@@ -1,0 +1,352 @@
+# Auditor Guide — CPG Agentic Pricing Exception System
+
+**Document owner:** Principal AI Systems Architect
+**Scope:** Phase 6 hardening controls and Guidance / Outlines constrained-generation safeguards
+**Status:** Production-ready (Phase 6)
+
+---
+
+## 1. System Overview
+
+The CPG Agentic Pricing Exception System is a **deterministic, compliance-first**
+orchestration layer for pricing and promotional exception handling.  It follows a
+**Skill–Shadow–Recipe** architecture:
+
+| Layer | Component | Role |
+|---|---|---|
+| Skill | `skills/SKILL.md` | Classifies intent; guides reasoning only |
+| Shadow | `compliance/shadow.py` | Audits every proposed action before execution |
+| Recipe | `recipes/*.py` | Immutable deterministic business logic |
+| Orchestrator | `orchestration/graph.py` | LangGraph state machine; routes state; no business logic |
+
+The system **never** executes a recipe unless:
+1. Intent has been classified to a constrained vocabulary.
+2. The Compliance Shadow has returned `GREEN`.
+3. Recipe selection has been constrained to a registered name.
+4. All recipe parameters have been type-validated.
+
+---
+
+## 2. Constrained Generation Safeguards (Guidance / Outlines)
+
+All LLM-generated values that flow into code, state transitions, or downstream
+systems are **constrained at generation time**.  Free-form text is allowed only
+for human-facing explanations.
+
+### 2.1 Intent Classification
+
+| Property | Value |
+|---|---|
+| **Where** | `orchestration/nodes.py` → `classify()` → `backend.classify_intent()` |
+| **Schema** | `constraints/specs.py` → `IntentDecision` |
+| **Allowed values** | `CONTRACTUAL_CORRECTION`, `CREDIT_BLOCK`, `MASS_PRICING_ERROR`, `DUPLICATE_PO` |
+| **Enforcement** | `AllowedIntent` Pydantic `Literal` type; Pydantic raises `ValidationError` on any other value |
+| **Backend** | `DeterministicFallbackBackend` (no LLM in CI/test) or `OutlinesConstrainedBackend` (production Outlines regex) |
+
+Any value outside the allowed set causes a `ValidationError` before the state
+machine advances.  The system routes to `FAIL_TO_HUMAN`.
+
+### 2.2 Compliance Shadow Verdict
+
+| Property | Value |
+|---|---|
+| **Where** | `compliance/shadow.py` → `ComplianceShadow.audit()` → `backend.shadow_decision()` |
+| **Schema** | `constraints/specs.py` → `ShadowDecision` |
+| **Allowed values** | `GREEN`, `YELLOW`, `RED` |
+| **Enforcement** | `AllowedShadowStatus` Pydantic `Literal`; `ShadowStatus` enum in `contracts/models.py` |
+| **Routing** | `GREEN` → proceed · `YELLOW` → `MANUAL_REVIEW_REQUIRED` · `RED` → `BLOCKED` |
+
+The Compliance Shadow verdict **cannot be overridden** by orchestration code.
+`ShadowEnforcement.action` is derived purely from the constrained verdict.
+
+### 2.3 Recipe Selection
+
+| Property | Value |
+|---|---|
+| **Where** | `orchestration/nodes.py` → `select_recipe()` → `backend.propose_recipe()` |
+| **Schema** | `constraints/specs.py` → `RecipeProposal` |
+| **Allowed values** | `PriceAdjustmentRecipe.py`, `CreditHoldReleaseRecipe.py`, `DuplicatePORecipe.py` |
+| **Enforcement** | `AllowedRecipeName` Pydantic `Literal`; recipe registry (`recipes/registry.py`) as defence-in-depth |
+
+An unregistered recipe name causes a `ValidationError` at the `RecipeProposal`
+boundary and a `KeyError` at the registry — two independent guards.
+
+### 2.4 Recipe Invocation Parameters
+
+| Property | Value |
+|---|---|
+| **Where** | `orchestration/nodes.py` → `validate_types()` → `RecipeExecutor.run()` |
+| **Schema** | `contracts/models.py` → `RecipeInvocation`; recipe-specific required-param lists in `recipes/registry.py` |
+| **Enforcement** | `RecipeExecutor` checks all required params before dispatch; missing / `None` params produce `ExecutionLog.errors` and the node routes to `FAIL_TO_HUMAN` |
+
+---
+
+## 3. Infrastructure Gateways
+
+### 3.1 Architecture
+
+Infrastructure operations (SAP calls, database queries, external APIs) are
+accessed through a **Gateway** layer that follows **Hexagonal Architecture
+(Ports & Adapters)**:
+
+| Component | File | Role |
+|---|---|---|
+| Protocol | `gateways/base.py` | `InfrastructureGateway` — typed interface (Port) |
+| Registry | `gateways/registry.py` | Maps gateway names to adapter instances |
+| Executor | `gateways/executor.py` | Wraps calls with tracing + error handling |
+| Stub | `gateways/stub.py` | Test double — canned responses, no network |
+
+**Key invariant:** Recipes never call gateways directly.  The orchestration
+layer resolves data before recipe execution (`resolve_dependencies` node) and
+applies side effects after (`apply_effects` node).  This preserves recipe
+purity and determinism.
+
+### 3.2 Gateway Integration in the Graph
+
+```
+... → validate_types → resolve_dependencies → execute_recipe → apply_effects → END
+```
+
+- `resolve_dependencies` reads `RecipeSpec.dependencies` and calls gateways to
+  fetch data the recipe needs.  Results are stored in `GraphState.resolved_data`.
+  Gateway failure → `FAIL_TO_HUMAN`.
+- `apply_effects` reads `RecipeSpec.effects` and calls gateways to apply
+  side effects from recipe output.  Results are stored in
+  `GraphState.effect_results`.  Effect failure is logged but does **not** undo
+  the recipe result.
+
+### 3.3 Typed Contracts
+
+All gateway operations use typed `GatewayRequest` / `GatewayResponse` models
+with `extra="forbid"`.  Response statuses are constrained to:
+`SUCCESS`, `FAILED`, `TIMEOUT`, `UNAVAILABLE`.
+
+---
+
+## 4. Multi-Step Workflows (Saga Pattern)
+
+### 4.1 Architecture
+
+Multi-intent workflows are executed by `WorkflowRunner` (`workflows/runner.py`)
+using the **Saga pattern** (Garcia-Molina & Salem, 1987):
+
+- Each step runs through the **full graph** — intent classification, Compliance
+  Shadow, recipe execution, gateway effects.
+- If step N fails after steps 1..N-1 succeeded, compensation recipes are
+  invoked in **reverse (LIFO) order**.
+- Each step has its own independent Compliance Shadow audit.
+
+### 4.2 Workflow Result Statuses
+
+| Status | Meaning |
+|---|---|
+| `COMPLETE` | All steps succeeded |
+| `FAILED` | A step failed; no compensation recipes declared |
+| `COMPENSATED` | A step failed; compensation recipes were invoked for completed steps |
+| `PARTIAL` | Reserved for future partial-completion modes |
+
+### 4.3 Typed Contracts
+
+`WorkflowDefinition`, `WorkflowStep`, `WorkflowStepResult`, `WorkflowResult`
+— all use `extra="forbid"`.
+
+---
+
+## 5. Kill Switch
+
+### 5.1 Purpose
+
+The kill switch is an **emergency stop** that halts ALL automated recipe execution
+before any graph node runs.  It is intended for:
+
+- Production incidents where automated pricing changes must stop immediately.
+- Maintenance windows.
+- Operator-initiated pauses pending policy review.
+
+### 5.2 Activation
+
+```bash
+export ASOE_KILL_SWITCH=1   # accepted values: 1, true, yes (case-insensitive)
+```
+
+No process restart required.  The check runs at each `run_graph()` call.
+
+### 5.3 Behaviour
+
+When active:
+
+- `run_graph()` returns immediately — **zero nodes execute**.
+- `final_status` = `FAIL_TO_HUMAN`
+- `explanation` = `"Automated execution halted: ASOE_KILL_SWITCH is active. …"`
+- The TraceRecord is still emitted to the observability log.
+
+### 5.4 Deactivation
+
+```bash
+unset ASOE_KILL_SWITCH      # or set to 0 / false / no
+```
+
+### 5.5 Implementation reference
+
+`hardening/kill_switch.py` — `is_kill_switch_active()`, `apply_kill_switch()`
+
+---
+
+## 6. Read-Only Explain Mode
+
+### 6.1 Purpose
+
+Explain mode is a **safe, read-only dry-run** for auditors and operators who want
+to see what the system *would* do without committing any changes to SAP/ERP.
+
+Intended for:
+
+- Auditor impact assessments.
+- Pre-production validation.
+- CI smoke-tests in staging environments.
+- Operator review of borderline orders.
+
+### 6.2 Activation
+
+```bash
+export ASOE_EXPLAIN_MODE=1   # accepted values: 1, true, yes (case-insensitive)
+```
+
+### 6.3 Behaviour
+
+When active, `run_graph()` uses `build_explain_graph()`, which replaces the
+`execute_recipe` terminal node with `explain_only`:
+
+| Node | Normal mode | Explain mode |
+|---|---|---|
+| `ingest` | runs | runs |
+| `classify` | runs | runs |
+| `load_skill` | runs | runs |
+| `validate_circuit_breaker` | runs | runs |
+| `shadow_audit` | runs | **runs** (real verdict) |
+| `select_recipe` | runs | runs |
+| `validate_types` | runs | runs |
+| `execute_recipe` | **runs** | **replaced** by `explain_only` |
+
+The Compliance Shadow and circuit breaker both execute — the explanation
+includes the **real** shadow verdict.
+
+Terminal outcome:
+- `final_status` = `MANUAL_REVIEW_REQUIRED`
+- `explanation` = human-readable summary of intent, shadow verdict, recipe, and params
+
+**No SAP writes.  No MCP calls.  No recipe side-effects.**
+
+### 6.4 Implementation reference
+
+`hardening/explain_mode.py` — `is_explain_mode_active()`, `build_explain_summary()`
+`orchestration/nodes.py` — `explain_only()` node
+`orchestration/graph.py` — `build_explain_graph()`
+
+---
+
+## 7. Circuit Breaker
+
+Deployed in `orchestration/nodes.py` → `validate_circuit_breaker()`.
+
+| Threshold | Limit | Action |
+|---|---|---|
+| Update count | > 50 per batch | `FAIL_TO_HUMAN` |
+| Total dollar variance | > $10,000 per batch | `FAIL_TO_HUMAN` |
+
+Both thresholds are evaluated on every graph run.  A breach halts the graph
+**before** the shadow audit and recipe selection.
+
+Implementation: `orchestration/utils.py` → `circuit_breaker()`
+
+---
+
+## 8. Execution Invariants (Non-Negotiable)
+
+The following invariants are enforced by code, not configuration.
+Violating them requires modifying and re-reviewing source code.
+
+| # | Invariant |
+|---|---|
+| 1 | No recipe runs unless `ComplianceDecision.status == GREEN` |
+| 2 | No recipe runs unless `RecipeProposal.recipe_name` is in `AllowedRecipeName` |
+| 3 | No recipe runs unless all required parameters are non-`None` |
+| 4 | `ComplianceDecision.trace_id` propagates to `ExecutionLog.trace_id` unchanged |
+| 5 | `GraphState.extra = "forbid"` — no untyped fields enter the state machine |
+| 6 | Kill switch check precedes all node execution |
+| 7 | Explain mode suppresses only `execute_recipe`; shadow always runs |
+| 8 | `RecipeExecutor` has no `audit()`, `enforce()`, or `classify_intent()` methods |
+| 9 | `SKILL.md` files are loaded verbatim — no summarisation or rewriting |
+| 10 | All constrained outputs are validated by Pydantic before state advances |
+
+---
+
+## 9. Audit Trail
+
+Every `run_graph()` call emits a `TraceRecord` (Phase 5 observability scaffold)
+to the `asoe.observability` Python logger.  The record contains:
+
+| Field | Description |
+|---|---|
+| `trace_id` | UUID propagated from `ComplianceDecision` → `ExecutionLog` |
+| `event_id` | `OrderEvent.order_id` |
+| `skill_name` | Name of the loaded `SkillDocument` |
+| `intent_selected` | Constrained intent value |
+| `shadow_verdict` | `GREEN` / `YELLOW` / `RED` |
+| `shadow_policy_hits` | List of policy identifiers that fired |
+| `recipe_name` | Selected recipe filename (or `null`) |
+| `rag_chunks` | RAG chunk identifiers attached to the execution |
+| `constrained_output_schemas` | Map of layer → schema name (e.g. `intent → IntentDecision`) |
+| `gateway_calls` | Gateway operations invoked (dependency resolutions + effect applications) |
+| `final_status` | `COMPLETE`, `FAIL_TO_HUMAN`, `BLOCKED`, `MANUAL_REVIEW_REQUIRED`, `REJECTED` |
+| `explanation` | Human-readable reason for the terminal decision |
+
+The record is JSON-serialisable and field-compatible with LangFuse trace schema
+for future self-hosted forwarding.
+
+---
+
+## 10. Environment Variable Reference
+
+| Variable | Default | Description |
+|---|---|---|
+| `ASOE_KILL_SWITCH` | `0` | `1` / `true` / `yes` → halt all execution |
+| `ASOE_EXPLAIN_MODE` | `0` | `1` / `true` / `yes` → dry-run only, no recipe execution |
+| `USE_OUTLINES_BACKEND` | `0` | `1` → use `OutlinesConstrainedBackend` (requires `outlines` package) |
+
+---
+
+## 11. Test Coverage Reference
+
+All hardening controls are covered by `tests/test_hardening.py`.
+Golden regression tests for the full pipeline live in `tests/test_golden.py`.
+
+Run the full suite:
+
+```bash
+python -m pytest
+```
+
+Expected outcome: **490 passed, 0 failed, 0 skipped.**
+
+---
+
+## 12. Local Execution Sandbox
+
+The sandbox (`tests/sandbox/`) is an interactive tool for auditors and engineers
+to run live pipeline executions without touching production systems.
+
+| Component | Purpose |
+|---|---|
+| `tests/sandbox/seed.py` | Seeds a local SQLite database with sample SAP pricing, retailer contracts, credit profiles, and 8 EDI events covering all four intents |
+| `tests/sandbox/ui/app.py` | Streamlit UI — select an event, run the full graph, inspect the step-by-step execution trace |
+| `tests/sandbox/llm/local_backend.py` | Optional `LocalHFBackend` — Outlines constrained-JSON generation via a local HuggingFace model; falls back to `DeterministicFallbackBackend` if model unavailable |
+
+**Key audit properties of the sandbox:**
+- Every event runs through the full pipeline: classify → shadow → recipe → effects
+- `ASOE_EXPLAIN_MODE=1` suppresses recipe execution (dry-run) — safe for auditor use
+- `ASOE_KILL_SWITCH=1` halts all execution — visible in the environment banner
+- The "Prompt Preview" expander shows the exact prompts sent to the constrained backend
+- The "Full JSON trace" expander exposes the complete serialised `GraphState`
+
+The sandbox database (`.db`) is git-ignored; only the seeder script is committed.

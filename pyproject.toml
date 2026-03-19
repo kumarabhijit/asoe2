@@ -1,0 +1,25 @@
+[project]
+name = "asoe"
+version = "0.3.2"
+description = "Starter scaffold for a deterministic skill-shadow-recipe pricing exception system with constrained generation"
+requires-python = ">=3.11"
+dependencies = [
+  "langgraph>=0.2.0",
+  "pydantic>=2.7.0",
+]
+
+[project.optional-dependencies]
+outlines = [
+  "outlines>=1.2.12",
+  "transformers>=4.48.0",
+  "torch>=2.3.0",
+]
+dev = [
+  "pytest>=8.0.0",
+  "pytest-cov>=5.0.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"

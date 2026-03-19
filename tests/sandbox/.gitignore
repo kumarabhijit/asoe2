@@ -1,0 +1,19 @@
+# SQLite database binary — never commit
+*.db
+*.db-shm
+*.db-wal
+
+# Streamlit runtime artefacts
+.streamlit/
+
+# Hugging Face model cache
+.hf_cache/
+hf_cache/
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Editor artefacts
+.DS_Store

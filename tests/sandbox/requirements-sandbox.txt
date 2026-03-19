@@ -1,0 +1,23 @@
+# ASOE Sandbox — additional dependencies
+# Install with: pip install -r tests/sandbox/requirements-sandbox.txt
+#
+# Core production deps (already in pyproject.toml) are NOT repeated here.
+# These are the sandbox-only extras.
+
+# ── Streamlit UI ────────────────────────────────────────────────────────────
+streamlit>=1.35.0
+
+# ── Local LLM (constrained generation) ─────────────────────────────────────
+# Outlines provides token-level JSON/schema-constrained generation.
+# transformers provides the model weights loader.
+# torch is the compute backend (CPU-only wheel shown; adjust for CUDA).
+outlines>=0.0.46
+transformers>=4.41.0
+torch>=2.3.0
+accelerate>=0.30.0       # faster model loading on multi-core CPU / GPU
+
+# ── Optional: use a smaller quantised model ─────────────────────────────────
+# bitsandbytes>=0.43.0   # 4-bit / 8-bit quantisation (GPU only)
+
+# ── Hugging Face Hub (for auto-downloading model weights) ───────────────────
+huggingface-hub>=0.23.0

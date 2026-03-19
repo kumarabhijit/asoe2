@@ -1,0 +1,144 @@
+from __future__ import annotations
+
+# Phase 4 — LangGraph state machine
+#
+# build_graph()         — returns the compiled StateGraph (normal execution).
+# build_explain_graph() — same pipeline, but execute_recipe is replaced with
+#                         explain_only (Phase 6 explain mode).
+# run_graph()           — convenience wrapper: checks Phase 6 kill switch and
+#                         explain mode, invokes the appropriate graph, and
+#                         returns a typed GraphState.
+#
+# State transitions (all deterministic, no hidden loops):
+#   ingest → classify → load_skill → validate_circuit_breaker
+#     ├─ [breach]   → END (FAIL_TO_HUMAN)
+#     └─ [ok]       → shadow_audit
+#                       ├─ [RED]     → END (BLOCKED)
+#                       ├─ [YELLOW]  → END (MANUAL_REVIEW_REQUIRED)
+#                       └─ [GREEN]   → select_recipe
+#                                        ├─ [no recipe] → END (FAIL_TO_HUMAN)
+#                                        └─ [ok]        → validate_types
+#                                                             → resolve_dependencies
+#                                                               ├─ [gw fail] → END (FAIL_TO_HUMAN)
+#                                                               └─ [ok]      → execute_recipe
+#                                                                              → apply_effects → END
+#                                                             → explain_only  (explain mode)
+#                                                                 → END
+#
+# Phase 6 hardening:
+#   kill switch  — run_graph() returns FAIL_TO_HUMAN before any node executes
+#                  when ASOE_KILL_SWITCH=1
+#   explain mode — build_explain_graph() replaces execute_recipe with
+#                  explain_only when ASOE_EXPLAIN_MODE=1; returns
+#                  MANUAL_REVIEW_REQUIRED with a dry-run summary
+
+from langgraph.graph import END, StateGraph
+from contracts.models import GraphState
+from orchestration import nodes
+from hardening.kill_switch import is_kill_switch_active, apply_kill_switch
+from hardening.explain_mode import is_explain_mode_active
+
+
+def route_after_gate(state: GraphState) -> str:
+    """Route to terminal END if any node set final_status, else continue."""
+    return "terminal" if state.final_status is not None else "continue"
+
+
+def _add_common_nodes_and_edges(graph: StateGraph) -> None:
+    """Register all nodes and edges shared between normal and explain graphs."""
+    graph.add_node("ingest", nodes.ingest)
+    graph.add_node("classify", nodes.classify)
+    graph.add_node("load_skill", nodes.load_skill)
+    graph.add_node("validate_circuit_breaker", nodes.validate_circuit_breaker)
+    graph.add_node("shadow_audit", nodes.shadow_audit)
+    graph.add_node("select_recipe", nodes.select_recipe)
+    graph.add_node("validate_types", nodes.validate_types)
+
+    graph.set_entry_point("ingest")
+    graph.add_edge("ingest", "classify")
+    graph.add_edge("classify", "load_skill")
+    graph.add_edge("load_skill", "validate_circuit_breaker")
+    graph.add_conditional_edges(
+        "validate_circuit_breaker", route_after_gate,
+        {"terminal": END, "continue": "shadow_audit"},
+    )
+    graph.add_conditional_edges(
+        "shadow_audit", route_after_gate,
+        {"terminal": END, "continue": "select_recipe"},
+    )
+    graph.add_conditional_edges(
+        "select_recipe", route_after_gate,
+        {"terminal": END, "continue": "validate_types"},
+    )
+
+
+def build_graph():
+    """Build and compile the deterministic LangGraph state machine (normal execution)."""
+    graph = StateGraph(GraphState)
+    _add_common_nodes_and_edges(graph)
+    graph.add_node("resolve_dependencies", nodes.resolve_dependencies)
+    graph.add_node("execute_recipe", nodes.execute_recipe)
+    graph.add_node("apply_effects", nodes.apply_effects)
+    graph.add_edge("validate_types", "resolve_dependencies")
+    graph.add_conditional_edges(
+        "resolve_dependencies", route_after_gate,
+        {"terminal": END, "continue": "execute_recipe"},
+    )
+    graph.add_edge("execute_recipe", "apply_effects")
+    graph.add_edge("apply_effects", END)
+    return graph.compile()
+
+
+def build_explain_graph():
+    """Build the explain-mode graph.
+
+    Identical to build_graph() except execute_recipe is replaced with
+    explain_only.  The full reasoning and compliance pipeline still runs;
+    only the final SAP-writing step is suppressed.
+    """
+    graph = StateGraph(GraphState)
+    _add_common_nodes_and_edges(graph)
+    graph.add_node("explain_only", nodes.explain_only)
+    graph.add_edge("validate_types", "explain_only")
+    graph.add_edge("explain_only", END)
+    return graph.compile()
+
+
+def run_graph(state: GraphState) -> GraphState:
+    """Invoke the graph and return a typed GraphState.
+
+    Phase 6 hardening checks (evaluated in order):
+      1. Kill switch  — if ASOE_KILL_SWITCH=1, return FAIL_TO_HUMAN immediately
+                        without running any node.
+      2. Explain mode — if ASOE_EXPLAIN_MODE=1, use build_explain_graph()
+                        so execute_recipe is replaced by explain_only.
+
+    LangGraph 0.2+ serialises state to a plain dict at the invoke() boundary.
+    This wrapper reconstructs the Pydantic model so callers always receive a
+    typed result without having to deal with the serialisation artefact.
+
+    Phase 5: after reconstruction, emit a structured trace record via the
+    observability scaffold (stdlib logging — no langfuse package required).
+    """
+    # --- Phase 6: kill switch ---
+    if is_kill_switch_active():
+        return apply_kill_switch(state)
+
+    # --- Phase 6: explain mode selects alternate graph ---
+    compiled_graph = build_explain_graph() if is_explain_mode_active() else build_graph()
+
+    result = compiled_graph.invoke(state)
+    if isinstance(result, GraphState):
+        final_state = result
+    else:
+        final_state = GraphState.model_validate(result)
+
+    # Emit LangFuse-ready trace via stdlib logging (Phase 5 — no live integration).
+    try:
+        from observability.tracer import Tracer
+        tracer = Tracer()
+        tracer.emit(tracer.build_record(final_state))
+    except Exception:  # pragma: no cover — tracer must never crash the graph
+        pass
+
+    return final_state
