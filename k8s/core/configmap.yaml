@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: asoe-core-config
+  namespace: asoe
+  labels:
+    app: asoe-core
+data:
+  PYTHONPATH: "/app"
+  PYTHONUNBUFFERED: "1"
+  # Safety switches — override per environment via Kustomize overlays
+  ASOE_KILL_SWITCH: "0"
+  ASOE_EXPLAIN_MODE: "0"
+  # Uses DeterministicFallbackBackend in core; inference pod handles Outlines
+  USE_OUTLINES_BACKEND: "0"

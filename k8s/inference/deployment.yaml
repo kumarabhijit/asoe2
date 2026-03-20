@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: asoe-inference
+  namespace: asoe
+  labels:
+    app: asoe-inference
+    tier: inference
+    app.kubernetes.io/part-of: asoe
+spec:
+  replicas: 1  # GPU/AMX nodes are expensive; scale via HPA on shadow-queue depth
+  selector:
+    matchLabels:
+      app: asoe-inference
+  template:
+    metadata:
+      labels:
+        app: asoe-inference
+        tier: inference
+      annotations:
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: asoe-inference-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      # ── Intel Sapphire Rapids (AMX) node pool ────────────────────────────────
+      # Matches the dedicated AKS node pool in architecture_v2.md §2
+      # "Intel Xeon Sapphire Rapids … Advanced Matrix Extensions (AMX)"
+      # For CUDA GPU nodes: replace nodeSelector + tolerations with:
+      #   nodeSelector: { accelerator: nvidia-gpu }
+      #   resources.limits: { nvidia.com/gpu: "1" }
+      nodeSelector:
+        kubernetes.io/arch: amd64
+        # Set this label on your AKS AMX node pool:
+        asoe.io/node-type: "intel-amx"
+      tolerations:
+        - key: "asoe.io/inference"
+          operator: "Exists"
+          effect: "NoSchedule"
+      containers:
+        - name: inference
+          image: your-acr.azurecr.io/asoe-inference:latest
+          env:
+            - name: USE_OUTLINES_BACKEND
+              value: "1"
+            - name: LOCAL_LLM_DEVICE
+              value: "cpu"  # "cuda" for GPU nodes
+            - name: LOCAL_LLM_MODEL
+              # Lightweight default; production overrides to Llama 3.1 8B via Kustomize
+              value: "Qwen/Qwen2.5-0.5B-Instruct"
+            - name: HF_HOME
+              value: "/cache/huggingface"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          ports:
+            - containerPort: 8080
+              name: inference-http
+          resources:
+            requests:
+              cpu: "8000m"    # 8 cores for Intel AMX matrix operations
+              memory: "20Gi"  # Llama 3.1 8B fp16 ≈ 16 GB + overhead
+            limits:
+              cpu: "16000m"
+              memory: "32Gi"
+              # For CUDA: nvidia.com/gpu: "1"
+          readinessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "from constraints.router import get_constrained_backend; get_constrained_backend()"
+            # Model weights download on first start — allow generous warm-up
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 20
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "import torch; print('ok')"
+            initialDelaySeconds: 90
+            periodSeconds: 60
+            timeoutSeconds: 15
+          volumeMounts:
+            - name: model-cache
+              mountPath: /cache/huggingface
+      volumes:
+        - name: model-cache
+          # Use a PersistentVolumeClaim in production to survive pod restarts.
+          # emptyDir is acceptable for dev/staging (re-downloads on restart).
+          emptyDir:
+            sizeLimit: 30Gi

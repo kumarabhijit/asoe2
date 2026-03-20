@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: asoe-ui
+  namespace: asoe
+  labels:
+    app: asoe-ui
+  annotations:
+    # Traffic enters via Azure APIM Ingress Controller — keep ClusterIP.
+    # To expose directly during staging, change type to LoadBalancer.
+spec:
+  selector:
+    app: asoe-ui
+  type: ClusterIP
+  ports:
+    - name: streamlit
+      port: 8501
+      targetPort: 8501
+      protocol: TCP

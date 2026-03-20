@@ -1,0 +1,119 @@
+# docker-compose.yml ─ ASOE local development stack
+#
+# Three services, two profiles:
+#
+#   core       — orchestration engine     (always on)
+#   ui         — Streamlit sandbox UI     (always on, depends on core)
+#   inference  — local LLM backend        (optional, --profile inference)
+#
+# Usage:
+#   docker compose up                           # core + ui (fallback LLM backend)
+#   docker compose --profile inference up       # + local Outlines/HF inference
+#   docker compose run --rm core python main.py # one-shot smoke test
+#   docker compose logs -f ui                   # follow UI logs
+#
+# Copy .env.example → .env and fill in values before running.
+
+name: asoe
+
+# ── Shared env block ──────────────────────────────────────────────────────────
+x-core-env: &core-env
+  PYTHONPATH: /app
+  PYTHONUNBUFFERED: "1"
+  ASOE_KILL_SWITCH: "${ASOE_KILL_SWITCH:-0}"
+  ASOE_EXPLAIN_MODE: "${ASOE_EXPLAIN_MODE:-0}"
+
+services:
+
+  # ── Core orchestration engine ───────────────────────────────────────────────
+  # Runs the LangGraph state machine, recipes, Compliance Shadow, and gateways.
+  # Production: replace CMD with the Event Hubs consumer entrypoint.
+  core:
+    build:
+      context: .
+      dockerfile: Dockerfile.core
+    image: asoe-core:local
+    environment:
+      <<: *core-env
+      USE_OUTLINES_BACKEND: "0"
+    volumes:
+      # Source-mount for hot-reload during development.
+      # Remove volume in production (image already contains source).
+      - .:/app:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from orchestration.graph import build_graph; build_graph(); print('ok')"
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 20s
+    restart: on-failure
+
+  # ── Streamlit sandbox UI ────────────────────────────────────────────────────
+  # Interactive execution trace visualiser. Accessible at http://localhost:8501.
+  # Imports the core package directly (shared source volume).
+  # When --profile inference is active, set LOCAL_LLM_BACKEND_CLASS below.
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+    image: asoe-ui:local
+    environment:
+      <<: *core-env
+      SANDBOX_DB_PATH: "/app/tests/sandbox/sandbox.db"
+      USE_OUTLINES_BACKEND: "0"
+      # Uncomment when inference profile is active:
+      # LOCAL_LLM_BACKEND_CLASS: "tests.sandbox.llm.local_backend.LocalHFBackend"
+      LOCAL_LLM_BACKEND_CLASS: "${LOCAL_LLM_BACKEND_CLASS:-}"
+      LOCAL_LLM_MODEL: "${LOCAL_LLM_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}"
+    ports:
+      - "8501:8501"
+    volumes:
+      - .:/app:ro
+      # Persist the sandbox SQLite DB across container restarts
+      - sandbox-db:/app/tests/sandbox
+    depends_on:
+      core:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8501/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # ── Local LLM inference ─────────────────────────────────────────────────────
+  # Activate with: docker compose --profile inference up
+  #
+  # Runs Outlines + HuggingFace model for constrained-generation.
+  # Default model: Qwen/Qwen2.5-0.5B-Instruct (fast, <1 GB, CPU-friendly)
+  # Production:    meta-llama/Llama-3.1-8B-Instruct (set LOCAL_LLM_MODEL)
+  #
+  # WARNING: First startup downloads model weights (~500 MB – 16 GB depending
+  # on LOCAL_LLM_MODEL). Weights are cached in the hf-model-cache volume.
+  inference:
+    profiles: ["inference"]
+    build:
+      context: .
+      dockerfile: Dockerfile.inference
+    image: asoe-inference:local
+    environment:
+      <<: *core-env
+      USE_OUTLINES_BACKEND: "1"
+      LOCAL_LLM_DEVICE: "${LOCAL_LLM_DEVICE:-cpu}"
+      LOCAL_LLM_MODEL: "${LOCAL_LLM_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}"
+    volumes:
+      - .:/app:ro
+      # Cache downloaded model weights so they survive image rebuilds
+      - hf-model-cache:/cache/huggingface
+    restart: on-failure
+
+volumes:
+  # SQLite DB for sandbox seed data (pricing, contracts, EDI events)
+  sandbox-db:
+  # HuggingFace model weight cache (can be several GB)
+  hf-model-cache:

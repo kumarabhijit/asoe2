@@ -1,0 +1,71 @@
+# Dockerfile.inference ─ ASOE local LLM inference (Compliance Shadow)
+#
+# Runs the constrained-generation backend (Outlines + HuggingFace model).
+# Targets Intel Sapphire Rapids (AMX) AKS node pools per architecture_v2.md §2.
+# For CUDA GPU builds: change torch install index to https://download.pytorch.org/whl/cu121
+#
+# Default model: Qwen/Qwen2.5-0.5B-Instruct  (fast, lightweight for dev/CI)
+# Production:    meta-llama/Llama-3.1-8B-Instruct  (set via LOCAL_LLM_MODEL env var)
+#
+# Image size warning: ~8 GB with torch (CPU). Model weights are downloaded at
+# runtime into a mounted volume — not baked into the image.
+#
+# Local dev:  docker compose --profile inference up inference
+
+FROM python:3.11-slim AS base
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir "uv==0.4.27"
+
+# ── Core deps ─────────────────────────────────────────────────────────────────
+COPY pyproject.toml .
+RUN uv pip install --system --no-cache-dir \
+    "langgraph>=0.2.0" \
+    "pydantic>=2.7.0"
+
+# ── Inference extras: torch (CPU wheel) + outlines + transformers ─────────────
+# CPU-only wheel for Intel AMX / dev. For CUDA replace the index URL:
+#   --extra-index-url https://download.pytorch.org/whl/cu121
+RUN uv pip install --system --no-cache-dir \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
+    "torch>=2.3.0+cpu" \
+    "outlines>=0.0.46" \
+    "transformers>=4.41.0" \
+    "accelerate>=0.30.0" \
+    "huggingface-hub>=0.23.0"
+
+# ── Application source (only inference-relevant modules) ─────────────────────
+COPY constraints/         constraints/
+COPY contracts/           contracts/
+COPY llm/                 llm/
+COPY tests/sandbox/llm/   tests/sandbox/llm/
+COPY tests/__init__.py    tests/__init__.py
+COPY tests/sandbox/__init__.py tests/sandbox/__init__.py
+
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+ENV USE_OUTLINES_BACKEND=1
+ENV LOCAL_LLM_DEVICE=cpu
+ENV LOCAL_LLM_MODEL=Qwen/Qwen2.5-0.5B-Instruct
+
+# HuggingFace cache — mount a volume here to persist model weights
+ENV HF_HOME=/cache/huggingface
+RUN mkdir -p /cache/huggingface
+
+RUN adduser --disabled-password --gecos "" --uid 1000 asoe \
+    && chown -R asoe /cache
+USER asoe
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=60s --timeout=30s --start-period=90s --retries=3 \
+    CMD python -c "from constraints.router import get_constrained_backend; get_constrained_backend(); print('ok')" || exit 1
+
+# Self-test on startup. Production: replace with vLLM HTTP server.
+CMD ["python", "-c", \
+     "from constraints.router import get_constrained_backend; b = get_constrained_backend(); print(f'Inference backend ready: {type(b).__name__}')"]
