@@ -4,7 +4,7 @@
 # Targets Intel Sapphire Rapids (AMX) AKS node pools per architecture_v2.md §2.
 # For CUDA GPU builds: change torch install index to https://download.pytorch.org/whl/cu121
 #
-# Python: 3.14 (pinned via .python-version and pyproject.toml requires-python)
+# Python: 3.14.3 (stable) — pinned via .python-version and pyproject.toml
 # Package manager: uv
 # Default model: Qwen/Qwen2.5-0.5B-Instruct (fast, lightweight for dev/CI)
 # Production:    meta-llama/Llama-3.1-8B-Instruct (set via LOCAL_LLM_MODEL env var)

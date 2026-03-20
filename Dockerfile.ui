@@ -3,7 +3,7 @@
 # Extends the core image with Streamlit. Does NOT include torch/transformers/outlines.
 # Uses DeterministicFallbackBackend by default (USE_OUTLINES_BACKEND=0).
 #
-# Python: 3.14 (pinned via .python-version and pyproject.toml requires-python)
+# Python: 3.14.3 (stable) — pinned via .python-version and pyproject.toml
 # Package manager: uv
 # Port: 8501
 

@@ -1,6 +1,6 @@
 # docker-compose.yml ─ ASOE local development stack
 #
-# Python: 3.14  |  Package manager: uv
+# Python: 3.14.3 (stable)  |  Package manager: uv
 #
 # Three services, two profiles:
 #

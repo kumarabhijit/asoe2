@@ -55,7 +55,7 @@ OrderEvent
 
 ### Prerequisites
 
-- **Python 3.14** (pinned in `.python-version`)
+- **Python 3.14.3** (stable, pinned in `.python-version`)
 - **uv** — fast Python package manager ([install](https://docs.astral.sh/uv/getting-started/installation/))
 
 No GPU or optional packages required for development or testing.
@@ -63,11 +63,11 @@ No GPU or optional packages required for development or testing.
 ### Install
 
 ```bash
-# 1. Install Python 3.14 (if not already present)
-uv python install 3.14
+# 1. Install Python 3.14.3 (if not already present)
+uv python install 3.14.3
 
 # 2. Create virtual environment
-uv venv --python 3.14
+uv venv --python 3.14.3
 
 # 3. Install core + dev dependencies
 uv pip install "langgraph>=0.2.0" "pydantic>=2.7.0" "pytest>=8.0.0" "pytest-cov>=5.0.0"
@@ -99,6 +99,8 @@ python -m pytest
 ```
 
 Expected: **490 passed, 0 failed, 1 warning** (the warning is from `langchain_core` pydantic.v1 deprecation — not a blocker).
+
+> **Verified on Python 3.14.3 (stable).**
 
 ### Smoke test
 

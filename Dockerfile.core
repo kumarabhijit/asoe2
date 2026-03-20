@@ -3,7 +3,7 @@
 # Contains: LangGraph state machine, recipes, Compliance Shadow, constraints,
 #           gateways, observability, hardening. No UI. No GPU dependencies.
 #
-# Python: 3.14 (pinned via .python-version and pyproject.toml requires-python)
+# Python: 3.14.3 (stable) — pinned via .python-version and pyproject.toml
 # Package manager: uv (fast, deterministic, reproducible)
 # Production entry: replace CMD with your Azure Event Hubs consumer.
 # Local dev:        docker compose up core
@@ -23,7 +23,7 @@ RUN apt-get update \
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # ── Python deps — core only (no torch, no streamlit) ─────────────────────────
-# Install from lock file for reproducibility; patch for Python 3.14 rc compat.
+# Install from lock file for reproducibility; patch for Python 3.14 typing API change.
 COPY pyproject.toml uv.lock ./
 RUN uv pip install --system --no-cache-dir \
     "langgraph>=0.2.0" \

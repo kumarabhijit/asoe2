@@ -3,10 +3,9 @@
 # Run once after installing dependencies in a new environment.
 #
 # Current patches:
-#   pydantic 2.12.5 — Python 3.14 rc2 renamed typing._eval_type(prefer_fwd_module)
+#   pydantic 2.12.5 — Python 3.14 renamed typing._eval_type(prefer_fwd_module)
 #   to typing._eval_type(parent_fwdref). Pydantic's 3.14 branch still uses the
 #   old name. Patch until pydantic >=2.12.6 ships with the fix.
-#   Upstream issue: https://github.com/pydantic/pydantic/issues/<tbd>
 
 set -euo pipefail
 
