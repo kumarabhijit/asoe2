@@ -1,0 +1,262 @@
+"""Duplicate PO Detection Recipe
+
+Deterministic scoring and classification of a potential duplicate
+Purchase Order (PO) against a set of pre-computed per-signal match scores.
+
+This recipe runs POST-COMMIT. The order has already been saved in the ERP
+(SAP, Oracle, etc.) or ingested from EDI by the time this recipe executes.
+All actions downstream are retroactive — holding, annotating, or clearing
+an order that already exists in the system.
+
+CONTRACT (shared with DuplicatePO_SKILL.md — keep in sync)
+=========================================================
+
+Signal Keys (8 total):
+    po_number, customer_id, line_items, amount,
+    timestamp, ship_to, channel, delivery_date
+
+    Each score must be a float in [0.0, 1.0].
+    Missing signals default to 0.0 (conservative / worst-case).
+    If fewer than 4 signals are present, the result includes a
+    `partial_coverage` flag so the orchestrator can decide whether
+    to escalate.
+
+Classification Tiers (4):
+    CONFIRMED_DUPLICATE  — composite >= 0.90
+    PROBABLE_DUPLICATE   — composite >= 0.70
+    SOFT_FLAG            — composite >= 0.50
+    NO_MATCH             — composite <  0.50
+
+Recommended Actions (4, one per tier):
+    HOLD_AND_NOTIFY      — place a hold on the saved order and alert
+    ESCALATE_TO_REVIEW   — route to review queue for human decision
+    ANNOTATE_AND_RELEASE — flag the order record but allow fulfillment
+    RELEASE              — no action required, order proceeds
+
+    These actions are CHANNEL-AGNOSTIC. The orchestrator (SKILL.md)
+    maps them to channel-specific routing (which queue, who gets
+    notified, what context is attached).
+
+Status Values (4, one per tier):
+    HELD                 — order is on hold pending resolution
+    REVIEW_REQUIRED      — order is held pending human review
+    FLAGGED              — order proceeds with a duplicate-risk annotation
+    CLEARED              — order proceeds clean
+
+Source Channels:
+    EDI                  — order arrived via EDI 850 processing
+    MANUAL               — order was keyed by a human agent in the ERP
+
+Invariants:
+    - Weights sum to 1.0 (validated at module load).
+    - All threshold comparisons use closed lower bounds.
+    - No LLM calls, no I/O, no side effects.
+    - Scoring is identical regardless of source channel.
+    - source_channel and erp_warning_issued are PASSTHROUGH fields —
+      they appear in the output for the orchestrator but do not
+      influence the composite score or classification.
+    - This recipe is invoked ONLY for the DUPLICATE_PO intent.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
+
+# ---------------------------------------------------------------------------
+# Signal weights — sourced from the product specification.
+# Must sum to 1.0.
+# ---------------------------------------------------------------------------
+
+SIGNAL_KEYS: List[str] = [
+    "po_number",
+    "customer_id",
+    "line_items",
+    "amount",
+    "timestamp",
+    "ship_to",
+    "channel",
+    "delivery_date",
+]
+
+_WEIGHTS: Dict[str, float] = {
+    "po_number":     0.30,
+    "customer_id":   0.15,
+    "line_items":    0.20,
+    "amount":        0.10,
+    "timestamp":     0.10,
+    "ship_to":       0.05,
+    "channel":       0.05,
+    "delivery_date": 0.05,
+}
+
+assert abs(sum(_WEIGHTS.values()) - 1.0) < 1e-9, "Signal weights must sum to 1.0"
+assert set(_WEIGHTS.keys()) == set(SIGNAL_KEYS), "Weight keys must match SIGNAL_KEYS"
+
+# ---------------------------------------------------------------------------
+# Classification thresholds (inclusive lower bound)
+# ---------------------------------------------------------------------------
+
+THRESHOLD_CONFIRMED_DUPLICATE = 0.90
+THRESHOLD_PROBABLE_DUPLICATE  = 0.70
+THRESHOLD_SOFT_FLAG           = 0.50
+
+# ---------------------------------------------------------------------------
+# Tier definitions — single source of truth for label mapping
+#
+# NOTE: All actions are POST-COMMIT. "HOLD_AND_NOTIFY" means place a hold
+# on an order that already exists in the ERP, not prevent it from being saved.
+# ---------------------------------------------------------------------------
+
+_TIERS = [
+    # (min_score, classification,         status,            recommended_action)
+    (THRESHOLD_CONFIRMED_DUPLICATE, "CONFIRMED_DUPLICATE", "HELD",             "HOLD_AND_NOTIFY"),
+    (THRESHOLD_PROBABLE_DUPLICATE,  "PROBABLE_DUPLICATE",  "REVIEW_REQUIRED",  "ESCALATE_TO_REVIEW"),
+    (THRESHOLD_SOFT_FLAG,           "SOFT_FLAG",           "FLAGGED",          "ANNOTATE_AND_RELEASE"),
+    (0.0,                           "NO_MATCH",            "CLEARED",          "RELEASE"),
+]
+
+# Exported enumerations for external validation
+VALID_CLASSIFICATIONS = {t[1] for t in _TIERS}
+VALID_STATUSES        = {t[2] for t in _TIERS}
+VALID_ACTIONS         = {t[3] for t in _TIERS}
+
+# Valid source channels — the recipe doesn't branch on these, but validates them
+VALID_SOURCE_CHANNELS = {"EDI", "MANUAL"}
+
+# Minimum number of signals required for full-confidence scoring
+MIN_SIGNALS_FULL_CONFIDENCE = 4
+
+
+class DuplicatePOValidationError(Exception):
+    """Raised when input validation fails."""
+    pass
+
+
+def _validate_signal_scores(signal_scores: Dict[str, float]) -> List[str]:
+    """Validate signal scores and return a list of warning flags.
+
+    Raises:
+        DuplicatePOValidationError: If any score is outside [0.0, 1.0].
+    """
+    flags: List[str] = []
+
+    # Check for out-of-range values (hard failure).
+    for key, value in signal_scores.items():
+        if key not in _WEIGHTS:
+            continue  # Ignore unknown signals; they don't affect scoring.
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            raise DuplicatePOValidationError(
+                f"Signal '{key}' has non-numeric value: {value!r}"
+            )
+        if not (0.0 <= v <= 1.0):
+            raise DuplicatePOValidationError(
+                f"Signal '{key}' out of range [0.0, 1.0]: {v}"
+            )
+
+    # Check for missing signals (soft warning).
+    present = [k for k in SIGNAL_KEYS if k in signal_scores]
+    missing = [k for k in SIGNAL_KEYS if k not in signal_scores]
+
+    if len(present) < MIN_SIGNALS_FULL_CONFIDENCE:
+        flags.append("INSUFFICIENT_SIGNALS")
+    elif missing:
+        flags.append("PARTIAL_SIGNAL_COVERAGE")
+
+    if missing:
+        flags.append(f"MISSING_SIGNALS:{','.join(missing)}")
+
+    return flags
+
+
+def _classify(composite_score: float) -> tuple:
+    """Return (classification, status, recommended_action) for a score."""
+    for min_score, classification, status, action in _TIERS:
+        if composite_score >= min_score:
+            return classification, status, action
+    # Defensive fallback (should never reach here because 0.0 is in _TIERS).
+    return "NO_MATCH", "CLEARED", "RELEASE"
+
+
+def detect_duplicate_po(
+    incoming_po_number: str,
+    customer_id: str,
+    signal_scores: Dict[str, float],
+    source_channel: str = "EDI",
+    prior_rejection_ref: Optional[str] = None,
+    erp_warning_issued: bool = False,
+) -> Dict[str, Any]:
+    """Score and classify a saved PO against pre-computed signal scores.
+
+    This function is CHANNEL-AGNOSTIC for scoring purposes. The
+    source_channel and erp_warning_issued fields are passed through
+    to the output for the orchestrator to use in routing decisions —
+    they do not affect the composite score or classification.
+
+    Args:
+        incoming_po_number: Normalized PO number of the saved order.
+        customer_id:        Sold-to / bill-to party identifier.
+        signal_scores:      Per-signal match scores in [0.0, 1.0].
+                            Keys should match SIGNAL_KEYS; missing keys
+                            default to 0.0 (conservative).
+        source_channel:     How the order entered the system. One of
+                            "EDI" or "MANUAL". Does not affect scoring.
+        prior_rejection_ref: If present, the PO reference of a previously
+                            rejected/held order. Passed through as context.
+        erp_warning_issued: True if the ERP (e.g., SAP) issued a duplicate
+                            warning during order entry that the agent
+                            overrode. Only meaningful for MANUAL channel.
+                            Passed through — does not affect scoring.
+
+    Returns:
+        Dict with keys: status, composite_score, classification,
+        recommended_action, signal_breakdown, incoming_po_number,
+        customer_id, source_channel, erp_warning_issued,
+        prior_rejection_ref, flags.
+
+    Raises:
+        DuplicatePOValidationError: If any signal score is non-numeric
+            or outside [0.0, 1.0], or if source_channel is invalid.
+    """
+    # --- Validate source channel ---
+    if source_channel not in VALID_SOURCE_CHANNELS:
+        raise DuplicatePOValidationError(
+            f"Invalid source_channel '{source_channel}'. "
+            f"Must be one of: {', '.join(sorted(VALID_SOURCE_CHANNELS))}"
+        )
+
+    # --- Validate signal scores ---
+    flags = _validate_signal_scores(signal_scores)
+
+    # --- Contextual flags (passthrough, do not affect scoring) ---
+    if prior_rejection_ref:
+        flags.append("RESUBMISSION_CONTEXT")
+
+    if erp_warning_issued:
+        flags.append("ERP_WARNING_OVERRIDDEN")
+
+    # --- Compute weighted contribution per signal ---
+    breakdown: Dict[str, float] = {
+        signal: round(_WEIGHTS[signal] * float(signal_scores.get(signal, 0.0)), 6)
+        for signal in _WEIGHTS
+    }
+
+    composite_score = round(sum(breakdown.values()), 6)
+
+    # --- Classify ---
+    classification, status, recommended_action = _classify(composite_score)
+
+    return {
+        "status": status,
+        "composite_score": composite_score,
+        "classification": classification,
+        "recommended_action": recommended_action,
+        "signal_breakdown": breakdown,
+        "incoming_po_number": incoming_po_number,
+        "customer_id": customer_id,
+        "source_channel": source_channel,
+        "erp_warning_issued": erp_warning_issued,
+        "prior_rejection_ref": prior_rejection_ref,
+        "flags": flags,
+    }
