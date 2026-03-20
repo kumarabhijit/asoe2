@@ -17,7 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 DB_DEFAULT = Path(__file__).parent / "sandbox.db"
@@ -99,7 +99,7 @@ _CREDIT_PROFILES = [
     ("R-05", 20_000.00, 25_500.00),  # OVER LIMIT by $5,500 → REJECTED
 ]
 
-_NOW = datetime.utcnow().isoformat()
+_NOW = datetime.now(timezone.utc).isoformat()
 _CONTRACT_START = "2024-01-01"
 _CONTRACT_END   = "2025-12-31"
 

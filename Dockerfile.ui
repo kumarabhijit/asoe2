@@ -1,14 +1,13 @@
 # Dockerfile.ui ─ ASOE Streamlit sandbox UI
 #
 # Extends the core image with Streamlit. Does NOT include torch/transformers/outlines.
-# The UI uses DeterministicFallbackBackend by default (USE_OUTLINES_BACKEND=0).
-# When running with --profile inference, point LOCAL_LLM_BACKEND_CLASS at the
-# inference container's endpoint instead.
+# Uses DeterministicFallbackBackend by default (USE_OUTLINES_BACKEND=0).
 #
-# Local dev:  docker compose up ui
-# Port:       8501
+# Python: 3.14.3 (stable) — pinned via .python-version and pyproject.toml
+# Package manager: uv
+# Port: 8501
 
-FROM python:3.11-slim AS base
+FROM python:3.14-slim AS base
 
 WORKDIR /app
 
@@ -16,10 +15,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir "uv==0.4.27"
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # ── Core deps ─────────────────────────────────────────────────────────────────
-COPY pyproject.toml .
+COPY pyproject.toml uv.lock ./
 RUN uv pip install --system --no-cache-dir \
     "langgraph>=0.2.0" \
     "pydantic>=2.7.0"
@@ -28,6 +27,10 @@ RUN uv pip install --system --no-cache-dir \
 RUN uv pip install --system --no-cache-dir \
     "streamlit>=1.35.0" \
     "huggingface-hub>=0.23.0"
+
+# ── Compatibility patch ───────────────────────────────────────────────────────
+COPY scripts/apply-patches.sh scripts/apply-patches.sh
+RUN bash scripts/apply-patches.sh python3
 
 # ── Application source ────────────────────────────────────────────────────────
 COPY contracts/    contracts/

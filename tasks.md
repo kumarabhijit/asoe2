@@ -202,3 +202,31 @@ States:
 - [x] `outlines`, `transformers`, `torch`, `accelerate`, `huggingface-hub` (all optional)
 - [x] Core production deps not duplicated
 ✅ Outcome: sandbox installs are isolated from CI and production requirements
+---
+## PHASE 9 — Containerized Deployment
+### 9.1 Dockerfiles (3-Container Architecture)
+- [x] `Dockerfile.core` — core orchestration engine (LangGraph + recipes + Compliance Shadow)
+- [x] `Dockerfile.ui` — Streamlit sandbox UI (core + streamlit, no GPU deps)
+- [x] `Dockerfile.inference` — local LLM inference (Outlines + torch + transformers for Compliance Shadow)
+- [x] `.dockerignore` — excludes .git, __pycache__, sandbox.db, k8s/
+- [x] Non-root user (`asoe`, UID 1000) in all images
+- [x] `uv` for fast, deterministic dependency resolution (per architecture_v2.md §2)
+✅ Outcome: each container installs only its required dependency group
+
+### 9.2 Docker Compose (Local Development)
+- [x] `docker-compose.yml` — core + ui services (always on), inference service (optional `--profile inference`)
+- [x] `.env.example` — documents all runtime env vars
+- [x] Shared env block (`x-core-env`) for ASOE_KILL_SWITCH, ASOE_EXPLAIN_MODE
+- [x] Source-mount volumes for hot-reload during development
+- [x] `hf-model-cache` volume persists model weights across rebuilds
+- [x] Health checks for all services
+✅ Outcome: `docker compose up` runs the full stack locally
+
+### 9.3 Kubernetes Manifests (AKS Production)
+- [x] `k8s/namespace.yaml` — `asoe` namespace with compliance label
+- [x] `k8s/core/` — Deployment (2 replicas, topology spread), Service (ClusterIP), ConfigMap
+- [x] `k8s/ui/` — Deployment (2 replicas), Service (ClusterIP behind APIM)
+- [x] `k8s/inference/` — Deployment (1 replica, Intel AMX nodeSelector, 20 Gi memory), Service (ClusterIP)
+- [x] Azure Workload Identity annotations on all pod templates
+- [x] Non-root security context on all pods
+✅ Outcome: deployment manifests align with architecture_v2.md §2 infrastructure stack

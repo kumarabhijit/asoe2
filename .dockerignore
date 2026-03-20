@@ -1,4 +1,6 @@
 # .dockerignore ─ exclude files not needed in any ASOE image
+# NOTE: .python-version and uv.lock are intentionally NOT excluded —
+# they are copied into images to pin Python 3.14 and lock dependencies.
 .git
 .gitignore
 __pycache__
@@ -17,6 +19,7 @@ venv/
 .env
 .env.*
 tests/sandbox/sandbox.db
+tests/sandbox/db/*.db
 *.log
 .DS_Store
 k8s/

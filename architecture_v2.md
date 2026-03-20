@@ -30,6 +30,8 @@ e.g.  Skill: "When you see a price mismatch > 3%, explain it to the user and ask
 
 The application is deployed as a suite of containerized microservices on Microsoft Azure. Image builds are optimized for high-performance data center environments, utilizing `uv pip` for rapid, deterministic Python environment resolution on Ubuntu 24.04 base images.
 
+**Implementation:** Dockerfiles, `docker-compose.yml` (local dev), and Kubernetes manifests (`k8s/`) are committed in the repository root. The three-container split (core orchestration, Streamlit UI, LLM inference) mirrors the dependency groups in `pyproject.toml`.
+
 ### Infrastructure & Deployment Stack
 
 | Component | Technology | Rationale / Description |

@@ -55,20 +55,42 @@ OrderEvent
 
 ### Prerequisites
 
-Python 3.11+. No GPU or optional packages required for development or testing.
+- **Python 3.14.3** (stable, pinned in `.python-version`)
+- **uv** — fast Python package manager ([install](https://docs.astral.sh/uv/getting-started/installation/))
+
+No GPU or optional packages required for development or testing.
 
 ### Install
 
 ```bash
-# Core dependencies (langgraph + pydantic)
-pip install -e ".[dev]"
+# 1. Install Python 3.14.3 (if not already present)
+uv python install 3.14.3
+
+# 2. Create virtual environment
+uv venv --python 3.14.3
+
+# 3. Install core + dev dependencies
+uv pip install "langgraph>=0.2.0" "pydantic>=2.7.0" "pytest>=8.0.0" "pytest-cov>=5.0.0"
+
+# 4. Apply compatibility patch (pydantic 2.12.x + Python 3.14 typing API change)
+bash scripts/apply-patches.sh .venv/bin/python
+
+# 5. Activate the environment
+source .venv/bin/activate
 ```
 
 For the optional Outlines constrained-generation backend (GPU-heavy, not needed for CI):
 
 ```bash
-pip install -e ".[outlines]"
+uv pip install "outlines>=0.0.46" "transformers>=4.41.0" "torch>=2.3.0" "accelerate>=0.30.0" "huggingface-hub>=0.23.0"
+bash scripts/apply-patches.sh .venv/bin/python   # re-run after any pydantic reinstall
 ```
+
+> **Note on the pydantic patch:** Python 3.14 renamed an internal `typing._eval_type`
+> parameter from `prefer_fwd_module` to `parent_fwdref`. Pydantic 2.12.5 uses the old
+> name. `scripts/apply-patches.sh` applies the one-line fix in-place. It is idempotent
+> and safe to re-run. The patch will become unnecessary once pydantic ships a compatible
+> release. See `patches/pydantic-py314-typing-eval-type.patch` for the diff.
 
 ### Run the tests
 
@@ -76,7 +98,9 @@ pip install -e ".[outlines]"
 python -m pytest
 ```
 
-Expected: **490 passed, 0 failed, 0 skipped.**
+Expected: **490 passed, 0 failed, 1 warning** (the warning is from `langchain_core` pydantic.v1 deprecation — not a blocker).
+
+> **Verified on Python 3.14.3 (stable).**
 
 ### Smoke test
 
@@ -118,6 +142,35 @@ PYTHONPATH=. streamlit run tests/sandbox/ui/app.py
 guarantee as `OutlinesConstrainedBackend` in production.  If the model fails
 to load it falls back silently to `DeterministicFallbackBackend`.
 
+### Docker (containerized)
+
+Run the full stack in containers without installing Python dependencies on
+your host:
+
+```bash
+# Core orchestration + Streamlit UI (uses DeterministicFallbackBackend)
+docker compose up
+
+# → UI at http://localhost:8501
+
+# Include local LLM inference (downloads model weights on first start)
+docker compose --profile inference up
+```
+
+Copy `.env.example` to `.env` to configure kill switch, explain mode, or
+model selection.  See `docker-compose.yml` for all available options.
+
+For AKS production deployment, apply the Kubernetes manifests:
+
+```bash
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/core/
+kubectl apply -f k8s/ui/
+kubectl apply -f k8s/inference/
+```
+
+See `architecture_v2.md` §2 for the full Azure infrastructure stack.
+
 ---
 
 ## Directory structure
@@ -156,6 +209,17 @@ tests/              pytest test suite (490 tests)
     llm/local_backend.py  LocalHFBackend — Outlines + HuggingFace model (optional)
     llm/prompts.py  Human-readable prompt templates for the UI "Prompt Preview" panel
     requirements-sandbox.txt  Sandbox-only deps (streamlit, outlines, transformers, torch)
+Dockerfile.core     Core orchestration container (LangGraph + recipes + shadow)
+Dockerfile.ui       Streamlit sandbox UI container (core + streamlit)
+Dockerfile.inference  Local LLM inference container (Outlines + torch + transformers)
+docker-compose.yml  Local dev stack — core + ui + optional inference profile
+.dockerignore       Excludes .git, __pycache__, sandbox.db, k8s/ from images
+.env.example        Documents all runtime env vars for Docker
+k8s/                Kubernetes manifests for AKS production deployment
+  namespace.yaml    asoe namespace with compliance label
+  core/             Deployment (2 replicas), Service, ConfigMap
+  ui/               Deployment (2 replicas), Service
+  inference/        Deployment (1 replica, Intel AMX nodeSelector), Service
 ```
 
 ---
@@ -192,6 +256,7 @@ tests/              pytest test suite (490 tests)
 | 6 | Kill switch, read-only explain mode, auditor docs, constrained-generation safeguard documentation |
 | 7 | Infrastructure gateways (Ports & Adapters), multi-step workflows (Saga pattern), DUPLICATE_PO fallback routing |
 | 8 | Local execution sandbox — SQLite seeder, Streamlit UI, LocalHFBackend (Outlines + HuggingFace) |
+| 9 | Containerized deployment — 3 Dockerfiles (core/ui/inference), docker-compose for local dev, K8s manifests for AKS |
 
 ---
 
