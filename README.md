@@ -118,6 +118,35 @@ PYTHONPATH=. streamlit run tests/sandbox/ui/app.py
 guarantee as `OutlinesConstrainedBackend` in production.  If the model fails
 to load it falls back silently to `DeterministicFallbackBackend`.
 
+### Docker (containerized)
+
+Run the full stack in containers without installing Python dependencies on
+your host:
+
+```bash
+# Core orchestration + Streamlit UI (uses DeterministicFallbackBackend)
+docker compose up
+
+# → UI at http://localhost:8501
+
+# Include local LLM inference (downloads model weights on first start)
+docker compose --profile inference up
+```
+
+Copy `.env.example` to `.env` to configure kill switch, explain mode, or
+model selection.  See `docker-compose.yml` for all available options.
+
+For AKS production deployment, apply the Kubernetes manifests:
+
+```bash
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/core/
+kubectl apply -f k8s/ui/
+kubectl apply -f k8s/inference/
+```
+
+See `architecture_v2.md` §2 for the full Azure infrastructure stack.
+
 ---
 
 ## Directory structure
@@ -156,6 +185,17 @@ tests/              pytest test suite (490 tests)
     llm/local_backend.py  LocalHFBackend — Outlines + HuggingFace model (optional)
     llm/prompts.py  Human-readable prompt templates for the UI "Prompt Preview" panel
     requirements-sandbox.txt  Sandbox-only deps (streamlit, outlines, transformers, torch)
+Dockerfile.core     Core orchestration container (LangGraph + recipes + shadow)
+Dockerfile.ui       Streamlit sandbox UI container (core + streamlit)
+Dockerfile.inference  Local LLM inference container (Outlines + torch + transformers)
+docker-compose.yml  Local dev stack — core + ui + optional inference profile
+.dockerignore       Excludes .git, __pycache__, sandbox.db, k8s/ from images
+.env.example        Documents all runtime env vars for Docker
+k8s/                Kubernetes manifests for AKS production deployment
+  namespace.yaml    asoe namespace with compliance label
+  core/             Deployment (2 replicas), Service, ConfigMap
+  ui/               Deployment (2 replicas), Service
+  inference/        Deployment (1 replica, Intel AMX nodeSelector), Service
 ```
 
 ---
@@ -192,6 +232,7 @@ tests/              pytest test suite (490 tests)
 | 6 | Kill switch, read-only explain mode, auditor docs, constrained-generation safeguard documentation |
 | 7 | Infrastructure gateways (Ports & Adapters), multi-step workflows (Saga pattern), DUPLICATE_PO fallback routing |
 | 8 | Local execution sandbox — SQLite seeder, Streamlit UI, LocalHFBackend (Outlines + HuggingFace) |
+| 9 | Containerized deployment — 3 Dockerfiles (core/ui/inference), docker-compose for local dev, K8s manifests for AKS |
 
 ---
 
