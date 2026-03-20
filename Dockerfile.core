@@ -3,31 +3,39 @@
 # Contains: LangGraph state machine, recipes, Compliance Shadow, constraints,
 #           gateways, observability, hardening. No UI. No GPU dependencies.
 #
+# Python: 3.14 (pinned via .python-version and pyproject.toml requires-python)
+# Package manager: uv (fast, deterministic, reproducible)
 # Production entry: replace CMD with your Azure Event Hubs consumer.
 # Local dev:        docker compose up core
 #
 # Image size target: < 500 MB (slim base + pure-Python deps only)
 
-FROM python:3.11-slim AS base
+FROM python:3.14-slim AS base
 
 WORKDIR /app
 
-# ── System deps (curl for healthchecks only) ─────────────────────────────────
+# ── System deps ───────────────────────────────────────────────────────────────
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
 # ── uv: fast, deterministic dep resolution (per architecture_v2.md §2) ───────
-RUN pip install --no-cache-dir "uv==0.4.27"
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # ── Python deps — core only (no torch, no streamlit) ─────────────────────────
-COPY pyproject.toml .
+# Install from lock file for reproducibility; patch for Python 3.14 rc compat.
+COPY pyproject.toml uv.lock ./
 RUN uv pip install --system --no-cache-dir \
     "langgraph>=0.2.0" \
     "pydantic>=2.7.0"
 
+# ── Compatibility patch ───────────────────────────────────────────────────────
+# pydantic 2.12.5 calls typing._eval_type(prefer_fwd_module=True) but Python
+# 3.14 renamed that kwarg to parent_fwdref. Patch until pydantic ships a fix.
+COPY scripts/apply-patches.sh scripts/apply-patches.sh
+RUN bash scripts/apply-patches.sh python3
+
 # ── Application source ────────────────────────────────────────────────────────
-# Copy only the production modules; exclude tests/, docs/, k8s/.
 COPY contracts/    contracts/
 COPY constraints/  constraints/
 COPY compliance/   compliance/
@@ -45,8 +53,6 @@ COPY main.py       main.py
 # ── Runtime config ────────────────────────────────────────────────────────────
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
-
-# Defaults — override per-deployment via ConfigMap / env vars:
 ENV ASOE_KILL_SWITCH=0
 ENV ASOE_EXPLAIN_MODE=0
 ENV USE_OUTLINES_BACKEND=0

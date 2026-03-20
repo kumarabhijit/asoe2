@@ -1,5 +1,7 @@
 # docker-compose.yml ─ ASOE local development stack
 #
+# Python: 3.14  |  Package manager: uv
+#
 # Three services, two profiles:
 #
 #   core       — orchestration engine     (always on)

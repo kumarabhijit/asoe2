@@ -1,0 +1,10 @@
+--- a/pydantic/_internal/_typing_extra.py
++++ b/pydantic/_internal/_typing_extra.py
+@@ -532,7 +532,7 @@ def _eval_type(
+             # Our `globalns` is irrelevant and we need to indicate `typing._eval_type()` that it should
+             # infer it from the `ForwardRef.__forward_module__` attribute instead (`typing.get_type_hints()`
+             # does the same). Note that this would probably be unnecessary if we properly iterated over the
+             # `__orig_bases__` for TypedDicts in `get_cls_type_hints()`:
+-            prefer_fwd_module=True,
++            parent_fwdref=True,
+         )

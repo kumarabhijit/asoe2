@@ -55,20 +55,42 @@ OrderEvent
 
 ### Prerequisites
 
-Python 3.11+. No GPU or optional packages required for development or testing.
+- **Python 3.14** (pinned in `.python-version`)
+- **uv** — fast Python package manager ([install](https://docs.astral.sh/uv/getting-started/installation/))
+
+No GPU or optional packages required for development or testing.
 
 ### Install
 
 ```bash
-# Core dependencies (langgraph + pydantic)
-pip install -e ".[dev]"
+# 1. Install Python 3.14 (if not already present)
+uv python install 3.14
+
+# 2. Create virtual environment
+uv venv --python 3.14
+
+# 3. Install core + dev dependencies
+uv pip install "langgraph>=0.2.0" "pydantic>=2.7.0" "pytest>=8.0.0" "pytest-cov>=5.0.0"
+
+# 4. Apply compatibility patch (pydantic 2.12.x + Python 3.14 typing API change)
+bash scripts/apply-patches.sh .venv/bin/python
+
+# 5. Activate the environment
+source .venv/bin/activate
 ```
 
 For the optional Outlines constrained-generation backend (GPU-heavy, not needed for CI):
 
 ```bash
-pip install -e ".[outlines]"
+uv pip install "outlines>=0.0.46" "transformers>=4.41.0" "torch>=2.3.0" "accelerate>=0.30.0" "huggingface-hub>=0.23.0"
+bash scripts/apply-patches.sh .venv/bin/python   # re-run after any pydantic reinstall
 ```
+
+> **Note on the pydantic patch:** Python 3.14 renamed an internal `typing._eval_type`
+> parameter from `prefer_fwd_module` to `parent_fwdref`. Pydantic 2.12.5 uses the old
+> name. `scripts/apply-patches.sh` applies the one-line fix in-place. It is idempotent
+> and safe to re-run. The patch will become unnecessary once pydantic ships a compatible
+> release. See `patches/pydantic-py314-typing-eval-type.patch` for the diff.
 
 ### Run the tests
 
@@ -76,7 +98,7 @@ pip install -e ".[outlines]"
 python -m pytest
 ```
 
-Expected: **490 passed, 0 failed, 0 skipped.**
+Expected: **490 passed, 0 failed, 1 warning** (the warning is from `langchain_core` pydantic.v1 deprecation — not a blocker).
 
 ### Smoke test
 

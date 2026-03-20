@@ -2,7 +2,7 @@
 name = "asoe"
 version = "0.3.2"
 description = "Starter scaffold for a deterministic skill-shadow-recipe pricing exception system with constrained generation"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 dependencies = [
   "langgraph>=0.2.0",
   "pydantic>=2.7.0",
@@ -19,7 +19,28 @@ dev = [
   "pytest-cov>=5.0.0",
 ]
 
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = [
+  "contracts",
+  "constraints",
+  "compliance",
+  "recipes",
+  "skills",
+  "gateways",
+  "workflows",
+  "orchestration",
+  "observability",
+  "hardening",
+  "llm",
+  "prompts",
+]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-q"
+
