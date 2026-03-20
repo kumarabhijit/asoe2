@@ -36,8 +36,15 @@ spec:
           envFrom:
             - configMapRef:
                 name: asoe-core-config
+            - secretRef:
+                name: asoe-secrets
+                optional: true
           # Secrets (SAP MCP credentials, Claude API key) injected via
-          # Azure Key Vault CSI driver — never in ConfigMap or plain env vars
+          # Azure Key Vault CSI driver — mounted at /mnt/secrets-store/
+          volumeMounts:
+            - name: secrets-store
+              mountPath: /mnt/secrets-store
+              readOnly: true
           resources:
             requests:
               cpu: "500m"
@@ -63,6 +70,13 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5
+      volumes:
+        - name: secrets-store
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: asoe-keyvault-secrets
       # Spread replicas across nodes to avoid SPOF
       topologySpreadConstraints:
         - maxSkew: 1

@@ -21,9 +21,12 @@ from __future__ import annotations
 #   - Remote serving (vLLM endpoint) is NOT implemented here (Phase 2 scope)
 
 import abc
+import logging
 
 from contracts.models import ComplianceDecision, GraphState, ShadowEnforcement, ShadowStatus
 from constraints import get_constrained_backend
+
+logger = logging.getLogger("asoe.compliance")
 
 
 # ---------------------------------------------------------------------------
@@ -88,12 +91,23 @@ class ComplianceShadow(ComplianceShadowBase):
             raw = self.backend.shadow_decision(state)
             constrained_by = "Guidance/Outlines fallback schema"
 
-        return ComplianceDecision(
+        decision = ComplianceDecision(
             status=ShadowStatus(raw.status),
             reasons=raw.reasons,
             policy_hits=raw.policy_hits,
             constrained_by=constrained_by,
         )
+        logger.info(
+            "shadow_audit",
+            extra={
+                "trace_id": decision.trace_id,
+                "status": decision.status.value,
+                "reasons": decision.reasons,
+                "policy_hits": decision.policy_hits,
+                "constrained_by": decision.constrained_by,
+            },
+        )
+        return decision
 
     # ------------------------------------------------------------------
     # enforce — Phase 2.2
@@ -112,11 +126,20 @@ class ComplianceShadow(ComplianceShadowBase):
                 "Execution halted. "
                 + "; ".join(decision.reasons)
             )
-            return ShadowEnforcement(
+            enforcement = ShadowEnforcement(
                 action="BLOCK",
                 trace_id=decision.trace_id,
                 explanation=explanation,
             )
+            logger.warning(
+                "shadow_enforce",
+                extra={
+                    "trace_id": enforcement.trace_id,
+                    "action": enforcement.action,
+                    "source_status": decision.status.value,
+                },
+            )
+            return enforcement
 
         if decision.status == ShadowStatus.YELLOW:
             explanation = (
@@ -124,15 +147,33 @@ class ComplianceShadow(ComplianceShadowBase):
                 "Routing to MANUAL_REVIEW_REQUIRED. "
                 + "; ".join(decision.reasons)
             )
-            return ShadowEnforcement(
+            enforcement = ShadowEnforcement(
                 action="ESCALATE",
                 trace_id=decision.trace_id,
                 explanation=explanation,
             )
+            logger.warning(
+                "shadow_enforce",
+                extra={
+                    "trace_id": enforcement.trace_id,
+                    "action": enforcement.action,
+                    "source_status": decision.status.value,
+                },
+            )
+            return enforcement
 
         # GREEN
-        return ShadowEnforcement(
+        enforcement = ShadowEnforcement(
             action="PROCEED",
             trace_id=decision.trace_id,
             explanation="Compliance Shadow returned GREEN. Auto-proceed is allowed.",
         )
+        logger.info(
+            "shadow_enforce",
+            extra={
+                "trace_id": enforcement.trace_id,
+                "action": enforcement.action,
+                "source_status": decision.status.value,
+            },
+        )
+        return enforcement

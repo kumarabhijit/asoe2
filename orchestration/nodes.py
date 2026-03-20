@@ -35,6 +35,12 @@ from recipes.registry import get_recipe
 from gateways.executor import GatewayExecutor
 from orchestration.utils import circuit_breaker, compute_discrepancy
 from hardening.explain_mode import build_explain_summary
+from contracts.policy import MAX_DISCOUNT_ALLOWED
+
+
+import logging
+
+_node_logger = logging.getLogger("asoe.nodes")
 
 
 def _backend():
@@ -42,11 +48,41 @@ def _backend():
     return get_constrained_backend()
 
 
+class NodeValidationError(Exception):
+    """Raised when a node receives invalid state at a boundary."""
+
+
+def _validate_event(state: GraphState) -> None:
+    """Validate that the inbound event has all required fields for processing.
+
+    Raises NodeValidationError with a structured message instead of
+    allowing downstream AttributeError (SEC-2 fix).
+    """
+    event = state.event
+    missing = []
+    if not event.order_id:
+        missing.append("order_id")
+    if event.po_price is None:
+        missing.append("po_price")
+    if event.sap_base_price is None:
+        missing.append("sap_base_price")
+    if missing:
+        raise NodeValidationError(f"OrderEvent missing required fields: {missing}")
+
+
 # ---------------------------------------------------------------------------
 # ingest — track update count and batch variance
 # ---------------------------------------------------------------------------
 
 def ingest(state: GraphState) -> GraphState:
+    try:
+        _validate_event(state)
+    except NodeValidationError as exc:
+        _node_logger.error("ingest_validation_failed: %s", exc)
+        state.final_status = TerminalStatus.FAIL_TO_HUMAN
+        state.explanation = f"Input validation failed: {exc}"
+        return state
+
     state.update_count += 1
     state.batch_total_variance = abs(
         (state.event.po_price - state.event.sap_base_price) * state.event.line_count
@@ -155,7 +191,7 @@ def validate_types(state: GraphState) -> GraphState:
                 "requested_price": state.event.po_price,
                 "erp_context": {
                     "base_price": state.event.sap_base_price,
-                    "max_discount_allowed": 0.15,
+                    "max_discount_allowed": MAX_DISCOUNT_ALLOWED,
                 },
             },
         )

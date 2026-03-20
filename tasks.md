@@ -234,20 +234,20 @@ States:
 ## REVIEW FINDINGS — Triple-Check Technical Review Board (2026-03-20)
 
 ### Critical
-- [ ] **TEST-1**: Add DUPLICATE_PO end-to-end graph tests (conftest fixture, test_graph_paths, test_golden, test_nodes for validate_types param mapping)
+- [x] **TEST-1**: Add DUPLICATE_PO end-to-end graph tests (conftest fixture, test_graph_paths, test_golden, test_nodes for validate_types param mapping)
 
 ### High
-- [ ] **SEC-1**: Add structured logging to `compliance/shadow.py` audit() and enforce() methods so shadow decisions survive graph crashes
+- [x] **SEC-1**: Add structured logging to `compliance/shadow.py` audit() and enforce() methods so shadow decisions survive graph crashes
 
 ### Medium
-- [ ] **ARCH-1**: Externalize hardcoded business thresholds (15% discount, $5k exposure, 50-update/10k-variance circuit breaker) to a policy config layer
-- [ ] **ARCH-3**: Add fallback chain in `constraints/router.py` — degrade to DeterministicFallbackBackend on OutlinesConstrainedBackend init failure
-- [ ] **SEC-2**: Add explicit input validation at orchestration node boundaries (structured errors, not AttributeError)
-- [ ] **SEC-3**: Replace broad `except Exception: pass` in `graph.py` and `gateways/executor.py` with specific exception types and structured logging
-- [ ] **SEC-4**: Enforce `GatewayRequest.timeout_ms` in `GatewayExecutor.run()`
-- [ ] **SEC-7**: Add SecretProviderClass and VolumeMount for Azure Key Vault CSI driver in k8s/core/deployment.yaml
-- [ ] **TEST-2**: Add UNKNOWN intent handling tests (should route to FAIL_TO_HUMAN)
-- [ ] **TEST-3**: Add recipe exception-throwing tests (verify RecipeExecutor catches and logs)
+- [x] **ARCH-1**: Externalize hardcoded business thresholds (15% discount, $5k exposure, 50-update/10k-variance circuit breaker) to `contracts/policy.py`
+- [x] **ARCH-3**: Add fallback chain in `constraints/router.py` — degrade to DeterministicFallbackBackend on OutlinesConstrainedBackend init failure
+- [x] **SEC-2**: Add explicit input validation at orchestration node boundaries (structured errors, not AttributeError)
+- [x] **SEC-3**: Replace broad `except Exception: pass` in `graph.py` and `gateways/executor.py` with specific exception types and structured logging
+- [x] **SEC-4**: Enforce `GatewayRequest.timeout_ms` in `GatewayExecutor.run()` via `concurrent.futures` thread timeout
+- [x] **SEC-7**: Add SecretProviderClass and VolumeMount for Azure Key Vault CSI driver in `k8s/core/secret-provider.yaml` and `k8s/core/deployment.yaml`
+- [x] **TEST-2**: Add UNKNOWN intent handling tests (should route to FAIL_TO_HUMAN)
+- [x] **TEST-3**: Add recipe exception-throwing tests (verify RecipeExecutor catches and logs)
 
 ### Low
 - [ ] **ARCH-2**: Replace `hasattr()` backend checks with explicit Protocol/ABC `isinstance()`

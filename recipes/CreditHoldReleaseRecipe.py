@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from contracts.policy import CREDIT_AUTHORIZED_ROLES, CREDIT_EXPOSURE_TOLERANCE
+
 
 def release_credit_hold(order_id: str, requester_role: str, credit_limit: float, current_exposure: float):
-    authorized_roles = ["ORDER_MANAGER", "FINANCE_DIRECTOR"]
-    if requester_role not in authorized_roles:
+    if requester_role not in CREDIT_AUTHORIZED_ROLES:
         return {"status": "BLOCKED", "reason": "Insufficient permissions for Credit Release."}
-    if (current_exposure - credit_limit) > 5000:
+    if (current_exposure - credit_limit) > CREDIT_EXPOSURE_TOLERANCE:
         return {
             "status": "REJECTED",
             "reason": "Exposure exceeds limit by >$5,000. Manual Finance review required.",
