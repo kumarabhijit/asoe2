@@ -1,0 +1,66 @@
+# Dockerfile.ui ─ ASOE Streamlit sandbox UI
+#
+# Extends the core image with Streamlit. Does NOT include torch/transformers/outlines.
+# The UI uses DeterministicFallbackBackend by default (USE_OUTLINES_BACKEND=0).
+# When running with --profile inference, point LOCAL_LLM_BACKEND_CLASS at the
+# inference container's endpoint instead.
+#
+# Local dev:  docker compose up ui
+# Port:       8501
+
+FROM python:3.11-slim AS base
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir "uv==0.4.27"
+
+# ── Core deps ─────────────────────────────────────────────────────────────────
+COPY pyproject.toml .
+RUN uv pip install --system --no-cache-dir \
+    "langgraph>=0.2.0" \
+    "pydantic>=2.7.0"
+
+# ── UI extras — Streamlit only (no GPU/ML deps) ───────────────────────────────
+RUN uv pip install --system --no-cache-dir \
+    "streamlit>=1.35.0" \
+    "huggingface-hub>=0.23.0"
+
+# ── Application source ────────────────────────────────────────────────────────
+COPY contracts/    contracts/
+COPY constraints/  constraints/
+COPY compliance/   compliance/
+COPY recipes/      recipes/
+COPY skills/       skills/
+COPY gateways/     gateways/
+COPY workflows/    workflows/
+COPY orchestration/ orchestration/
+COPY observability/ observability/
+COPY hardening/    hardening/
+COPY llm/          llm/
+COPY prompts/      prompts/
+COPY tests/sandbox/ tests/sandbox/
+COPY main.py        main.py
+
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+ENV ASOE_KILL_SWITCH=0
+ENV ASOE_EXPLAIN_MODE=0
+ENV USE_OUTLINES_BACKEND=0
+ENV SANDBOX_DB_PATH=/app/tests/sandbox/sandbox.db
+
+RUN adduser --disabled-password --gecos "" --uid 1000 asoe
+USER asoe
+
+EXPOSE 8501
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=25s --retries=3 \
+    CMD curl -sf http://localhost:8501/healthz || exit 1
+
+CMD ["streamlit", "run", "tests/sandbox/ui/app.py", \
+     "--server.address=0.0.0.0", \
+     "--server.port=8501", \
+     "--server.headless=true"]

@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: asoe-inference
+  namespace: asoe
+  labels:
+    app: asoe-inference
+spec:
+  selector:
+    app: asoe-inference
+  # ClusterIP: inference is internal only; reached by core + UI within the cluster
+  type: ClusterIP
+  ports:
+    - name: inference-http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP

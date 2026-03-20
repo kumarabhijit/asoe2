@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: asoe-core
+  namespace: asoe
+  labels:
+    app: asoe-core
+    tier: orchestration
+    app.kubernetes.io/part-of: asoe
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: asoe-core
+  template:
+    metadata:
+      labels:
+        app: asoe-core
+        tier: orchestration
+      annotations:
+        # Azure Workload Identity — no hardcoded API keys in env vars
+        # (per architecture_v2.md §2 Security row)
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: asoe-core-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: core
+          image: your-acr.azurecr.io/asoe-core:latest
+          # Production: replace with Event Hubs consumer:
+          #   command: ["python", "event_consumer.py"]
+          command: ["python", "main.py"]
+          envFrom:
+            - configMapRef:
+                name: asoe-core-config
+          # Secrets (SAP MCP credentials, Claude API key) injected via
+          # Azure Key Vault CSI driver — never in ConfigMap or plain env vars
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "from orchestration.graph import build_graph; build_graph()"
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "from contracts.models import GraphState; print('ready')"
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+      # Spread replicas across nodes to avoid SPOF
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: asoe-core
