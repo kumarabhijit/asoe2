@@ -1,8 +1,7 @@
 # Architecture Spec: CPG Agentic AI Exception Management System (Product 1.0)
 
-**Document Owner:** Principal AI Systems Architect  
-**Domain:** Consumer Packaged Goods (CPG) Supply Chain (Order-to-Cash)  
-**Status:** Product 1.0 (Production Ready)  
+**Document Owner:** Principal AI Systems Architect
+**Domain:** Consumer Packaged Goods (CPG) Supply Chain (Order-to-Cash)
 **Scope:** V1.0 is strictly constrained to **Pricing & Promotional Exceptions**.
 
 ---
@@ -44,22 +43,22 @@ The application is deployed as a suite of containerized microservices on Microso
 
 ### Application & AI Stack
 
-| Layer | Technology | Status | Rationale / Description |
-| :--- | :--- | :---: | :--- |
-| **Reasoning Core** | Claude 4.6 Sonnet | Impl | Azure AI Foundry deployment. Acts as the primary planner and intent router. |
-| **Orchestration** | LangGraph (Python) | Impl | Manages state transitions and cyclical workflows for the exception lifecycle. |
-| **Logic Layer** | `SKILL.md` framework | Impl | Progressive disclosure files that load domain-specific rules only when needed. |
-| **Policy** | `contracts/policy.py` | Impl | Single source of truth for all business thresholds (discounts, circuit breaker limits, roles). |
-| **Constrained Generation** | `constraints/router.py` | Impl | Three-tier fallback: custom backend → Outlines → DeterministicFallback. Ensures machine-consumed outputs (intents, verdicts, recipe selection) are schema-constrained at generation time. |
-| **Infrastructure Gateways** | `gateways/` (Hexagonal) | Impl | `InfrastructureGateway` Protocol with timeout-enforced executor. Recipes declare dependencies/effects; orchestration mediates. `StubGateway` for testing. |
-| **Workflow Runner** | `workflows/runner.py` | Impl | Multi-step Saga pattern. Each step runs the full graph. LIFO compensation on failure. |
-| **Hardening** | `hardening/` | Impl | Kill switch (`ASOE_KILL_SWITCH`) halts all execution. Explain mode (`ASOE_EXPLAIN_MODE`) runs full pipeline read-only, returns dry-run summary. Both are env-var activated, no restart needed. |
-| **Memory / RAG** | Pinecone (Serverless) | Planned | Hybrid Search (BM25 + Dense) for SKU/Order matching and semantic contract retrieval. Currently stubbed via `RagContext` contract. |
-| **Compliance Shadow** | Llama 3.1 8B + vLLM | Planned | Target: localized model on AKS/Intel AMX for zero-latency penalty auditing. Currently uses `DeterministicFallbackBackend`. |
-| **Guardrails** | Pydantic + Outlines | Impl | Forces strict type-checking on execution payloads before triggering Recipes. |
-| **Integration Protocol** | Model Context Protocol (MCP) | Planned | Target: wraps SAP/ERP endpoints into self-describing tool servers. Currently `StubGateway` satisfies the same contract. |
-| **Observability** | Structured JSON logging | Impl | `TraceRecord` (Pydantic, LangFuse-aligned) emitted via stdlib logging. Captures intent, shadow verdict, recipe, gateway calls, and terminal status per execution. Future: forward to self-hosted LangFuse. |
-| **Secret Management** | Azure Key Vault CSI | Impl | `SecretProviderClass` mounts secrets to pods via Workload Identity. No hardcoded credentials. |
+| Layer | Technology | Rationale / Description |
+| :--- | :--- | :--- |
+| **Reasoning Core** | Claude 4.6 Sonnet | Azure AI Foundry deployment. Acts as the primary planner and intent router. |
+| **Orchestration** | LangGraph (Python) | Manages state transitions and cyclical workflows for the exception lifecycle. |
+| **Logic Layer** | `SKILL.md` framework | Progressive disclosure files that load domain-specific rules only when needed. |
+| **Policy** | `contracts/policy.py` | Single source of truth for all business thresholds (discounts, circuit breaker limits, roles). |
+| **Constrained Generation** | `constraints/router.py` | Three-tier fallback: custom backend → Outlines → DeterministicFallback. Ensures machine-consumed outputs (intents, verdicts, recipe selection) are schema-constrained at generation time. |
+| **Infrastructure Gateways** | `gateways/` (Hexagonal) | `InfrastructureGateway` Protocol with timeout-enforced executor. Recipes declare dependencies/effects; orchestration mediates. `StubGateway` for testing. |
+| **Workflow Runner** | `workflows/runner.py` | Multi-step Saga pattern. Each step runs the full graph. LIFO compensation on failure. |
+| **Hardening** | `hardening/` | Kill switch (`ASOE_KILL_SWITCH`) halts all execution. Explain mode (`ASOE_EXPLAIN_MODE`) runs full pipeline read-only, returns dry-run summary. Both are env-var activated, no restart needed. |
+| **Memory / RAG** | Pinecone (Serverless) | Hybrid Search (BM25 + Dense) for SKU/Order matching and semantic contract retrieval. Currently stubbed via `RagContext` contract. |
+| **Compliance Shadow** | Llama 3.1 8B + vLLM | Target: localized model on AKS/Intel AMX for zero-latency penalty auditing. Currently uses `DeterministicFallbackBackend`. |
+| **Guardrails** | Pydantic + Outlines | Forces strict type-checking on execution payloads before triggering Recipes. |
+| **Integration Protocol** | Model Context Protocol (MCP) | Target: wraps SAP/ERP endpoints into self-describing tool servers. Currently `StubGateway` satisfies the same contract. |
+| **Observability** | Structured JSON logging | `TraceRecord` (Pydantic, LangFuse-aligned) emitted via stdlib logging. Captures intent, shadow verdict, recipe, gateway calls, and terminal status per execution. Future: forward to self-hosted LangFuse. |
+| **Secret Management** | Azure Key Vault CSI | `SecretProviderClass` mounts secrets to pods via Workload Identity. No hardcoded credentials. |
 
 ---
 
