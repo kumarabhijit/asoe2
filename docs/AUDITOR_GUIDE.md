@@ -1,8 +1,8 @@
 # Auditor Guide — CPG Agentic Pricing Exception System
 
 **Document owner:** Principal AI Systems Architect
-**Scope:** Phase 6 hardening controls and Guidance / Outlines constrained-generation safeguards
-**Status:** Production-ready (Phase 6)
+**Scope:** Phase 6 hardening controls, Guidance / Outlines constrained-generation safeguards, and post-review remediation
+**Status:** Production-ready (Post-Review, Grade A-)
 
 ---
 
@@ -42,6 +42,7 @@ for human-facing explanations.
 | **Allowed values** | `CONTRACTUAL_CORRECTION`, `CREDIT_BLOCK`, `MASS_PRICING_ERROR`, `DUPLICATE_PO` |
 | **Enforcement** | `AllowedIntent` Pydantic `Literal` type; Pydantic raises `ValidationError` on any other value |
 | **Backend** | `DeterministicFallbackBackend` (no LLM in CI/test) or `OutlinesConstrainedBackend` (production Outlines regex) |
+| **Fallback chain** | Custom backend → `OutlinesConstrainedBackend` → `DeterministicFallbackBackend` (graceful degradation with `logger.warning()` on each failure) |
 
 Any value outside the allowed set causes a `ValidationError` before the state
 machine advances.  The system routes to `FAIL_TO_HUMAN`.
@@ -58,6 +59,21 @@ machine advances.  The system routes to `FAIL_TO_HUMAN`.
 
 The Compliance Shadow verdict **cannot be overridden** by orchestration code.
 `ShadowEnforcement.action` is derived purely from the constrained verdict.
+
+#### Structured Shadow Logging
+
+Both `audit()` and `enforce()` emit structured log records to the `asoe.compliance`
+logger so that shadow decisions **survive graph crashes**.  Each log entry includes:
+
+| Field | Source |
+|---|---|
+| `trace_id` | `ComplianceDecision.trace_id` |
+| `status` | `GREEN` / `YELLOW` / `RED` |
+| `reasons` | List of human-readable reason strings |
+| `policy_hits` | List of policy identifiers that fired |
+| `constrained_by` | Schema name used to constrain the verdict |
+
+Enforcement logs are emitted at `INFO` for `GREEN` and `WARNING` for `YELLOW` / `RED`.
 
 ### 2.3 Recipe Selection
 
@@ -79,11 +95,38 @@ boundary and a `KeyError` at the registry — two independent guards.
 | **Schema** | `contracts/models.py` → `RecipeInvocation`; recipe-specific required-param lists in `recipes/registry.py` |
 | **Enforcement** | `RecipeExecutor` checks all required params before dispatch; missing / `None` params produce `ExecutionLog.errors` and the node routes to `FAIL_TO_HUMAN` |
 
+### 2.5 Input Validation at System Boundary
+
+The `ingest()` node in `orchestration/nodes.py` validates every incoming event
+via `_validate_event()` before the state machine advances.  Invalid events
+(missing `order_id`, `event_type`, or `OrderEvent` object) produce a structured
+`NodeValidationError` and route to `FAIL_TO_HUMAN` — never an unhandled
+`AttributeError`.
+
 ---
 
-## 3. Infrastructure Gateways
+## 3. Policy Externalization
 
-### 3.1 Architecture
+All business thresholds are centralised in `contracts/policy.py`.  No recipe,
+node, or utility may hardcode a threshold value.
+
+| Constant | Value | Used by |
+|---|---|---|
+| `MAX_DISCOUNT_ALLOWED` | `0.15` (15%) | `PriceAdjustmentRecipe.py` |
+| `PRICE_CONDITION_TYPE` | `"YK07"` | `PriceAdjustmentRecipe.py` |
+| `CREDIT_AUTHORIZED_ROLES` | `("ORDER_MANAGER", "FINANCE_DIRECTOR")` | `CreditHoldReleaseRecipe.py` |
+| `CREDIT_EXPOSURE_TOLERANCE` | `5_000.0` | `CreditHoldReleaseRecipe.py` |
+| `CIRCUIT_BREAKER_MAX_UPDATES` | `50` | `orchestration/utils.py` |
+| `CIRCUIT_BREAKER_MAX_VARIANCE` | `10_000.0` | `orchestration/utils.py`, `constraints/fallback_backend.py` |
+| `DISCREPANCY_THRESHOLD` | `0.15` | `orchestration/utils.py` |
+
+Auditors can verify that a threshold change requires modifying exactly one file.
+
+---
+
+## 4. Infrastructure Gateways
+
+### 4.1 Architecture
 
 Infrastructure operations (SAP calls, database queries, external APIs) are
 accessed through a **Gateway** layer that follows **Hexagonal Architecture
@@ -96,12 +139,19 @@ accessed through a **Gateway** layer that follows **Hexagonal Architecture
 | Executor | `gateways/executor.py` | Wraps calls with tracing + error handling |
 | Stub | `gateways/stub.py` | Test double — canned responses, no network |
 
+**Gateway timeout enforcement:** `GatewayExecutor` enforces `timeout_ms` via
+`concurrent.futures.ThreadPoolExecutor`.  A gateway that exceeds its deadline
+receives a `TIMEOUT` response with structured error — never an infinite hang.
+Exception handling uses two tiers: known types (`RuntimeError`, `ValueError`,
+`TypeError`, `KeyError`) logged at `ERROR`, and unexpected types logged at
+`CRITICAL` with `error_type` in the structured payload.
+
 **Key invariant:** Recipes never call gateways directly.  The orchestration
 layer resolves data before recipe execution (`resolve_dependencies` node) and
 applies side effects after (`apply_effects` node).  This preserves recipe
 purity and determinism.
 
-### 3.2 Gateway Integration in the Graph
+### 4.2 Gateway Integration in the Graph
 
 ```
 ... → validate_types → resolve_dependencies → execute_recipe → apply_effects → END
@@ -115,7 +165,7 @@ purity and determinism.
   `GraphState.effect_results`.  Effect failure is logged but does **not** undo
   the recipe result.
 
-### 3.3 Typed Contracts
+### 7.3 Typed Contracts
 
 All gateway operations use typed `GatewayRequest` / `GatewayResponse` models
 with `extra="forbid"`.  Response statuses are constrained to:
@@ -123,9 +173,9 @@ with `extra="forbid"`.  Response statuses are constrained to:
 
 ---
 
-## 4. Multi-Step Workflows (Saga Pattern)
+## 5. Multi-Step Workflows (Saga Pattern)
 
-### 4.1 Architecture
+### 7.1 Architecture
 
 Multi-intent workflows are executed by `WorkflowRunner` (`workflows/runner.py`)
 using the **Saga pattern** (Garcia-Molina & Salem, 1987):
@@ -136,7 +186,7 @@ using the **Saga pattern** (Garcia-Molina & Salem, 1987):
   invoked in **reverse (LIFO) order**.
 - Each step has its own independent Compliance Shadow audit.
 
-### 4.2 Workflow Result Statuses
+### 7.2 Workflow Result Statuses
 
 | Status | Meaning |
 |---|---|
@@ -145,16 +195,16 @@ using the **Saga pattern** (Garcia-Molina & Salem, 1987):
 | `COMPENSATED` | A step failed; compensation recipes were invoked for completed steps |
 | `PARTIAL` | Reserved for future partial-completion modes |
 
-### 4.3 Typed Contracts
+### 7.4 Typed Contracts
 
 `WorkflowDefinition`, `WorkflowStep`, `WorkflowStepResult`, `WorkflowResult`
 — all use `extra="forbid"`.
 
 ---
 
-## 5. Kill Switch
+## 6. Kill Switch
 
-### 5.1 Purpose
+### 7.1 Purpose
 
 The kill switch is an **emergency stop** that halts ALL automated recipe execution
 before any graph node runs.  It is intended for:
@@ -163,7 +213,7 @@ before any graph node runs.  It is intended for:
 - Maintenance windows.
 - Operator-initiated pauses pending policy review.
 
-### 5.2 Activation
+### 7.2 Activation
 
 ```bash
 export ASOE_KILL_SWITCH=1   # accepted values: 1, true, yes (case-insensitive)
@@ -171,7 +221,7 @@ export ASOE_KILL_SWITCH=1   # accepted values: 1, true, yes (case-insensitive)
 
 No process restart required.  The check runs at each `run_graph()` call.
 
-### 5.3 Behaviour
+### 7.3 Behaviour
 
 When active:
 
@@ -180,21 +230,21 @@ When active:
 - `explanation` = `"Automated execution halted: ASOE_KILL_SWITCH is active. …"`
 - The TraceRecord is still emitted to the observability log.
 
-### 5.4 Deactivation
+### 7.4 Deactivation
 
 ```bash
 unset ASOE_KILL_SWITCH      # or set to 0 / false / no
 ```
 
-### 5.5 Implementation reference
+### 7.5 Implementation reference
 
 `hardening/kill_switch.py` — `is_kill_switch_active()`, `apply_kill_switch()`
 
 ---
 
-## 6. Read-Only Explain Mode
+## 7. Read-Only Explain Mode
 
-### 6.1 Purpose
+### 7.1 Purpose
 
 Explain mode is a **safe, read-only dry-run** for auditors and operators who want
 to see what the system *would* do without committing any changes to SAP/ERP.
@@ -206,13 +256,13 @@ Intended for:
 - CI smoke-tests in staging environments.
 - Operator review of borderline orders.
 
-### 6.2 Activation
+### 7.2 Activation
 
 ```bash
 export ASOE_EXPLAIN_MODE=1   # accepted values: 1, true, yes (case-insensitive)
 ```
 
-### 6.3 Behaviour
+### 7.3 Behaviour
 
 When active, `run_graph()` uses `build_explain_graph()`, which replaces the
 `execute_recipe` terminal node with `explain_only`:
@@ -237,7 +287,7 @@ Terminal outcome:
 
 **No SAP writes.  No MCP calls.  No recipe side-effects.**
 
-### 6.4 Implementation reference
+### 7.4 Implementation reference
 
 `hardening/explain_mode.py` — `is_explain_mode_active()`, `build_explain_summary()`
 `orchestration/nodes.py` — `explain_only()` node
@@ -245,23 +295,24 @@ Terminal outcome:
 
 ---
 
-## 7. Circuit Breaker
+## 8. Circuit Breaker
 
 Deployed in `orchestration/nodes.py` → `validate_circuit_breaker()`.
 
 | Threshold | Limit | Action |
 |---|---|---|
-| Update count | > 50 per batch | `FAIL_TO_HUMAN` |
-| Total dollar variance | > $10,000 per batch | `FAIL_TO_HUMAN` |
+| Update count | > 50 per batch (`CIRCUIT_BREAKER_MAX_UPDATES`) | `FAIL_TO_HUMAN` |
+| Total dollar variance | > $10,000 per batch (`CIRCUIT_BREAKER_MAX_VARIANCE`) | `FAIL_TO_HUMAN` |
 
-Both thresholds are evaluated on every graph run.  A breach halts the graph
-**before** the shadow audit and recipe selection.
+Both thresholds are sourced from `contracts/policy.py` and evaluated on every
+graph run.  A breach halts the graph **before** the shadow audit and recipe
+selection.
 
-Implementation: `orchestration/utils.py` → `circuit_breaker()`
+Implementation: `orchestration/utils.py` → `circuit_breaker()`, thresholds in `contracts/policy.py`
 
 ---
 
-## 8. Execution Invariants (Non-Negotiable)
+## 9. Execution Invariants (Non-Negotiable)
 
 The following invariants are enforced by code, not configuration.
 Violating them requires modifying and re-reviewing source code.
@@ -281,7 +332,7 @@ Violating them requires modifying and re-reviewing source code.
 
 ---
 
-## 9. Audit Trail
+## 10. Audit Trail
 
 Every `run_graph()` call emits a `TraceRecord` (Phase 5 observability scaffold)
 to the `asoe.observability` Python logger.  The record contains:
@@ -306,7 +357,23 @@ for future self-hosted forwarding.
 
 ---
 
-## 10. Environment Variable Reference
+## 11. Secret Management (Kubernetes)
+
+Secrets are managed via the **Azure Key Vault CSI driver**, not environment
+variables or ConfigMaps.
+
+| Manifest | Purpose |
+|---|---|
+| `k8s/core/secret-provider.yaml` | `SecretProviderClass` that syncs Azure Key Vault secrets to a Kubernetes Secret (`asoe-secrets`) |
+| `k8s/core/deployment.yaml` | Mounts the secrets-store volume and references `asoe-secrets` via `envFrom.secretRef` |
+
+No credentials are hardcoded in source code, Dockerfiles, or environment
+variable defaults.  Pods authenticate via Azure Workload Identity (temporary
+tokens).
+
+---
+
+## 12. Environment Variable Reference
 
 | Variable | Default | Description |
 |---|---|---|
@@ -316,7 +383,7 @@ for future self-hosted forwarding.
 
 ---
 
-## 11. Test Coverage Reference
+## 13. Test Coverage Reference
 
 All hardening controls are covered by `tests/test_hardening.py`.
 Golden regression tests for the full pipeline live in `tests/test_golden.py`.
@@ -327,11 +394,11 @@ Run the full suite:
 python -m pytest
 ```
 
-Expected outcome: **490 passed, 0 failed, 0 skipped.**
+Expected outcome: **522 passed, 0 failed, 0 skipped.**
 
 ---
 
-## 12. Local Execution Sandbox
+## 14. Local Execution Sandbox
 
 The sandbox (`tests/sandbox/`) is an interactive tool for auditors and engineers
 to run live pipeline executions without touching production systems.

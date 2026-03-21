@@ -98,7 +98,7 @@ bash scripts/apply-patches.sh .venv/bin/python   # re-run after any pydantic rei
 python -m pytest
 ```
 
-Expected: **490 passed, 0 failed, 1 warning** (the warning is from `langchain_core` pydantic.v1 deprecation — not a blocker).
+Expected: **522 passed, 0 failed, 1 warning** (the warning is from `langchain_core` pydantic.v1 deprecation — not a blocker).
 
 > **Verified on Python 3.14.3 (stable).**
 
@@ -177,6 +177,7 @@ See `architecture_v2.md` §2 for the full Azure infrastructure stack.
 
 ```
 contracts/          Typed Pydantic models — OrderEvent, GraphState, ExecutionLog, …
+  policy.py         Centralised business thresholds (discount limits, circuit breaker bounds, etc.)
 skills/             SKILL.md files (loaded verbatim, never rewritten)
 compliance/         Compliance Shadow — audit() + enforce()
 constraints/        Constrained-generation schemas, backends, router
@@ -202,7 +203,7 @@ observability/      LangFuse-ready structured tracing (no langfuse import)
 hardening/          Kill switch + explain mode implementation
 docs/               AUDITOR_GUIDE.md
   specs/            Product-owner reference specs (not runtime code)
-tests/              pytest test suite (490 tests)
+tests/              pytest test suite (522 tests)
   sandbox/          Local execution sandbox (not part of CI test suite)
     seed.py         SQLite seeder — creates sandbox.db with sample SAP / EDI data
     ui/app.py       Streamlit execution-trace visualiser
@@ -217,7 +218,7 @@ docker-compose.yml  Local dev stack — core + ui + optional inference profile
 .env.example        Documents all runtime env vars for Docker
 k8s/                Kubernetes manifests for AKS production deployment
   namespace.yaml    asoe namespace with compliance label
-  core/             Deployment (2 replicas), Service, ConfigMap
+  core/             Deployment (2 replicas), Service, ConfigMap, SecretProviderClass (Azure Key Vault CSI)
   ui/               Deployment (2 replicas), Service
   inference/        Deployment (1 replica, Intel AMX nodeSelector), Service
 ```
@@ -232,7 +233,9 @@ k8s/                Kubernetes manifests for AKS production deployment
 | `tasks.md` | Phase-by-phase implementation checklist and acceptance criteria |
 | `architecture_v2.md` | Detailed architecture spec: Skill–Recipe decoupling, circuit-breaker thresholds, graph routing |
 | `docs/AUDITOR_GUIDE.md` | Audit controls: constrained-generation boundaries, kill switch, explain mode, 10 execution invariants |
+| `contracts/policy.py` | Centralised business thresholds — discount limits, circuit breaker bounds, credit exposure tolerance |
 | `prompts/po-spec-to-asoe.md` | Step-by-step prompt for converting a Product Owner specification into ASOE Skill–Shadow–Recipe components |
+| `prompts/triple_check_review_board.md` | Reusable review prompt — three-persona architecture, security, and test coverage assessment |
 | `tests/sandbox/seed.py` | Sandbox seeder: sample SAP pricing, retailer contracts, credit profiles, and 8 EDI events covering all four intents |
 | `tests/sandbox/ui/app.py` | Streamlit execution-trace visualiser — select event, run pipeline, inspect trace |
 
@@ -257,6 +260,7 @@ k8s/                Kubernetes manifests for AKS production deployment
 | 7 | Infrastructure gateways (Ports & Adapters), multi-step workflows (Saga pattern), DUPLICATE_PO fallback routing |
 | 8 | Local execution sandbox — SQLite seeder, Streamlit UI, LocalHFBackend (Outlines + HuggingFace) |
 | 9 | Containerized deployment — 3 Dockerfiles (core/ui/inference), docker-compose for local dev, K8s manifests for AKS |
+| Review | Triple-Check Technical Review Board — resolved 10 findings (1 Critical, 1 High, 8 Medium); 7 Low findings debated and accepted (SKIP); test count 490 → 522 |
 
 ---
 
