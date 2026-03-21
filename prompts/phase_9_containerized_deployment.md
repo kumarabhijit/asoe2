@@ -42,6 +42,7 @@ All images:
 | k8s/namespace.yaml             | `asoe` namespace, compliance: "true" label                   |
 | k8s/core/configmap.yaml        | Runtime env vars (kill switch, explain mode, backend flags)  |
 | k8s/core/deployment.yaml       | 2 replicas, topology spread, Azure Workload Identity          |
+| k8s/core/secret-provider.yaml  | SecretProviderClass — Azure Key Vault CSI sync to `asoe-secrets` |
 | k8s/core/service.yaml          | ClusterIP, port 8000                                         |
 | k8s/inference/deployment.yaml  | 1 replica, Intel AMX nodeSelector, 20 Gi memory limit        |
 | k8s/inference/service.yaml     | ClusterIP, port 8080                                         |
