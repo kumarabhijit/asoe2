@@ -8,6 +8,7 @@ distinct focus area, evaluation criteria, and grading scale.
 Before starting, read:
 - CLAUDE.md (architecture guardrails and engineering rules)
 - architecture_v2.md (system design and Skill-Shadow-Recipe architecture)
+- DESIGN.md (implementation details: file names, class names, wiring)
 - tasks.md (implementation status and open items)
 - All source files under: contracts/, compliance/, constraints/, orchestration/,
   recipes/, gateways/, skills/, and tests/
