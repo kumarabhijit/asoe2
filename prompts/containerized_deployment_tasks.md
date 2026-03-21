@@ -128,6 +128,8 @@ driver, mounted at /mnt/secrets-store/.
 
 ### C. Kubernetes Manifests
 
+> **Note:** This section contains Azure-specific references (AKS, ACR, Azure Workload Identity, Key Vault CSI, Azure APIM). When targeting a different cloud or on-prem cluster, replace these with the equivalent platform primitives and update `architecture_v2.md` first.
+
 1. Lint all manifests (use kubeval or kube-score if available):
    ```
    kubeval k8s/**/*.yaml
@@ -227,6 +229,8 @@ driver, mounted at /mnt/secrets-store/.
    - Any committed file (run: `git log --all -p | grep -i "api_key\|password\|secret"`)
 
 ### F. Production Handoff Checklist
+
+> **Note:** This section contains Azure-specific references (ACR, Azure Workload Identity, Key Vault CSI, Azure APIM, Azure Monitor). When targeting a different cloud or on-prem cluster, replace these with the equivalent platform primitives and update `architecture_v2.md` first.
 
 Before declaring the deployment production-ready, confirm:
 
