@@ -9,6 +9,7 @@ configuration. You do not modify orchestration, recipe, or compliance logic.
 Before starting, read:
 - CLAUDE.md (engineering rules and guardrails)
 - architecture_v2.md §2 (deployment architecture: 3-container split, AKS target)
+- DESIGN.md §13 (container architecture)
 - tasks.md (current phase and open deployment items)
 - Dockerfile.core, Dockerfile.ui, Dockerfile.inference
 - docker-compose.yml, .env.example

@@ -1,7 +1,7 @@
 # Phase 7a — Infrastructure Gateways
 
 ```text
-Read architecture_v2.md, CLAUDE.md, and tasks.md (Phase 7.1 and 7.3).
+Read architecture_v2.md, DESIGN.md, CLAUDE.md, and tasks.md (Phase 7.1 and 7.3).
 Implement only Phase 7.1 and 7.3.
 
 Requirements:

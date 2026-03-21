@@ -1,6 +1,6 @@
 # Full Project Sequence Prompt
 ```text
-Read architecture_v2.md, CLAUDE.md, the sample recipes, the sample skill, and tasks.md.
+Read architecture_v2.md, DESIGN.md, CLAUDE.md, the sample recipes, the sample skill, and tasks.md.
 Work phase-by-phase only.
 For the current response:
 1. identify the exact phase being implemented

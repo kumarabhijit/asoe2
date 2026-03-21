@@ -231,7 +231,8 @@ k8s/                Kubernetes manifests for AKS production deployment
 |---|---|
 | `CLAUDE.md` | Architecture rules, what must never change, constrained-generation policy |
 | `tasks.md` | Phase-by-phase implementation checklist and acceptance criteria |
-| `architecture_v2.md` | Detailed architecture spec: Skill–Recipe decoupling, circuit-breaker thresholds, graph routing |
+| `architecture_v2.md` | Architecture patterns and principles: Skill–Recipe decoupling, Hexagonal Gateways, Saga workflows, execution invariants |
+| `DESIGN.md` | Implementation reference: module map, class/function names, graph node wiring, env vars, container layout |
 | `docs/AUDITOR_GUIDE.md` | Audit controls: constrained-generation boundaries, kill switch, explain mode, 10 execution invariants |
 | `contracts/policy.py` | Centralised business thresholds — discount limits, circuit breaker bounds, credit exposure tolerance |
 | `prompts/po-spec-to-asoe.md` | Step-by-step prompt for converting a Product Owner specification into ASOE Skill–Shadow–Recipe components |
