@@ -249,11 +249,11 @@ States:
 - [x] **TEST-2**: Add UNKNOWN intent handling tests (should route to FAIL_TO_HUMAN)
 - [x] **TEST-3**: Add recipe exception-throwing tests (verify RecipeExecutor catches and logs)
 
-### Low
-- [ ] **ARCH-2**: Replace `hasattr()` backend checks with explicit Protocol/ABC `isinstance()`
-- [ ] **ARCH-4**: Type `GraphState.resolved_data` per gateway instead of `Dict[str, Any]`
-- [ ] **ARCH-5**: Replace manual if/elif recipe param mapping in validate_types with registry-driven builder
-- [ ] **SEC-5**: Add type/range validation to RecipeExecutor param checks (not just presence/None)
-- [ ] **SEC-6**: Add signal score bounds validation ([0.0, 1.0]) in DuplicatePORecipe
-- [ ] **TEST-4**: Add negative/adversarial input tests (negative prices, None fields, large numbers)
-- [ ] **TEST-5**: Validate compensation recipe names against registry in workflow tests
+### Low (Board Verdict: SKIP — debated 2026-03-21)
+- [~] **ARCH-2**: Replace `hasattr()` backend checks with Protocol/ABC — **SKIP**: 3+ files touched for zero behavioral change; import cycle risk; duck typing is idiomatic and tested
+- [~] **ARCH-4**: Type `resolved_data` per gateway — **SKIP**: high blast radius (cross-cutting state model change); no code reads it unsafely; intentional loose typing for pass-through field
+- [~] **ARCH-5**: Replace if/elif param mapping with registry — **SKIP**: premature abstraction at 3 recipes; CLAUDE.md says "three similar lines > premature abstraction"; 33 lines is readable
+- [~] **SEC-5**: Add type/range validation to RecipeExecutor — **SKIP**: violates CLAUDE.md §1 (leaks recipe business logic into orchestration); exception handler already catches TypeError
+- [~] **SEC-6**: Add signal score clamping to [0.0, 1.0] — **SKIP**: silent correction masks upstream bugs; classifications unaffected even with out-of-bounds scores; input is internally generated
+- [~] **TEST-4**: Add adversarial input tests — **SKIP**: no known bugs caught; recipes already handle edge cases correctly; testing for testing's sake violates "smallest viable increment"
+- [~] **TEST-5**: Validate compensation recipe names against registry — **SKIP**: two independent guards (Pydantic Literal + registry KeyError) already prevent the failure mode
