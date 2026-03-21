@@ -4,7 +4,7 @@
 ---
 ## PHASE 0 — Foundation (NO BUSINESS LOGIC)
 ### 0.1 Repository Structure
-- [ ] Create folders:
+- [x] Create folders:
   - `contracts/`
   - `skills/`
   - `recipes/`
@@ -14,81 +14,81 @@
   - `mcp/`
   - `tests/`
   - `prompts/`
-- [ ] Move existing recipes into `recipes/`
-- [ ] Move SKILL.md into `skills/`
+- [x] Move existing recipes into `recipes/`
+- [x] Move SKILL.md into `skills/`
 ✅ Outcome: clean separation of brain vs muscle
 ---
 ### 0.2 Type Contracts
-- [ ] Define Pydantic models for:
+- [x] Define Pydantic models for:
   - OrderEvent
   - PricingDiscrepancy
   - RecipeInvocation
   - ComplianceDecision
   - ExecutionLog
   - GraphState
-- [ ] Define constrained output schemas for Guidance / Outlines:
+- [x] Define constrained output schemas for Guidance / Outlines:
   - IntentDecision
   - ShadowDecision
   - RecipeProposal
-- [ ] Enforce strict validation before execution
+- [x] Enforce strict validation before execution
 ✅ Outcome: no untyped execution paths
 ---
 ## PHASE 1 — Skill Loading & Reasoning
 ### 1.1 Skill Loader
-- [ ] Implement dynamic loader for `skills/*.md`
-- [ ] Load skills **only when relevant**
-- [ ] Ensure skill text is injected verbatim (no summarization)
+- [x] Implement dynamic loader for `skills/*.md`
+- [x] Load skills **only when relevant**
+- [x] Ensure skill text is injected verbatim (no summarization)
 ✅ Outcome: progressive disclosure works as designed
 ---
 ### 1.2 Intent Classifier (Non-Executing)
-- [ ] Given an OrderEvent:
+- [x] Given an OrderEvent:
   - Identify price gap
   - Classify intent:
   - `CONTRACTUAL_CORRECTION`
   - `CREDIT_BLOCK`
   - `MASS_PRICING_ERROR`
   - `DUPLICATE_PO`
-- [ ] Constrain intent output vocabulary using Guidance / Outlines
-- [ ] Output intent + confidence
-- [ ] NO recipe calls yet
+- [x] Constrain intent output vocabulary using Guidance / Outlines
+- [x] Output intent + confidence
+- [x] NO recipe calls yet
 ✅ Outcome: reasoning-only stage is testable
 ---
 ## PHASE 2 — Compliance Shadow
 ### 2.1 Shadow Interface
-- [ ] Define ComplianceShadow API contract
-- [ ] Implement stub that returns:
+- [x] Define ComplianceShadow API contract
+- [x] Implement stub that returns:
   - `GREEN`
   - `YELLOW`
   - `RED`
-- [ ] Constrain shadow verdict using Guidance / Outlines
-- [ ] Log shadow decision with TraceID
-- [ ] Include `TraceID`, reasons, policy hits
+- [x] Constrain shadow verdict using Guidance / Outlines
+- [x] Log shadow decision with TraceID
+- [x] Include `TraceID`, reasons, policy hits
 ✅ Outcome: compliance is always first-class
 ---
 ### 2.2 Shadow Enforcement
-- [ ] Block execution on `RED`
-- [ ] Force explanation output on `RED`
-- [ ] Route `YELLOW` to `MANUAL_REVIEW_REQUIRED`
-- [ ] Allow auto-proceed only on `GREEN`
+- [x] Block execution on `RED`
+- [x] Force explanation output on `RED`
+- [x] Route `YELLOW` to `MANUAL_REVIEW_REQUIRED`
+- [x] Allow auto-proceed only on `GREEN`
 ✅ Outcome: no silent violations
 ---
 ## PHASE 3 — Recipe Invocation
 ### 3.1 Recipe Registry
-- [ ] Register recipes with:
+- [x] Register recipes with:
   - Name
   - Required parameters
   - Allowed intents
-- [ ] Reject unknown recipe calls
+- [x] Reject unknown recipe calls
 ✅ Outcome: zero dynamic execution
 ---
 ### 3.2 Deterministic Execution Wrapper
-- [ ] Execute recipe via subprocess or function call
-- [ ] Constrain recipe proposal to registered recipe names using Guidance / Outlines
-- [ ] Capture:
+- [x] Execute recipe via subprocess or function call
+- [x] Constrain recipe proposal to registered recipe names using Guidance / Outlines
+- [x] Capture:
   - Inputs
   - Outputs
   - Errors
-- [ ] Return immutable execution log
+- [x] Return immutable execution log
 ✅ Outcome: audit-ready execution
 ---
 ## PHASE 4 — Orchestration (LangGraph)
@@ -104,63 +104,63 @@ States:
 - `Complete`
 ✅ Outcome: predictable, loop-safe behavior
 ### 4.2 Circuit Breaker
-- [ ] Track execution counts
-- [ ] Enforce:
+- [x] Track execution counts
+- [x] Enforce:
   - Max updates / window e.g. max 50 pricing updates / 5-minute window
   - Max financial exposure e.g. max $10,000 total dollar variance per batch
-- [ ] Route to HITL / `FAIL_TO_HUMAN` on breach
+- [x] Route to HITL / `FAIL_TO_HUMAN` on breach
 ✅ Outcome: systemic risk control
 ---
 ## PHASE 5 — Observability & Tests
 ### 5.1 LangFuse-Ready Integration/Tracing
-- [ ] Trace:
+- [x] Trace:
   - Skill used
   - intent selected
   - Shadow verdict
   - Recipe output
   - RAG chunks
   - TraceID
-- [ ] Keep implementation self-host ready
+- [x] Keep implementation self-host ready
 ### 5.2 Golden Tests
-- [ ] Test each intent → recipe mapping
-- [ ] Test shadow rejection paths
-- [ ] Test FAIL_TO_HUMAN paths
-- [ ] Test constrained output schemas and allowed vocabularies
+- [x] Test each intent → recipe mapping
+- [x] Test shadow rejection paths
+- [x] Test FAIL_TO_HUMAN paths
+- [x] Test constrained output schemas and allowed vocabularies
 ✅ Outcome: regression-proof system
 ---
 ## PHASE 6 — Hardening
-- [ ] Kill switch config
-- [ ] Read-only “explain mode”
-- [ ] Documentation for auditors
-- [ ] Document Guidance / Outlines safeguards for downstream systems
+- [x] Kill switch config
+- [x] Read-only “explain mode”
+- [x] Documentation for auditors
+- [x] Document Guidance / Outlines safeguards for downstream systems
 ✅ Outcome: production readiness
 ---
 ## PHASE 7 — Infrastructure Gateways & Multi-Step Workflows
 ### 7.1 Infrastructure Gateway Layer (Hexagonal Architecture)
-- [ ] Define `InfrastructureGateway` protocol (Port) in `gateways/base.py`
-- [ ] Implement Gateway Registry (`register_gateway`, `get_gateway`, `clear_registry`)
-- [ ] Implement `GatewayExecutor` with structured tracing and error handling
-- [ ] Implement `StubGateway` test double (canned responses, call recording)
-- [ ] Add typed contracts: `GatewayRequest`, `GatewayResponse`, `GatewayDependency`, `GatewayEffect`
-- [ ] Extend `RecipeSpec` with optional `dependencies` and `effects` tuples
-- [ ] Add `resolve_dependencies` node (pre-recipe gateway data resolution)
-- [ ] Add `apply_effects` node (post-recipe gateway side effect application)
-- [ ] Wire new nodes into graph: `validate_types → resolve_dependencies → execute_recipe → apply_effects → END`
-- [ ] Add `gateway_calls` field to `TraceRecord` for observability
+- [x] Define `InfrastructureGateway` protocol (Port) in `gateways/base.py`
+- [x] Implement Gateway Registry (`register_gateway`, `get_gateway`, `clear_registry`)
+- [x] Implement `GatewayExecutor` with structured tracing and error handling
+- [x] Implement `StubGateway` test double (canned responses, call recording)
+- [x] Add typed contracts: `GatewayRequest`, `GatewayResponse`, `GatewayDependency`, `GatewayEffect`
+- [x] Extend `RecipeSpec` with optional `dependencies` and `effects` tuples
+- [x] Add `resolve_dependencies` node (pre-recipe gateway data resolution)
+- [x] Add `apply_effects` node (post-recipe gateway side effect application)
+- [x] Wire new nodes into graph: `validate_types → resolve_dependencies → execute_recipe → apply_effects → END`
+- [x] Add `gateway_calls` field to `TraceRecord` for observability
 ✅ Outcome: recipes stay pure; infrastructure I/O is decoupled via Ports & Adapters
 
 ### 7.2 Multi-Step Workflow Runner (Saga Pattern)
-- [ ] Define typed contracts: `WorkflowStep`, `WorkflowDefinition`, `WorkflowStepResult`, `WorkflowResult`
-- [ ] Implement `WorkflowRunner.run()` — sequential step execution through full graph
-- [ ] Implement Saga compensation — LIFO reverse through completed steps on failure
-- [ ] Support `input_mapping` — carry state forward between steps
-- [ ] `WorkflowResult.status`: `COMPLETE`, `FAILED`, `COMPENSATED`, `PARTIAL`
-- [ ] Each step runs through full compliance shadow independently
+- [x] Define typed contracts: `WorkflowStep`, `WorkflowDefinition`, `WorkflowStepResult`, `WorkflowResult`
+- [x] Implement `WorkflowRunner.run()` — sequential step execution through full graph
+- [x] Implement Saga compensation — LIFO reverse through completed steps on failure
+- [x] Support `input_mapping` — carry state forward between steps
+- [x] `WorkflowResult.status`: `COMPLETE`, `FAILED`, `COMPENSATED`, `PARTIAL`
+- [x] Each step runs through full compliance shadow independently
 ✅ Outcome: multi-intent workflows with compensation; each step fully audited
 
 ### 7.3 DUPLICATE_PO Fallback Backend
-- [ ] Add `DUPLICATE_PO` classification branch in `DeterministicFallbackBackend.classify_intent()`
-- [ ] Add `DUPLICATE_PO → DuplicatePORecipe.py` mapping in `propose_recipe()`
+- [x] Add `DUPLICATE_PO` classification branch in `DeterministicFallbackBackend.classify_intent()`
+- [x] Add `DUPLICATE_PO → DuplicatePORecipe.py` mapping in `propose_recipe()`
 ✅ Outcome: DUPLICATE_PO intent is fully routable end-to-end in CI/test mode
 ---
 ## PHASE 8 — Local Execution Sandbox
@@ -230,3 +230,30 @@ States:
 - [x] Azure Workload Identity annotations on all pod templates
 - [x] Non-root security context on all pods
 ✅ Outcome: deployment manifests align with architecture_v2.md §2 infrastructure stack
+---
+## REVIEW FINDINGS — Triple-Check Technical Review Board (2026-03-20)
+
+### Critical
+- [x] **TEST-1**: Add DUPLICATE_PO end-to-end graph tests (conftest fixture, test_graph_paths, test_golden, test_nodes for validate_types param mapping)
+
+### High
+- [x] **SEC-1**: Add structured logging to `compliance/shadow.py` audit() and enforce() methods so shadow decisions survive graph crashes
+
+### Medium
+- [x] **ARCH-1**: Externalize hardcoded business thresholds (15% discount, $5k exposure, 50-update/10k-variance circuit breaker) to `contracts/policy.py`
+- [x] **ARCH-3**: Add fallback chain in `constraints/router.py` — degrade to DeterministicFallbackBackend on OutlinesConstrainedBackend init failure
+- [x] **SEC-2**: Add explicit input validation at orchestration node boundaries (structured errors, not AttributeError)
+- [x] **SEC-3**: Replace broad `except Exception: pass` in `graph.py` and `gateways/executor.py` with specific exception types and structured logging
+- [x] **SEC-4**: Enforce `GatewayRequest.timeout_ms` in `GatewayExecutor.run()` via `concurrent.futures` thread timeout
+- [x] **SEC-7**: Add SecretProviderClass and VolumeMount for Azure Key Vault CSI driver in `k8s/core/secret-provider.yaml` and `k8s/core/deployment.yaml`
+- [x] **TEST-2**: Add UNKNOWN intent handling tests (should route to FAIL_TO_HUMAN)
+- [x] **TEST-3**: Add recipe exception-throwing tests (verify RecipeExecutor catches and logs)
+
+### Low
+- [ ] **ARCH-2**: Replace `hasattr()` backend checks with explicit Protocol/ABC `isinstance()`
+- [ ] **ARCH-4**: Type `GraphState.resolved_data` per gateway instead of `Dict[str, Any]`
+- [ ] **ARCH-5**: Replace manual if/elif recipe param mapping in validate_types with registry-driven builder
+- [ ] **SEC-5**: Add type/range validation to RecipeExecutor param checks (not just presence/None)
+- [ ] **SEC-6**: Add signal score bounds validation ([0.0, 1.0]) in DuplicatePORecipe
+- [ ] **TEST-4**: Add negative/adversarial input tests (negative prices, None fields, large numbers)
+- [ ] **TEST-5**: Validate compensation recipe names against registry in workflow tests

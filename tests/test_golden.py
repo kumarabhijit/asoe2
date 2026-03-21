@@ -195,11 +195,63 @@ class TestGoldenFailToHumanPaths:
 # Golden: Constrained output vocabulary
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Golden: DUPLICATE_PO intent → recipe mapping (TEST-1 fix)
+# ---------------------------------------------------------------------------
+
+class TestGoldenDuplicatePO:
+    """Pins DUPLICATE_PO intent → DuplicatePORecipe.py end-to-end."""
+
+    def test_duplicate_po_intent_classified(self, duplicate_po_event):
+        result = run_graph(duplicate_po_event)
+        assert result.intent == Intent.DUPLICATE_PO
+
+    def test_duplicate_po_selects_recipe(self, duplicate_po_event):
+        result = run_graph(duplicate_po_event)
+        assert result.execution_log is not None
+        assert result.execution_log.recipe_name == "DuplicatePORecipe.py"
+
+    def test_duplicate_po_shadow_is_green(self, duplicate_po_event):
+        result = run_graph(duplicate_po_event)
+        assert result.shadow.status.value == "GREEN"
+
+    def test_duplicate_po_high_signals_blocked(self, duplicate_po_event):
+        result = run_graph(duplicate_po_event)
+        assert result.final_status == TerminalStatus.BLOCKED
+
+    def test_duplicate_po_output_has_composite_score(self, duplicate_po_event):
+        result = run_graph(duplicate_po_event)
+        assert "composite_score" in result.execution_log.outputs
+
+    def test_duplicate_po_output_has_signal_breakdown(self, duplicate_po_event):
+        result = run_graph(duplicate_po_event)
+        assert "signal_breakdown" in result.execution_log.outputs
+
+    def test_duplicate_po_low_signals_complete(self):
+        state = _state(
+            order_id="PO-GLOW01",
+            po_price=100.0,
+            sap_base_price=100.0,
+            event_type="EDI_850_DUPLICATE_PO",
+            retailer_id="R-10",
+        )
+        state.event.metadata = {"signal_scores": {}}
+        result = run_graph(state)
+        assert result.final_status == TerminalStatus.COMPLETE
+        assert result.execution_log.outputs.get("classification") == "PASS"
+
+    def test_duplicate_po_trace_record(self, duplicate_po_event):
+        result = run_graph(duplicate_po_event)
+        record = Tracer().build_record(result)
+        assert record.intent_selected == "DUPLICATE_PO"
+        assert record.recipe_name == "DuplicatePORecipe.py"
+
+
 class TestGoldenConstrainedVocabulary:
     """Every constrained field must use only the permitted vocabulary."""
 
-    ALLOWED_INTENTS = {"CONTRACTUAL_CORRECTION", "CREDIT_BLOCK", "MASS_PRICING_ERROR"}
-    ALLOWED_RECIPES = {"PriceAdjustmentRecipe.py", "CreditHoldReleaseRecipe.py", None}
+    ALLOWED_INTENTS = {"CONTRACTUAL_CORRECTION", "CREDIT_BLOCK", "MASS_PRICING_ERROR", "DUPLICATE_PO"}
+    ALLOWED_RECIPES = {"PriceAdjustmentRecipe.py", "CreditHoldReleaseRecipe.py", "DuplicatePORecipe.py", None}
     ALLOWED_VERDICTS = {"GREEN", "YELLOW", "RED"}
     ALLOWED_STATUSES = {s.value for s in TerminalStatus}
 

@@ -473,3 +473,186 @@ class TestExecuteRecipeNode:
         state.shadow = None
         result = execute_recipe(state)
         assert result.execution_log.shadow_verdict is None
+
+
+# ---------------------------------------------------------------------------
+# DUPLICATE_PO — end-to-end node tests (TEST-1 fix)
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# UNKNOWN intent handling (TEST-2 fix)
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Recipe exception handling (TEST-3 fix)
+# ---------------------------------------------------------------------------
+
+class TestRecipeExceptionHandling:
+    def test_recipe_exception_captured_in_execution_log(self):
+        """If a recipe function raises, executor captures it as a structured error."""
+        from recipes.executor import RecipeExecutor
+        from constraints.specs import RecipeProposal
+
+        proposal = RecipeProposal(recipe_name="PriceAdjustmentRecipe.py")
+        # Pass erp_context without 'base_price' so recipe raises TypeError
+        log = RecipeExecutor().run(
+            proposal=proposal,
+            params={
+                "order_id": "SO-EXC01",
+                "line_item": 1,
+                "requested_price": 90.0,
+                "erp_context": {},  # missing base_price → causes TypeError
+            },
+        )
+        # RecipeExecutor wraps recipe calls in try/except and records the error.
+        assert len(log.errors) > 0
+        assert "Recipe raised" in log.errors[0]
+        assert log.outputs == {}
+
+    def test_missing_erp_context_key_causes_recipe_error(self):
+        """Recipe with incomplete erp_context should not return SUCCESS."""
+        from recipes.PriceAdjustmentRecipe import execute_price_correction
+        try:
+            result = execute_price_correction(
+                order_id="SO-EXC02",
+                line_item=1,
+                requested_price=90.0,
+                erp_context={},  # missing base_price
+            )
+            # If it returns, it should not be SUCCESS
+            assert result.get("status") != "SUCCESS"
+        except (TypeError, ZeroDivisionError):
+            # Expected: base_price is None → TypeError on arithmetic
+            pass
+
+
+class TestUnknownIntentHandling:
+    def test_unknown_intent_select_recipe_routes_to_fail_to_human(self):
+        """UNKNOWN intent has no recipe mapping → FAIL_TO_HUMAN."""
+        state = _state()
+        state.intent = Intent.UNKNOWN
+        result = select_recipe(state)
+        assert result.final_status == TerminalStatus.FAIL_TO_HUMAN
+
+    def test_unknown_intent_select_recipe_explanation_set(self):
+        state = _state()
+        state.intent = Intent.UNKNOWN
+        result = select_recipe(state)
+        assert result.explanation is not None
+        assert "recipe" in result.explanation.lower() or "intent" in result.explanation.lower()
+
+    def test_unknown_intent_no_recipe_selected(self):
+        state = _state()
+        state.intent = Intent.UNKNOWN
+        result = select_recipe(state)
+        assert result.selected_recipe is None
+
+
+# ---------------------------------------------------------------------------
+# DUPLICATE_PO — end-to-end node tests (TEST-1 fix)
+# ---------------------------------------------------------------------------
+
+class TestDuplicatePOClassifyNode:
+    def test_duplicate_po_intent_classified(self, duplicate_po_event):
+        result = classify(duplicate_po_event)
+        assert result.intent == Intent.DUPLICATE_PO
+
+    def test_duplicate_po_confidence_set(self, duplicate_po_event):
+        result = classify(duplicate_po_event)
+        assert 0.0 <= result.confidence <= 1.0
+
+
+class TestDuplicatePOSelectRecipeNode:
+    def test_duplicate_po_selects_recipe(self, duplicate_po_event):
+        duplicate_po_event.intent = Intent.DUPLICATE_PO
+        result = select_recipe(duplicate_po_event)
+        assert result.selected_recipe == "DuplicatePORecipe.py"
+
+    def test_duplicate_po_recipe_in_registry(self, duplicate_po_event):
+        duplicate_po_event.intent = Intent.DUPLICATE_PO
+        result = select_recipe(duplicate_po_event)
+        from recipes.registry import REGISTRY
+        assert result.selected_recipe in REGISTRY
+
+
+class TestDuplicatePOShadowNode:
+    def test_duplicate_po_shadow_is_green(self, duplicate_po_event):
+        duplicate_po_event.intent = Intent.DUPLICATE_PO
+        result = shadow_audit(duplicate_po_event)
+        assert result.shadow is not None
+        assert result.shadow.status == ShadowStatus.GREEN
+        assert result.final_status is None
+
+
+class TestDuplicatePOValidateTypesNode:
+    def test_duplicate_po_builds_invocation(self, duplicate_po_event):
+        duplicate_po_event.selected_recipe = "DuplicatePORecipe.py"
+        result = validate_types(duplicate_po_event)
+        assert result.invocation is not None
+        assert result.invocation.recipe_name == "DuplicatePORecipe.py"
+
+    def test_duplicate_po_invocation_contains_required_params(self, duplicate_po_event):
+        duplicate_po_event.selected_recipe = "DuplicatePORecipe.py"
+        result = validate_types(duplicate_po_event)
+        for param in ("incoming_po_number", "customer_id", "signal_scores"):
+            assert param in result.invocation.params
+
+    def test_duplicate_po_signal_scores_from_metadata(self, duplicate_po_event):
+        duplicate_po_event.selected_recipe = "DuplicatePORecipe.py"
+        result = validate_types(duplicate_po_event)
+        scores = result.invocation.params["signal_scores"]
+        assert isinstance(scores, dict)
+        assert scores.get("po_number") == 1.0
+
+
+class TestDuplicatePOExecuteRecipeNode:
+    def test_duplicate_po_auto_block(self, duplicate_po_event):
+        """High signal scores → AUTO_BLOCK → BLOCKED terminal status."""
+        duplicate_po_event.intent = Intent.DUPLICATE_PO
+        duplicate_po_event.shadow = _green_shadow()
+        duplicate_po_event.invocation = RecipeInvocation(
+            recipe_name="DuplicatePORecipe.py",
+            params={
+                "incoming_po_number": "PO-4001",
+                "customer_id": "R-10",
+                "signal_scores": {
+                    "po_number": 1.0,
+                    "customer_id": 1.0,
+                    "line_items": 0.95,
+                    "amount": 0.90,
+                    "timestamp": 0.80,
+                    "ship_to": 0.80,
+                    "channel": 1.0,
+                    "delivery_date": 0.80,
+                },
+            },
+        )
+        result = execute_recipe(duplicate_po_event)
+        assert result.execution_log is not None
+        assert result.execution_log.outputs.get("classification") == "AUTO_BLOCK"
+        assert result.final_status == TerminalStatus.BLOCKED
+
+    def test_duplicate_po_pass(self):
+        """Low signal scores → PASS → COMPLETE terminal status."""
+        state = GraphState(event=OrderEvent(
+            order_id="PO-4002",
+            po_price=100.0,
+            sap_base_price=100.0,
+            event_type="EDI_850_DUPLICATE_PO",
+            retailer_id="R-10",
+            metadata={"signal_scores": {}},
+        ))
+        state.intent = Intent.DUPLICATE_PO
+        state.shadow = _green_shadow()
+        state.invocation = RecipeInvocation(
+            recipe_name="DuplicatePORecipe.py",
+            params={
+                "incoming_po_number": "PO-4002",
+                "customer_id": "R-10",
+                "signal_scores": {},
+            },
+        )
+        result = execute_recipe(state)
+        assert result.execution_log is not None
+        assert result.execution_log.outputs.get("classification") == "PASS"
+        assert result.final_status == TerminalStatus.COMPLETE

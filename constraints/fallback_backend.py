@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from contracts.models import GraphState, Intent
+from contracts.policy import CIRCUIT_BREAKER_MAX_VARIANCE
 from constraints.specs import IntentDecision, RecipeProposal, ShadowDecisionSchema
 
 
@@ -33,7 +34,7 @@ class DeterministicFallbackBackend:
                 reasons=["Systemic pricing failure requires human escalation."],
                 policy_hits=["HITL_REQUIRED_FOR_SYSTEMIC_FAILURE"],
             )
-        if state.batch_total_variance > 10_000:
+        if state.batch_total_variance > CIRCUIT_BREAKER_MAX_VARIANCE:
             return ShadowDecisionSchema(
                 status="RED",
                 reasons=["Circuit breaker threshold exceeded for total batch variance."],

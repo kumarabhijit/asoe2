@@ -138,7 +138,10 @@ def run_graph(state: GraphState) -> GraphState:
         from observability.tracer import Tracer
         tracer = Tracer()
         tracer.emit(tracer.build_record(final_state))
-    except Exception:  # pragma: no cover — tracer must never crash the graph
-        pass
+    except (ImportError, AttributeError, ValueError, TypeError) as exc:  # pragma: no cover
+        import logging
+        logging.getLogger("asoe.observability").warning(
+            "Tracer failed to emit record: %s", exc,
+        )
 
     return final_state

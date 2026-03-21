@@ -205,6 +205,61 @@ class TestRecipeRejectionPath:
 # Loop-safety — graph always terminates (no hidden loops)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# DUPLICATE_PO path — full graph execution (TEST-1 fix)
+# ---------------------------------------------------------------------------
+
+class TestDuplicatePOPath:
+    def test_duplicate_po_high_signals_blocked(self, duplicate_po_event):
+        """High signal scores → AUTO_BLOCK → BLOCKED terminal status."""
+        result = run_graph(duplicate_po_event)
+        assert result.final_status == TerminalStatus.BLOCKED
+
+    def test_duplicate_po_intent_classified(self, duplicate_po_event):
+        result = run_graph(duplicate_po_event)
+        assert result.intent == Intent.DUPLICATE_PO
+
+    def test_duplicate_po_shadow_is_green(self, duplicate_po_event):
+        result = run_graph(duplicate_po_event)
+        assert result.shadow is not None
+        assert result.shadow.status.value == "GREEN"
+
+    def test_duplicate_po_execution_log_present(self, duplicate_po_event):
+        result = run_graph(duplicate_po_event)
+        assert result.execution_log is not None
+        assert result.execution_log.recipe_name == "DuplicatePORecipe.py"
+
+    def test_duplicate_po_recipe_output_has_classification(self, duplicate_po_event):
+        result = run_graph(duplicate_po_event)
+        assert result.execution_log.outputs.get("classification") == "AUTO_BLOCK"
+
+    def test_duplicate_po_explanation_set(self, duplicate_po_event):
+        result = run_graph(duplicate_po_event)
+        assert result.explanation is not None
+
+    def test_duplicate_po_low_signals_pass(self):
+        """Empty signal scores → PASS → COMPLETE terminal status."""
+        state = GraphState(event=OrderEvent(
+            order_id="PO-LOW01",
+            po_price=100.0,
+            sap_base_price=100.0,
+            event_type="EDI_850_DUPLICATE_PO",
+            retailer_id="R-10",
+            metadata={"signal_scores": {}},
+        ))
+        result = run_graph(state)
+        assert result.final_status == TerminalStatus.COMPLETE
+        assert result.execution_log.outputs.get("classification") == "PASS"
+
+    def test_duplicate_po_skill_loaded(self, duplicate_po_event):
+        result = run_graph(duplicate_po_event)
+        assert result.skill is not None
+
+
+# ---------------------------------------------------------------------------
+# Loop-safety — graph always terminates (no hidden loops)
+# ---------------------------------------------------------------------------
+
 class TestLoopSafety:
     def test_graph_always_terminates_on_pricing(self, pricing_event):
         """Graph must terminate in at most N node calls (not loop infinitely)."""
@@ -219,8 +274,12 @@ class TestLoopSafety:
         result = run_graph(mass_event)
         assert result.final_status is not None
 
-    def test_final_status_always_in_allowed_set(self, pricing_event, credit_event, mass_event):
+    def test_graph_always_terminates_on_duplicate_po(self, duplicate_po_event):
+        result = run_graph(duplicate_po_event)
+        assert result.final_status is not None
+
+    def test_final_status_always_in_allowed_set(self, pricing_event, credit_event, mass_event, duplicate_po_event):
         allowed = set(TerminalStatus)
-        for state in (pricing_event, credit_event, mass_event):
+        for state in (pricing_event, credit_event, mass_event, duplicate_po_event):
             result = run_graph(state)
             assert result.final_status in allowed

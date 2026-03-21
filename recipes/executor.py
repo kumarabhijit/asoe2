@@ -103,7 +103,19 @@ class RecipeExecutor:
             )
 
         # Call the immutable recipe function — logic is never reimplemented here.
-        outputs = spec.func(**params)
+        try:
+            outputs = spec.func(**params)
+        except Exception as exc:
+            return ExecutionLog(
+                trace_id=effective_trace_id,
+                recipe_name=recipe_name,
+                inputs=params,
+                outputs={},
+                errors=[f"Recipe raised {type(exc).__name__}: {exc}"],
+                constrained_outputs={"recipe": "RecipeProposal"},
+                intent_selected=intent_selected,
+                shadow_policy_hits=shadow_policy_hits or [],
+            )
 
         return ExecutionLog(
             trace_id=effective_trace_id,
