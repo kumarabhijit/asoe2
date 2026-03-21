@@ -1,7 +1,7 @@
 # Phase 8 — Local Execution Sandbox
 
 ```text
-Read architecture_v2.md, DESIGN.md, CLAUDE.md, tasks.md (Phase 8), and
+Read architecture_v2.md, CLAUDE.md, tasks.md (Phase 8), and
 tests/sandbox/ui/app.py before making any changes.
 
 Goal: provide an interactive, local execution environment that lets engineers

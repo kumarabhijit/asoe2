@@ -12,14 +12,13 @@ into the correct architectural components — not to execute it as-is.
 Before touching any file, read all of these in full:
 1. CLAUDE.md                          — guardrails and working rules
 2. architecture_v2.md                 — system design
-3. DESIGN.md                          — implementation details (file names, class names, wiring)
-4. contracts/models.py                — current Intent enum and all Pydantic models
-5. constraints/specs.py               — current AllowedIntent, AllowedRecipeName literals
-6. constraints/guidance_backend.py    — current constrained-generation regex patterns
-7. recipes/registry.py                — currently registered recipes
-8. skills/loader.py                   — current skill routing logic
-9. orchestration/nodes.py             — current validate_types branches
-10. The PO specification file itself   — read it completely before forming any plan
+3. contracts/models.py                — current Intent enum and all Pydantic models
+4. constraints/specs.py               — current AllowedIntent, AllowedRecipeName literals
+5. constraints/guidance_backend.py    — current constrained-generation regex patterns
+6. recipes/registry.py                — currently registered recipes
+7. skills/loader.py                   — current skill routing logic
+8. orchestration/nodes.py             — current validate_types branches
+9. The PO specification file itself   — read it completely before forming any plan
 
 ---
 

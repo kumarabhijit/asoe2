@@ -1,7 +1,7 @@
 # Phase 7b — Multi-Step Workflows (Saga Pattern)
 
 ```text
-Read architecture_v2.md, DESIGN.md, CLAUDE.md, and tasks.md (Phase 7.2).
+Read architecture_v2.md, CLAUDE.md, and tasks.md (Phase 7.2).
 Implement only Phase 7.2. Phase 7a (gateways) must already be complete.
 
 Requirements:
