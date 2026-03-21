@@ -250,7 +250,7 @@ Emitted via stdlib logging to the `asoe.observability` logger. Fields:
 | `shadow_verdict` | `GREEN` / `YELLOW` / `RED` |
 | `shadow_policy_hits` | List of policy identifiers that fired |
 | `recipe_name` | Selected recipe filename (or `null`) |
-| `rag_chunks` | RAG chunk identifiers attached to the execution |
+| `rag_chunks` | Reserved for V2 RAG integration — always empty in V1.0 (forward-compatible field) |
 | `constrained_output_schemas` | Map of layer → schema name (e.g. `intent → IntentDecision`) |
 | `gateway_calls` | Gateway operations invoked (dependency resolutions + effect applications) |
 | `final_status` | `COMPLETE`, `FAIL_TO_HUMAN`, `BLOCKED`, `MANUAL_REVIEW_REQUIRED`, `REJECTED` |

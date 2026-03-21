@@ -118,7 +118,7 @@ States:
   - intent selected
   - Shadow verdict
   - Recipe output
-  - RAG chunks
+  - RAG chunks (reserved for V2 — empty in V1.0)
   - TraceID
 - [x] Keep implementation self-host ready
 ### 5.2 Golden Tests

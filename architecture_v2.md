@@ -12,7 +12,7 @@
 This system acts as an intelligent, event-driven orchestration layer sitting above legacy enterprise systems (SAP, Manhattan WMS). To ensure enterprise-grade reliability and compliance, it abandons the traditional "autonomous free-thinking agent" model in favor of a **"Modular Skill-Recipe Sandwich Architecture"**.
 
 In this model, non-deterministic Large Language Model (LLM) reasoning is tightly constrained:
-* **Top Guardrail:** Deterministic vector retrieval (RAG) and structured progressive disclosure (Skill definitions).
+* **Top Guardrail:** Structured progressive disclosure (Skill definitions) and typed gateway dependencies for deterministic context loading.
 * **Middle:** Cloud-based reasoning core (Claude 4.6 Sonnet).
 * **Bottom Guardrail:** A localized, high-speed "Compliance Shadow" auditor and strictly typed, hardcoded Python execution "Recipes".
 
@@ -52,7 +52,7 @@ The application is deployed as a suite of containerized microservices on Microso
 | **Infrastructure Gateways** | Hexagonal Architecture | Protocol-based gateway layer with timeout-enforced executor. Recipes declare dependencies/effects; orchestration mediates. Stub adapter for testing. |
 | **Workflow Runner** | Saga pattern | Multi-step workflow execution. Each step runs the full graph. LIFO compensation on failure. |
 | **Hardening** | Env-var switches | Kill switch halts all execution. Explain mode runs full pipeline read-only, returns dry-run summary. Both activate at call time, no restart needed. |
-| **Memory / RAG** | Pinecone (Serverless) | Hybrid Search (BM25 + Dense) for SKU/Order matching and semantic contract retrieval. Currently stubbed. |
+| **Context Resolution** | Gateway Dependencies | Structured data (retailer contracts, SKU pricing, credit profiles) is resolved via typed `GatewayDependency` declarations on recipe specs — deterministic, not probabilistic. RAG is deferred to V2 (see §4C). |
 | **Compliance Shadow** | Llama 3.1 8B + vLLM | Target: localized model on AKS/Intel AMX for zero-latency penalty auditing. Currently uses deterministic fallback. |
 | **Guardrails** | Pydantic + Outlines | Forces strict type-checking on execution payloads before triggering Recipes. |
 | **Integration Protocol** | Model Context Protocol (MCP) | Target: wraps SAP/ERP endpoints into self-describing tool servers. Currently stubbed. |
@@ -74,8 +74,8 @@ graph TD
     B --> C{Init Pricing State}
 
     %% Context & Logic Loading
-    C --> D[Query RAG: Hybrid Search]
-    D -.->|Metadata: Retailer_ID, SKU| E[(Retailer Contracts & Promos)]
+    C --> D[Resolve Context via Gateway Dependencies]
+    D -.->|Retailer_ID, SKU| E[(Retailer Contracts & Promos)]
     E --> F[Load Skill into Context]
 
     %% Reasoning (constrained generation)
@@ -137,8 +137,15 @@ We explicitly reject the paradigm of LLMs generating execution code dynamically.
 ### B. High-Performance Localized Compliance
 The Compliance Shadow runs as a secondary auditor that evaluates every proposed recipe execution against retailer penalty matrices. The interface produces typed verdicts: GREEN (proceed), YELLOW (escalate), RED (halt). Target state: Llama 3.1 8B served via vLLM on AKS Intel Sapphire Rapids (AMX) nodes for sub-200ms latency, keeping penalty matrices within the Azure VPC.
 
-### C. Advanced RAG ETL Pipeline
-Standard semantic chunking destroys the integrity of CPG promotional tables. Before documents enter Pinecone, they are processed through an intelligent ETL pipeline (using Unstructured) that preserves tabular hierarchies. Hybrid Search guarantees that specific identifiers (like SKU-12345) are never hallucinated or mismatched during retrieval.
+### C. RAG Deferral (V2 Consideration)
+V1.0 does not use RAG. All context required for recipe execution — retailer contracts, SKU pricing, credit profiles — is structured, keyed by known identifiers (retailer_id, SKU, order_id), and resolved deterministically via the gateway dependency layer (§4G). Semantic vector search would introduce probabilistic retrieval into an otherwise deterministic pipeline, conflicting with Invariant #5 (no ad-hoc data enters the state machine).
+
+RAG becomes justified in V2 if the system needs to:
+- Search across **thousands of unstructured** retailer contract PDFs where the relevant clause isn't predictable from structured keys
+- Support **free-text user queries** (e.g., "what's our promotional deal with Walmart on cereal?") where intent maps to document retrieval, not recipe execution
+- Ingest **new document types** faster than gateway adapters can be written
+
+Until then, the gateway layer provides the same data-fetching capability with typed contracts, timeout enforcement, and full trace correlation — without the non-determinism of similarity search.
 
 ### D. The Circuit Breaker & HITL Fallback
 Deployed at the API Gateway level. If the automated state machine attempts to execute more than the configured maximum pricing updates in a time window, or if the total dollar variance of an execution batch exceeds the configured threshold, the Circuit Breaker trips. Execution halts, and the state transitions to a Human-in-the-Loop (HITL) approval UI, preventing runaway systemic errors.
