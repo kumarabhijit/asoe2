@@ -166,6 +166,47 @@ Two env-var switches provide coarse-grained production safety:
 
 Both are evaluated at call time — no restart needed.
 
+### I. LLM Tiering & Ensemble Strategy
+
+V1.0 already implements a tiered inference strategy through its three-tier constrained generation backend chain and the separation of reasoning core from compliance shadow. This section documents the rationale and outlines when additional tiering or ensemble voting becomes justified.
+
+#### Current Tiering (V1.0)
+
+| Tier | Component | Model / Backend | Purpose | Cost |
+|---|---|---|---|---|
+| 0 (no LLM) | Deterministic fallback | Heuristic if/elif | Intent classification, recipe selection, shadow verdicts | Zero |
+| 1 (small local) | Compliance Shadow | Llama 3.1 8B on Intel AMX (target) | Policy auditing against penalty matrices | Low (on-prem inference) |
+| 2 (frontier cloud) | Reasoning Core | Claude 4.6 Sonnet via Azure AI Foundry | Primary planning, intent routing, parameter extraction | High (API calls) |
+
+The backend chain (`Custom → Outlines → DeterministicFallbackBackend`) degrades gracefully: if the constrained LLM backend is unavailable or unnecessary, the deterministic fallback handles all V1.0 decision points without any LLM call.
+
+#### Why Multi-LLM Voting Is Not Used in V1.0
+
+Multi-model ensemble voting (running N models on the same input and taking majority vote) is a valid technique for open-ended generation tasks where hallucination detection is the goal. It does not apply here because:
+
+1. **Output space is too small to benefit.** Intent classification (4 values), shadow verdicts (3 values), and recipe selection (3 values) are all constrained to small enums via Outlines. Voting reduces variance in high-entropy outputs; these are low-entropy by design.
+2. **Correlated errors defeat voting.** Models trained on similar data exhibit correlated failure modes on the same edge cases. Three models agreeing on a wrong classification does not make it correct. Schema-constrained generation plus Pydantic validation is a stronger guarantee.
+3. **The Shadow already provides a structural second opinion.** The Skill–Shadow architecture is superior to N-way voting because the two stages have *different objectives* (propose vs. audit), not the same objective repeated. This catches policy violations that homogeneous voters would consistently miss.
+4. **Tiebreaker policy is itself business logic.** If voters disagree (e.g., two GREEN, one RED), the resolution rule encodes policy — which must live in recipes or the compliance module, not in an ad-hoc voting layer. The Shadow verdict already fills this role with clear semantics.
+5. **Cost and latency.** Voting multiplies LLM calls by 2–3× per decision point. For a pipeline with 2–3 LLM calls per graph run, this means 6–9 calls with no proportional improvement in a constrained-output system.
+
+#### When Voting Becomes Justified (V2+)
+
+Ensemble voting should be reconsidered if:
+- The system introduces **free-text generation** consumed by humans or downstream systems (e.g., explanation summaries, contract clause extraction via RAG)
+- Intent space grows beyond **~15 intents** where boundary ambiguity makes single-model classification unreliable
+- **Safety-critical outputs** (e.g., financial amounts, penalty calculations) are generated rather than looked up — voting can catch arithmetic hallucination
+
+#### When Frontier Models Become Justified
+
+V1.0's four intents, three recipes, and structured EDI inputs do not require frontier-model reasoning. The deterministic fallback handles all decision points. Claude 4.6 Sonnet earns its cost when:
+- Inputs become **unstructured** (free-text emails, PDF contract clauses — V2 RAG scope per §4C)
+- Intent space **scales beyond heuristic coverage** (~15+ intents with overlapping features)
+- **Multi-step planning** is required beyond predefined `WorkflowDefinition` sequences
+- **Human-facing explanations** need nuanced, context-aware language (explain mode in V1.0 is the first use case)
+
+Until those conditions are met, the deterministic fallback and small local models provide equivalent accuracy at a fraction of the cost.
+
 ---
 
 ## 5. Execution Invariants (Non-Negotiable)
