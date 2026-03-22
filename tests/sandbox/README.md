@@ -1,24 +1,24 @@
 # ASOE Sandbox
 
-Local execution environment for testing the full Skill–Shadow–Recipe pipeline
+Local execution environment for testing the full Skill-Shadow-Recipe pipeline
 without any cloud services.  Uses a SQLite database for seed data and
 (optionally) a local open-weights model for constrained LLM generation.
 
 ```
 tests/sandbox/
 ├── db/
-│   └── schema.sql          ← authoritative schema reference
+│   └── schema.sql          <- authoritative schema reference
 ├── llm/
 │   ├── __init__.py
-│   ├── local_backend.py    ← LocalHFBackend (Outlines + HuggingFace)
-│   └── prompts.py          ← human-readable prompt templates (used by UI)
+│   ├── local_backend.py    <- LocalHFBackend (Outlines + HuggingFace)
+│   └── prompts.py          <- human-readable prompt templates (used by UI)
 ├── ui/
 │   ├── __init__.py
-│   └── app.py              ← Streamlit trace visualiser
-├── seed.py                 ← SQLite seeder (generates sandbox.db)
+│   └── app.py              <- Streamlit trace visualiser
+├── seed.py                 <- SQLite seeder (generates sandbox.db)
 ├── requirements-sandbox.txt
 ├── .gitignore
-└── README.md               ← this file
+└── README.md               <- this file
 ```
 
 > `sandbox.db` is gitignored — only `seed.py` is committed.
@@ -37,7 +37,7 @@ pip install -r tests/sandbox/requirements-sandbox.txt
 
 ```bash
 python tests/sandbox/seed.py
-# → tests/sandbox/sandbox.db  (8 EDI events covering all 4 intents)
+# -> tests/sandbox/sandbox.db  (18 EDI events covering all 4 intents)
 
 # Force recreate:
 python tests/sandbox/seed.py --reset
@@ -57,18 +57,41 @@ The UI opens at **http://localhost:8501**.
 
 ---
 
-## Seeded events
+## Seeded data summary
 
-| Event ID      | Intent                  | Order   | Notes                          |
-|---------------|-------------------------|---------|-------------------------------|
-| EVT-CC-001    | CONTRACTUAL_CORRECTION  | SO-1001 | 10 % discount — within 15 %   |
-| EVT-CC-002    | CONTRACTUAL_CORRECTION  | SO-1002 | 8 % discount — within 15 %    |
-| EVT-CC-003    | CONTRACTUAL_CORRECTION  | SO-1003 | 22 % discount — exceeds threshold → FAILED |
-| EVT-CB-001    | CREDIT_BLOCK            | SO-2001 | ORDER_MANAGER, $100 over limit |
-| EVT-CB-002    | CREDIT_BLOCK            | SO-2002 | FINANCE_DIRECTOR, $5 500 over  |
-| EVT-MPE-001   | MASS_PRICING_ERROR      | SO-3001 | 15 lines → RED shadow → BLOCKED |
-| EVT-DPO-001   | DUPLICATE_PO            | PO-9001 | composite score 0.98 → AUTO_BLOCK |
-| EVT-DPO-002   | DUPLICATE_PO            | PO-9002 | composite score 0.65 → SOFT_FLAG |
+### Reference tables
+
+| Table                | Count | Description                                   |
+|----------------------|-------|-----------------------------------------------|
+| customers            |    10 | Retailer master data (name, region, tier)     |
+| distribution_centers |     5 | Fulfillment locations across 4 US regions     |
+| sap_pricing          |    10 | SKU master with base prices and categories    |
+| retailer_contracts   |    15 | Negotiated contract prices per retailer + SKU |
+| promotions           |     4 | Seasonal/clearance/bundle promotions          |
+| credit_profiles      |     8 | Credit limits and current exposure per retailer |
+
+### EDI events (18 scenarios)
+
+| Event ID      | Intent                  | Order   | Retailer | Notes                                    |
+|---------------|-------------------------|---------|----------|------------------------------------------|
+| EVT-CC-001    | CONTRACTUAL_CORRECTION  | SO-1001 | R-01     | 10% discount — within 15%                |
+| EVT-CC-002    | CONTRACTUAL_CORRECTION  | SO-1002 | R-02     | 8% discount — within 15%                 |
+| EVT-CC-003    | CONTRACTUAL_CORRECTION  | SO-1003 | R-03     | 22% discount — exceeds threshold -> FAILED |
+| EVT-CC-004    | CONTRACTUAL_CORRECTION  | SO-1004 | R-06     | 12% discount — within threshold           |
+| EVT-CC-005    | CONTRACTUAL_CORRECTION  | SO-1005 | R-08     | 13% PREMIUM discount — near edge          |
+| EVT-CC-006    | CONTRACTUAL_CORRECTION  | SO-1006 | R-01     | 14.7% — very close to threshold edge      |
+| EVT-CC-007    | CONTRACTUAL_CORRECTION  | SO-1007 | R-03     | 20% — exceeds threshold -> FAILED         |
+| EVT-CB-001    | CREDIT_BLOCK            | SO-2001 | R-01     | ORDER_MANAGER, $100 over limit            |
+| EVT-CB-002    | CREDIT_BLOCK            | SO-2002 | R-05     | FINANCE_DIRECTOR, $5,500 over -> REJECTED |
+| EVT-CB-003    | CREDIT_BLOCK            | SO-2003 | R-07     | ORDER_MANAGER, $4,500 over (tolerance)    |
+| EVT-CB-004    | CREDIT_BLOCK            | SO-2004 | R-10     | FINANCE_DIRECTOR, $5,200 over -> REJECTED |
+| EVT-MPE-001   | MASS_PRICING_ERROR      | SO-3001 | R-02     | 15 lines -> RED shadow -> BLOCKED         |
+| EVT-MPE-002   | MASS_PRICING_ERROR      | SO-3002 | R-06     | 25 lines -> RED shadow -> BLOCKED         |
+| EVT-MPE-003   | MASS_PRICING_ERROR      | SO-3003 | R-08     | 11 lines -> just over threshold -> BLOCKED |
+| EVT-DPO-001   | DUPLICATE_PO            | PO-9001 | R-04     | composite 0.98 -> AUTO_BLOCK              |
+| EVT-DPO-002   | DUPLICATE_PO            | PO-9002 | R-04     | composite 0.65 -> SOFT_FLAG               |
+| EVT-DPO-003   | DUPLICATE_PO            | PO-9003 | R-09     | composite 0.82 -> REVIEW_REQUIRED         |
+| EVT-DPO-004   | DUPLICATE_PO            | PO-9004 | R-06     | composite 0.40 -> CLEAR                   |
 
 ---
 
@@ -102,7 +125,7 @@ If the model fails to load (missing deps, no network) it falls back to
 ASOE_EXPLAIN_MODE=1 PYTHONPATH=. streamlit run tests/sandbox/ui/app.py
 ```
 
-The pipeline runs the full classify → shadow → select_recipe path but
+The pipeline runs the full classify -> shadow -> select_recipe path but
 replaces `execute_recipe` with `explain_only`, returning
 `MANUAL_REVIEW_REQUIRED` with a dry-run summary and no side effects.
 
