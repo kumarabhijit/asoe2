@@ -166,9 +166,9 @@ States:
 ---
 ## PHASE 8 — Local Execution Sandbox
 ### 8.1 SQLite Seeder (`tests/sandbox/seed.py`)
-- [x] Define SQLite schema: `sap_pricing`, `retailer_contracts`, `credit_profiles`, `edi_events`
-- [x] Seed 5 SKUs, 7 retailer contracts, 4 credit profiles
-- [x] Seed 8 EDI events covering all four intents (CONTRACTUAL_CORRECTION ×3, CREDIT_BLOCK ×2, MASS_PRICING_ERROR ×1, DUPLICATE_PO ×2)
+- [x] Define SQLite schema: `customers`, `distribution_centers`, `promotions`, `sap_pricing`, `retailer_contracts`, `credit_profiles`, `edi_events`
+- [x] Seed 10 customers, 5 DCs, 4 promotions, 10 SKUs, 15 retailer contracts, 8 credit profiles
+- [x] Seed 18 EDI events covering all four intents (CONTRACTUAL_CORRECTION ×7, CREDIT_BLOCK ×4, MASS_PRICING_ERROR ×3, DUPLICATE_PO ×4)
 - [x] CLI flags: `--db <path>` and `--reset`
 - [x] `load_events()` helper used by the Streamlit UI
 ✅ Outcome: repeatable, deterministic fixture data for local exploration

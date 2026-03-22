@@ -98,7 +98,7 @@ bash scripts/apply-patches.sh .venv/bin/python   # re-run after any pydantic rei
 python -m pytest
 ```
 
-Expected: **522 passed, 0 failed, 1 warning** (the warning is from `langchain_core` pydantic.v1 deprecation — not a blocker).
+Expected: **525 passed, 0 failed, 1 warning** (the warning is from `langchain_core` pydantic.v1 deprecation — not a blocker).
 
 > **Verified on Python 3.14.3 (stable).**
 
@@ -212,7 +212,7 @@ HTTP_PROXY=http://proxy:8080 HTTPS_PROXY=http://proxy:8080 \
 
 1. `docker compose -f docker-compose.hub.yml up` — starts core + sandbox UI
 2. Open `http://localhost:8501` in your browser
-3. Select an EDI event from the sidebar (8 sample events covering all 4 intents)
+3. Select an EDI event from the sidebar (18 sample events covering all 4 intents)
 4. Click **Run** — the event runs through the full pipeline: classify → shadow → recipe → effects
 5. Inspect the execution trace: intent, shadow verdict, recipe, gateway activity, full JSON state
 6. Toggle `ASOE_EXPLAIN_MODE=1` in `.env` for dry-run mode (no recipe side effects)
@@ -278,9 +278,9 @@ observability/      LangFuse-ready structured tracing (no langfuse import)
 hardening/          Kill switch + explain mode implementation
 docs/               AUDITOR_GUIDE.md
   specs/            Product-owner reference specs (not runtime code)
-tests/              pytest test suite (522 tests)
+tests/              pytest test suite (525 tests)
   sandbox/          Local execution sandbox (not part of CI test suite)
-    seed.py         SQLite seeder — creates sandbox.db with sample SAP / EDI data
+    seed.py         SQLite seeder — creates sandbox.db with customers, DCs, promotions, SAP / EDI data
     ui/app.py       Streamlit execution-trace visualiser
     llm/local_backend.py  LocalHFBackend — Outlines + HuggingFace model (optional)
     llm/prompts.py  Human-readable prompt templates for the UI "Prompt Preview" panel
@@ -313,7 +313,7 @@ k8s/                Kubernetes manifests for AKS production deployment
 | `contracts/policy.py` | Centralised business thresholds — discount limits, circuit breaker bounds, credit exposure tolerance |
 | `prompts/po-spec-to-asoe.md` | Step-by-step prompt for converting a Product Owner specification into ASOE Skill–Shadow–Recipe components |
 | `prompts/triple_check_review_board.md` | Reusable review prompt — three-persona architecture, security, and test coverage assessment |
-| `tests/sandbox/seed.py` | Sandbox seeder: sample SAP pricing, retailer contracts, credit profiles, and 8 EDI events covering all four intents |
+| `tests/sandbox/seed.py` | Sandbox seeder: customers, DCs, promotions, SAP pricing, retailer contracts, credit profiles, and 18 EDI events covering all four intents |
 | `tests/sandbox/ui/app.py` | Streamlit execution-trace visualiser — select event, run pipeline, inspect trace |
 
 **Start here if you are:**
@@ -337,7 +337,7 @@ k8s/                Kubernetes manifests for AKS production deployment
 | 7 | Infrastructure gateways (Ports & Adapters), multi-step workflows (Saga pattern), DUPLICATE_PO fallback routing |
 | 8 | Local execution sandbox — SQLite seeder, Streamlit UI, LocalHFBackend (Outlines + HuggingFace) |
 | 9 | Containerized deployment — 3 Dockerfiles (core/ui/inference), docker-compose for local dev, K8s manifests for AKS |
-| Review | Triple-Check Technical Review Board — resolved 10 findings (1 Critical, 1 High, 8 Medium); 7 Low findings debated and accepted (SKIP); test count 490 → 522 |
+| Review | Triple-Check Technical Review Board — resolved 10 findings (1 Critical, 1 High, 8 Medium); 7 Low findings debated and accepted (SKIP); test count 490 → 525 |
 
 ---
 

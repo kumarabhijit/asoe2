@@ -403,7 +403,7 @@ Run the full suite:
 python -m pytest
 ```
 
-Expected outcome: **522 passed, 0 failed, 0 skipped.**
+Expected outcome: **525 passed, 0 failed, 0 skipped.**
 
 ---
 
@@ -414,7 +414,7 @@ to run live pipeline executions without touching production systems.
 
 | Component | Purpose |
 |---|---|
-| `tests/sandbox/seed.py` | Seeds a local SQLite database with sample SAP pricing, retailer contracts, credit profiles, and 8 EDI events covering all four intents |
+| `tests/sandbox/seed.py` | Seeds a local SQLite database with customers, distribution centres, promotions, SAP pricing, retailer contracts, credit profiles, and 18 EDI events covering all four intents |
 | `tests/sandbox/ui/app.py` | Streamlit UI — select an event, run the full graph, inspect the step-by-step execution trace |
 | `tests/sandbox/llm/local_backend.py` | Optional `LocalHFBackend` — Outlines constrained-JSON generation via a local HuggingFace model; falls back to `DeterministicFallbackBackend` if model unavailable |
 

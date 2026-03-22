@@ -61,7 +61,7 @@ observability/
 
 tests/
   conftest.py        # Shared fixtures (StubGateway, sample events, backend setup)
-  test_*.py          # Unit and integration tests (16 files, 522 tests)
+  test_*.py          # Unit and integration tests (16 files, 525 tests)
   sandbox/           # Interactive exploration tools (see §10)
 ```
 
@@ -325,7 +325,7 @@ Production: Kubernetes manifests in `k8s/` (namespace, deployments, services, se
 
 | Component | File | Purpose |
 |---|---|---|
-| Seeder | `tests/sandbox/seed.py` | Seeds SQLite with sample SAP pricing, retailer contracts, credit profiles, 8 EDI events |
+| Seeder | `tests/sandbox/seed.py` | Seeds SQLite with customers, DCs, promotions, SAP pricing, retailer contracts, credit profiles, 18 EDI events |
 | UI | `tests/sandbox/ui/app.py` | Streamlit — select event, run full graph, inspect execution trace |
 | Local LLM | `tests/sandbox/llm/local_backend.py` | `LocalHFBackend` — Outlines constrained-JSON via local HuggingFace model; falls back to `DeterministicFallbackBackend` |
 | Prompts | `tests/sandbox/llm/prompts.py` | `intent_prompt()`, `recipe_prompt()`, `shadow_prompt()` — prompt transparency for demos |
@@ -355,5 +355,5 @@ Production: Kubernetes manifests in `k8s/` (namespace, deployments, services, se
 | `test_workflows.py` | WorkflowRunner Saga execution and compensation |
 
 ```bash
-python -m pytest   # Expected: 522 passed
+python -m pytest   # Expected: 525 passed
 ```
