@@ -30,6 +30,26 @@ CREDIT_EXPOSURE_TOLERANCE: float = 5_000.0
 """Maximum (exposure − limit) delta before requiring manual Finance review."""
 
 # ---------------------------------------------------------------------------
+# Duplicate PO Detection thresholds
+# ---------------------------------------------------------------------------
+
+DUPLICATE_PO_THRESHOLD_AUTO_BLOCK: float = 0.90
+"""Composite score at or above which a PO is auto-blocked."""
+
+DUPLICATE_PO_THRESHOLD_REVIEW_REQUIRED: float = 0.70
+"""Composite score at or above which a PO requires manual review."""
+
+DUPLICATE_PO_THRESHOLD_SOFT_FLAG: float = 0.50
+"""Composite score at or above which a PO is soft-flagged."""
+
+# ---------------------------------------------------------------------------
+# Mass-update / line-count threshold
+# ---------------------------------------------------------------------------
+
+MASS_UPDATE_LINE_COUNT_THRESHOLD: int = 10
+"""Line count above which an event is classified as a mass update risk."""
+
+# ---------------------------------------------------------------------------
 # Circuit breaker thresholds (orchestration/utils.py)
 # ---------------------------------------------------------------------------
 

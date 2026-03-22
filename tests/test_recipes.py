@@ -20,8 +20,8 @@ from recipes.DuplicatePORecipe import detect_duplicate_po
 # ---------------------------------------------------------------------------
 
 class TestPriceAdjustmentRecipe:
-    def _ctx(self, base: float = 100.0, threshold: float = 0.15):
-        return {"base_price": base, "max_discount_allowed": threshold}
+    def _ctx(self, base: float = 100.0, threshold: float = 0.15, condition_type: str = "YK07"):
+        return {"base_price": base, "max_discount_allowed": threshold, "condition_type": condition_type}
 
     # -- success path --------------------------------------------------------
 
@@ -110,6 +110,9 @@ class TestPriceAdjustmentRecipe:
 
 class TestCreditHoldReleaseRecipe:
 
+    _ROLES = ("ORDER_MANAGER", "FINANCE_DIRECTOR")
+    _TOLERANCE = 5_000.0
+
     # -- success path --------------------------------------------------------
 
     def test_order_manager_within_limit_succeeds(self):
@@ -118,6 +121,8 @@ class TestCreditHoldReleaseRecipe:
             requester_role="ORDER_MANAGER",
             credit_limit=10_000.0,
             current_exposure=9_000.0,
+            authorized_roles=self._ROLES,
+            exposure_tolerance=self._TOLERANCE,
         )
         assert result["status"] == "RELEASED"
 
@@ -127,6 +132,8 @@ class TestCreditHoldReleaseRecipe:
             requester_role="FINANCE_DIRECTOR",
             credit_limit=50_000.0,
             current_exposure=45_000.0,
+            authorized_roles=self._ROLES,
+            exposure_tolerance=self._TOLERANCE,
         )
         assert result["status"] == "RELEASED"
 
@@ -136,6 +143,8 @@ class TestCreditHoldReleaseRecipe:
             requester_role="ORDER_MANAGER",
             credit_limit=10_000.0,
             current_exposure=9_000.0,
+            authorized_roles=self._ROLES,
+            exposure_tolerance=self._TOLERANCE,
         )
         assert result["order_id"] == "SO-2001"
 
@@ -145,6 +154,8 @@ class TestCreditHoldReleaseRecipe:
             requester_role="ORDER_MANAGER",
             credit_limit=10_000.0,
             current_exposure=9_000.0,
+            authorized_roles=self._ROLES,
+            exposure_tolerance=self._TOLERANCE,
         )
         assert result["workflow"] == "AUTO_APPROVED"
 
@@ -155,6 +166,8 @@ class TestCreditHoldReleaseRecipe:
             requester_role="ORDER_MANAGER",
             credit_limit=10_000.0,
             current_exposure=15_000.0,   # exactly $5,000 over (not >5000)
+            authorized_roles=self._ROLES,
+            exposure_tolerance=self._TOLERANCE,
         )
         assert result["status"] == "RELEASED"
 
@@ -164,6 +177,8 @@ class TestCreditHoldReleaseRecipe:
         result = release_credit_hold(
             order_id="SO-2", requester_role="CSR",
             credit_limit=10_000.0, current_exposure=9_500.0,
+            authorized_roles=self._ROLES,
+            exposure_tolerance=self._TOLERANCE,
         )
         assert result["status"] == "BLOCKED"
 
@@ -171,6 +186,8 @@ class TestCreditHoldReleaseRecipe:
         result = release_credit_hold(
             order_id="SO-2", requester_role="CSR",
             credit_limit=10_000.0, current_exposure=9_500.0,
+            authorized_roles=self._ROLES,
+            exposure_tolerance=self._TOLERANCE,
         )
         assert "reason" in result
 
@@ -178,6 +195,8 @@ class TestCreditHoldReleaseRecipe:
         result = release_credit_hold(
             order_id="SO-2", requester_role="ADMIN",
             credit_limit=10_000.0, current_exposure=9_500.0,
+            authorized_roles=self._ROLES,
+            exposure_tolerance=self._TOLERANCE,
         )
         assert result["status"] == "BLOCKED"
 
@@ -189,6 +208,8 @@ class TestCreditHoldReleaseRecipe:
             requester_role="ORDER_MANAGER",
             credit_limit=10_000.0,
             current_exposure=15_001.0,   # $5,001 over limit
+            authorized_roles=self._ROLES,
+            exposure_tolerance=self._TOLERANCE,
         )
         assert result["status"] == "REJECTED"
 
@@ -198,6 +219,8 @@ class TestCreditHoldReleaseRecipe:
             requester_role="ORDER_MANAGER",
             credit_limit=10_000.0,
             current_exposure=20_000.0,
+            authorized_roles=self._ROLES,
+            exposure_tolerance=self._TOLERANCE,
         )
         assert "reason" in result
         assert "5,000" in result["reason"] or "5000" in result["reason"]
@@ -308,3 +331,52 @@ class TestDuplicatePORecipe:
         result = detect_duplicate_po("PO-009", "cust-9", {})
         assert result["status"] == "PASS"
         assert result["composite_score"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Architectural invariant: recipes must NOT import from contracts.policy
+# ---------------------------------------------------------------------------
+
+class TestRecipePolicyDecoupling:
+    """Guard against regression of the recipe-policy decoupling invariant.
+
+    Recipes are immutable execution logic.  All thresholds must be injected
+    by the orchestration layer — recipes must never import from the policy
+    module directly.
+    """
+
+    @staticmethod
+    def _has_policy_import(module) -> bool:
+        """Check whether *module* has an actual import of contracts.policy."""
+        import ast, inspect, textwrap
+        source = inspect.getsource(module)
+        tree = ast.parse(textwrap.dedent(source))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module and "contracts.policy" in node.module:
+                return True
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if "contracts.policy" in alias.name:
+                        return True
+        return False
+
+    def test_price_adjustment_no_policy_import(self):
+        import inspect
+        mod = inspect.getmodule(execute_price_correction)
+        assert not self._has_policy_import(mod), (
+            "PriceAdjustmentRecipe must not import from contracts.policy"
+        )
+
+    def test_credit_hold_release_no_policy_import(self):
+        import inspect
+        mod = inspect.getmodule(release_credit_hold)
+        assert not self._has_policy_import(mod), (
+            "CreditHoldReleaseRecipe must not import from contracts.policy"
+        )
+
+    def test_duplicate_po_no_policy_import(self):
+        import inspect
+        mod = inspect.getmodule(detect_duplicate_po)
+        assert not self._has_policy_import(mod), (
+            "DuplicatePORecipe must not import from contracts.policy"
+        )

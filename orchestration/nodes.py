@@ -35,7 +35,15 @@ from recipes.registry import get_recipe
 from gateways.executor import GatewayExecutor
 from orchestration.utils import circuit_breaker, compute_discrepancy
 from hardening.explain_mode import build_explain_summary
-from contracts.policy import MAX_DISCOUNT_ALLOWED
+from contracts.policy import (
+    CREDIT_AUTHORIZED_ROLES,
+    CREDIT_EXPOSURE_TOLERANCE,
+    DUPLICATE_PO_THRESHOLD_AUTO_BLOCK,
+    DUPLICATE_PO_THRESHOLD_REVIEW_REQUIRED,
+    DUPLICATE_PO_THRESHOLD_SOFT_FLAG,
+    MAX_DISCOUNT_ALLOWED,
+    PRICE_CONDITION_TYPE,
+)
 
 
 import logging
@@ -192,6 +200,7 @@ def validate_types(state: GraphState) -> GraphState:
                 "erp_context": {
                     "base_price": state.event.sap_base_price,
                     "max_discount_allowed": MAX_DISCOUNT_ALLOWED,
+                    "condition_type": PRICE_CONDITION_TYPE,
                 },
             },
         )
@@ -203,6 +212,8 @@ def validate_types(state: GraphState) -> GraphState:
                 "requester_role": state.event.requester_role,
                 "credit_limit": state.event.credit_limit,
                 "current_exposure": state.event.current_exposure,
+                "authorized_roles": CREDIT_AUTHORIZED_ROLES,
+                "exposure_tolerance": CREDIT_EXPOSURE_TOLERANCE,
             },
         )
     elif state.selected_recipe == "DuplicatePORecipe.py":
@@ -212,6 +223,9 @@ def validate_types(state: GraphState) -> GraphState:
                 "incoming_po_number": state.event.order_id,
                 "customer_id": state.event.retailer_id or "",
                 "signal_scores": state.event.metadata.get("signal_scores", {}),
+                "threshold_auto_block": DUPLICATE_PO_THRESHOLD_AUTO_BLOCK,
+                "threshold_review_required": DUPLICATE_PO_THRESHOLD_REVIEW_REQUIRED,
+                "threshold_soft_flag": DUPLICATE_PO_THRESHOLD_SOFT_FLAG,
             },
         )
     return state

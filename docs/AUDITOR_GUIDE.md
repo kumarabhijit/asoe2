@@ -110,17 +110,24 @@ via `_validate_event()` before the state machine advances.  Invalid events
 All business thresholds are centralised in `contracts/policy.py`.  No recipe,
 node, or utility may hardcode a threshold value.
 
-| Constant | Value | Used by |
+| Constant | Value | Injected into |
 |---|---|---|
-| `MAX_DISCOUNT_ALLOWED` | `0.15` (15%) | `PriceAdjustmentRecipe.py` |
-| `PRICE_CONDITION_TYPE` | `"YK07"` | `PriceAdjustmentRecipe.py` |
-| `CREDIT_AUTHORIZED_ROLES` | `("ORDER_MANAGER", "FINANCE_DIRECTOR")` | `CreditHoldReleaseRecipe.py` |
-| `CREDIT_EXPOSURE_TOLERANCE` | `5_000.0` | `CreditHoldReleaseRecipe.py` |
+| `MAX_DISCOUNT_ALLOWED` | `0.15` (15%) | `PriceAdjustmentRecipe` via `erp_context` |
+| `PRICE_CONDITION_TYPE` | `"YK07"` | `PriceAdjustmentRecipe` via `erp_context` |
+| `CREDIT_AUTHORIZED_ROLES` | `("ORDER_MANAGER", "FINANCE_DIRECTOR")` | `CreditHoldReleaseRecipe` as param |
+| `CREDIT_EXPOSURE_TOLERANCE` | `5_000.0` | `CreditHoldReleaseRecipe` as param |
+| `DUPLICATE_PO_THRESHOLD_AUTO_BLOCK` | `0.90` | `DuplicatePORecipe` as param |
+| `DUPLICATE_PO_THRESHOLD_REVIEW_REQUIRED` | `0.70` | `DuplicatePORecipe` as param |
+| `DUPLICATE_PO_THRESHOLD_SOFT_FLAG` | `0.50` | `DuplicatePORecipe` as param |
+| `MASS_UPDATE_LINE_COUNT_THRESHOLD` | `10` | `constraints/fallback_backend.py` |
 | `CIRCUIT_BREAKER_MAX_UPDATES` | `50` | `orchestration/utils.py` |
 | `CIRCUIT_BREAKER_MAX_VARIANCE` | `10_000.0` | `orchestration/utils.py`, `constraints/fallback_backend.py` |
 | `DISCREPANCY_THRESHOLD` | `0.15` | `orchestration/utils.py` |
 
-Auditors can verify that a threshold change requires modifying exactly one file.
+**Key audit property:** Recipes never import thresholds directly from `policy.py`.
+All thresholds are injected by the orchestration layer (`validate_types` node),
+so the same recipe logic can serve different customer / vendor threshold sets.
+A threshold change requires modifying exactly one file (`contracts/policy.py`).
 
 ---
 
@@ -165,7 +172,7 @@ purity and determinism.
   `GraphState.effect_results`.  Effect failure is logged but does **not** undo
   the recipe result.
 
-### 7.3 Typed Contracts
+### 4.3 Typed Contracts
 
 All gateway operations use typed `GatewayRequest` / `GatewayResponse` models
 with `extra="forbid"`.  Response statuses are constrained to:
@@ -175,7 +182,7 @@ with `extra="forbid"`.  Response statuses are constrained to:
 
 ## 5. Multi-Step Workflows (Saga Pattern)
 
-### 7.1 Architecture
+### 5.1 Architecture
 
 Multi-intent workflows are executed by `WorkflowRunner` (`workflows/runner.py`)
 using the **Saga pattern** (Garcia-Molina & Salem, 1987):
@@ -186,7 +193,7 @@ using the **Saga pattern** (Garcia-Molina & Salem, 1987):
   invoked in **reverse (LIFO) order**.
 - Each step has its own independent Compliance Shadow audit.
 
-### 7.2 Workflow Result Statuses
+### 5.2 Workflow Result Statuses
 
 | Status | Meaning |
 |---|---|
@@ -195,7 +202,7 @@ using the **Saga pattern** (Garcia-Molina & Salem, 1987):
 | `COMPENSATED` | A step failed; compensation recipes were invoked for completed steps |
 | `PARTIAL` | Reserved for future partial-completion modes |
 
-### 7.4 Typed Contracts
+### 5.3 Typed Contracts
 
 `WorkflowDefinition`, `WorkflowStep`, `WorkflowStepResult`, `WorkflowResult`
 — all use `extra="forbid"`.
@@ -204,7 +211,7 @@ using the **Saga pattern** (Garcia-Molina & Salem, 1987):
 
 ## 6. Kill Switch
 
-### 7.1 Purpose
+### 6.1 Purpose
 
 The kill switch is an **emergency stop** that halts ALL automated recipe execution
 before any graph node runs.  It is intended for:
@@ -213,7 +220,7 @@ before any graph node runs.  It is intended for:
 - Maintenance windows.
 - Operator-initiated pauses pending policy review.
 
-### 7.2 Activation
+### 6.2 Activation
 
 ```bash
 export ASOE_KILL_SWITCH=1   # accepted values: 1, true, yes (case-insensitive)
@@ -221,7 +228,7 @@ export ASOE_KILL_SWITCH=1   # accepted values: 1, true, yes (case-insensitive)
 
 No process restart required.  The check runs at each `run_graph()` call.
 
-### 7.3 Behaviour
+### 6.3 Behaviour
 
 When active:
 
@@ -230,13 +237,13 @@ When active:
 - `explanation` = `"Automated execution halted: ASOE_KILL_SWITCH is active. …"`
 - The TraceRecord is still emitted to the observability log.
 
-### 7.4 Deactivation
+### 6.4 Deactivation
 
 ```bash
 unset ASOE_KILL_SWITCH      # or set to 0 / false / no
 ```
 
-### 7.5 Implementation reference
+### 6.5 Implementation reference
 
 `hardening/kill_switch.py` — `is_kill_switch_active()`, `apply_kill_switch()`
 
@@ -276,7 +283,9 @@ When active, `run_graph()` uses `build_explain_graph()`, which replaces the
 | `shadow_audit` | runs | **runs** (real verdict) |
 | `select_recipe` | runs | runs |
 | `validate_types` | runs | runs |
-| `execute_recipe` | **runs** | **replaced** by `explain_only` |
+| `resolve_dependencies` | runs | **skipped** |
+| `execute_recipe` | runs | **replaced** by `explain_only` |
+| `apply_effects` | runs | **skipped** |
 
 The Compliance Shadow and circuit breaker both execute — the explanation
 includes the **real** shadow verdict.
@@ -287,7 +296,7 @@ Terminal outcome:
 
 **No SAP writes.  No MCP calls.  No recipe side-effects.**
 
-### 7.4 Implementation reference
+### 7.3 Implementation reference
 
 `hardening/explain_mode.py` — `is_explain_mode_active()`, `build_explain_summary()`
 `orchestration/nodes.py` — `explain_only()` node

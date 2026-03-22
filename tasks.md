@@ -11,9 +11,10 @@
   - `orchestration/`
   - `compliance/`
   - `constraints/`
-  - `mcp/`
+  - ~~`mcp/`~~ (deferred — MCP integration is stubbed per architecture_v2.md §2; directory not created)
   - `tests/`
   - `prompts/`
+  - `llm/` (added during Phase 9 — Outlines model loader for `OutlinesConstrainedBackend`)
 - [x] Move existing recipes into `recipes/`
 - [x] Move SKILL.md into `skills/`
 ✅ Outcome: clean separation of brain vs muscle

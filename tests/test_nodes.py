@@ -342,7 +342,11 @@ class TestExecuteRecipeNode:
                 "order_id": "SO-T001",
                 "line_item": 1,
                 "requested_price": po_price,
-                "erp_context": {"base_price": 100.0, "max_discount_allowed": 0.15},
+                "erp_context": {
+                    "base_price": 100.0,
+                    "max_discount_allowed": 0.15,
+                    "condition_type": "YK07",
+                },
             },
         )
         return state
@@ -361,6 +365,8 @@ class TestExecuteRecipeNode:
                 "requester_role": role,
                 "credit_limit": 10_000.0,
                 "current_exposure": exposure,
+                "authorized_roles": ("ORDER_MANAGER", "FINANCE_DIRECTOR"),
+                "exposure_tolerance": 5_000.0,
             },
         )
         return state
@@ -517,12 +523,12 @@ class TestRecipeExceptionHandling:
                 order_id="SO-EXC02",
                 line_item=1,
                 requested_price=90.0,
-                erp_context={},  # missing base_price
+                erp_context={},  # missing base_price, condition_type, max_discount_allowed
             )
             # If it returns, it should not be SUCCESS
             assert result.get("status") != "SUCCESS"
-        except (TypeError, ZeroDivisionError):
-            # Expected: base_price is None → TypeError on arithmetic
+        except (TypeError, KeyError, ZeroDivisionError):
+            # Expected: erp_context["base_price"] → KeyError
             pass
 
 
@@ -625,6 +631,9 @@ class TestDuplicatePOExecuteRecipeNode:
                     "channel": 1.0,
                     "delivery_date": 0.80,
                 },
+                "threshold_auto_block": 0.90,
+                "threshold_review_required": 0.70,
+                "threshold_soft_flag": 0.50,
             },
         )
         result = execute_recipe(duplicate_po_event)
@@ -650,6 +659,9 @@ class TestDuplicatePOExecuteRecipeNode:
                 "incoming_po_number": "PO-4002",
                 "customer_id": "R-10",
                 "signal_scores": {},
+                "threshold_auto_block": 0.90,
+                "threshold_review_required": 0.70,
+                "threshold_soft_flag": 0.50,
             },
         )
         result = execute_recipe(state)
