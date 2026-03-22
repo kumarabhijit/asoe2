@@ -1,0 +1,81 @@
+# docker-compose.hub.yml ─ Run ASOE sandbox from Docker Hub images
+#
+# No source code or local build required. Pull pre-built images and run.
+#
+# Usage:
+#   docker compose -f docker-compose.hub.yml up              # sandbox UI
+#   docker compose -f docker-compose.hub.yml --profile inference up  # + LLM
+#
+# Sandbox UI → http://localhost:8501
+#
+# Override the tag:
+#   ASOE_TAG=v0.3.2 docker compose -f docker-compose.hub.yml up
+
+name: asoe
+
+x-core-env: &core-env
+  PYTHONPATH: /app
+  PYTHONUNBUFFERED: "1"
+  ASOE_KILL_SWITCH: "${ASOE_KILL_SWITCH:-0}"
+  ASOE_EXPLAIN_MODE: "${ASOE_EXPLAIN_MODE:-0}"
+  HTTP_PROXY: "${HTTP_PROXY:-}"
+  HTTPS_PROXY: "${HTTPS_PROXY:-}"
+  NO_PROXY: "${NO_PROXY:-}"
+
+services:
+
+  core:
+    image: kumarabhijit/asoe:core-${ASOE_TAG:-latest}
+    environment:
+      <<: *core-env
+      USE_OUTLINES_BACKEND: "0"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from orchestration.graph import build_graph; build_graph(); print('ok')"
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 20s
+    restart: on-failure
+
+  ui:
+    image: kumarabhijit/asoe:sandbox-ui-${ASOE_TAG:-latest}
+    environment:
+      <<: *core-env
+      SANDBOX_DB_PATH: "/app/tests/sandbox/sandbox.db"
+      USE_OUTLINES_BACKEND: "0"
+      LOCAL_LLM_BACKEND_CLASS: "${LOCAL_LLM_BACKEND_CLASS:-}"
+      LOCAL_LLM_MODEL: "${LOCAL_LLM_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}"
+    ports:
+      - "8501:8501"
+    volumes:
+      - sandbox-db:/app/tests/sandbox
+    depends_on:
+      core:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8501/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  inference:
+    profiles: ["inference"]
+    image: kumarabhijit/asoe:inference-${ASOE_TAG:-latest}
+    environment:
+      <<: *core-env
+      USE_OUTLINES_BACKEND: "1"
+      LOCAL_LLM_DEVICE: "${LOCAL_LLM_DEVICE:-cpu}"
+      LOCAL_LLM_MODEL: "${LOCAL_LLM_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}"
+    volumes:
+      - hf-model-cache:/cache/huggingface
+    restart: on-failure
+
+volumes:
+  sandbox-db:
+  hf-model-cache:

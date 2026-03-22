@@ -142,7 +142,7 @@ PYTHONPATH=. streamlit run tests/sandbox/ui/app.py
 guarantee as `OutlinesConstrainedBackend` in production.  If the model fails
 to load it falls back silently to `DeterministicFallbackBackend`.
 
-### Docker (containerized)
+### Docker (containerized — local build)
 
 Run the full stack in containers without installing Python dependencies on
 your host:
@@ -159,6 +159,81 @@ docker compose --profile inference up
 
 Copy `.env.example` to `.env` to configure kill switch, explain mode, or
 model selection.  See `docker-compose.yml` for all available options.
+
+**Behind a proxy?** Set proxy vars before building:
+
+```bash
+export HTTP_PROXY=http://proxy.example.com:8080
+export HTTPS_PROXY=http://proxy.example.com:8080
+docker compose build    # proxy args forwarded automatically
+docker compose up
+```
+
+Proxy is a runtime option — the same images work with or without a proxy.
+At runtime, set `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` in `.env` or
+your shell; docker-compose passes them into containers automatically.
+
+### Docker Hub (pre-built images — no local build required)
+
+Pull and run the sandbox directly from Docker Hub:
+
+```bash
+# Run the sandbox UI (auto-seeds the demo database on first start)
+docker compose -f docker-compose.hub.yml up
+
+# → Sandbox UI at http://localhost:8501
+
+# Include local LLM inference
+docker compose -f docker-compose.hub.yml --profile inference up
+```
+
+**Available images on Docker Hub (`kumarabhijit/asoe`):**
+
+| Image | Tag | Contents |
+|---|---|---|
+| `kumarabhijit/asoe` | `core-latest` | Core orchestration engine (LangGraph + recipes + Compliance Shadow) |
+| `kumarabhijit/asoe` | `sandbox-ui-latest` | Streamlit sandbox UI (auto-seeds demo DB, no GPU needed) |
+| `kumarabhijit/asoe` | `inference-latest` | Local LLM inference (Outlines + torch + transformers) |
+
+**Pin a specific version:**
+
+```bash
+ASOE_TAG=v0.3.2 docker compose -f docker-compose.hub.yml up
+```
+
+**Behind a proxy (runtime):**
+
+```bash
+HTTP_PROXY=http://proxy:8080 HTTPS_PROXY=http://proxy:8080 \
+  docker compose -f docker-compose.hub.yml up
+```
+
+**Test the sandbox step-by-step:**
+
+1. `docker compose -f docker-compose.hub.yml up` — starts core + sandbox UI
+2. Open `http://localhost:8501` in your browser
+3. Select an EDI event from the sidebar (8 sample events covering all 4 intents)
+4. Click **Run** — the event runs through the full pipeline: classify → shadow → recipe → effects
+5. Inspect the execution trace: intent, shadow verdict, recipe, gateway activity, full JSON state
+6. Toggle `ASOE_EXPLAIN_MODE=1` in `.env` for dry-run mode (no recipe side effects)
+
+### Build and push to Docker Hub
+
+```bash
+# Login to Docker Hub
+docker login
+
+# Build and push all images (tag: latest)
+bash scripts/docker-build-push.sh
+
+# Build and push with a specific version tag
+bash scripts/docker-build-push.sh v0.3.2
+
+# Build behind a proxy
+HTTP_PROXY=http://proxy:8080 bash scripts/docker-build-push.sh v0.3.2
+```
+
+### AKS production deployment
 
 For AKS production deployment, apply the Kubernetes manifests:
 
@@ -213,9 +288,10 @@ tests/              pytest test suite (522 tests)
 Dockerfile.core     Core orchestration container (LangGraph + recipes + shadow)
 Dockerfile.ui       Streamlit sandbox UI container (core + streamlit)
 Dockerfile.inference  Local LLM inference container (Outlines + torch + transformers)
-docker-compose.yml  Local dev stack — core + ui + optional inference profile
-.dockerignore       Excludes .git, __pycache__, sandbox.db, k8s/ from images
-.env.example        Documents all runtime env vars for Docker
+docker-compose.yml      Local dev stack — core + ui + optional inference profile (local build)
+docker-compose.hub.yml  Pull-and-run from Docker Hub (no local build required)
+.dockerignore           Excludes .git, __pycache__, sandbox.db, k8s/ from images
+.env.example            Documents all runtime env vars for Docker (incl. proxy)
 k8s/                Kubernetes manifests for AKS production deployment
   namespace.yaml    asoe namespace with compliance label
   core/             Deployment (2 replicas), Service, ConfigMap, SecretProviderClass (Azure Key Vault CSI)
@@ -276,6 +352,9 @@ k8s/                Kubernetes manifests for AKS production deployment
 | `LOCAL_LLM_BACKEND_CLASS` | _(unset)_ | Fully-qualified class to use as the constrained backend (e.g. `tests.sandbox.llm.local_backend.LocalHFBackend`) |
 | `LOCAL_LLM_MODEL` | `Qwen/Qwen2.5-0.5B-Instruct` | HuggingFace model id for `LocalHFBackend` |
 | `LOCAL_LLM_DEVICE` | `cpu` | Compute device for `LocalHFBackend` (`cpu` / `cuda` / `mps`) |
+| `HTTP_PROXY` | _(unset)_ | HTTP proxy URL — used at build time (Dockerfile ARG) and runtime (container env) |
+| `HTTPS_PROXY` | _(unset)_ | HTTPS proxy URL — same as above |
+| `NO_PROXY` | _(unset)_ | Comma-separated list of hosts to bypass proxy |
 
 No process restart required; each `run_graph()` call reads the env vars fresh.
 

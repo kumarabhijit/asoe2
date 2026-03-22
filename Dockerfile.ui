@@ -11,6 +11,12 @@ FROM python:3.14-slim AS base
 
 WORKDIR /app
 
+# ── Proxy support (optional, pass at build time) ─────────────────────────────
+# docker build --build-arg HTTP_PROXY=http://proxy:8080 ...
+ARG HTTP_PROXY=""
+ARG HTTPS_PROXY=""
+ARG NO_PROXY=""
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
@@ -48,6 +54,9 @@ COPY prompts/      prompts/
 COPY tests/sandbox/ tests/sandbox/
 COPY main.py        main.py
 
+# ── Entrypoint — auto-seed sandbox DB on first start ─────────────────────────
+COPY scripts/sandbox-entrypoint.sh scripts/sandbox-entrypoint.sh
+
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 ENV ASOE_KILL_SWITCH=0
@@ -55,7 +64,9 @@ ENV ASOE_EXPLAIN_MODE=0
 ENV USE_OUTLINES_BACKEND=0
 ENV SANDBOX_DB_PATH=/app/tests/sandbox/sandbox.db
 
-RUN adduser --disabled-password --gecos "" --uid 1000 asoe
+RUN adduser --disabled-password --gecos "" --uid 1000 asoe \
+    && mkdir -p /app/tests/sandbox \
+    && chown -R asoe:asoe /app/tests/sandbox
 USER asoe
 
 EXPOSE 8501
@@ -63,6 +74,7 @@ EXPOSE 8501
 HEALTHCHECK --interval=30s --timeout=10s --start-period=25s --retries=3 \
     CMD curl -sf http://localhost:8501/healthz || exit 1
 
+ENTRYPOINT ["bash", "scripts/sandbox-entrypoint.sh"]
 CMD ["streamlit", "run", "tests/sandbox/ui/app.py", \
      "--server.address=0.0.0.0", \
      "--server.port=8501", \
