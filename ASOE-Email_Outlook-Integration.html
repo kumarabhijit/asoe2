@@ -1,0 +1,977 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ASOE — Outlook Email Integration Requirements</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #f5f5f7;
+    --surface:   #ffffff;
+    --surface2:  #f5f5f7;
+    --border:    rgba(0,0,0,0.09);
+    --border2:   rgba(0,0,0,0.15);
+    --text:      #1d1d1f;
+    --text2:     #6e6e73;
+    --text3:     #aeaeb2;
+    --blue:      #0071e3;
+    --blue-bg:   #e8f1fc;
+    --blue-text: #1a5ca8;
+    --blue-bdr:  #c0d6f5;
+    --orange-bg:   #fef0e6;
+    --orange-text: #b24a0a;
+    --orange-bdr:  #f5cda9;
+    --green-bg:    #e8f5ee;
+    --green-text:  #1a6e3e;
+    --green-bdr:   #b6dec9;
+    --purple-bg:   #f0eafd;
+    --purple-text: #5a2da0;
+    --purple-bdr:  #d4bffb;
+    --teal-bg:     #e5f6f5;
+    --teal-text:   #0f6b65;
+    --teal-bdr:    #a8ddd9;
+    --red-bg:      #fdedf0;
+    --red-text:    #a01b31;
+    --red-bdr:     #f5bfca;
+    --radius-sm:   8px;
+    --radius-md:   12px;
+    --radius-lg:   18px;
+    --shadow-sm:   0 1px 3px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.04);
+    --shadow-md:   0 4px 16px rgba(0,0,0,0.08), 0 1px 3px rgba(0,0,0,0.05);
+    --shadow-lg:   0 12px 40px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:        #000000;
+      --surface:   #1c1c1e;
+      --surface2:  #2c2c2e;
+      --border:    rgba(255,255,255,0.10);
+      --border2:   rgba(255,255,255,0.18);
+      --text:      #f5f5f7;
+      --text2:     #aeaeb2;
+      --text3:     #636366;
+      --blue:      #2997ff;
+      --blue-bg:   #0d2b50;
+      --blue-text: #82b4f0;
+      --blue-bdr:  #1a4a80;
+      --orange-bg:   #3d1a06;
+      --orange-text: #f09a60;
+      --orange-bdr:  #6b2e0a;
+      --green-bg:    #0a2e1c;
+      --green-text:  #6ec995;
+      --green-bdr:   #155930;
+      --purple-bg:   #1e0d40;
+      --purple-text: #b890fa;
+      --purple-bdr:  #3a1878;
+      --teal-bg:     #062b29;
+      --teal-text:   #5fc8c2;
+      --teal-bdr:    #0f4e4a;
+      --red-bg:      #3b0910;
+      --red-text:    #f0748a;
+      --red-bdr:     #6e1222;
+      --shadow-sm:   0 1px 3px rgba(0,0,0,0.4);
+      --shadow-md:   0 4px 16px rgba(0,0,0,0.5);
+      --shadow-lg:   0 12px 40px rgba(0,0,0,0.6);
+    }
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'DM Sans', -apple-system, 'Helvetica Neue', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Header ── */
+  .header {
+    background: rgba(255,255,255,0.72);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    padding: 0 40px;
+  }
+  @media (prefers-color-scheme: dark) {
+    .header { background: rgba(28,28,30,0.8); }
+  }
+  .header-inner {
+    max-width: 900px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 52px;
+    gap: 16px;
+  }
+  .header-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .brand-icon {
+    width: 28px; height: 28px;
+    background: linear-gradient(135deg, #0071e3, #00c7be);
+    border-radius: 7px;
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-size: 14px; font-weight: 600;
+    flex-shrink: 0;
+  }
+  .brand-name {
+    font-size: 14px; font-weight: 600; letter-spacing: -0.01em; color: var(--text);
+  }
+  .brand-sep { color: var(--text3); font-size: 14px; }
+  .brand-sub { font-size: 13px; color: var(--text2); font-weight: 400; }
+  .header-meta {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .status-pill {
+    display: flex; align-items: center; gap: 5px;
+    padding: 4px 10px; border-radius: 20px;
+    background: var(--green-bg); color: var(--green-text);
+    font-size: 11px; font-weight: 600; letter-spacing: 0.03em;
+    border: 1px solid var(--green-bdr);
+  }
+  .status-dot {
+    width: 6px; height: 6px; border-radius: 50%; background: currentColor;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  /* ── Hero ── */
+  .hero {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 48px 40px 32px;
+  }
+  .eyebrow {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--blue); margin-bottom: 10px;
+  }
+  .hero h1 {
+    font-size: 32px; font-weight: 600; letter-spacing: -0.03em; line-height: 1.15;
+    color: var(--text); margin-bottom: 10px;
+  }
+  .hero p {
+    font-size: 15px; color: var(--text2); line-height: 1.6; max-width: 560px; margin-bottom: 24px;
+  }
+  .build-order {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    font-size: 12px; color: var(--text3); font-weight: 500;
+  }
+  .build-step {
+    display: flex; align-items: center; gap: 6px;
+  }
+  .build-node {
+    padding: 4px 10px; border-radius: 20px;
+    background: var(--surface); border: 1px solid var(--border2);
+    color: var(--text2); font-size: 11px; font-weight: 500;
+    white-space: nowrap;
+  }
+  .build-arrow { color: var(--text3); font-size: 12px; }
+
+  /* ── Content ── */
+  .content {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 8px 40px 64px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  /* ── Layer Card ── */
+  .layer-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.2s;
+  }
+  .layer-card:hover { box-shadow: var(--shadow-md); }
+
+  .layer-header {
+    padding: 18px 22px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+  }
+  .layer-icon {
+    width: 36px; height: 36px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 17px; flex-shrink: 0; margin-top: 1px;
+  }
+  .layer-meta { flex: 1; }
+  .layer-num {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--text3); margin-bottom: 2px;
+  }
+  .layer-title {
+    font-size: 15px; font-weight: 600; letter-spacing: -0.01em; color: var(--text);
+    margin-bottom: 4px;
+  }
+  .layer-desc { font-size: 12px; color: var(--text2); line-height: 1.5; }
+
+  .layer-body { padding: 18px 22px; }
+
+  /* ── Chips ── */
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 4px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 13px; border-radius: 20px; cursor: pointer;
+    font-size: 12px; font-weight: 500; border: 1px solid transparent;
+    transition: all 0.15s; user-select: none; white-space: nowrap;
+  }
+  .chip:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+  .chip:active { transform: scale(0.97); }
+  .chip.active { box-shadow: 0 0 0 2px currentColor; }
+  .chip-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+
+  .chip-blue   { background: var(--blue-bg);   color: var(--blue-text);   border-color: var(--blue-bdr); }
+  .chip-orange { background: var(--orange-bg); color: var(--orange-text); border-color: var(--orange-bdr); }
+  .chip-green  { background: var(--green-bg);  color: var(--green-text);  border-color: var(--green-bdr); }
+  .chip-purple { background: var(--purple-bg); color: var(--purple-text); border-color: var(--purple-bdr); }
+  .chip-teal   { background: var(--teal-bg);   color: var(--teal-text);   border-color: var(--teal-bdr); }
+  .chip-red    { background: var(--red-bg);    color: var(--red-text);    border-color: var(--red-bdr); }
+  .chip-gray   { background: var(--surface2);  color: var(--text2);       border-color: var(--border2); }
+
+  /* ── Detail Panel ── */
+  .detail-panel {
+    display: none;
+    margin-top: 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    animation: slideDown 0.18s ease;
+  }
+  .detail-panel.open { display: block; }
+  @keyframes slideDown {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .detail-inner { padding: 16px 18px 18px; }
+  .detail-title {
+    font-size: 13px; font-weight: 600; letter-spacing: -0.01em;
+    color: var(--text); margin-bottom: 10px;
+    display: flex; align-items: center; gap: 7px;
+  }
+  .detail-list { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+  .detail-list li {
+    font-size: 12.5px; color: var(--text2); line-height: 1.55;
+    padding-left: 16px; position: relative;
+  }
+  .detail-list li::before {
+    content: "›"; position: absolute; left: 0;
+    color: var(--text3); font-weight: 700; font-size: 14px; line-height: 1.3;
+  }
+  .detail-list li code {
+    font-family: 'DM Mono', 'SF Mono', monospace;
+    font-size: 11px;
+    background: var(--border);
+    padding: 1px 6px; border-radius: 4px;
+    color: var(--text);
+  }
+
+  .detail-footer {
+    padding: 10px 18px;
+    border-top: 1px solid var(--border);
+    display: flex; flex-wrap: wrap; gap: 6px;
+    background: var(--surface);
+  }
+  .badge {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+    padding: 3px 8px; border-radius: 5px;
+  }
+  .badge-req    { background: var(--red-bg);    color: var(--red-text); }
+  .badge-new    { background: var(--green-bg);  color: var(--green-text); }
+  .badge-ext    { background: var(--purple-bg); color: var(--purple-text); }
+  .badge-warn   { background: var(--orange-bg); color: var(--orange-text); }
+  .badge-info   { background: var(--blue-bg);   color: var(--blue-text); }
+
+  /* ── Flow row ── */
+  .flow-row {
+    display: flex; align-items: center; gap: 6px;
+    flex-wrap: wrap; margin: 10px 0;
+    padding: 10px 12px;
+    background: var(--surface);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+  }
+  .flow-node {
+    padding: 5px 10px; border-radius: 6px;
+    font-size: 11.5px; font-weight: 500; color: var(--text2);
+    background: var(--surface2); border: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .flow-arrow { color: var(--text3); font-size: 12px; }
+
+  /* ── Info callout ── */
+  .callout {
+    display: flex; gap: 10px; align-items: flex-start;
+    padding: 12px 14px;
+    background: var(--blue-bg);
+    border: 1px solid var(--blue-bdr);
+    border-radius: var(--radius-sm);
+    margin-bottom: 14px;
+    font-size: 12.5px; color: var(--blue-text); line-height: 1.55;
+  }
+  .callout-icon { font-size: 15px; flex-shrink: 0; margin-top: 1px; }
+
+  /* ── Section divider ── */
+  .divider {
+    height: 1px; background: var(--border); margin: 14px 0;
+  }
+
+  /* ── Summary card at bottom ── */
+  .summary-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 22px 24px;
+    box-shadow: var(--shadow-sm);
+  }
+  .summary-title {
+    font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 12px;
+    display: flex; align-items: center; gap: 7px;
+  }
+  .summary-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px;
+  }
+  .summary-item {
+    padding: 12px 14px; border-radius: var(--radius-sm);
+    background: var(--surface2); border: 1px solid var(--border);
+  }
+  .summary-item-label {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase;
+    color: var(--text3); margin-bottom: 4px;
+  }
+  .summary-item-value {
+    font-size: 14px; font-weight: 600; color: var(--text); letter-spacing: -0.01em;
+  }
+  .summary-item-sub {
+    font-size: 11px; color: var(--text2); margin-top: 2px;
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 600px) {
+    .header { padding: 0 16px; }
+    .hero, .content { padding-left: 16px; padding-right: 16px; }
+    .hero h1 { font-size: 24px; }
+    .build-order { display: none; }
+    .brand-sub { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="header">
+  <div class="header-inner">
+    <div class="header-brand">
+      <div class="brand-icon">A</div>
+      <span class="brand-name">ASOE</span>
+      <span class="brand-sep">·</span>
+      <span class="brand-sub">Outlook Email Integration — Requirements</span>
+    </div>
+    <div class="header-meta">
+      <div class="status-pill">
+        <span class="status-dot"></span>
+        Planning Phase
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- Hero -->
+<div class="hero">
+  <div class="eyebrow">Platform Capability Spec</div>
+  <h1>Outlook Email Integration</h1>
+  <p>Full requirements to add inbound Outlook email receiving and outbound email sending to the ASOE order intelligence platform — across 5 architectural layers.</p>
+  <div class="build-order">
+    <span style="font-size:11px;color:var(--text3);font-weight:600;margin-right:2px;">BUILD ORDER</span>
+    <div class="build-step"><span class="build-node">① Azure AD</span><span class="build-arrow">→</span></div>
+    <div class="build-step"><span class="build-node">② DB Migration</span><span class="build-arrow">→</span></div>
+    <div class="build-step"><span class="build-node">③ Token Auth</span><span class="build-arrow">→</span></div>
+    <div class="build-step"><span class="build-node">④ Graph Client</span><span class="build-arrow">→</span></div>
+    <div class="build-step"><span class="build-node">⑤ Email Sync</span><span class="build-arrow">→</span></div>
+    <div class="build-step"><span class="build-node">⑥ Send API</span><span class="build-arrow">→</span></div>
+    <div class="build-step"><span class="build-node">⑦ Frontend Tab</span></div>
+  </div>
+</div>
+
+<!-- Content -->
+<div class="content">
+
+  <!-- ── Layer 1: Azure AD ── -->
+  <div class="layer-card">
+    <div class="layer-header">
+      <div class="layer-icon" style="background:var(--blue-bg);">🔑</div>
+      <div class="layer-meta">
+        <div class="layer-num">Layer 1 · Do this first</div>
+        <div class="layer-title">Azure AD + OAuth 2.0 — Identity &amp; Permissions</div>
+        <div class="layer-desc">Everything else depends on this. Without an Azure App Registration and proper OAuth scopes, nothing can touch any mailbox.</div>
+      </div>
+    </div>
+    <div class="layer-body">
+      <div class="chips">
+        <span class="chip chip-blue" onclick="toggle('az1',this)"><span class="chip-dot"></span>App Registration</span>
+        <span class="chip chip-blue" onclick="toggle('az2',this)"><span class="chip-dot"></span>OAuth 2.0 Delegated Flow</span>
+        <span class="chip chip-blue" onclick="toggle('az3',this)"><span class="chip-dot"></span>Required Scopes</span>
+        <span class="chip chip-orange" onclick="toggle('az4',this)"><span class="chip-dot"></span>Token Storage (DB)</span>
+        <span class="chip chip-orange" onclick="toggle('az5',this)"><span class="chip-dot"></span>Token Refresh Service</span>
+      </div>
+
+      <div id="az1" class="detail-panel">
+        <div class="detail-inner">
+          <div class="detail-title">Azure App Registration</div>
+          <ul class="detail-list">
+            <li>Go to <code>portal.azure.com</code> → Azure Active Directory → App Registrations → New</li>
+            <li>Set redirect URI to your backend callback: <code>https://yourdomain.com/api/auth/outlook/callback</code></li>
+            <li>Generate a Client Secret — store in env as <code>AZURE_CLIENT_SECRET</code></li>
+            <li>Copy the Application (client) ID and Tenant ID into your <code>.env</code> file</li>
+          </ul>
+        </div>
+        <div class="detail-footer">
+          <span class="badge badge-req">Required First</span>
+          <span class="badge badge-ext">External — Azure Portal</span>
+        </div>
+      </div>
+
+      <div id="az2" class="detail-panel">
+        <div class="detail-inner">
+          <div class="detail-title">OAuth 2.0 Delegated Flow</div>
+          <div class="flow-row">
+            <span class="flow-node">User clicks "Connect Outlook"</span>
+            <span class="flow-arrow">→</span>
+            <span class="flow-node">Redirect to Microsoft login</span>
+            <span class="flow-arrow">→</span>
+            <span class="flow-node">User consents to scopes</span>
+            <span class="flow-arrow">→</span>
+            <span class="flow-node">Callback with auth code</span>
+            <span class="flow-arrow">→</span>
+            <span class="flow-node">Exchange for access + refresh token</span>
+          </div>
+          <ul class="detail-list">
+            <li>Use MSAL for Node.js: <code>npm install @azure/msal-node</code></li>
+            <li>Access tokens expire in 1 hour — store refresh tokens per-user in your DB</li>
+            <li>Implement a token refresh middleware that auto-renews before expiry</li>
+          </ul>
+        </div>
+        <div class="detail-footer">
+          <span class="badge badge-new">New route: /api/auth/outlook</span>
+        </div>
+      </div>
+
+      <div id="az3" class="detail-panel">
+        <div class="detail-inner">
+          <div class="detail-title">Required Microsoft Graph API Scopes</div>
+          <ul class="detail-list">
+            <li><code>Mail.Read</code> — read emails from the user's mailbox</li>
+            <li><code>Mail.Send</code> — send emails on behalf of the user</li>
+            <li><code>Mail.ReadWrite</code> — move emails, mark as read, update flags</li>
+            <li><code>offline_access</code> — required to receive refresh tokens (do not omit)</li>
+            <li>Optional: <code>MailboxSettings.Read</code> — for out-of-office/signature info</li>
+          </ul>
+        </div>
+        <div class="detail-footer">
+          <span class="badge badge-warn">Request minimum scopes only</span>
+        </div>
+      </div>
+
+      <div id="az4" class="detail-panel">
+        <div class="detail-inner">
+          <div class="detail-title">Token Storage — New DB Columns on users table</div>
+          <ul class="detail-list">
+            <li>Add: <code>outlook_access_token TEXT</code> — encrypted at rest (AES-256)</li>
+            <li>Add: <code>outlook_refresh_token TEXT</code> — encrypted, never expires unless revoked</li>
+            <li>Add: <code>outlook_token_expiry TIMESTAMPTZ</code></li>
+            <li>Add: <code>outlook_connected BOOLEAN DEFAULT false</code></li>
+            <li>Add: <code>outlook_email TEXT</code> — the connected mailbox address</li>
+            <li>Use <code>pgcrypto</code> or application-level AES-256 — never store plaintext tokens</li>
+          </ul>
+        </div>
+        <div class="detail-footer">
+          <span class="badge badge-req">DB Migration Required</span>
+        </div>
+      </div>
+
+      <div id="az5" class="detail-panel">
+        <div class="detail-inner">
+          <div class="detail-title">Token Refresh Service</div>
+          <ul class="detail-list">
+            <li>Create <code>src/middleware/outlookAuth.js</code></li>
+            <li>Before every Graph API call, check: <code>token_expiry &lt; now + 5min</code></li>
+            <li>If true, call Microsoft token endpoint with refresh token to get new access token</li>
+            <li>Update DB with new access token and expiry — completely transparent to the user</li>
+          </ul>
+        </div>
+        <div class="detail-footer">
+          <span class="badge badge-new">New Middleware File</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Layer 2: Backend ── -->
+  <div class="layer-card">
+    <div class="layer-header">
+      <div class="layer-icon" style="background:var(--green-bg);">⚙️</div>
+      <div class="layer-meta">
+        <div class="layer-num">Layer 2 · Core services</div>
+        <div class="layer-title">Backend — Node.js/Express Services</div>
+        <div class="layer-desc">New services, routes, and AI agent extensions within your existing Express API.</div>
+      </div>
+    </div>
+    <div class="layer-body">
+      <div class="chips">
+        <span class="chip chip-green"  onclick="toggle('be1',this)"><span class="chip-dot"></span>Microsoft Graph SDK</span>
+        <span class="chip chip-green"  onclick="toggle('be2',this)"><span class="chip-dot"></span>Email Sync Service</span>
+        <span class="chip chip-green"  onclick="toggle('be3',this)"><span class="chip-dot"></span>Webhook Subscription</span>
+        <span class="chip chip-green"  onclick="toggle('be4',this)"><span class="chip-dot"></span>Send Email API Routes</span>
+        <span class="chip chip-orange" onclick="toggle('be5',this)"><span class="chip-dot"></span>Order ↔ Email Linkage</span>
+        <span class="chip chip-teal"   onclick="toggle('be6',this)"><span class="chip-dot"></span>AI Email Agents</span>
+      </div>
+
+      <div id="be1" class="detail-panel">
+        <div class="detail-inner">
+          <div class="detail-title">Microsoft Graph SDK — Wrapper Service</div>
+          <ul class="detail-list">
+            <li>Install: <code>npm install @microsoft/microsoft-graph-client</code></li>
+            <li>Create <code>src/services/graphClient.js</code> — initializes client with user's access token</li>
+            <li>Exposes: <code>getMessages()</code>, <code>getMessage(id)</code>, <code>sendMessage()</code>, <code>replyMessage()</code></li>
+            <li>All Graph calls go through this service — never call the Graph API directly from route handlers</li>
+          </ul>
+        </div>
+        <div class="detail-footer">
+          <span class="badge badge-new">New: src/services/graphClient.js</span>
+        </div>
+      </div>
+
+      <div id="be2" class="detail-panel">
+        <div class="detail-inner">
+          <div class="detail-title">Email Sync Service — Two Strategies</div>
+          <ul class="detail-list">
+            <li><strong>Polling (simpler, MVP):</strong> Cron job every 2–5 min calls Graph API to fetch messages since last sync, upserts into DB. Use <code>node-cron</code> package.</li>
+            <li><strong>Webhooks (real-time):</strong> Subscribe to Graph change notifications — Microsoft POSTs to your endpoint when new mail arrives. Requires public HTTPS.</li>
+            <li>Recommendation: Start with polling for MVP, upgrade to webhooks post-launch</li>
+            <li>Create <code>src/services/emailSync.js</code> with the polling loop and last-sync-cursor in DB</li>
+          </ul>
+        </div>
+        <div class="detail-footer">
+          <span class="badge badge-new">New: src/services/emailSync.js</span>
+          <span class="badge badge-info">npm install node-cron</span>
+        </div>
+      </div>
+
+      <div id="be3" class="detail-panel">
+        <div class="detail-inner">
+          <div class="detail-title">Webhook Subscription (real-time option)</div>
+          <ul class="detail-list">
+            <li>POST to <code>https://graph.microsoft.com/v1.0/subscriptions</code> with changeType: <code>"created,updated"</code></li>
+            <li>Set notificationUrl to <code>https://yourdomain.com/api/webhooks/outlook</code></li>
+            <li>Subscriptions expire in 3 days — need a renewal cron to re-subscribe automatically</li>
+            <li>Microsoft sends a validation token first — your endpoint must echo it back within 10 seconds</li>
+            <li>Validate incoming calls with the webhook HMAC secret before processing payload</li>
+          </ul>
+        </div>
+        <div class="detail-footer">
+          <span class="badge badge-req">Requires Public HTTPS URL</span>
+          <span class="badge badge-warn">Post-MVP complexity</span>
+        </div>
+      </div>
+
+      <div id="be4" class="detail-panel">
+        <div class="detail-inner">
+          <div class="detail-title">New API Routes</div>
+          <ul class="detail-list">
+            <li><code>GET  /api/emails</code> — paginated inbox with filters (unread, linked to order, direction)</li>
+            <li><code>GET  /api/emails/:id</code> — single email with full HTML body + attachments</li>
+            <li><code>POST /api/emails/send</code> — send new email via Graph API on behalf of user</li>
+            <li><code>POST /api/emails/:id/reply</code> — threaded reply, maintains Graph conversation ID</li>
+            <li><code>PATCH /api/emails/:id</code> — mark read/unread, flag, archive</li>
+            <li><code>POST /api/emails/:id/link-order</code> — associate email with a price hold order</li>
+          </ul>
+        </div>
+        <div class="detail-footer">
+          <span class="badge badge-new">6 New API Routes</span>
+        </div>
+      </div>
+
+      <div id="be5" class="detail-panel">
+        <div class="detail-inner">
+          <div class="detail-title">Order ↔ Email Linkage Logic</div>
+          <ul class="detail-list">
+            <li>During sync, run keyword extraction: match customer name, PO number, SKU against email subjects/bodies</li>
+            <li>Auto-suggest link if confidence &gt; 80% — user confirms in UI (never auto-link silently)</li>
+            <li>Store in <code>order_emails</code> junction table: <code>order_id, email_id, linked_by, linked_at, link_type</code></li>
+            <li>Linked emails surface inline on the existing order detail sidebar in ASOE</li>
+          </ul>
+        </div>
+        <div class="detail-footer">
+          <span class="badge badge-new">New Junction Table</span>
+          <span class="badge badge-info">Extends order detail sidebar</span>
+        </div>
+      </div>
+
+      <div id="be6" class="detail-panel">
+        <div class="detail-inner">
+          <div class="detail-title">AI Email Agents — Extensions to Existing Agent Layer</div>
+          <ul class="detail-list">
+            <li>New: <code>callEmailDraftAgent(order, email, tone)</code> — drafts customer-facing response using order context</li>
+            <li>New: <code>callEmailClassifyAgent(emailBody)</code> — classifies inbound email by root cause (PROMO_EXPIRED, EDI_MISMATCH, etc.)</li>
+            <li>Both route through your existing <code>/api/agent/*</code> proxy — no new Anthropic API key exposure</li>
+            <li>Track usage in the existing AI cost tracking table — no schema changes needed</li>
+            <li>Human always reviews AI drafts before sending — the agent drafts, never sends autonomously</li>
+          </ul>
+        </div>
+        <div class="detail-footer">
+          <span class="badge badge-new">Extends Existing Agent Layer</span>
+          <span class="badge badge-req">Human-in-loop Required</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Layer 3: Database ── -->
+  <div class="layer-card">
+    <div class="layer-header">
+      <div class="layer-icon" style="background:var(--purple-bg);">🗄️</div>
+      <div class="layer-meta">
+        <div class="layer-num">Layer 3 · Schema changes</div>
+        <div class="layer-title">Database — PostgreSQL Schema Changes</div>
+        <div class="layer-desc">3 new tables and 5 new columns on the existing users table. Write migrations before writing any service code.</div>
+      </div>
+    </div>
+    <div class="layer-body">
+      <div class="chips">
+        <span class="chip chip-purple" onclick="toggle('db1',this)"><span class="chip-dot"></span>emails table</span>
+        <span class="chip chip-purple" onclick="toggle('db2',this)"><span class="chip-dot"></span>email_threads table</span>
+        <span class="chip chip-purple" onclick="toggle('db3',this)"><span class="chip-dot"></span>order_emails junction</span>
+        <span class="chip chip-gray"   onclick="toggle('db4',this)"><span class="chip-dot"></span>users table updates</span>
+      </div>
+
+      <div id="db1" class="detail-panel">
+        <div class="detail-inner">
+          <div class="detail-title">New Table: emails</div>
+          <ul class="detail-list">
+            <li><code>id UUID PRIMARY KEY</code></li>
+            <li><code>graph_message_id TEXT UNIQUE</code> — Microsoft's message ID (for deduplication)</li>
+            <li><code>thread_id TEXT</code> — Graph conversation ID</li>
+            <li><code>user_id UUID REFERENCES users</code>, <code>org_id UUID REFERENCES organizations</code></li>
+            <li><code>from_email TEXT</code>, <code>from_name TEXT</code></li>
+            <li><code>to_emails TEXT[]</code>, <code>cc_emails TEXT[]</code></li>
+            <li><code>subject TEXT</code>, <code>body_html TEXT</code>, <code>body_text TEXT</code></li>
+            <li><code>received_at TIMESTAMPTZ</code>, <code>is_read BOOLEAN</code>, <code>has_attachments BOOLEAN</code></li>
+            <li><code>direction TEXT CHECK (direction IN ('inbound','outbound'))</code></li>
+            <li><code>ai_classification TEXT</code> — root cause category from classify agent</li>
+            <li><code>created_at TIMESTAMPTZ DEFAULT NOW()</code></li>
+          </ul>
+        </div>
+        <div class="detail-footer">
+          <span class="badge badge-new">New Table</span>
+        </div>
+      </div>
+
+      <div id="db2" class="detail-panel">
+        <div class="detail-inner">
+          <div class="detail-title">New Table: email_threads (conversation grouping)</div>
+          <ul class="detail-list">
+            <li><code>id UUID PRIMARY KEY</code></li>
+            <li><code>graph_conversation_id TEXT UNIQUE</code></li>
+            <li><code>subject TEXT</code>, <code>participant_emails TEXT[]</code></li>
+            <li><code>last_message_at TIMESTAMPTZ</code>, <code>message_count INTEGER</code></li>
+            <li><code>linked_order_id UUID REFERENCES price_hold_orders</code> (nullable)</li>
+          </ul>
+        </div>
+        <div class="detail-footer">
+          <span class="badge badge-new">New Table</span>
+        </div>
+      </div>
+
+      <div id="db3" class="detail-panel">
+        <div class="detail-inner">
+          <div class="detail-title">New Table: order_emails (junction)</div>
+          <ul class="detail-list">
+            <li><code>order_id UUID REFERENCES price_hold_orders</code></li>
+            <li><code>email_id UUID REFERENCES emails</code></li>
+            <li><code>linked_by UUID REFERENCES users</code></li>
+            <li><code>linked_at TIMESTAMPTZ DEFAULT NOW()</code></li>
+            <li><code>link_type TEXT</code> — e.g. <code>'customer_inquiry'</code>, <code>'vendor_notice'</code>, <code>'internal'</code></li>
+            <li><code>PRIMARY KEY (order_id, email_id)</code></li>
+          </ul>
+        </div>
+        <div class="detail-footer">
+          <span class="badge badge-new">New Junction Table</span>
+        </div>
+      </div>
+
+      <div id="db4" class="detail-panel">
+        <div class="detail-inner">
+          <div class="detail-title">Updates to Existing users Table</div>
+          <ul class="detail-list">
+            <li>Add <code>outlook_access_token TEXT</code> — encrypted at rest</li>
+            <li>Add <code>outlook_refresh_token TEXT</code> — encrypted, long-lived</li>
+            <li>Add <code>outlook_token_expiry TIMESTAMPTZ</code></li>
+            <li>Add <code>outlook_connected BOOLEAN DEFAULT false</code></li>
+            <li>Add <code>outlook_email TEXT</code> — the connected mailbox address</li>
+          </ul>
+        </div>
+        <div class="detail-footer">
+          <span class="badge badge-req">Migration on Existing Table</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Layer 4: Frontend ── -->
+  <div class="layer-card">
+    <div class="layer-header">
+      <div class="layer-icon" style="background:var(--orange-bg);">🖥️</div>
+      <div class="layer-meta">
+        <div class="layer-num">Layer 4 · React UI</div>
+        <div class="layer-title">Frontend — React UI Components</div>
+        <div class="layer-desc">New Mailbox tab, inbox layout, compose modal, and email panel additions to the existing order sidebar.</div>
+      </div>
+    </div>
+    <div class="layer-body">
+      <div class="chips">
+        <span class="chip chip-orange" onclick="toggle('fe1',this)"><span class="chip-dot"></span>Mailbox Tab</span>
+        <span class="chip chip-orange" onclick="toggle('fe2',this)"><span class="chip-dot"></span>Inbox List View</span>
+        <span class="chip chip-orange" onclick="toggle('fe3',this)"><span class="chip-dot"></span>Email Thread Viewer</span>
+        <span class="chip chip-orange" onclick="toggle('fe4',this)"><span class="chip-dot"></span>Compose / Reply Modal</span>
+        <span class="chip chip-orange" onclick="toggle('fe5',this)"><span class="chip-dot"></span>Order Email Panel</span>
+        <span class="chip chip-teal"   onclick="toggle('fe6',this)"><span class="chip-dot"></span>Outlook Connect Button</span>
+      </div>
+
+      <div id="fe1" class="detail-panel">
+        <div class="detail-inner">
+          <div class="detail-title">New Mailbox Tab</div>
+          <ul class="detail-list">
+            <li>Add a 4th tab to the existing ASOE tab bar alongside "Orders", "Insights", "Activity Log"</li>
+            <li>Label: <code>Mailbox (3)</code> with live unread badge count from backend</li>
+            <li>Two-pane layout: left pane = paginated email list, right pane = selected email thread</li>
+          </ul>
+        </div>
+        <div class="detail-footer">
+          <span class="badge badge-new">New Tab in Existing Tab Bar</span>
+        </div>
+      </div>
+
+      <div id="fe2" class="detail-panel">
+        <div class="detail-inner">
+          <div class="detail-title">Inbox List View</div>
+          <ul class="detail-list">
+            <li>Paginated list: sender initials avatar, subject, preview snippet, received timestamp</li>
+            <li>Filter pills: All · Unread · Linked to Order · Inbound · Outbound</li>
+            <li>AI classification badge per row — PROMO_EXPIRED chip, EDI_MISMATCH chip, etc.</li>
+            <li>Unread rows: <code>font-weight: 600</code>; read rows: <code>font-weight: 400</code></li>
+            <li>Linked orders shown as a small PO number chip inline with each email row</li>
+          </ul>
+        </div>
+      </div>
+
+      <div id="fe3" class="detail-panel">
+        <div class="detail-inner">
+          <div class="detail-title">Email Thread Viewer</div>
+          <ul class="detail-list">
+            <li>Stacked conversation bubbles grouped by date</li>
+            <li>Inbound: left-aligned with sender info; Outbound: right-aligned in brand color</li>
+            <li>HTML body rendered in a sandboxed <code>&lt;iframe&gt;</code> — never <code>dangerouslySetInnerHTML</code></li>
+            <li>Attachment list at the bottom with download links</li>
+            <li>Action bar: Reply · Forward · Link to Order · Draft with AI</li>
+          </ul>
+        </div>
+        <div class="detail-footer">
+          <span class="badge badge-req">Sandboxed iframe — Security Critical</span>
+        </div>
+      </div>
+
+      <div id="fe4" class="detail-panel">
+        <div class="detail-inner">
+          <div class="detail-title">Compose / Reply Modal</div>
+          <ul class="detail-list">
+            <li>To/CC fields with typeahead from customer contacts in DB</li>
+            <li>Subject auto-populated for replies (<code>Re: …</code>)</li>
+            <li>Rich text editor — use <code>react-quill</code> or <code>tiptap</code> (lightweight)</li>
+            <li>"Draft with AI" button — calls AI draft agent with current order context, inserts into editor for human review</li>
+            <li>Human always reviews and clicks Send — AI only drafts, never sends autonomously</li>
+          </ul>
+        </div>
+        <div class="detail-footer">
+          <span class="badge badge-req">Human-in-loop — AI Drafts Only</span>
+          <span class="badge badge-info">npm install react-quill</span>
+        </div>
+      </div>
+
+      <div id="fe5" class="detail-panel">
+        <div class="detail-inner">
+          <div class="detail-title">Order Email Panel — Sidebar Addition</div>
+          <ul class="detail-list">
+            <li>Add an "Emails" section to the existing ASOE order detail sidebar</li>
+            <li>Shows linked emails: subject + timestamp, expandable inline preview</li>
+            <li>"Compose Email" button opens compose modal pre-filled with order + customer context</li>
+            <li>Keeps email communication tightly coupled to each PO — no context switching for the user</li>
+          </ul>
+        </div>
+        <div class="detail-footer">
+          <span class="badge badge-new">Extends Existing Order Sidebar</span>
+        </div>
+      </div>
+
+      <div id="fe6" class="detail-panel">
+        <div class="detail-inner">
+          <div class="detail-title">Outlook Connect Button — User Settings</div>
+          <ul class="detail-list">
+            <li>Add to user profile/settings page: "Connect your Outlook mailbox"</li>
+            <li>Once connected, shows the connected email address with a "Disconnect" option</li>
+            <li>Each ASOE user connects their own individual Outlook account (delegated auth — not shared mailbox)</li>
+            <li>Disconnecting revokes the refresh token via Graph API and clears tokens from DB</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Layer 5: Security / Ops ── -->
+  <div class="layer-card">
+    <div class="layer-header">
+      <div class="layer-icon" style="background:var(--red-bg);">🔒</div>
+      <div class="layer-meta">
+        <div class="layer-num">Layer 5 · Security &amp; ops</div>
+        <div class="layer-title">Security, Env Vars &amp; Deployment</div>
+        <div class="layer-desc">New environment variables, encryption requirements, and Docker/deployment notes.</div>
+      </div>
+    </div>
+    <div class="layer-body">
+      <div class="chips">
+        <span class="chip chip-red"  onclick="toggle('sec1',this)"><span class="chip-dot"></span>New .env Variables</span>
+        <span class="chip chip-red"  onclick="toggle('sec2',this)"><span class="chip-dot"></span>Security Requirements</span>
+        <span class="chip chip-gray" onclick="toggle('sec3',this)"><span class="chip-dot"></span>Docker / Deployment Notes</span>
+      </div>
+
+      <div id="sec1" class="detail-panel">
+        <div class="detail-inner">
+          <div class="detail-title">New Environment Variables</div>
+          <ul class="detail-list">
+            <li><code>AZURE_CLIENT_ID</code> — from Azure App Registration</li>
+            <li><code>AZURE_CLIENT_SECRET</code> — from Azure App Registration (never expose client-side)</li>
+            <li><code>AZURE_TENANT_ID</code> — your org's tenant ID, or <code>"common"</code> for multi-tenant</li>
+            <li><code>AZURE_REDIRECT_URI</code> — your OAuth callback URL</li>
+            <li><code>TOKEN_ENCRYPTION_KEY</code> — 32-byte key for encrypting stored tokens in DB</li>
+            <li><code>WEBHOOK_SECRET</code> — to validate incoming Microsoft Graph webhook calls</li>
+          </ul>
+        </div>
+        <div class="detail-footer">
+          <span class="badge badge-req">Add to .env.example</span>
+        </div>
+      </div>
+
+      <div id="sec2" class="detail-panel">
+        <div class="detail-inner">
+          <div class="detail-title">Security Requirements</div>
+          <ul class="detail-list">
+            <li>Encrypt access + refresh tokens at rest using AES-256 — never store plaintext</li>
+            <li>Scope the OAuth consent to the minimum required permissions only</li>
+            <li>Render all email HTML bodies in sandboxed iframes — prevents XSS from attacker-crafted emails</li>
+            <li>Rate limit the email send endpoint: max 20 sends per user per hour</li>
+            <li>Audit log every sent email: sender, recipients, timestamp, linked order ID</li>
+            <li>Webhook endpoint must validate Microsoft's HMAC signature before processing any payload</li>
+          </ul>
+        </div>
+        <div class="detail-footer">
+          <span class="badge badge-req">Non-negotiable before production</span>
+        </div>
+      </div>
+
+      <div id="sec3" class="detail-panel">
+        <div class="detail-inner">
+          <div class="detail-title">Docker &amp; Deployment</div>
+          <ul class="detail-list">
+            <li>Add email sync cron as a separate worker container in <code>docker-compose.yml</code>, or run inside the API container with <code>node-cron</code> (simpler for MVP)</li>
+            <li>Webhook endpoint requires a public HTTPS URL — update nginx/Traefik config accordingly</li>
+            <li>Add all 6 new env vars to your deployment secrets manager (Railway, Render, Fly.io, etc.)</li>
+            <li>Graph webhook subscriptions expire every 3 days — add a renewal cron job to avoid silent gaps</li>
+          </ul>
+        </div>
+        <div class="detail-footer">
+          <span class="badge badge-warn">Webhook renewal cron required</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Summary -->
+  <div class="summary-card">
+    <div class="summary-title">📊 Build Scope at a Glance</div>
+    <div class="summary-grid">
+      <div class="summary-item">
+        <div class="summary-item-label">New Tables</div>
+        <div class="summary-item-value">3</div>
+        <div class="summary-item-sub">emails, email_threads, order_emails</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-item-label">DB Migrations</div>
+        <div class="summary-item-value">+5 cols</div>
+        <div class="summary-item-sub">Added to existing users table</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-item-label">New API Routes</div>
+        <div class="summary-item-value">6</div>
+        <div class="summary-item-sub">Plus 2 new OAuth routes</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-item-label">New Service Files</div>
+        <div class="summary-item-value">3</div>
+        <div class="summary-item-sub">graphClient, emailSync, outlookAuth</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-item-label">New AI Agents</div>
+        <div class="summary-item-value">2</div>
+        <div class="summary-item-sub">Email draft + email classify</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-item-label">New env vars</div>
+        <div class="summary-item-value">6</div>
+        <div class="summary-item-sub">All Azure / encryption keys</div>
+      </div>
+    </div>
+    <div style="margin-top:14px;padding:12px 14px;border-radius:var(--radius-sm);background:var(--surface2);border:1px solid var(--border);font-size:12px;color:var(--text2);line-height:1.6;">
+      <strong style="color:var(--text)">Recommended build order:</strong> Azure AD setup → DB migration → Token auth middleware → Graph client service → Email sync cron → Send/receive API routes → Frontend Mailbox tab → Order sidebar email panel.
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const openPanels = {};
+
+  function toggle(id, chip) {
+    const panel = document.getElementById(id);
+    const isOpen = panel.classList.contains('open');
+
+    // Close all open panels
+    document.querySelectorAll('.detail-panel.open').forEach(p => p.classList.remove('open'));
+    document.querySelectorAll('.chip.active').forEach(c => c.classList.remove('active'));
+
+    if (!isOpen) {
+      panel.classList.add('open');
+      if (chip) chip.classList.add('active');
+      // Smooth scroll into view if needed
+      setTimeout(() => {
+        panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }, 50);
+    }
+  }
+</script>
+</body>
+</html>
