@@ -24,6 +24,10 @@ x-core-env: &core-env
   PYTHONUNBUFFERED: "1"
   ASOE_KILL_SWITCH: "${ASOE_KILL_SWITCH:-0}"
   ASOE_EXPLAIN_MODE: "${ASOE_EXPLAIN_MODE:-0}"
+  # Runtime proxy (optional — set in .env or shell)
+  HTTP_PROXY: "${HTTP_PROXY:-}"
+  HTTPS_PROXY: "${HTTPS_PROXY:-}"
+  NO_PROXY: "${NO_PROXY:-}"
 
 services:
 
@@ -34,7 +38,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.core
-    image: asoe-core:local
+      args:
+        HTTP_PROXY: "${HTTP_PROXY:-}"
+        HTTPS_PROXY: "${HTTPS_PROXY:-}"
+        NO_PROXY: "${NO_PROXY:-}"
+    image: ${ASOE_IMAGE_REPO:-asoe-core}:${ASOE_IMAGE_TAG:-local}
     environment:
       <<: *core-env
       USE_OUTLINES_BACKEND: "0"
@@ -62,7 +70,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.ui
-    image: asoe-ui:local
+      args:
+        HTTP_PROXY: "${HTTP_PROXY:-}"
+        HTTPS_PROXY: "${HTTPS_PROXY:-}"
+        NO_PROXY: "${NO_PROXY:-}"
+    image: ${ASOE_UI_IMAGE_REPO:-asoe-ui}:${ASOE_UI_IMAGE_TAG:-local}
     environment:
       <<: *core-env
       SANDBOX_DB_PATH: "/app/tests/sandbox/sandbox.db"
@@ -102,7 +114,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.inference
-    image: asoe-inference:local
+      args:
+        HTTP_PROXY: "${HTTP_PROXY:-}"
+        HTTPS_PROXY: "${HTTPS_PROXY:-}"
+        NO_PROXY: "${NO_PROXY:-}"
+    image: ${ASOE_INFERENCE_IMAGE_REPO:-asoe-inference}:${ASOE_INFERENCE_IMAGE_TAG:-local}
     environment:
       <<: *core-env
       USE_OUTLINES_BACKEND: "1"
