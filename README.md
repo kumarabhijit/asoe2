@@ -63,19 +63,21 @@ No GPU or optional packages required for development or testing.
 ### Install
 
 ```bash
-# 1. Install Python 3.14.3 (if not already present)
+# 1. Update uv
+uv self update 
+# 2. Install Python 3.14.3 (if not already present)
 uv python install 3.14.3
 
-# 2. Create virtual environment
+# 3. Create virtual environment
 uv venv --python 3.14.3
 
-# 3. Install core + dev dependencies
+# 4. Install core + dev dependencies
 uv pip install "langgraph>=0.2.0" "pydantic>=2.7.0" "pytest>=8.0.0" "pytest-cov>=5.0.0"
 
-# 4. Apply compatibility patch (pydantic 2.12.x + Python 3.14 typing API change)
+# 5. Apply compatibility patch (pydantic 2.12.x + Python 3.14 typing API change)
 bash scripts/apply-patches.sh .venv/bin/python
 
-# 5. Activate the environment
+# 6. Activate the environment
 source .venv/bin/activate
 ```
 
