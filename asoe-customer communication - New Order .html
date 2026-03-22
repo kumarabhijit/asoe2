@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ASOE — Email Order Extraction</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { min-height: 100vh; background: #f5f5f7; font-family: -apple-system, 'SF Pro Text', BlinkMacSystemFont, 'Inter', system-ui, sans-serif; color: #1d1d1f; font-size: 14px; }
+    body { padding: 24px; }
+    /* Override sendPrompt - disable it gracefully in standalone */
+  </style>
+</head>
+<body>
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, 'SF Pro Text', BlinkMacSystemFont, system-ui, sans-serif; }
+  .wrap { max-width: 900px; padding: 0 0 2rem; }
+  .stage-bar { display: flex; gap: 0; margin-bottom: 2rem; border: 0.5px solid #d2d2d7; border-radius: 12px; overflow: hidden; }
+  .stage { flex: 1; padding: 10px 6px; font-size: 11px; font-weight: 500; text-align: center; cursor: pointer; border-right: 0.5px solid #d2d2d7; background: #f5f5f7; color: #6e6e73; transition: background 0.15s, color 0.15s; line-height: 1.3; }
+  .stage:last-child { border-right: none; }
+  .stage.active { background: #ffffff; color: #1a73e8; }
+  .stage .num { display: block; font-size: 15px; font-weight: 500; margin-bottom: 2px; color: #aeaeb2; }
+  .stage.active .num { color: #1a73e8; }
+  .stage.done .num { color: #137333; }
+  .stage.done { color: #137333; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* Phase 1: Inbox */
+  .inbox-email { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-bottom: 0.5px solid #d2d2d7; cursor: pointer; border-radius: 0; background: #ffffff; transition: background 0.1s; }
+  .inbox-email:hover { background: #f5f5f7; }
+  .inbox-email.selected { background: #e8f0fe; }
+  .avatar { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; flex-shrink: 0; }
+  .intent-pill { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 99px; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+
+  /* Phase 2: Extraction */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .panel-card { background: #ffffff; border: 0.5px solid #d2d2d7; border-radius: 12px; overflow: hidden; }
+  .panel-head { padding: 10px 14px; border-bottom: 0.5px solid #d2d2d7; font-size: 12px; font-weight: 500; color: #6e6e73; display: flex; align-items: center; gap: 8px; background: #f5f5f7; }
+  .email-body { padding: 14px; font-size: 12px; line-height: 1.7; color: #1d1d1f; }
+  .hl { display: inline; padding: 1px 0; border-radius: 2px; }
+  .hl-green { background: #e6f4ea; color: #137333; }
+  .hl-blue  { background: #e8f0fe;    color: #1a73e8; }
+  .hl-amber { background: #fef7e0; color: #b06000; }
+
+  .field-row { display: grid; grid-template-columns: 110px 1fr 56px 22px; gap: 8px; align-items: center; padding: 8px 14px; border-bottom: 0.5px solid #d2d2d7; font-size: 12px; }
+  .field-row:last-child { border-bottom: none; }
+  .field-label { color: #6e6e73; font-size: 11px; }
+  .field-val { font-weight: 500; color: #1d1d1f; display: flex; align-items: center; gap: 5px; }
+  .field-val input { font-family: inherit; font-size: 12px; font-weight: 500; border: 0.5px solid #b0b0b5; border-radius: 5px; padding: 3px 7px; background: #f5f5f7; color: #1d1d1f; width: 100%; outline: none; }
+  .field-val input:focus { border-color: #1a73e8; background: #e8f0fe; }
+  .conf { font-size: 10px; font-weight: 500; padding: 2px 6px; border-radius: 99px; text-align: center; white-space: nowrap; }
+  .conf-hi  { background: #e6f4ea; color: #137333; }
+  .conf-mid { background: #fef7e0; color: #b06000; }
+  .conf-lo  { background: #fce8e6;  color: #c5221f; }
+  .edit-btn { font-size: 11px; color: #1a73e8; cursor: pointer; background: none; border: none; padding: 2px; border-radius: 4px; font-family: inherit; }
+  .edit-btn:hover { background: #e8f0fe; }
+  .src-pill { font-size: 10px; padding: 1px 6px; border-radius: 99px; background: #f5f5f7; color: #aeaeb2; border: 0.5px solid #d2d2d7; }
+  .section-head { padding: 8px 14px 4px; font-size: 10px; font-weight: 500; color: #aeaeb2; letter-spacing: 0.06em; text-transform: uppercase; background: #f5f5f7; border-bottom: 0.5px solid #d2d2d7; }
+  .conflict { background: #fef7e0; border-left: 2px solid #b06000; }
+  .missing  { background: #fce8e6; }
+  .action-bar { display: flex; justify-content: space-between; align-items: center; padding: 12px 0 0; gap: 10px; }
+  .btn { font-family: inherit; font-size: 12px; font-weight: 500; padding: 8px 18px; border-radius: 8px; cursor: pointer; border: 0.5px solid #b0b0b5; background: #ffffff; color: #1d1d1f; transition: background 0.1s; }
+  .btn:hover { background: #f5f5f7; }
+  .btn-primary { background: #e8f0fe; color: #1a73e8; border-color: #1a73e8; }
+  .btn-primary:hover { opacity: 0.85; }
+  .btn-success { background: #e6f4ea; color: #137333; border-color: #137333; }
+  .warning-box { background: #fef7e0; border: 0.5px solid #b06000; border-radius: 8px; padding: 10px 12px; font-size: 12px; color: #b06000; display: flex; gap: 8px; align-items: flex-start; margin-bottom: 12px; }
+  .err-box { background: #fce8e6; border: 0.5px solid #c5221f; border-radius: 8px; padding: 10px 12px; font-size: 12px; color: #c5221f; display: flex; gap: 8px; align-items: flex-start; margin-bottom: 12px; }
+
+  /* Phase 3: JSON output */
+  .json-box { background: #f5f5f7; border: 0.5px solid #d2d2d7; border-radius: 8px; padding: 14px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px; line-height: 1.7; overflow-x: auto; color: #1d1d1f; }
+  .jk { color: #1a73e8; }
+  .jv { color: #137333; }
+  .jn { color: #b06000; }
+  .jc { color: #aeaeb2; font-style: italic; }
+  .erp-option { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border: 0.5px solid #d2d2d7; border-radius: 8px; cursor: pointer; background: #ffffff; margin-bottom: 8px; transition: border-color 0.1s; }
+  .erp-option:hover { border-color: #1a73e8; }
+  .erp-option.selected { border-color: #1a73e8; background: #e8f0fe; }
+  .erp-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+
+  /* Edge cases panel */
+  .edge-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .edge-card { background: #ffffff; border: 0.5px solid #d2d2d7; border-radius: 8px; padding: 12px 14px; }
+  .edge-title { font-size: 12px; font-weight: 500; margin-bottom: 5px; color: #1d1d1f; }
+  .edge-desc { font-size: 11px; color: #6e6e73; line-height: 1.55; }
+  .tag { display: inline-block; font-size: 10px; font-weight: 500; padding: 1px 7px; border-radius: 99px; margin-bottom: 5px; }
+  .tag-warn { background: #fef7e0; color: #b06000; }
+  .tag-err  { background: #fce8e6;  color: #c5221f;  }
+  .tag-info { background: #e8f0fe;    color: #1a73e8;    }
+  .tag-ok   { background: #e6f4ea; color: #137333; }
+</style>
+
+<div class="wrap">
+
+  <!-- Stage nav -->
+  <div class="stage-bar" id="stageBar">
+    <div class="stage active" onclick="goStage(0)"><span class="num">01</span>Inbox &amp; Intent</div>
+    <div class="stage" onclick="goStage(1)"><span class="num">02</span>Extract &amp; Review</div>
+    <div class="stage" onclick="goStage(2)"><span class="num">03</span>Confirm &amp; Send</div>
+    <div class="stage" onclick="goStage(3)"><span class="num">04</span>Edge Cases</div>
+  </div>
+
+  <!-- \u2500\u2500 PHASE 1: Inbox \u2500\u2500 -->
+  <div class="panel active" id="p0">
+    <div style="display:grid;grid-template-columns:280px 1fr;gap:12px;">
+
+      <!-- Left: email list -->
+      <div class="panel-card">
+        <div class="panel-head">
+          <span style="font-size:14px;">\u2709</span> Mailbox \u00b7 Price Hold Queue
+          <span style="margin-left:auto;background:#fce8e6;color:#c5221f;font-size:10px;padding:1px 6px;border-radius:99px;">4 new</span>
+        </div>
+        <div class="inbox-email selected">
+          <div class="avatar" style="background:#e8f0fe;color:#1a73e8;">WM</div>
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;font-weight:500;">buyer@walmart.com</span><span style="font-size:10px;color:#aeaeb2;">9:04 AM</span></div>
+            <div style="font-size:11px;font-weight:500;margin-top:1px;">PO 88421 \u2014 Cola 12pk reorder</div>
+            <div style="font-size:11px;color:#6e6e73;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Please find attached our purchase order for\u2026</div>
+            <div style="margin-top:5px;display:flex;gap:4px;flex-wrap:wrap;">
+              <span class="intent-pill" style="background:#e6f4ea;color:#137333;"><span class="dot" style="background:#137333;"></span>Purchase Order</span>
+              <span class="src-pill">PDF</span><span class="src-pill">2 attachments</span>
+            </div>
+          </div>
+        </div>
+        <div class="inbox-email">
+          <div class="avatar" style="background:#fef7e0;color:#b06000;">KR</div>
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;font-weight:500;">orders@kroger.com</span><span style="font-size:10px;color:#aeaeb2;">8:31 AM</span></div>
+            <div style="font-size:11px;font-weight:500;margin-top:1px;">Weekly replenishment \u2014 see attached</div>
+            <div style="font-size:11px;color:#6e6e73;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Attached is our weekly replenishment order\u2026</div>
+            <div style="margin-top:5px;display:flex;gap:4px;flex-wrap:wrap;">
+              <span class="intent-pill" style="background:#e6f4ea;color:#137333;"><span class="dot" style="background:#137333;"></span>Purchase Order</span>
+              <span class="src-pill">Excel</span>
+            </div>
+          </div>
+        </div>
+        <div class="inbox-email">
+          <div class="avatar" style="background:#f5f5f7;color:#6e6e73;">TG</div>
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;font-weight:500;">ops@target.com</span><span style="font-size:10px;color:#aeaeb2;">7:58 AM</span></div>
+            <div style="font-size:11px;font-weight:500;margin-top:1px;">Question about invoice #3310</div>
+            <div style="font-size:11px;color:#6e6e73;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Hi, we had a question about the pricing on\u2026</div>
+            <div style="margin-top:5px;display:flex;gap:4px;flex-wrap:wrap;">
+              <span class="intent-pill" style="background:#fef7e0;color:#b06000;"><span class="dot" style="background:#b06000;"></span>Price Dispute</span>
+            </div>
+          </div>
+        </div>
+        <div class="inbox-email">
+          <div class="avatar" style="background:#fce8e6;color:#c5221f;">CC</div>
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;font-weight:500;">costco-merch@costco.com</span><span style="font-size:10px;color:#aeaeb2;">7:22 AM</span></div>
+            <div style="font-size:11px;font-weight:500;margin-top:1px;">Duplicate \u2014 see PO 5521 &amp; 5525</div>
+            <div style="font-size:11px;color:#6e6e73;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Resending our order as the first email\u2026</div>
+            <div style="margin-top:5px;display:flex;gap:4px;flex-wrap:wrap;">
+              <span class="intent-pill" style="background:#fce8e6;color:#c5221f;"><span class="dot" style="background:#c5221f;"></span>Possible Duplicate</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: intent breakdown -->
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <div class="panel-card">
+          <div class="panel-head"><span style="font-size:14px;">\u25ce</span> Intent Analysis \u00b7 buyer@walmart.com</div>
+          <div style="padding:14px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+            <div style="background:#e6f4ea;border-radius:8px;padding:12px;text-align:center;">
+              <div style="font-size:22px;font-weight:500;color:#137333;">97%</div>
+              <div style="font-size:11px;color:#137333;margin-top:2px;">Purchase Order</div>
+            </div>
+            <div style="background:#f5f5f7;border-radius:8px;padding:12px;text-align:center;">
+              <div style="font-size:22px;font-weight:500;color:#aeaeb2;">2%</div>
+              <div style="font-size:11px;color:#aeaeb2;margin-top:2px;">Price Inquiry</div>
+            </div>
+            <div style="background:#f5f5f7;border-radius:8px;padding:12px;text-align:center;">
+              <div style="font-size:22px;font-weight:500;color:#aeaeb2;">1%</div>
+              <div style="font-size:11px;color:#aeaeb2;margin-top:2px;">Other</div>
+            </div>
+          </div>
+          <div style="padding:0 14px 14px;">
+            <div style="font-size:11px;color:#6e6e73;line-height:1.6;background:#f5f5f7;border-radius:8px;padding:10px 12px;">
+              <strong style="color:#1d1d1f;">Signals detected:</strong> Subject contains "PO", sender domain matches known customer, email body references SKU numbers and quantities, PDF attachment named "PO_88421.pdf", structured tabular data in attachment.
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <div class="panel-head"><span style="font-size:14px;">\u25c8</span> Source Inventory</div>
+          <div style="padding:14px;display:flex;flex-direction:column;gap:8px;">
+            <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border:0.5px solid #d2d2d7;border-radius:8px;">
+              <span style="font-size:16px;">\u2709</span>
+              <div style="flex:1;"><div style="font-size:12px;font-weight:500;">Email body</div><div style="font-size:11px;color:#6e6e73;">Plain text \u00b7 3 order signals found</div></div>
+              <span class="conf conf-hi">High</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border:0.5px solid #d2d2d7;border-radius:8px;">
+              <span style="font-size:16px;">\ud83d\udcc4</span>
+              <div style="flex:1;"><div style="font-size:12px;font-weight:500;">PO_88421.pdf</div><div style="font-size:11px;color:#6e6e73;">PDF \u00b7 Structured table \u00b7 12 fields</div></div>
+              <span class="conf conf-hi">High</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border:0.5px solid #d2d2d7;border-radius:8px;">
+              <span style="font-size:16px;">\ud83d\uddbc</span>
+              <div style="flex:1;"><div style="font-size:12px;font-weight:500;">label_scan.jpg</div><div style="font-size:11px;color:#6e6e73;">Image \u00b7 OCR \u00b7 Low legibility warning</div></div>
+              <span class="conf conf-lo">Low</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;">
+          <button class="btn btn-primary" onclick="goStage(1)">Extract Order Data \u2192</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- \u2500\u2500 PHASE 2: Extract & Review \u2500\u2500 -->
+  <div class="panel" id="p1">
+    <div class="warning-box" style="margin-bottom:12px;">
+      <span style="font-size:14px;flex-shrink:0;">\u26a0</span>
+      <div><strong>Conflict detected:</strong> Delivery date differs between email body ("Jan 15") and PDF attachment ("01/22/2025"). Review and confirm before proceeding.</div>
+    </div>
+
+    <div class="two-col" style="gap:12px;margin-bottom:12px;">
+      <!-- Source panel -->
+      <div class="panel-card">
+        <div class="panel-head">
+          <span style="font-size:14px;">\ud83d\udcc4</span> Source \u00b7 PO_88421.pdf
+          <div style="margin-left:auto;display:flex;gap:6px;">
+            <span class="src-pill" style="cursor:pointer;color:#1a73e8;">Email body</span>
+            <span class="src-pill" style="cursor:pointer;background:#e8f0fe;color:#1a73e8;border-color:#1a73e8;">PDF</span>
+            <span class="src-pill" style="cursor:pointer;">Image</span>
+          </div>
+        </div>
+        <div class="email-body">
+          <div style="font-size:10px;color:#aeaeb2;margin-bottom:10px;padding:5px 8px;background:#f5f5f7;border-radius:4px;">PURCHASE ORDER \u2014 Walmart Inc. \u00b7 Supplier: Acme CPG Ltd.</div>
+          <table style="width:100%;border-collapse:collapse;font-size:11px;">
+            <tr style="background:#f5f5f7;">
+              <td style="padding:5px 8px;font-weight:500;">PO Number</td>
+              <td style="padding:5px 8px;"><span class="hl hl-green">PO-88421</span></td>
+              <td style="padding:5px 8px;font-weight:500;">Date</td>
+              <td style="padding:5px 8px;"><span class="hl hl-green">01/10/2025</span></td>
+            </tr>
+            <tr>
+              <td style="padding:5px 8px;font-weight:500;">Ship To</td>
+              <td style="padding:5px 8px;" colspan="3"><span class="hl hl-green">Walmart DC #6080, Bentonville AR 72712</span></td>
+            </tr>
+            <tr style="background:#f5f5f7;">
+              <td style="padding:5px 8px;font-weight:500;">Delivery By</td>
+              <td style="padding:5px 8px;"><span class="hl hl-amber">01/22/2025</span></td>
+              <td style="padding:5px 8px;font-weight:500;">Payment</td>
+              <td style="padding:5px 8px;"><span class="hl hl-blue">Net 30</span></td>
+            </tr>
+          </table>
+          <div style="margin-top:10px;border:0.5px solid #d2d2d7;border-radius:5px;overflow:hidden;">
+            <table style="width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed;">
+              <thead>
+                <tr style="background:#f5f5f7;">
+                  <th style="padding:5px 8px;text-align:left;font-weight:500;width:20%;">SKU</th>
+                  <th style="padding:5px 8px;text-align:left;font-weight:500;width:35%;">Description</th>
+                  <th style="padding:5px 8px;text-align:right;font-weight:500;width:15%;">Qty</th>
+                  <th style="padding:5px 8px;text-align:right;font-weight:500;width:15%;">UOM</th>
+                  <th style="padding:5px 8px;text-align:right;font-weight:500;width:15%;">Price</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td style="padding:5px 8px;"><span class="hl hl-green">SKU-0042</span></td><td style="padding:5px 8px;">12-pk Cola</td><td style="padding:5px 8px;text-align:right;"><span class="hl hl-green">240</span></td><td style="padding:5px 8px;text-align:right;"><span class="hl hl-blue">CS</span></td><td style="padding:5px 8px;text-align:right;"><span class="hl hl-amber">$13.20</span></td></tr>
+                <tr style="background:#f5f5f7;"><td style="padding:5px 8px;"><span class="hl hl-green">SKU-0043</span></td><td style="padding:5px 8px;">12-pk Diet Cola</td><td style="padding:5px 8px;text-align:right;"><span class="hl hl-green">120</span></td><td style="padding:5px 8px;text-align:right;"><span class="hl hl-blue">CS</span></td><td style="padding:5px 8px;text-align:right;"><span class="hl hl-amber">$13.20</span></td></tr>
+                <tr><td style="padding:5px 8px;"><span class="hl hl-green">SKU-0051</span></td><td style="padding:5px 8px;">12-pk Zero Sugar</td><td style="padding:5px 8px;text-align:right;"><span class="hl hl-green">96</span></td><td style="padding:5px 8px;text-align:right;"><span class="hl hl-blue">CS</span></td><td style="padding:5px 8px;text-align:right;"><span class="hl hl-amber">$14.90</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="margin-top:8px;font-size:10px;color:#aeaeb2;">
+            <span class="hl hl-green" style="font-size:10px;">Green</span> = high conf &nbsp;\u00b7&nbsp; <span class="hl hl-amber" style="font-size:10px;">Amber</span> = conflict/review &nbsp;\u00b7&nbsp; <span class="hl hl-blue" style="font-size:10px;">Blue</span> = supplemental
+          </div>
+        </div>
+      </div>
+
+      <!-- Extracted fields -->
+      <div class="panel-card">
+        <div class="panel-head"><span style="font-size:14px;">\u25ce</span> Extracted Fields <span style="margin-left:auto;font-size:11px;color:#6e6e73;">Click any field to edit</span></div>
+
+        <div class="section-head">Order Header</div>
+        <div class="field-row">
+          <span class="field-label">PO Number</span>
+          <span class="field-val"><input value="PO-88421" /></span>
+          <span class="conf conf-hi">99%</span>
+          <span class="src-pill" style="font-size:9px;">PDF</span>
+        </div>
+        <div class="field-row">
+          <span class="field-label">Customer</span>
+          <span class="field-val"><input value="Walmart Inc." /></span>
+          <span class="conf conf-hi">98%</span>
+          <span class="src-pill" style="font-size:9px;">Email</span>
+        </div>
+        <div class="field-row">
+          <span class="field-label">Order Date</span>
+          <span class="field-val"><input value="2025-01-10" /></span>
+          <span class="conf conf-hi">96%</span>
+          <span class="src-pill" style="font-size:9px;">PDF</span>
+        </div>
+        <div class="field-row conflict">
+          <span class="field-label" style="color:#b06000;">Delivery Date</span>
+          <span class="field-val"><input value="2025-01-22" style="border-color:#b06000;" /></span>
+          <span class="conf conf-mid">71%</span>
+          <span class="src-pill" style="font-size:9px;background:#fef7e0;color:#b06000;">Conflict</span>
+        </div>
+        <div style="padding:4px 14px 8px;font-size:10px;color:#b06000;background:#fef7e0;border-bottom:0.5px solid #d2d2d7;">
+          Email body says "Jan 15" \u00b7 PDF says "01/22/2025" \u00b7 Using PDF value. Verify with customer.
+        </div>
+        <div class="field-row">
+          <span class="field-label">Ship-To</span>
+          <span class="field-val"><input value="DC #6080, Bentonville AR" /></span>
+          <span class="conf conf-hi">94%</span>
+          <span class="src-pill" style="font-size:9px;">PDF</span>
+        </div>
+        <div class="field-row">
+          <span class="field-label">Payment Terms</span>
+          <span class="field-val"><input value="Net 30" /></span>
+          <span class="conf conf-hi">99%</span>
+          <span class="src-pill" style="font-size:9px;">PDF</span>
+        </div>
+
+        <div class="section-head">Line Items</div>
+        <div class="field-row">
+          <span class="field-label">L1 \u00b7 SKU</span>
+          <span class="field-val"><input value="SKU-0042" /></span>
+          <span class="conf conf-hi">99%</span>
+          <span class="src-pill" style="font-size:9px;">PDF</span>
+        </div>
+        <div class="field-row">
+          <span class="field-label">L1 \u00b7 Qty</span>
+          <span class="field-val"><input value="240 CS" /></span>
+          <span class="conf conf-hi">98%</span>
+          <span class="src-pill" style="font-size:9px;">PDF</span>
+        </div>
+        <div class="field-row">
+          <span class="field-label">L1 \u00b7 Unit Price</span>
+          <span class="field-val"><input value="$13.20" /></span>
+          <span class="conf conf-mid">78%</span>
+          <span class="src-pill" style="font-size:9px;">PDF</span>
+        </div>
+        <div class="field-row missing">
+          <span class="field-label" style="color:#c5221f;">Currency</span>
+          <span class="field-val"><input value="" placeholder="Not found \u2014 enter manually" style="border-color:#c5221f;" /></span>
+          <span class="conf conf-lo">\u2014</span>
+          <span class="src-pill" style="font-size:9px;background:#fce8e6;color:#c5221f;">Missing</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="action-bar">
+      <button class="btn" onclick="goStage(0)">\u2190 Back</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn" onclick="sendPrompt('What happens when there are conflicting values across sources in the ASOE email extraction feature?')">Learn about conflicts \u2197</button>
+        <button class="btn btn-primary" onclick="goStage(2)">Confirm Extraction \u2192</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- \u2500\u2500 PHASE 3: Confirm & Send \u2500\u2500 -->
+  <div class="panel" id="p2">
+    <div style="display:grid;grid-template-columns:1fr 300px;gap:12px;">
+
+      <!-- JSON preview -->
+      <div class="panel-card">
+        <div class="panel-head"><span style="font-size:14px;">{}</span> ERP Payload Preview <span style="margin-left:auto;" class="conf conf-hi">Ready</span></div>
+        <div style="padding:14px;">
+          <div class="json-box">
+<span class="jc">// ASOE Order Extraction Output \u00b7 v1.0</span>
+{
+  <span class="jk">"schema_version"</span>: <span class="jv">"1.0"</span>,
+  <span class="jk">"extraction_id"</span>: <span class="jv">"ext_9f2a1b"</span>,
+  <span class="jk">"source_email_id"</span>: <span class="jv">"msg_walmart_88421"</span>,
+  <span class="jk">"intent"</span>: <span class="jv">"PURCHASE_ORDER"</span>,
+  <span class="jk">"confidence"</span>: <span class="jn">0.97</span>,
+  <span class="jk">"order"</span>: {
+    <span class="jk">"po_number"</span>: <span class="jv">"PO-88421"</span>,
+    <span class="jk">"customer_name"</span>: <span class="jv">"Walmart Inc."</span>,
+    <span class="jk">"order_date"</span>: <span class="jv">"2025-01-10"</span>,
+    <span class="jk">"delivery_date"</span>: <span class="jv">"2025-01-22"</span>,
+    <span class="jk">"ship_to"</span>: <span class="jv">"DC #6080, Bentonville AR 72712"</span>,
+    <span class="jk">"payment_terms"</span>: <span class="jv">"NET_30"</span>,
+    <span class="jk">"currency"</span>: <span class="jv">"USD"</span>,
+    <span class="jk">"line_items"</span>: [
+      {
+        <span class="jk">"line_number"</span>: <span class="jn">1</span>,
+        <span class="jk">"sku"</span>: <span class="jv">"SKU-0042"</span>,
+        <span class="jk">"description"</span>: <span class="jv">"12-pk Cola"</span>,
+        <span class="jk">"quantity"</span>: <span class="jn">240</span>,
+        <span class="jk">"uom"</span>: <span class="jv">"CS"</span>,
+        <span class="jk">"unit_price"</span>: <span class="jn">13.20</span>
+      },
+      <span class="jc">// \u20262 more line items</span>
+    ]
+  },
+  <span class="jk">"extraction_meta"</span>: {
+    <span class="jk">"sources_used"</span>: [<span class="jv">"email_body"</span>, <span class="jv">"pdf_attachment"</span>],
+    <span class="jk">"conflicts_resolved"</span>: <span class="jn">1</span>,
+    <span class="jk">"fields_manually_edited"</span>: <span class="jn">1</span>,
+    <span class="jk">"human_confirmed"</span>: <span class="jn">true</span>,
+    <span class="jk">"confirmed_by"</span>: <span class="jv">"jdoe@acme.com"</span>,
+    <span class="jk">"confirmed_at"</span>: <span class="jv">"2025-01-10T09:11:44Z"</span>
+  }
+}
+          </div>
+        </div>
+      </div>
+
+      <!-- ERP Target -->
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <div class="panel-card">
+          <div class="panel-head"><span style="font-size:14px;">\u25c8</span> Send to ERP</div>
+          <div style="padding:12px;">
+            <div class="erp-option selected">
+              <div class="erp-icon" style="background:#e8f0fe;color:#1a73e8;">S</div>
+              <div><div style="font-size:12px;font-weight:500;">SAP ECC / S4HANA</div><div style="font-size:11px;color:#6e6e73;">via RFC / BAPI \u00b7 connected</div></div>
+            </div>
+            <div class="erp-option">
+              <div class="erp-icon" style="background:#fef7e0;color:#b06000;">O</div>
+              <div><div style="font-size:12px;font-weight:500;">Oracle NetSuite</div><div style="font-size:11px;color:#6e6e73;">REST API \u00b7 connected</div></div>
+            </div>
+            <div class="erp-option">
+              <div class="erp-icon" style="background:#f5f5f7;color:#aeaeb2;">W</div>
+              <div><div style="font-size:12px;font-weight:500;">Webhook / Custom</div><div style="font-size:11px;color:#6e6e73;">POST to endpoint</div></div>
+            </div>
+            <div class="erp-option">
+              <div class="erp-icon" style="background:#f5f5f7;color:#aeaeb2;">\u2193</div>
+              <div><div style="font-size:12px;font-weight:500;">Download JSON</div><div style="font-size:11px;color:#6e6e73;">Manual import</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <div class="panel-head"><span style="font-size:14px;">\u2713</span> Pre-flight Checks</div>
+          <div style="padding:12px;display:flex;flex-direction:column;gap:7px;font-size:12px;">
+            <div style="display:flex;align-items:center;gap:8px;"><span style="color:#137333;font-size:14px;">\u2713</span> All required fields present</div>
+            <div style="display:flex;align-items:center;gap:8px;"><span style="color:#137333;font-size:14px;">\u2713</span> Human review confirmed</div>
+            <div style="display:flex;align-items:center;gap:8px;"><span style="color:#137333;font-size:14px;">\u2713</span> No open conflicts</div>
+            <div style="display:flex;align-items:center;gap:8px;"><span style="color:#b06000;font-size:14px;">\u26a0</span> <span style="color:#b06000;">Delivery date was revised \u2014 note logged</span></div>
+            <div style="display:flex;align-items:center;gap:8px;"><span style="color:#137333;font-size:14px;">\u2713</span> ERP connection healthy</div>
+          </div>
+        </div>
+
+        <button class="btn btn-success" style="padding:11px;width:100%;font-size:13px;" onclick="goStage(0)">Send to SAP \u2192</button>
+        <button class="btn" style="width:100%;font-size:12px;" onclick="goStage(1)">\u2190 Back to Review</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- \u2500\u2500 PHASE 4: Edge Cases \u2500\u2500 -->
+  <div class="panel" id="p3">
+    <div style="margin-bottom:12px;font-size:12px;color:#6e6e73;line-height:1.6;">
+      Every identified edge case and its defined system behavior, for spec review.
+    </div>
+    <div class="edge-grid">
+      <div class="edge-card"><span class="tag tag-warn">Conflict</span><div class="edge-title">Same field, multiple sources</div><div class="edge-desc">System shows both values inline, highlights the discrepancy, defaults to highest-confidence source, prompts user to confirm. Conflict is recorded in extraction_meta.</div></div>
+      <div class="edge-card"><span class="tag tag-err">Missing</span><div class="edge-title">Required field not found</div><div class="edge-desc">Field rendered as empty with red border. User must manually enter before confirmation is allowed. System blocks "Confirm" until all required fields are filled.</div></div>
+      <div class="edge-card"><span class="tag tag-warn">Ambiguous</span><div class="edge-title">Date format ambiguity (01/02/03)</div><div class="edge-desc">System uses locale context and email header date for disambiguation. If still ambiguous, flags field as medium confidence and requests user confirmation.</div></div>
+      <div class="edge-card"><span class="tag tag-err">Duplicate</span><div class="edge-title">PO number already in system</div><div class="edge-desc">System checks existing orders on intent detection. If duplicate PO found, shows side-by-side diff before extraction. User must explicitly choose: update, ignore, or create new.</div></div>
+      <div class="edge-card"><span class="tag tag-warn">Low Quality</span><div class="edge-title">Corrupted or low-res image/PDF</div><div class="edge-desc">OCR confidence below 60% triggers a source-level warning. Fields from that source shown with "Low" badge. User prompted to re-upload cleaner file or enter manually.</div></div>
+      <div class="edge-card"><span class="tag tag-err">Blocked</span><div class="edge-title">Password-protected PDF</div><div class="edge-desc">System cannot extract. User is shown a prompt to forward the unlocked file or enter order data manually. Attachment noted as "locked" in audit log.</div></div>
+      <div class="edge-card"><span class="tag tag-info">Multi-file</span><div class="edge-title">Multiple attachments, same order</div><div class="edge-desc">System merges extracted fields, using source priority: PDF structured &gt; Excel &gt; Image OCR &gt; email body. Source shown per field. Conflicts surfaced individually.</div></div>
+      <div class="edge-card"><span class="tag tag-info">Multi-order</span><div class="edge-title">Single email, multiple POs</div><div class="edge-desc">System detects multiple PO numbers and splits into separate extraction sessions. User sees "2 orders detected" banner and reviews each independently.</div></div>
+      <div class="edge-card"><span class="tag tag-warn">Non-order</span><div class="edge-title">Intent below threshold (&lt;60%)</div><div class="edge-desc">Email routed to "Unclassified" queue. No extraction attempted. User manually assigns intent or discards. All signals logged for model feedback.</div></div>
+      <div class="edge-card"><span class="tag tag-info">UOM mismatch</span><div class="edge-title">Mixed units in same order</div><div class="edge-desc">Line items with differing UOM (EA vs CS vs PL) flagged individually. System suggests standard conversion if mapping exists in master data. User confirms or overrides.</div></div>
+      <div class="edge-card"><span class="tag tag-warn">Currency</span><div class="edge-title">Ambiguous or missing currency</div><div class="edge-desc">System infers from customer master (default billing currency). If no match, flags as missing. All prices stored with explicit currency in JSON output regardless.</div></div>
+      <div class="edge-card"><span class="tag tag-ok">Partial</span><div class="edge-title">Header found, no line items</div><div class="edge-desc">System extracts what it can and flags missing sections. User can add line items manually. Partial extractions saved as drafts, not sent to ERP until complete.</div></div>
+    </div>
+    <div class="action-bar">
+      <button class="btn" onclick="goStage(2)">\u2190 Back</button>
+      <button class="btn btn-primary" onclick="sendPrompt('Build the ASOE Email Order Extraction feature based on the spec we just reviewed')">Build this feature \u2197</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function goStage(n) {
+  const stages = document.querySelectorAll('.stage');
+  const panels = document.querySelectorAll('.panel');
+  stages.forEach((s, i) => {
+    s.classList.remove('active', 'done');
+    if (i === n) s.classList.add('active');
+    else if (i < n) s.classList.add('done');
+  });
+  panels.forEach((p, i) => {
+    p.classList.remove('active');
+    if (i === n) p.classList.add('active');
+  });
+}
+</script>
+
+<script>
+  // sendPrompt is a Claude.ai-specific API - stub it out for standalone use
+  if (typeof sendPrompt === 'undefined') {
+    window.sendPrompt = function(text) {
+      alert('In ASOE app, this would open: ' + text);
+    };
+  }
+  if (typeof openLink === 'undefined') {
+    window.openLink = function(url) { window.open(url, '_blank'); };
+  }
+</script>
+</body>
+</html>
