@@ -64,11 +64,11 @@ The UI opens at **http://localhost:8501**.
 | EVT-CC-001    | CONTRACTUAL_CORRECTION  | SO-1001 | 10 % discount — within 15 %   |
 | EVT-CC-002    | CONTRACTUAL_CORRECTION  | SO-1002 | 8 % discount — within 15 %    |
 | EVT-CC-003    | CONTRACTUAL_CORRECTION  | SO-1003 | 22 % discount — exceeds threshold → FAILED |
-| EVT-CB-001    | CREDIT_BLOCK            | SO-2001 | ORDER_MANAGER, gap $800        |
+| EVT-CB-001    | CREDIT_BLOCK            | SO-2001 | ORDER_MANAGER, $100 over limit |
 | EVT-CB-002    | CREDIT_BLOCK            | SO-2002 | FINANCE_DIRECTOR, $5 500 over  |
 | EVT-MPE-001   | MASS_PRICING_ERROR      | SO-3001 | 15 lines → RED shadow → BLOCKED |
-| EVT-DPO-001   | DUPLICATE_PO            | PO-9001 | composite score 0.97 → AUTO_BLOCK |
-| EVT-DPO-002   | DUPLICATE_PO            | PO-9002 | composite score 0.55 → SOFT_FLAG |
+| EVT-DPO-001   | DUPLICATE_PO            | PO-9001 | composite score 0.98 → AUTO_BLOCK |
+| EVT-DPO-002   | DUPLICATE_PO            | PO-9002 | composite score 0.65 → SOFT_FLAG |
 
 ---
 

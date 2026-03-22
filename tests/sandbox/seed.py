@@ -93,15 +93,15 @@ _RETAILER_CONTRACTS = [
 
 _CREDIT_PROFILES = [
     # retailer_id, credit_limit, current_exposure
-    ("R-01", 10_000.00,  9_200.00),  # gap $800  — released by ORDER_MANAGER
+    ("R-01", 10_000.00, 10_100.00),  # over limit by $100 — within $5k tolerance, released
     ("R-02", 15_000.00, 14_600.00),  # gap $400  — released
     ("R-03",  5_000.00,  4_800.00),  # gap $200  — released
     ("R-05", 20_000.00, 25_500.00),  # OVER LIMIT by $5,500 → REJECTED
 ]
 
 _NOW = datetime.now(timezone.utc).isoformat()
-_CONTRACT_START = "2024-01-01"
-_CONTRACT_END   = "2025-12-31"
+_CONTRACT_START = "2025-01-01"
+_CONTRACT_END   = "2026-12-31"
 
 _EDI_EVENTS = [
     # ── CONTRACTUAL_CORRECTION — price within 15 % discount ────────────────
@@ -183,7 +183,7 @@ _EDI_EVENTS = [
         "line_count":  15,
         "metadata":    json.dumps({"batch_ref": "BATCH-2024-01", "note": "15-line batch — systemic risk"}),
     },
-    # ── DUPLICATE_PO — composite score 0.97 → AUTO_BLOCK ───────────────────
+    # ── DUPLICATE_PO — composite score 0.98 → AUTO_BLOCK ───────────────────
     {
         "event_id":    "EVT-DPO-001",
         "event_type":  "EDI_850_DUPLICATE_PO",
@@ -206,7 +206,7 @@ _EDI_EVENTS = [
             },
         }),
     },
-    # ── DUPLICATE_PO — composite score 0.55 → SOFT_FLAG ───────────────────
+    # ── DUPLICATE_PO — composite score 0.65 → SOFT_FLAG ───────────────────
     {
         "event_id":    "EVT-DPO-002",
         "event_type":  "EDI_850_DUPLICATE_PO",
