@@ -187,7 +187,7 @@ docker compose -f docker-compose.hub.yml up
 docker compose -f docker-compose.hub.yml --profile inference up
 ```
 
-**Available images on Docker Hub (`kumarabhijit/asoe`):**
+** In Future: Available images on Docker Hub (`kumarabhijit/asoe`):**
 
 | Image | Tag | Contents |
 |---|---|---|
