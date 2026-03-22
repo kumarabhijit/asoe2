@@ -1,0 +1,1520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ASOE · Email Intelligence — Functional Spec</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,300;1,9..40,400&family=DM+Mono:wght@400;500&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --blue:       #007AFF;
+    --blue-soft:  #E8F1FF;
+    --blue-mid:   #C7DCFF;
+    --green:      #34C759;
+    --green-soft: #E6F9EC;
+    --orange:     #FF9500;
+    --orange-soft:#FFF3E0;
+    --red:        #FF3B30;
+    --red-soft:   #FFEDEC;
+    --purple:     #AF52DE;
+    --purple-soft:#F5EAFF;
+    --teal:       #32ADE6;
+    --teal-soft:  #E5F6FD;
+    --gray-50:    #FAFAFA;
+    --gray-100:   #F5F5F7;
+    --gray-200:   #E8E8ED;
+    --gray-300:   #D1D1D6;
+    --gray-400:   #AEAEB2;
+    --gray-500:   #8E8E93;
+    --gray-600:   #636366;
+    --gray-700:   #48484A;
+    --gray-800:   #3A3A3C;
+    --gray-900:   #1C1C1E;
+    --text:       #1C1C1E;
+    --text-2:     #3A3A3C;
+    --text-3:     #636366;
+    --text-4:     #AEAEB2;
+    --shadow-sm:  0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+    --shadow-md:  0 4px 12px rgba(0,0,0,0.08), 0 2px 6px rgba(0,0,0,0.04);
+    --shadow-lg:  0 16px 48px rgba(0,0,0,0.10), 0 4px 12px rgba(0,0,0,0.06);
+    --r-sm: 8px;
+    --r-md: 12px;
+    --r-lg: 16px;
+    --r-xl: 20px;
+  }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--gray-100);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Nav ── */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    background: rgba(250,250,250,0.88);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border-bottom: 1px solid var(--gray-200);
+    padding: 0 40px;
+    height: 52px;
+    display: flex; align-items: center; gap: 0;
+  }
+  .nav-logo {
+    display: flex; align-items: center; gap: 10px;
+    font-weight: 700; font-size: 15px; color: var(--text);
+    margin-right: 32px; letter-spacing: -0.01em;
+  }
+  .nav-logo-mark {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: var(--blue); display: flex; align-items: center; justify-content: center;
+    font-size: 14px;
+  }
+  .nav-pills { display: flex; gap: 2px; flex: 1; }
+  .nav-pill {
+    padding: 5px 12px; border-radius: 6px; font-size: 12px;
+    font-weight: 500; color: var(--text-3); cursor: pointer;
+    border: none; background: none; font-family: inherit;
+    text-decoration: none; transition: all 0.15s; white-space: nowrap;
+  }
+  .nav-pill:hover { background: var(--gray-200); color: var(--text); }
+  .nav-pill.active { background: var(--blue); color: white; }
+  .nav-meta { font-size: 11px; color: var(--text-4); font-weight: 500; letter-spacing: 0.04em; }
+
+  /* ── Layout ── */
+  main { max-width: 1100px; margin: 0 auto; padding: 80px 40px 80px; }
+
+  /* ── Hero ── */
+  .hero {
+    text-align: center; padding: 60px 0 56px;
+  }
+  .hero-eyebrow {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--blue-soft); color: var(--blue);
+    padding: 5px 12px; border-radius: 20px;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+    text-transform: uppercase; margin-bottom: 20px;
+  }
+  .hero h1 {
+    font-size: 42px; font-weight: 700; line-height: 1.1;
+    letter-spacing: -0.025em; color: var(--text);
+    margin-bottom: 16px;
+  }
+  .hero h1 span { color: var(--blue); }
+  .hero p {
+    font-size: 17px; color: var(--text-3); max-width: 560px;
+    margin: 0 auto 28px; line-height: 1.65; font-weight: 400;
+  }
+  .hero-meta {
+    display: flex; align-items: center; justify-content: center; gap: 24px;
+    font-size: 12px; color: var(--text-4);
+  }
+  .hero-meta span { display: flex; align-items: center; gap: 5px; }
+  .hero-meta-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--gray-300); }
+
+  /* ── Section ── */
+  section { margin-bottom: 64px; scroll-margin-top: 70px; }
+  .section-header { margin-bottom: 24px; }
+  .section-eyebrow {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--blue); margin-bottom: 8px;
+  }
+  .section-title {
+    font-size: 26px; font-weight: 700; letter-spacing: -0.02em;
+    color: var(--text); line-height: 1.2;
+  }
+  .section-desc {
+    font-size: 14px; color: var(--text-3); margin-top: 8px;
+    max-width: 640px; line-height: 1.65;
+  }
+
+  /* ── Card ── */
+  .card {
+    background: white; border-radius: var(--r-lg);
+    box-shadow: var(--shadow-md);
+    border: 1px solid var(--gray-200);
+    overflow: hidden;
+  }
+  .card-header {
+    padding: 16px 20px 14px;
+    border-bottom: 1px solid var(--gray-200);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .card-title {
+    font-size: 13px; font-weight: 600; color: var(--text);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .card-title-icon {
+    width: 24px; height: 24px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px;
+  }
+  .card-body { padding: 20px; }
+
+  /* ── Pipeline ── */
+  .pipeline {
+    display: flex; align-items: stretch; gap: 0;
+    background: white; border-radius: var(--r-lg);
+    box-shadow: var(--shadow-md); border: 1px solid var(--gray-200);
+    overflow: hidden;
+  }
+  .pipeline-step {
+    flex: 1; padding: 24px 20px; position: relative;
+    border-right: 1px solid var(--gray-200); cursor: pointer;
+    transition: background 0.15s;
+  }
+  .pipeline-step:last-child { border-right: none; }
+  .pipeline-step:hover { background: var(--gray-50); }
+  .pipeline-step-num {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+    color: var(--text-4); text-transform: uppercase; margin-bottom: 12px;
+  }
+  .pipeline-step-icon {
+    width: 40px; height: 40px; border-radius: var(--r-sm);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; margin-bottom: 12px;
+  }
+  .pipeline-step-name {
+    font-size: 13px; font-weight: 600; color: var(--text);
+    margin-bottom: 6px; line-height: 1.3;
+  }
+  .pipeline-step-desc {
+    font-size: 11px; color: var(--text-3); line-height: 1.55;
+  }
+  .pipeline-step-arrow {
+    position: absolute; right: -11px; top: 50%;
+    transform: translateY(-50%);
+    width: 20px; height: 20px; border-radius: 50%;
+    background: white; border: 1px solid var(--gray-300);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9px; color: var(--gray-500); z-index: 2;
+  }
+
+  /* ── Intent grid ── */
+  .intent-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+  }
+  .intent-card {
+    background: white; border-radius: var(--r-md);
+    box-shadow: var(--shadow-sm); border: 1px solid var(--gray-200);
+    padding: 16px; cursor: pointer; transition: all 0.15s;
+    position: relative; overflow: hidden;
+  }
+  .intent-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+  .intent-card-bar {
+    position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  }
+  .intent-card-icon {
+    font-size: 20px; margin-bottom: 10px;
+  }
+  .intent-card-name {
+    font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 6px;
+  }
+  .intent-card-desc {
+    font-size: 11px; color: var(--text-3); line-height: 1.55; margin-bottom: 10px;
+  }
+  .intent-card-example {
+    background: var(--gray-100); border-radius: var(--r-sm);
+    padding: 8px 10px; font-size: 11px; color: var(--text-3);
+    font-style: italic; line-height: 1.5; border-left: 2px solid var(--gray-300);
+  }
+  .intent-card-entities {
+    margin-top: 10px; display: flex; gap: 4px; flex-wrap: wrap;
+  }
+  .entity-chip {
+    font-size: 10px; font-weight: 500; padding: 2px 7px;
+    border-radius: 4px; font-family: 'DM Mono', monospace;
+  }
+
+  /* ── Table ── */
+  .spec-table {
+    width: 100%; border-collapse: collapse;
+    font-size: 12px;
+  }
+  .spec-table th {
+    text-align: left; padding: 10px 14px; font-size: 10px;
+    font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--text-3); background: var(--gray-50);
+    border-bottom: 1px solid var(--gray-200);
+  }
+  .spec-table td {
+    padding: 11px 14px; border-bottom: 1px solid var(--gray-100);
+    vertical-align: top; color: var(--text-2); line-height: 1.5;
+  }
+  .spec-table tr:last-child td { border-bottom: none; }
+  .spec-table tr:hover td { background: var(--gray-50); }
+  code {
+    font-family: 'DM Mono', monospace; font-size: 11px;
+    background: var(--gray-100); padding: 1px 5px; border-radius: 4px;
+    color: var(--purple);
+  }
+
+  /* ── Edge case grid ── */
+  .edge-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+  }
+  .edge-card {
+    background: white; border-radius: var(--r-md);
+    border: 1px solid var(--gray-200); box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+  .edge-card-header {
+    padding: 12px 16px; display: flex; align-items: flex-start; gap: 10px;
+  }
+  .edge-card-icon {
+    font-size: 18px; flex-shrink: 0; margin-top: 1px;
+  }
+  .edge-card-title { font-size: 13px; font-weight: 600; color: var(--text); }
+  .edge-card-cat {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--text-4); margin-bottom: 3px;
+  }
+  .edge-card-body { padding: 0 16px 14px 44px; }
+  .edge-card-scenario { font-size: 12px; color: var(--text-3); margin-bottom: 8px; line-height: 1.5; }
+  .edge-card-resolution {
+    font-size: 11px; padding: 8px 10px; border-radius: var(--r-sm);
+    line-height: 1.55; font-weight: 500;
+  }
+
+  /* ── Autonomy tiers ── */
+  .autonomy-row {
+    display: grid; grid-template-columns: 80px 1fr 1fr 1fr; gap: 12px;
+    align-items: start; padding: 16px 0; border-bottom: 1px solid var(--gray-100);
+  }
+  .autonomy-row:last-child { border-bottom: none; }
+  .autonomy-level {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 4px;
+  }
+  .autonomy-badge {
+    width: 36px; height: 36px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700;
+  }
+  .autonomy-label { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; color: var(--text-3); }
+  .aut-col-head { font-size: 11px; font-weight: 600; color: var(--text-3); margin-bottom: 4px; }
+  .aut-col-val { font-size: 12px; color: var(--text-2); line-height: 1.55; }
+
+  /* ── UX States ── */
+  .ux-states {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+  }
+  .ux-state {
+    background: white; border-radius: var(--r-md);
+    border: 1px solid var(--gray-200); box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+  .ux-state-top {
+    padding: 14px; border-bottom: 1px solid var(--gray-200); text-align: center;
+  }
+  .ux-state-icon { font-size: 24px; margin-bottom: 8px; }
+  .ux-state-name { font-size: 12px; font-weight: 600; color: var(--text); }
+  .ux-state-body { padding: 12px 14px; }
+  .ux-state-item {
+    font-size: 11px; color: var(--text-3); padding: 4px 0;
+    border-bottom: 1px dashed var(--gray-100); display: flex; gap: 6px;
+  }
+  .ux-state-item:last-child { border-bottom: none; }
+
+  /* ── Badge ── */
+  .badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600;
+    white-space: nowrap;
+  }
+  .badge-dot { width: 5px; height: 5px; border-radius: 50%; }
+
+  /* ── Tags ── */
+  .tag {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 11px; font-weight: 500; background: var(--gray-100); color: var(--text-3);
+  }
+
+  /* ── Callout ── */
+  .callout {
+    border-radius: var(--r-md); padding: 16px 18px; margin-bottom: 16px;
+    display: flex; gap: 12px; align-items: flex-start;
+  }
+  .callout-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+  .callout-title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+  .callout-body { font-size: 12px; line-height: 1.6; }
+
+  /* ── Two-col ── */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+
+  /* ── Process detail ── */
+  .process-step {
+    display: flex; gap: 16px; padding: 20px 0;
+    border-bottom: 1px solid var(--gray-100);
+  }
+  .process-step:last-child { border-bottom: none; }
+  .process-num {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--blue-soft); color: var(--blue);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700; flex-shrink: 0;
+  }
+  .process-content { flex: 1; }
+  .process-title { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+  .process-desc { font-size: 12px; color: var(--text-3); line-height: 1.65; }
+  .process-sub {
+    margin-top: 10px; background: var(--gray-50);
+    border-radius: var(--r-sm); padding: 12px 14px;
+    border: 1px solid var(--gray-200);
+  }
+  .process-sub-row {
+    display: flex; justify-content: space-between; gap: 16px;
+    font-size: 11px; padding: 4px 0; border-bottom: 1px dashed var(--gray-200);
+  }
+  .process-sub-row:last-child { border-bottom: none; }
+  .process-sub-label { color: var(--text-3); font-weight: 500; }
+  .process-sub-val { color: var(--text); font-weight: 600; font-family: 'DM Mono', monospace; font-size: 10.5px; }
+
+  /* ── Open questions ── */
+  .oq-list { display: flex; flex-direction: column; gap: 8px; }
+  .oq-item {
+    background: white; border-radius: var(--r-sm);
+    border: 1px solid var(--gray-200); padding: 14px 16px;
+    display: flex; gap: 12px; box-shadow: var(--shadow-sm);
+  }
+  .oq-num {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--orange-soft); color: var(--orange);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; flex-shrink: 0;
+  }
+  .oq-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 3px; }
+  .oq-body { font-size: 12px; color: var(--text-3); line-height: 1.55; }
+
+  /* ── Divider ── */
+  hr { border: none; border-top: 1px solid var(--gray-200); margin: 16px 0; }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--gray-300); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-logo">
+    <div class="nav-logo-mark">◈</div>
+    ASOE
+  </div>
+  <div class="nav-pills">
+    <a class="nav-pill active" href="#overview">Overview</a>
+    <a class="nav-pill" href="#pipeline">Pipeline</a>
+    <a class="nav-pill" href="#intents">Intent Taxonomy</a>
+    <a class="nav-pill" href="#extraction">Entity Extraction</a>
+    <a class="nav-pill" href="#erp-matrix">ERP Matrix</a>
+    <a class="nav-pill" href="#edge-cases">Edge Cases</a>
+    <a class="nav-pill" href="#autonomy">Autonomy Model</a>
+    <a class="nav-pill" href="#ux-states">UX States</a>
+    <a class="nav-pill" href="#open-qs">Open Questions</a>
+  </div>
+  <div class="nav-meta">SPEC v0.1 · DRAFT</div>
+</nav>
+
+<main>
+
+  <!-- Hero -->
+  <div class="hero">
+    <div class="hero-eyebrow">🧠 Feature Spec · ASOE Email Intelligence</div>
+    <h1>Inbound Email <span>Inquiry Agent</span></h1>
+    <p>An agentic pipeline that detects intent, extracts entities, queries the ERP, and drafts a customer-ready reply — entirely from a raw inbound email.</p>
+    <div class="hero-meta">
+      <span>📄 Functional Spec</span>
+      <div class="hero-meta-dot"></div>
+      <span>🏗 Pre-Build · Planning Phase</span>
+      <div class="hero-meta-dot"></div>
+      <span>🎯 B2B Order Management</span>
+      <div class="hero-meta-dot"></div>
+      <span>⚙️ ERP/SAP Integration</span>
+    </div>
+  </div>
+
+  <!-- 1. Overview -->
+  <section id="overview">
+    <div class="section-header">
+      <div class="section-eyebrow">01 · Overview</div>
+      <div class="section-title">What this feature does</div>
+      <div class="section-desc">The Email Inquiry Agent sits inside ASOE's mailbox layer and acts as a first-responder for every inbound customer inquiry — detecting intent, resolving it from live ERP data, and generating a precise, context-aware reply.</div>
+    </div>
+
+    <div class="callout" style="background: var(--blue-soft); border: 1px solid var(--blue-mid);">
+      <div class="callout-icon">💡</div>
+      <div>
+        <div class="callout-title" style="color: var(--blue);">Design Philosophy</div>
+        <div class="callout-body" style="color: #2c5282;">This agent is not a chatbot. It is a senior analyst that reads the email, pulls the facts, and hands a draft to the CS rep — who reviews and sends. The human remains in the loop on intent, tone, and send decision. Autonomy is graduated and explicit.</div>
+      </div>
+    </div>
+
+    <div class="two-col" style="margin-top: 16px;">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><div class="card-title-icon" style="background:#E8F1FF;">🎯</div>Goals</div>
+        </div>
+        <div class="card-body">
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <div style="display:flex;gap:10px;align-items:flex-start;">
+              <span style="color:var(--green);font-weight:700;font-size:13px;margin-top:1px;">✓</span>
+              <div><b>Reduce MTTR</b> — from hours to minutes for standard inquiries</div>
+            </div>
+            <div style="display:flex;gap:10px;align-items:flex-start;">
+              <span style="color:var(--green);font-weight:700;font-size:13px;margin-top:1px;">✓</span>
+              <div><b>Eliminate copy-paste</b> — CS rep never manually looks up ERP data</div>
+            </div>
+            <div style="display:flex;gap:10px;align-items:flex-start;">
+              <span style="color:var(--green);font-weight:700;font-size:13px;margin-top:1px;">✓</span>
+              <div><b>Consistent responses</b> — same data, same format, regardless of rep</div>
+            </div>
+            <div style="display:flex;gap:10px;align-items:flex-start;">
+              <span style="color:var(--green);font-weight:700;font-size:13px;margin-top:1px;">✓</span>
+              <div><b>Audit trail</b> — every AI inference, lookup, and draft is logged</div>
+            </div>
+            <div style="display:flex;gap:10px;align-items:flex-start;">
+              <span style="color:var(--green);font-weight:700;font-size:13px;margin-top:1px;">✓</span>
+              <div><b>Graceful escalation</b> — complex or ambiguous cases route to humans cleanly</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><div class="card-title-icon" style="background:#E6F9EC;">📐</div>Scope Boundaries</div>
+        </div>
+        <div class="card-body">
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <div style="display:flex;gap:10px;align-items:flex-start;">
+              <span style="color:var(--blue);font-weight:700;font-size:13px;margin-top:1px;">→</span>
+              <div><b>In scope:</b> Inbound email from known customers and buyer contacts</div>
+            </div>
+            <div style="display:flex;gap:10px;align-items:flex-start;">
+              <span style="color:var(--blue);font-weight:700;font-size:13px;margin-top:1px;">→</span>
+              <div><b>In scope:</b> Read-only ERP lookups (no write-back in v1)</div>
+            </div>
+            <div style="display:flex;gap:10px;align-items:flex-start;">
+              <span style="color:var(--red);font-weight:700;font-size:13px;margin-top:1px;">✗</span>
+              <div><b>Out of scope v1:</b> Auto-send without human review</div>
+            </div>
+            <div style="display:flex;gap:10px;align-items:flex-start;">
+              <span style="color:var(--red);font-weight:700;font-size:13px;margin-top:1px;">✗</span>
+              <div><b>Out of scope v1:</b> Approval workflows or pricing changes</div>
+            </div>
+            <div style="display:flex;gap:10px;align-items:flex-start;">
+              <span style="color:var(--red);font-weight:700;font-size:13px;margin-top:1px;">✗</span>
+              <div><b>Out of scope v1:</b> Non-English emails (configurable for v2)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. Pipeline -->
+  <section id="pipeline">
+    <div class="section-header">
+      <div class="section-eyebrow">02 · Processing Pipeline</div>
+      <div class="section-title">7-stage agentic pipeline</div>
+      <div class="section-desc">Every email passes through all stages sequentially. Each stage produces a structured artifact that feeds the next.</div>
+    </div>
+
+    <div class="pipeline">
+      <div class="pipeline-step">
+        <div class="pipeline-step-num">Stage 01</div>
+        <div class="pipeline-step-icon" style="background:#E8F1FF;">📥</div>
+        <div class="pipeline-step-name">Email Ingestion</div>
+        <div class="pipeline-step-desc">Parse raw email: headers, body, attachments, threading context, sender identity</div>
+        <div class="pipeline-step-arrow">›</div>
+      </div>
+      <div class="pipeline-step">
+        <div class="pipeline-step-num">Stage 02</div>
+        <div class="pipeline-step-icon" style="background:#F5EAFF;">🔍</div>
+        <div class="pipeline-step-name">Sender Resolution</div>
+        <div class="pipeline-step-desc">Map sender email → Customer Account → Contacts in CRM/ERP. Flag unknowns.</div>
+        <div class="pipeline-step-arrow">›</div>
+      </div>
+      <div class="pipeline-step">
+        <div class="pipeline-step-num">Stage 03</div>
+        <div class="pipeline-step-icon" style="background:#FFF3E0;">🧭</div>
+        <div class="pipeline-step-name">Intent Detection</div>
+        <div class="pipeline-step-desc">Classify inquiry type(s). Support multi-intent. Assign confidence score per intent.</div>
+        <div class="pipeline-step-arrow">›</div>
+      </div>
+      <div class="pipeline-step">
+        <div class="pipeline-step-num">Stage 04</div>
+        <div class="pipeline-step-icon" style="background:#E6F9EC;">⛏</div>
+        <div class="pipeline-step-name">Entity Extraction</div>
+        <div class="pipeline-step-desc">Extract order #s, SKUs, dates, quantities, reference #s, PO numbers per intent.</div>
+        <div class="pipeline-step-arrow">›</div>
+      </div>
+      <div class="pipeline-step">
+        <div class="pipeline-step-num">Stage 05</div>
+        <div class="pipeline-step-icon" style="background:#E5F6FD;">🏗</div>
+        <div class="pipeline-step-name">ERP Lookup</div>
+        <div class="pipeline-step-desc">Fan-out parallel queries to SAP/ERP based on intent + entities. Structured result set.</div>
+        <div class="pipeline-step-arrow">›</div>
+      </div>
+      <div class="pipeline-step">
+        <div class="pipeline-step-num">Stage 06</div>
+        <div class="pipeline-step-icon" style="background:#FFEDEC;">✍️</div>
+        <div class="pipeline-step-name">Draft Generation</div>
+        <div class="pipeline-step-desc">Compose email reply: tone-match, factual data insertion, missing info handling.</div>
+        <div class="pipeline-step-arrow">›</div>
+      </div>
+      <div class="pipeline-step">
+        <div class="pipeline-step-num">Stage 07</div>
+        <div class="pipeline-step-icon" style="background:#E8F1FF;">👤</div>
+        <div class="pipeline-step-name">Human Review & Send</div>
+        <div class="pipeline-step-desc">CS rep reviews draft + evidence, edits if needed, approves or escalates, sends.</div>
+      </div>
+    </div>
+
+    <!-- Pipeline detail -->
+    <div class="card" style="margin-top:16px;">
+      <div class="card-header">
+        <div class="card-title"><div class="card-title-icon" style="background:#FFF3E0;">⚙️</div>Stage-by-Stage Detail</div>
+        <div style="font-size:11px;color:var(--text-4);">Inputs → Processing → Output artifact</div>
+      </div>
+      <div class="card-body" style="padding:0 20px;">
+        <div class="process-step">
+          <div class="process-num">1</div>
+          <div class="process-content">
+            <div class="process-title">Email Ingestion & Preprocessing</div>
+            <div class="process-desc">Strip HTML, extract plain text body. Identify thread context (is this a reply in an existing chain?). Extract attachments and flag type (PDF, Excel, image). Identify if it's a forwarded email or a CC'd loop.</div>
+            <div class="process-sub">
+              <div class="process-sub-row"><span class="process-sub-label">Input</span><span class="process-sub-val">Raw MIME email via IMAP / webhook / mail relay</span></div>
+              <div class="process-sub-row"><span class="process-sub-label">Output Artifact</span><span class="process-sub-val">NormalizedEmail { subject, body_text, sender, thread_id, attachments[], in_reply_to }</span></div>
+              <div class="process-sub-row"><span class="process-sub-label">Edge Risk</span><span class="process-sub-val">Thread context may override apparent intent; reply-to-all storms</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="process-step">
+          <div class="process-num">2</div>
+          <div class="process-content">
+            <div class="process-title">Sender Resolution</div>
+            <div class="process-desc">Match sender email domain → Customer Account in ERP (SAP KNA1 / CRM). Match individual sender → Contact record. Determine account tier, assigned CS rep, active contracts. Unknown senders are routed to manual triage queue immediately.</div>
+            <div class="process-sub">
+              <div class="process-sub-row"><span class="process-sub-label">Lookup</span><span class="process-sub-val">SAP KNA1 (Customers), KNVV (Sales data), Contacts table</span></div>
+              <div class="process-sub-row"><span class="process-sub-label">Output Artifact</span><span class="process-sub-val">ResolvedSender { customer_id, account_name, tier, sales_org, cs_owner, is_known: bool }</span></div>
+              <div class="process-sub-row"><span class="process-sub-label">Fallback</span><span class="process-sub-val">Unknown sender → queue to manual triage, no AI processing</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="process-step">
+          <div class="process-num">3</div>
+          <div class="process-content">
+            <div class="process-title">Intent Detection</div>
+            <div class="process-desc">LLM classifies the email against the intent taxonomy (see §3). Supports multi-intent: a single email may contain a price inquiry AND a shipment status question. Each intent gets an individual confidence score. Low-confidence (&lt;70%) intents are flagged for human confirmation before ERP lookup proceeds.</div>
+            <div class="process-sub">
+              <div class="process-sub-row"><span class="process-sub-label">Model</span><span class="process-sub-val">Claude · structured JSON output · per-intent confidence[0-100]</span></div>
+              <div class="process-sub-row"><span class="process-sub-label">Output Artifact</span><span class="process-sub-val">IntentResult { intents: [{type, confidence, span}], primary_intent, needs_clarification: bool }</span></div>
+              <div class="process-sub-row"><span class="process-sub-label">Threshold</span><span class="process-sub-val">confidence &lt; 70 → flag · confidence &lt; 40 → halt and escalate</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="process-step">
+          <div class="process-num">4</div>
+          <div class="process-content">
+            <div class="process-title">Entity Extraction</div>
+            <div class="process-desc">Per detected intent, extract the required entities (order numbers, SKUs, dates, etc.). Entities are validated against ERP format patterns before lookup (e.g., SAP sales order format). Missing required entities for an intent trigger a clarification path — the agent can generate a clarification email draft to send back to the customer asking for the missing info.</div>
+            <div class="process-sub">
+              <div class="process-sub-row"><span class="process-sub-label">Validation</span><span class="process-sub-val">Regex + LLM dual-pass · SAP order format: [0-9]{10} · Material: [A-Z0-9-]{6,18}</span></div>
+              <div class="process-sub-row"><span class="process-sub-label">Missing entity path</span><span class="process-sub-val">Generate clarification draft → Human reviews → Sends clarification email</span></div>
+              <div class="process-sub-row"><span class="process-sub-label">Output Artifact</span><span class="process-sub-val">ExtractedEntities { order_numbers[], materials[], dates[], pos[], qty, ref_numbers[] }</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="process-step">
+          <div class="process-num">5</div>
+          <div class="process-content">
+            <div class="process-title">ERP Lookup (Parallel Fan-out)</div>
+            <div class="process-desc">For each intent × entity combination, dispatch parallel ERP queries. Results are normalized into a structured lookup response. Partial failures (e.g., one of three orders not found) are handled gracefully — the response draft notes the gap rather than failing entirely.</div>
+            <div class="process-sub">
+              <div class="process-sub-row"><span class="process-sub-label">Pattern</span><span class="process-sub-val">Fan-out → Promise.allSettled() → per-query status + result</span></div>
+              <div class="process-sub-row"><span class="process-sub-label">Timeout</span><span class="process-sub-val">8 seconds per query · retry once · flag partial on second failure</span></div>
+              <div class="process-sub-row"><span class="process-sub-label">Output Artifact</span><span class="process-sub-val">ERPResults { queries[{ intent, entity, status, data, error? }] }</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="process-step">
+          <div class="process-num">6</div>
+          <div class="process-content">
+            <div class="process-title">Draft Email Generation</div>
+            <div class="process-desc">LLM generates a structured reply email from the ERP result set. Tone is calibrated to: customer tier, prior email tone, account relationship. The draft is segmented — each answer block maps back to its source ERP data (for the reviewer to verify). Missing data sections are explicitly noted in the draft ("We were unable to locate shipment status for PO-88421 — please see note below.").</div>
+            <div class="process-sub">
+              <div class="process-sub-row"><span class="process-sub-label">Tone inputs</span><span class="process-sub-val">Customer tier · email formality score · prior thread tone · CS rep persona</span></div>
+              <div class="process-sub-row"><span class="process-sub-label">Output Artifact</span><span class="process-sub-val">EmailDraft { subject, body, evidence_map[{paragraph_id → erp_source}], confidence, warnings[] }</span></div>
+              <div class="process-sub-row"><span class="process-sub-label">Sensitive data</span><span class="process-sub-val">Contract pricing → redaction flag · pricing discounts → require approval flag</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="process-step">
+          <div class="process-num">7</div>
+          <div class="process-content">
+            <div class="process-title">Human Review & Dispatch</div>
+            <div class="process-desc">CS rep sees the side-by-side panel: inbound email + evidence card + generated draft. Inline editing available. Reviewer can approve, edit, or escalate. Final send action is always a deliberate human click (v1). Full audit trail recorded: who reviewed, what edits were made, timestamp, final sent body.</div>
+            <div class="process-sub">
+              <div class="process-sub-row"><span class="process-sub-label">Actions available</span><span class="process-sub-val">Approve & Send · Edit & Send · Send Clarification · Escalate · Dismiss</span></div>
+              <div class="process-sub-row"><span class="process-sub-label">SLA tracking</span><span class="process-sub-val">Time-in-queue visible on card · configurable SLA thresholds per customer tier</span></div>
+              <div class="process-sub-row"><span class="process-sub-label">Audit log</span><span class="process-sub-val">Every field change diffed and stored · AI vs human content tracked separately</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. Intent Taxonomy -->
+  <section id="intents">
+    <div class="section-header">
+      <div class="section-eyebrow">03 · Intent Taxonomy</div>
+      <div class="section-title">11 supported inquiry types</div>
+      <div class="section-desc">Each intent has a canonical definition, trigger signals, required entities, and a mapped ERP lookup path. A single email can trigger multiple intents simultaneously.</div>
+    </div>
+
+    <div class="intent-grid">
+
+      <!-- Price Inquiry -->
+      <div class="intent-card">
+        <div class="intent-card-bar" style="background:var(--blue)"></div>
+        <div class="intent-card-icon">💲</div>
+        <div class="intent-card-name">Price Inquiry</div>
+        <div class="intent-card-desc">Customer asking what the contracted or current price is for a specific material, quantity tier, or promotion.</div>
+        <div class="intent-card-example">"What's our price on SKU-1180 for Q4? Our buyer says we have a deal below $9.50."</div>
+        <div class="intent-card-entities">
+          <span class="entity-chip" style="background:var(--blue-soft);color:var(--blue)">material_id</span>
+          <span class="entity-chip" style="background:var(--blue-soft);color:var(--blue)">quantity</span>
+          <span class="entity-chip" style="background:var(--gray-100);color:var(--text-3)">date_range?</span>
+        </div>
+      </div>
+
+      <!-- Product Availability -->
+      <div class="intent-card">
+        <div class="intent-card-bar" style="background:var(--green)"></div>
+        <div class="intent-card-icon">📦</div>
+        <div class="intent-card-name">Product Availability</div>
+        <div class="intent-card-desc">Is a material in stock? What's the ATP (Available-to-Promise) date? Is there allocation risk?</div>
+        <div class="intent-card-example">"Can you confirm 500cs of SKU-3310 available for a Feb 14 ship date? Running a promo."</div>
+        <div class="intent-card-entities">
+          <span class="entity-chip" style="background:var(--green-soft);color:var(--green)">material_id</span>
+          <span class="entity-chip" style="background:var(--green-soft);color:var(--green)">quantity</span>
+          <span class="entity-chip" style="background:var(--green-soft);color:var(--green)">ship_date</span>
+        </div>
+      </div>
+
+      <!-- Order Status -->
+      <div class="intent-card">
+        <div class="intent-card-bar" style="background:var(--orange)"></div>
+        <div class="intent-card-icon">📋</div>
+        <div class="intent-card-name">Order Status</div>
+        <div class="intent-card-desc">Where is my order in the processing lifecycle? Is it confirmed, in picking, blocked, or released?</div>
+        <div class="intent-card-example">"Can you check on PO 88421? Our system shows it submitted 3 days ago but no confirmation."</div>
+        <div class="intent-card-entities">
+          <span class="entity-chip" style="background:var(--orange-soft);color:var(--orange)">order_number</span>
+          <span class="entity-chip" style="background:var(--gray-100);color:var(--text-3)">po_number?</span>
+        </div>
+      </div>
+
+      <!-- Shipment / Delivery Status -->
+      <div class="intent-card">
+        <div class="intent-card-bar" style="background:var(--teal)"></div>
+        <div class="intent-card-icon">🚚</div>
+        <div class="intent-card-name">Shipment & Delivery Status</div>
+        <div class="intent-card-desc">Tracking number, carrier, ETA, POD (Proof of Delivery), or delivery discrepancy investigation.</div>
+        <div class="intent-card-example">"Truck was supposed to arrive yesterday. BOL# 7723981. Still waiting at DC."</div>
+        <div class="intent-card-entities">
+          <span class="entity-chip" style="background:var(--teal-soft);color:var(--teal)">order_number</span>
+          <span class="entity-chip" style="background:var(--teal-soft);color:var(--teal)">bol_number?</span>
+          <span class="entity-chip" style="background:var(--gray-100);color:var(--text-3)">ship_date?</span>
+        </div>
+      </div>
+
+      <!-- Invoice / Billing -->
+      <div class="intent-card">
+        <div class="intent-card-bar" style="background:var(--purple)"></div>
+        <div class="intent-card-icon">🧾</div>
+        <div class="intent-card-name">Invoice & Billing</div>
+        <div class="intent-card-desc">Invoice copy requests, billing discrepancies, payment terms clarification, credit memo status.</div>
+        <div class="intent-card-example">"We're disputing invoice 9040182. The price doesn't match our contract rate."</div>
+        <div class="intent-card-entities">
+          <span class="entity-chip" style="background:var(--purple-soft);color:var(--purple)">invoice_number</span>
+          <span class="entity-chip" style="background:var(--purple-soft);color:var(--purple)">order_number?</span>
+          <span class="entity-chip" style="background:var(--gray-100);color:var(--text-3)">amount?</span>
+        </div>
+      </div>
+
+      <!-- Returns & Credits -->
+      <div class="intent-card">
+        <div class="intent-card-bar" style="background:var(--red)"></div>
+        <div class="intent-card-icon">↩️</div>
+        <div class="intent-card-name">Returns & Credits</div>
+        <div class="intent-card-desc">Return merchandise authorization (RMA) request, credit memo inquiry, short-ship credit, or quality issue return.</div>
+        <div class="intent-card-example">"We received 40cs short on order 88426. Need a credit memo ASAP."</div>
+        <div class="intent-card-entities">
+          <span class="entity-chip" style="background:var(--red-soft);color:var(--red)">order_number</span>
+          <span class="entity-chip" style="background:var(--red-soft);color:var(--red)">quantity</span>
+          <span class="entity-chip" style="background:var(--gray-100);color:var(--text-3)">reason?</span>
+        </div>
+      </div>
+
+      <!-- Contract / Agreement Inquiry -->
+      <div class="intent-card">
+        <div class="intent-card-bar" style="background:#5856D6)"></div>
+        <div class="intent-card-bar" style="background:#5856D6"></div>
+        <div class="intent-card-icon">📝</div>
+        <div class="intent-card-name">Contract / Agreement</div>
+        <div class="intent-card-desc">Questions about active contract terms, validity dates, volume commitment status, or pricing agreements.</div>
+        <div class="intent-card-example">"Our contract is up for renewal next month. Can you tell us what pricing tier we're currently at?"</div>
+        <div class="intent-card-entities">
+          <span class="entity-chip" style="background:#EEECFF;color:#5856D6">contract_id?</span>
+          <span class="entity-chip" style="background:var(--gray-100);color:var(--text-3)">material_id?</span>
+        </div>
+      </div>
+
+      <!-- Document Request -->
+      <div class="intent-card">
+        <div class="intent-card-bar" style="background:var(--gray-500)"></div>
+        <div class="intent-card-icon">📄</div>
+        <div class="intent-card-name">Document Request</div>
+        <div class="intent-card-desc">Request for order confirmation, ASN (Advanced Shipping Notice), BOL, COA (Certificate of Analysis), SDS, or sales contract copy.</div>
+        <div class="intent-card-example">"Please send the ASN and BOL for PO 88424. Needed for our DC receiving system."</div>
+        <div class="intent-card-entities">
+          <span class="entity-chip" style="background:var(--gray-100);color:var(--text-3)">order_number</span>
+          <span class="entity-chip" style="background:var(--gray-100);color:var(--text-3)">doc_type</span>
+        </div>
+      </div>
+
+      <!-- Product Substitution -->
+      <div class="intent-card">
+        <div class="intent-card-bar" style="background:var(--orange)"></div>
+        <div class="intent-card-icon">🔄</div>
+        <div class="intent-card-name">Product Substitution</div>
+        <div class="intent-card-desc">Customer asks if an out-of-stock or discontinued item has an approved substitute with equivalent specs.</div>
+        <div class="intent-card-example">"SKU-0042 is out of stock at our DC. Do you have an approved sub we can use for the display?"</div>
+        <div class="intent-card-entities">
+          <span class="entity-chip" style="background:var(--orange-soft);color:var(--orange)">material_id</span>
+          <span class="entity-chip" style="background:var(--gray-100);color:var(--text-3)">quantity?</span>
+        </div>
+      </div>
+
+      <!-- Quota / Allocation -->
+      <div class="intent-card">
+        <div class="intent-card-bar" style="background:var(--teal)"></div>
+        <div class="intent-card-icon">📊</div>
+        <div class="intent-card-name">Quota & Allocation</div>
+        <div class="intent-card-desc">What's the remaining quota for a material? Has a promotional allocation been assigned? Are there volume limits?</div>
+        <div class="intent-card-example">"How much of the holiday promo allocation do we have left? Want to place a top-up order."</div>
+        <div class="intent-card-entities">
+          <span class="entity-chip" style="background:var(--teal-soft);color:var(--teal)">material_id</span>
+          <span class="entity-chip" style="background:var(--teal-soft);color:var(--teal)">promo_id?</span>
+        </div>
+      </div>
+
+      <!-- Complaint / Dispute -->
+      <div class="intent-card">
+        <div class="intent-card-bar" style="background:var(--red)"></div>
+        <div class="intent-card-icon">⚠️</div>
+        <div class="intent-card-name">Complaint & Dispute</div>
+        <div class="intent-card-desc">Quality issue, wrong item shipped, damage in transit, deduction dispute. Requires human escalation in most cases.</div>
+        <div class="intent-card-example">"We've deducted $4,200 from invoice 9040180. Received wrong product on 3 SKUs."</div>
+        <div class="intent-card-entities">
+          <span class="entity-chip" style="background:var(--red-soft);color:var(--red)">order_number?</span>
+          <span class="entity-chip" style="background:var(--red-soft);color:var(--red)">invoice_number?</span>
+          <span class="entity-chip" style="background:var(--red-soft);color:var(--red)">deduction_amount?</span>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="callout" style="background:var(--orange-soft);border:1px solid #FFD580;margin-top:16px;">
+      <div class="callout-icon">🔀</div>
+      <div>
+        <div class="callout-title" style="color:var(--orange);">Multi-Intent Handling</div>
+        <div class="callout-body" style="color:#7A4F00;">A single email can carry up to <b>N intents</b>. The pipeline processes each in parallel after extraction. The draft email organizes answers in logical sections — one block per intent — with clear headers. If intents have conflicting or cross-dependent data (e.g., order status + invoice dispute for the same order), they are linked via a shared order context object.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. Entity Extraction -->
+  <section id="extraction">
+    <div class="section-header">
+      <div class="section-eyebrow">04 · Entity Extraction Spec</div>
+      <div class="section-title">Required vs optional entities per intent</div>
+      <div class="section-desc">Extraction uses a two-pass approach: regex patterns for structured references, then LLM for natural language references (e.g., "last month's shipment"). Missing required entities trigger the clarification path.</div>
+    </div>
+
+    <div class="card">
+      <table class="spec-table">
+        <thead>
+          <tr>
+            <th style="width:160px">Intent</th>
+            <th>Required Entities</th>
+            <th>Optional / Enriching</th>
+            <th>Validation Pattern</th>
+            <th>If Missing Required</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>Price Inquiry</b></td>
+            <td><code>material_id</code></td>
+            <td><code>quantity</code>, <code>date_range</code>, <code>sales_org</code></td>
+            <td>SAP format: 6–18 alphanumeric</td>
+            <td>Send clarification: "Please specify which product you're asking about."</td>
+          </tr>
+          <tr>
+            <td><b>Product Availability</b></td>
+            <td><code>material_id</code>, <code>quantity</code></td>
+            <td><code>requested_ship_date</code>, <code>plant</code></td>
+            <td>Qty: numeric · Date: parse natural language → ISO</td>
+            <td>If qty missing → assume 1 unit, flag assumption</td>
+          </tr>
+          <tr>
+            <td><b>Order Status</b></td>
+            <td><code>order_number</code> OR <code>po_number</code></td>
+            <td><code>line_item</code>, <code>material_id</code></td>
+            <td>SAP Sales Order: 10 digits · Customer PO: any format</td>
+            <td>Search by customer + date range if no number given</td>
+          </tr>
+          <tr>
+            <td><b>Shipment Status</b></td>
+            <td><code>order_number</code> OR <code>bol_number</code></td>
+            <td><code>delivery_number</code>, <code>ship_date</code>, <code>dc_location</code></td>
+            <td>Delivery: 10 digits · BOL: carrier-specific</td>
+            <td>Search open deliveries for customer in last 30 days</td>
+          </tr>
+          <tr>
+            <td><b>Invoice / Billing</b></td>
+            <td><code>invoice_number</code></td>
+            <td><code>order_number</code>, <code>disputed_amount</code>, <code>invoice_date</code></td>
+            <td>SAP Invoice: 9 digits starting with 9</td>
+            <td>Ask for invoice number + approximate amount</td>
+          </tr>
+          <tr>
+            <td><b>Returns & Credits</b></td>
+            <td><code>order_number</code>, <code>reason_code</code></td>
+            <td><code>quantity</code>, <code>material_id</code>, <code>invoice_number</code></td>
+            <td>Infer reason from complaint language → standard codes</td>
+            <td>Generate partial return request, flag for CS to confirm reason</td>
+          </tr>
+          <tr>
+            <td><b>Document Request</b></td>
+            <td><code>order_number</code>, <code>doc_type</code></td>
+            <td><code>delivery_number</code></td>
+            <td>Doc types: ASN, BOL, COA, SDS, ORDER_CONF, INVOICE</td>
+            <td>If doc_type ambiguous, ask · If order # missing, search recent</td>
+          </tr>
+          <tr>
+            <td><b>Quota / Allocation</b></td>
+            <td><code>material_id</code></td>
+            <td><code>promo_id</code>, <code>period</code></td>
+            <td>Promo ID: ZPROM + 6 digits</td>
+            <td>Return all active quota records for customer</td>
+          </tr>
+          <tr>
+            <td><b>Complaint / Dispute</b></td>
+            <td>One of: <code>order_number</code>, <code>invoice_number</code></td>
+            <td><code>deduction_amount</code>, <code>issue_description</code></td>
+            <td>Deduction: parse "$4,200" or "4200 USD"</td>
+            <td><b>Always escalate to human</b> — do not auto-draft response</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 5. ERP Lookup Matrix -->
+  <section id="erp-matrix">
+    <div class="section-header">
+      <div class="section-eyebrow">05 · ERP Lookup Matrix</div>
+      <div class="section-title">Intent → SAP table/API → Response fields</div>
+      <div class="section-desc">Maps each intent to the specific SAP objects queried, the key fields returned, and how they are presented in the draft reply.</div>
+    </div>
+
+    <div class="card">
+      <table class="spec-table">
+        <thead>
+          <tr>
+            <th>Intent</th>
+            <th>SAP Transaction / Table</th>
+            <th>Key Fields Retrieved</th>
+            <th>Draft Response Content</th>
+            <th>Sensitivity</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>Price Inquiry</b></td>
+            <td><code>VK13 / KONV / PRCD_ELEMENTS</code></td>
+            <td>KBETR, KOPOS, Valid_from, Valid_to, condition type (PR00, ZA01, ZPROM)</td>
+            <td>Unit price, applicable discounts, validity window, contract #</td>
+            <td><span class="badge" style="background:var(--red-soft);color:var(--red);">🔴 High</span> — requires disclosure approval</td>
+          </tr>
+          <tr>
+            <td><b>Product Availability</b></td>
+            <td><code>CO09 / MARA / MARD / ATP check</code></td>
+            <td>LABST (unrestricted stock), Confirmed_qty, ATP_date, plant, SLOCID</td>
+            <td>Available quantity, earliest ship date, plant location</td>
+            <td><span class="badge" style="background:var(--orange-soft);color:var(--orange);">🟡 Medium</span></td>
+          </tr>
+          <tr>
+            <td><b>Order Status</b></td>
+            <td><code>VA03 / VBAK / VBAP / VBUP</code></td>
+            <td>VBELN, AUART, GBSTA (overall status), LFGSA (delivery status), FKGSA (billing status)</td>
+            <td>Order confirmed date, processing status, delivery status, any blocks</td>
+            <td><span class="badge" style="background:var(--green-soft);color:var(--green);">🟢 Low</span></td>
+          </tr>
+          <tr>
+            <td><b>Shipment Status</b></td>
+            <td><code>VT03N / LIPS / LIKP / VL03N</code></td>
+            <td>VBELN (delivery), LFDAT (planned date), WADAT_IST (actual GI), carrier, tracking #</td>
+            <td>Ship date, carrier name, tracking number, ETA, POD timestamp</td>
+            <td><span class="badge" style="background:var(--green-soft);color:var(--green);">🟢 Low</span></td>
+          </tr>
+          <tr>
+            <td><b>Invoice / Billing</b></td>
+            <td><code>VF03 / VBRK / VBRP</code></td>
+            <td>VBELN, FKDAT, NETWR, MWSBP, payment terms (ZTERM), due date</td>
+            <td>Invoice amount, due date, payment terms, open/cleared status</td>
+            <td><span class="badge" style="background:var(--orange-soft);color:var(--orange);">🟡 Medium</span></td>
+          </tr>
+          <tr>
+            <td><b>Returns / Credits</b></td>
+            <td><code>VF04 / VBRK credit memos / FBL5N</code></td>
+            <td>Credit memo number, status, amount, open deductions</td>
+            <td>Credit memo reference, amount, expected posting date</td>
+            <td><span class="badge" style="background:var(--orange-soft);color:var(--orange);">🟡 Medium</span> — CS must approve</td>
+          </tr>
+          <tr>
+            <td><b>Document Request</b></td>
+            <td><code>Output Mgmt / NAST / GOS attachments</code></td>
+            <td>Document stored in GOS (Generic Object Services) or output management</td>
+            <td>PDF attachment or secure download link</td>
+            <td><span class="badge" style="background:var(--green-soft);color:var(--green);">🟢 Low</span></td>
+          </tr>
+          <tr>
+            <td><b>Quota / Allocation</b></td>
+            <td><code>MQ03 / QQMA00 / QUOTA table</code></td>
+            <td>Quota arrangement, allocated qty, remaining qty, validity period</td>
+            <td>Allocated amount, used, remaining, period expiry</td>
+            <td><span class="badge" style="background:var(--orange-soft);color:var(--orange);">🟡 Medium</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 6. Edge Cases -->
+  <section id="edge-cases">
+    <div class="section-header">
+      <div class="section-eyebrow">06 · Edge Case Catalog</div>
+      <div class="section-title">Known failure modes and handling strategies</div>
+      <div class="section-desc">Every edge case has a defined behavior. The system never silently fails — it always produces a deterministic outcome with a logged reason.</div>
+    </div>
+
+    <div class="edge-grid">
+
+      <div class="edge-card">
+        <div class="edge-card-header">
+          <div class="edge-card-icon">🔀</div>
+          <div>
+            <div class="edge-card-cat">Intent</div>
+            <div class="edge-card-title">Multi-Intent Email</div>
+          </div>
+        </div>
+        <div class="edge-card-body">
+          <div class="edge-card-scenario">A single email asks about order status, a shipment ETA, and requests an invoice copy — three distinct intents.</div>
+          <div class="edge-card-resolution" style="background:var(--blue-soft);color:#1a3c6e;">→ Process each intent in parallel. Group ERP results. Generate sectioned reply (each section addressed separately). Flag compound emails in audit log.</div>
+        </div>
+      </div>
+
+      <div class="edge-card">
+        <div class="edge-card-header">
+          <div class="edge-card-icon">❓</div>
+          <div>
+            <div class="edge-card-cat">Intent</div>
+            <div class="edge-card-title">Low Confidence Classification</div>
+          </div>
+        </div>
+        <div class="edge-card-body">
+          <div class="edge-card-scenario">Email body is vague: "Can you check on our stuff from last week?" — no order # or material specified.</div>
+          <div class="edge-card-resolution" style="background:var(--orange-soft);color:#7A4F00;">→ Confidence &lt; 70%: surface to CS rep with top-3 intent candidates. Rep selects the correct intent. System continues from Stage 4 with confirmed intent.</div>
+        </div>
+      </div>
+
+      <div class="edge-card">
+        <div class="edge-card-header">
+          <div class="edge-card-icon">👤</div>
+          <div>
+            <div class="edge-card-cat">Identity</div>
+            <div class="edge-card-title">Unknown Sender</div>
+          </div>
+        </div>
+        <div class="edge-card-body">
+          <div class="edge-card-scenario">Email arrives from a domain not in the customer master, or a new contact at a known account.</div>
+          <div class="edge-card-resolution" style="background:var(--red-soft);color:#7A1010;">→ Route to manual triage queue immediately. No ERP lookup attempted. CS rep verifies identity, creates contact record if needed, then re-processes or responds manually.</div>
+        </div>
+      </div>
+
+      <div class="edge-card">
+        <div class="edge-card-header">
+          <div class="edge-card-icon">🔍</div>
+          <div>
+            <div class="edge-card-cat">Entity</div>
+            <div class="edge-card-title">Ambiguous Order Reference</div>
+          </div>
+        </div>
+        <div class="edge-card-body">
+          <div class="edge-card-scenario">Customer writes "my order from January" or "the big shipment we had issues with" — no explicit order number.</div>
+          <div class="edge-card-resolution" style="background:var(--blue-soft);color:#1a3c6e;">→ Fuzzy lookup: query recent orders for customer in the implied timeframe. If 1 result: proceed with flag. If 2–5: surface to CS to confirm. If 6+: generate clarification email requesting order #.</div>
+        </div>
+      </div>
+
+      <div class="edge-card">
+        <div class="edge-card-header">
+          <div class="edge-card-icon">📭</div>
+          <div>
+            <div class="edge-card-cat">ERP</div>
+            <div class="edge-card-title">ERP Data Not Found</div>
+          </div>
+        </div>
+        <div class="edge-card-body">
+          <div class="edge-card-scenario">Customer references order PO-99999 which doesn't exist in the ERP, or a material that's been archived.</div>
+          <div class="edge-card-resolution" style="background:var(--orange-soft);color:#7A4F00;">→ Generate partial draft: explicitly state data was not found for the referenced item. Flag for CS review. Log lookup miss. Do not invent data or make assumptions.</div>
+        </div>
+      </div>
+
+      <div class="edge-card">
+        <div class="edge-card-header">
+          <div class="edge-card-icon">🔌</div>
+          <div>
+            <div class="edge-card-cat">ERP</div>
+            <div class="edge-card-title">ERP Timeout / System Down</div>
+          </div>
+        </div>
+        <div class="edge-card-body">
+          <div class="edge-card-scenario">SAP is undergoing batch processing or the middleware is unresponsive. Lookup times out after retry.</div>
+          <div class="edge-card-resolution" style="background:var(--red-soft);color:#7A1010;">→ Mark email with "ERP_UNAVAILABLE" status. Hold in queue. Auto-retry at configured interval (e.g., 10 min). Notify CS rep of hold with reason. Do not send a draft with stale/missing data.</div>
+        </div>
+      </div>
+
+      <div class="edge-card">
+        <div class="edge-card-header">
+          <div class="edge-card-icon">🔒</div>
+          <div>
+            <div class="edge-card-cat">Data</div>
+            <div class="edge-card-title">Sensitive Pricing Disclosure</div>
+          </div>
+        </div>
+        <div class="edge-card-body">
+          <div class="edge-card-scenario">A price inquiry returns contract pricing that is confidential — e.g., a tiered deal that should not be disclosed without approval.</div>
+          <div class="edge-card-resolution" style="background:var(--purple-soft);color:#4A1580;">→ Apply redaction flag from pricing sensitivity config. Draft shows [REDACTED — Requires Approval] in pricing fields. CS rep must obtain authorization before populating and sending.</div>
+        </div>
+      </div>
+
+      <div class="edge-card">
+        <div class="edge-card-header">
+          <div class="edge-card-icon">📎</div>
+          <div>
+            <div class="edge-card-cat">Input</div>
+            <div class="edge-card-title">PDF / Excel Attachment Contains Data</div>
+          </div>
+        </div>
+        <div class="edge-card-body">
+          <div class="edge-card-scenario">Customer attaches a PO spreadsheet or a PDF dispute letter. Relevant order numbers are in the attachment, not the email body.</div>
+          <div class="edge-card-resolution" style="background:var(--blue-soft);color:#1a3c6e;">→ Extract text from PDF/structured data from Excel (v2 feature). In v1: flag attachment present, prompt CS to manually extract and forward to agent or re-submit with order numbers in body.</div>
+        </div>
+      </div>
+
+      <div class="edge-card">
+        <div class="edge-card-header">
+          <div class="edge-card-icon">♻️</div>
+          <div>
+            <div class="edge-card-cat">Thread</div>
+            <div class="edge-card-title">Reply in Existing Thread</div>
+          </div>
+        </div>
+        <div class="edge-card-body">
+          <div class="edge-card-scenario">Customer replies to a previous email chain. The new intent is different from the original thread (e.g., original was order status, reply is now about an invoice dispute).</div>
+          <div class="edge-card-resolution" style="background:var(--orange-soft);color:#7A4F00;">→ Process only the new customer turn, not the thread. Note thread_id for context (e.g., prior order # already known). Detect if the intent has changed from the thread subject.</div>
+        </div>
+      </div>
+
+      <div class="edge-card">
+        <div class="edge-card-header">
+          <div class="edge-card-icon">🌍</div>
+          <div>
+            <div class="edge-card-cat">Input</div>
+            <div class="edge-card-title">Non-English Email</div>
+          </div>
+        </div>
+        <div class="edge-card-body">
+          <div class="edge-card-scenario">Email arrives in Spanish, French, or another language from a known international customer.</div>
+          <div class="edge-card-resolution" style="background:var(--gray-100);color:var(--text-3);">→ v1: Detect non-English, route to manual triage with language flag. v2: Translate → process → generate reply in customer's language. Log language detection in audit.</div>
+        </div>
+      </div>
+
+      <div class="edge-card">
+        <div class="edge-card-header">
+          <div class="edge-card-icon">🚨</div>
+          <div>
+            <div class="edge-card-cat">Special</div>
+            <div class="edge-card-title">Complaint or Dispute Detected</div>
+          </div>
+        </div>
+        <div class="edge-card-body">
+          <div class="edge-card-scenario">Any email classified as COMPLAINT or DISPUTE — regardless of other intents present. These carry legal and financial implications.</div>
+          <div class="edge-card-resolution" style="background:var(--red-soft);color:#7A1010;">→ <b>Always escalate to human.</b> AI drafts an acknowledgment only ("We've received your message and are reviewing…"). ERP lookup still runs for context, but no substantive AI response is generated. Flag for senior CS or trade ops.</div>
+        </div>
+      </div>
+
+      <div class="edge-card">
+        <div class="edge-card-header">
+          <div class="edge-card-icon">🧹</div>
+          <div>
+            <div class="edge-card-cat">Special</div>
+            <div class="edge-card-title">Spam / Auto-Reply / OOO Detection</div>
+          </div>
+        </div>
+        <div class="edge-card-body">
+          <div class="edge-card-scenario">An out-of-office autoresponder, a bounce notification, or marketing spam arrives in the monitored mailbox.</div>
+          <div class="edge-card-resolution" style="background:var(--gray-100);color:var(--text-3);">→ Pre-filter checks: "Auto-Submitted" headers, OOO keywords, bounce/NDR codes. Classify as SYSTEM_EMAIL → skip pipeline → discard silently, log classification reason. No CS queue entry created.</div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- 7. Autonomy Model -->
+  <section id="autonomy">
+    <div class="section-header">
+      <div class="section-eyebrow">07 · Autonomy Model</div>
+      <div class="section-title">Four-tier human-in-the-loop framework</div>
+      <div class="section-desc">Autonomy is configured per intent type and customer tier. It can be adjusted at the org, team, or individual rep level. V1 ships as L1 (review-first) for all intents.</div>
+    </div>
+
+    <div class="card">
+      <div class="card-body" style="padding:0 24px;">
+        <div class="autonomy-row">
+          <div style="font-size:10px;font-weight:700;letter-spacing:0.06em;color:var(--text-4);text-transform:uppercase;"></div>
+          <div class="aut-col-head" style="font-size:11px;color:var(--text-4);font-weight:700;letter-spacing:0.06em;text-transform:uppercase;">Human Action Required</div>
+          <div class="aut-col-head" style="font-size:11px;color:var(--text-4);font-weight:700;letter-spacing:0.06em;text-transform:uppercase;">Eligible Intent Types</div>
+          <div class="aut-col-head" style="font-size:11px;color:var(--text-4);font-weight:700;letter-spacing:0.06em;text-transform:uppercase;">Conditions to Advance to Next Tier</div>
+        </div>
+        <div class="autonomy-row">
+          <div class="autonomy-level">
+            <div class="autonomy-badge" style="background:var(--red-soft);color:var(--red);font-size:11px;">L1</div>
+            <div class="autonomy-label">REVIEW</div>
+          </div>
+          <div>
+            <div class="aut-col-val">Rep reviews <b>every draft</b> before send. Default for v1 all intents.</div>
+          </div>
+          <div>
+            <div class="aut-col-val">All intents (v1 default). Mandatory for: Complaints, Price inquiries, Returns.</div>
+          </div>
+          <div>
+            <div class="aut-col-val">After 30 days: &gt; 90% approve-without-edit rate on a given intent type unlocks L2 eligibility.</div>
+          </div>
+        </div>
+        <div class="autonomy-row">
+          <div class="autonomy-level">
+            <div class="autonomy-badge" style="background:var(--orange-soft);color:var(--orange);font-size:11px;">L2</div>
+            <div class="autonomy-label">SPOT CHECK</div>
+          </div>
+          <div>
+            <div class="aut-col-val">AI sends after <b>15-minute hold window</b>. Rep can cancel anytime in window.</div>
+          </div>
+          <div>
+            <div class="aut-col-val">Order Status, Shipment Status, Document Request (ASN/BOL only).</div>
+          </div>
+          <div>
+            <div class="aut-col-val">60-day track record: &gt; 95% no-edit, no-cancel, no complaint → L3 eligible.</div>
+          </div>
+        </div>
+        <div class="autonomy-row">
+          <div class="autonomy-level">
+            <div class="autonomy-badge" style="background:var(--blue-soft);color:var(--blue);font-size:11px;">L3</div>
+            <div class="autonomy-label">AUTO-SEND</div>
+          </div>
+          <div>
+            <div class="aut-col-val">AI sends immediately. Activity logged. Rep sees in sent folder. Can recall within 5 min.</div>
+          </div>
+          <div>
+            <div class="aut-col-val">Order Status, Shipment Status, Availability (read-only facts only), Document Requests.</div>
+          </div>
+          <div>
+            <div class="aut-col-val">Config-gated. Requires manager approval to activate per rep / per customer tier.</div>
+          </div>
+        </div>
+        <div class="autonomy-row">
+          <div class="autonomy-level">
+            <div class="autonomy-badge" style="background:var(--green-soft);color:var(--green);font-size:11px;">L4</div>
+            <div class="autonomy-label">SUPERVISED AI</div>
+          </div>
+          <div>
+            <div class="aut-col-val">AI handles end-to-end for a defined set of template-driven intents. Weekly human audit only.</div>
+          </div>
+          <div>
+            <div class="aut-col-val">V2+ only. Restricted to strategic accounts with prior approval. Full audit always on.</div>
+          </div>
+          <div>
+            <div class="aut-col-val">Executive-level sign-off. Not available in v1.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8. UX States -->
+  <section id="ux-states">
+    <div class="section-header">
+      <div class="section-eyebrow">08 · UX States</div>
+      <div class="section-title">7 distinct screen / card states</div>
+      <div class="section-desc">The Inquiry Inbox card cycles through these states as the pipeline executes. Each state has a defined visual treatment, available actions, and logged audit entry.</div>
+    </div>
+
+    <div class="ux-states">
+      <div class="ux-state">
+        <div class="ux-state-top">
+          <div class="ux-state-icon">📬</div>
+          <div class="ux-state-name">New / Unprocessed</div>
+          <div style="margin-top:6px;"><span class="badge" style="background:var(--gray-100);color:var(--gray-600);">INCOMING</span></div>
+        </div>
+        <div class="ux-state-body">
+          <div class="ux-state-item"><span>→</span><span>Email received, not yet processed</span></div>
+          <div class="ux-state-item"><span>→</span><span>Sender resolved (or flagged unknown)</span></div>
+          <div class="ux-state-item"><span>→</span><span>Action: Queue → Process</span></div>
+        </div>
+      </div>
+      <div class="ux-state">
+        <div class="ux-state-top">
+          <div class="ux-state-icon">⚙️</div>
+          <div class="ux-state-name">Processing</div>
+          <div style="margin-top:6px;"><span class="badge" style="background:var(--blue-soft);color:var(--blue);">RUNNING</span></div>
+        </div>
+        <div class="ux-state-body">
+          <div class="ux-state-item"><span>→</span><span>Intent + entity extraction in progress</span></div>
+          <div class="ux-state-item"><span>→</span><span>ERP queries dispatched</span></div>
+          <div class="ux-state-item"><span>→</span><span>Progress indicator visible</span></div>
+        </div>
+      </div>
+      <div class="ux-state">
+        <div class="ux-state-top">
+          <div class="ux-state-icon">🔍</div>
+          <div class="ux-state-name">Needs Clarification</div>
+          <div style="margin-top:6px;"><span class="badge" style="background:var(--orange-soft);color:var(--orange);">INPUT NEEDED</span></div>
+        </div>
+        <div class="ux-state-body">
+          <div class="ux-state-item"><span>→</span><span>Low-confidence intent or missing entity</span></div>
+          <div class="ux-state-item"><span>→</span><span>CS confirms intent OR sends clarification draft</span></div>
+          <div class="ux-state-item"><span>→</span><span>Blocked until resolved</span></div>
+        </div>
+      </div>
+      <div class="ux-state">
+        <div class="ux-state-top">
+          <div class="ux-state-icon">📝</div>
+          <div class="ux-state-name">Draft Ready</div>
+          <div style="margin-top:6px;"><span class="badge" style="background:var(--green-soft);color:var(--green);">REVIEW</span></div>
+        </div>
+        <div class="ux-state-body">
+          <div class="ux-state-item"><span>→</span><span>Draft + evidence panel visible</span></div>
+          <div class="ux-state-item"><span>→</span><span>Approve / Edit / Escalate / Dismiss</span></div>
+          <div class="ux-state-item"><span>→</span><span>SLA timer running</span></div>
+        </div>
+      </div>
+      <div class="ux-state">
+        <div class="ux-state-top">
+          <div class="ux-state-icon">↗️</div>
+          <div class="ux-state-name">Escalated</div>
+          <div style="margin-top:6px;"><span class="badge" style="background:var(--purple-soft);color:var(--purple);">ESCALATED</span></div>
+        </div>
+        <div class="ux-state-body">
+          <div class="ux-state-item"><span>→</span><span>Routed to senior CS or Trade Ops</span></div>
+          <div class="ux-state-item"><span>→</span><span>Escalation reason + original draft preserved</span></div>
+          <div class="ux-state-item"><span>→</span><span>Separate escalation queue view</span></div>
+        </div>
+      </div>
+      <div class="ux-state">
+        <div class="ux-state-top">
+          <div class="ux-state-icon">✉️</div>
+          <div class="ux-state-name">Sent</div>
+          <div style="margin-top:6px;"><span class="badge" style="background:var(--teal-soft);color:var(--teal);">SENT</span></div>
+        </div>
+        <div class="ux-state-body">
+          <div class="ux-state-item"><span>→</span><span>Email sent (human-approved or L3 auto)</span></div>
+          <div class="ux-state-item"><span>→</span><span>Full audit record: AI draft + human edits</span></div>
+          <div class="ux-state-item"><span>→</span><span>Recall available for 5 min (L3)</span></div>
+        </div>
+      </div>
+      <div class="ux-state">
+        <div class="ux-state-top">
+          <div class="ux-state-icon">⏳</div>
+          <div class="ux-state-name">ERP Hold</div>
+          <div style="margin-top:6px;"><span class="badge" style="background:var(--red-soft);color:var(--red);">SYSTEM WAIT</span></div>
+        </div>
+        <div class="ux-state-body">
+          <div class="ux-state-item"><span>→</span><span>ERP lookup failed / timed out</span></div>
+          <div class="ux-state-item"><span>→</span><span>Auto-retry queue with countdown</span></div>
+          <div class="ux-state-item"><span>→</span><span>CS notified of hold with reason</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Layout sketch -->
+    <div class="card" style="margin-top:16px;">
+      <div class="card-header">
+        <div class="card-title"><div class="card-title-icon" style="background:#E8F1FF;">🖥</div>Primary UI Layout — Draft Review Screen</div>
+        <div style="font-size:11px;color:var(--text-4);">Three-panel composition</div>
+      </div>
+      <div class="card-body">
+        <div style="display:grid;grid-template-columns:1fr 1.2fr 1fr;gap:2px;border:1px solid var(--gray-200);border-radius:var(--r-md);overflow:hidden;font-size:11px;">
+          <div style="background:var(--gray-50);padding:16px;border-right:1px solid var(--gray-200);">
+            <div style="font-size:10px;font-weight:700;letter-spacing:0.08em;color:var(--text-4);text-transform:uppercase;margin-bottom:12px;">Panel A · Inbound Email</div>
+            <div style="background:white;border-radius:var(--r-sm);padding:12px;border:1px solid var(--gray-200);margin-bottom:8px;">
+              <div style="font-size:11px;font-weight:600;margin-bottom:4px;">FROM: buyer@walmart.com</div>
+              <div style="color:var(--text-3);line-height:1.55;">Original email body, rendered as plain text with entity highlights (order #s, SKUs in colored spans).</div>
+            </div>
+            <div style="background:var(--blue-soft);border-radius:var(--r-sm);padding:10px;border:1px solid var(--blue-mid);">
+              <div style="font-weight:600;color:var(--blue);margin-bottom:4px;">🧭 Detected Intents</div>
+              <div style="color:#2c5282;">Order Status · Shipment ETA (2 intents, high confidence)</div>
+            </div>
+          </div>
+          <div style="background:white;padding:16px;border-right:1px solid var(--gray-200);">
+            <div style="font-size:10px;font-weight:700;letter-spacing:0.08em;color:var(--text-4);text-transform:uppercase;margin-bottom:12px;">Panel B · AI Draft Reply</div>
+            <div style="background:var(--gray-50);border-radius:var(--r-sm);padding:12px;border:1px solid var(--gray-200);line-height:1.65;color:var(--text-3);min-height:120px;">
+              <div style="font-weight:600;color:var(--text);margin-bottom:6px;">RE: Order PO-88421 Status</div>
+              <div>Dear [Contact Name],<br><br>Thank you for reaching out. Here's the current status of your order…<br><br><span style="background:var(--green-soft);padding:1px 3px;border-radius:2px;">[ORDER STATUS BLOCK]</span><br><br><span style="background:var(--teal-soft);padding:1px 3px;border-radius:2px;">[SHIPMENT BLOCK]</span></div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:12px;">
+              <div style="flex:1;background:var(--green);color:white;text-align:center;padding:8px;border-radius:var(--r-sm);font-weight:600;cursor:pointer;">✓ Approve & Send</div>
+              <div style="background:var(--gray-100);color:var(--text-3);text-align:center;padding:8px 12px;border-radius:var(--r-sm);font-weight:600;cursor:pointer;">Edit</div>
+              <div style="background:var(--gray-100);color:var(--text-3);text-align:center;padding:8px 12px;border-radius:var(--r-sm);font-weight:600;cursor:pointer;">↗</div>
+            </div>
+          </div>
+          <div style="background:var(--gray-50);padding:16px;">
+            <div style="font-size:10px;font-weight:700;letter-spacing:0.08em;color:var(--text-4);text-transform:uppercase;margin-bottom:12px;">Panel C · Evidence & Sources</div>
+            <div style="background:white;border-radius:var(--r-sm);padding:10px;border:1px solid var(--gray-200);margin-bottom:8px;">
+              <div style="font-weight:600;font-size:11px;margin-bottom:4px;">📋 VA03 · Order <code>8800088421</code></div>
+              <div style="color:var(--text-3);">Status: Released · Delivery created · No blocks</div>
+            </div>
+            <div style="background:white;border-radius:var(--r-sm);padding:10px;border:1px solid var(--gray-200);">
+              <div style="font-weight:600;font-size:11px;margin-bottom:4px;">🚚 VL03N · Delivery <code>8000071241</code></div>
+              <div style="color:var(--text-3);">Carrier: JB Hunt · Tracking: 1Z99ABC · ETA: Jan 15</div>
+            </div>
+            <div style="margin-top:8px;background:var(--orange-soft);border-radius:var(--r-sm);padding:8px;border:1px solid #FFD580;">
+              <div style="font-size:10px;font-weight:700;color:var(--orange);">⚠ 1 WARNING</div>
+              <div style="font-size:11px;color:#7A4F00;">ETA is an estimate — actual carrier data not synced since 4h ago.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9. Open Questions -->
+  <section id="open-qs">
+    <div class="section-header">
+      <div class="section-eyebrow">09 · Open Questions</div>
+      <div class="section-title">Decisions needed before build</div>
+      <div class="section-desc">These are unresolved design decisions that require product, engineering, or business stakeholder input before the sprint begins.</div>
+    </div>
+
+    <div class="oq-list">
+      <div class="oq-item">
+        <div class="oq-num">1</div>
+        <div>
+          <div class="oq-title">Mailbox integration strategy: dedicated inbox vs. BCC routing vs. forwarding rule?</div>
+          <div class="oq-body">Do we process a dedicated ASOE mailbox (e.g., orders@company.com), do reps BCC emails into the platform, or do we intercept via Exchange/Gmail forwarding rules? Each has different latency, threading, and data privacy implications.</div>
+        </div>
+      </div>
+      <div class="oq-item">
+        <div class="oq-num">2</div>
+        <div>
+          <div class="oq-title">Who "owns" the outbound send — the platform or the rep's personal email client?</div>
+          <div class="oq-body">If we send from ASOE directly (via SendGrid or similar), the From address changes, which customers may notice. If we push the draft back to the rep's Outlook/Gmail for send, we need OAuth + write access to their mailbox. Which is acceptable?</div>
+        </div>
+      </div>
+      <div class="oq-item">
+        <div class="oq-num">3</div>
+        <div>
+          <div class="oq-title">How do we handle contract price sensitivity — who can authorize disclosure and how is that signaled?</div>
+          <div class="oq-body">Not all price data should be auto-included in replies. We need a pricing sensitivity config per material group and customer tier. Who configures this? Is it a Trade Ops function? How is a disclosure override approved?</div>
+        </div>
+      </div>
+      <div class="oq-item">
+        <div class="oq-num">4</div>
+        <div>
+          <div class="oq-title">ERP connectivity: RFC / BAPI, OData / REST APIs, or middleware (e.g., MuleSoft, SAP Integration Suite)?</div>
+          <div class="oq-body">The lookup architecture in §5 assumes we can query SAP tables in near-real-time. What's the actual integration path available? RFC synchronous calls have very different latency profiles from OData APIs or event-driven middleware.</div>
+        </div>
+      </div>
+      <div class="oq-item">
+        <div class="oq-num">5</div>
+        <div>
+          <div class="oq-title">SLA targets: what are the target response times per customer tier and intent type?</div>
+          <div class="oq-body">We need agreed SLA thresholds to drive queue prioritization, escalation triggers, and the autonomy tier unlock conditions. Strategic accounts likely need &lt;2h; standard &lt;24h. Are there SLAs already defined in existing CS contracts?</div>
+        </div>
+      </div>
+      <div class="oq-item">
+        <div class="oq-num">6</div>
+        <div>
+          <div class="oq-title">AI cost model: are we tracking per-email token usage and passing to the ASOE billing module?</div>
+          <div class="oq-body">Given that ASOE already tracks AI call costs for other agents, the email inquiry agent should hook into the same cost tracking infrastructure. Confirm: do we bill tenants per-email processed, or is it included in platform tier pricing?</div>
+        </div>
+      </div>
+      <div class="oq-item">
+        <div class="oq-num">7</div>
+        <div>
+          <div class="oq-title">Persona permissions: which ASOE personas can configure autonomy levels vs. can only review drafts?</div>
+          <div class="oq-body">The existing persona model (Admin, CS Manager, Sr. Analyst, CS Analyst, Trade Analyst) needs to be extended with explicit permissions for: autonomy level configuration, triage queue access, escalation routing, and disclosure approval.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <div style="text-align:center;padding:40px 0 0;color:var(--text-4);font-size:12px;">
+    <div style="display:inline-flex;align-items:center;gap:8px;background:white;padding:10px 20px;border-radius:20px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm);">
+      <span style="font-size:14px;">◈</span>
+      <span>ASOE · Email Intelligence Feature · Spec v0.1 · Draft · Not for Distribution</span>
+    </div>
+  </div>
+
+</main>
+
+<script>
+  // Nav active state on scroll
+  const sections = document.querySelectorAll('section[id]');
+  const pills = document.querySelectorAll('.nav-pill');
+  window.addEventListener('scroll', () => {
+    let current = '';
+    sections.forEach(s => {
+      if (window.scrollY >= s.offsetTop - 80) current = s.id;
+    });
+    pills.forEach(p => {
+      p.classList.remove('active');
+      if (p.getAttribute('href') === '#' + current) p.classList.add('active');
+    });
+  });
+  pills.forEach(p => {
+    p.addEventListener('click', e => {
+      pills.forEach(x => x.classList.remove('active'));
+      p.classList.add('active');
+    });
+  });
+</script>
+
+</body>
+</html>
