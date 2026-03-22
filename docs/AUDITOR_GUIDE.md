@@ -165,7 +165,7 @@ purity and determinism.
   `GraphState.effect_results`.  Effect failure is logged but does **not** undo
   the recipe result.
 
-### 7.3 Typed Contracts
+### 4.3 Typed Contracts
 
 All gateway operations use typed `GatewayRequest` / `GatewayResponse` models
 with `extra="forbid"`.  Response statuses are constrained to:
@@ -175,7 +175,7 @@ with `extra="forbid"`.  Response statuses are constrained to:
 
 ## 5. Multi-Step Workflows (Saga Pattern)
 
-### 7.1 Architecture
+### 5.1 Architecture
 
 Multi-intent workflows are executed by `WorkflowRunner` (`workflows/runner.py`)
 using the **Saga pattern** (Garcia-Molina & Salem, 1987):
@@ -186,7 +186,7 @@ using the **Saga pattern** (Garcia-Molina & Salem, 1987):
   invoked in **reverse (LIFO) order**.
 - Each step has its own independent Compliance Shadow audit.
 
-### 7.2 Workflow Result Statuses
+### 5.2 Workflow Result Statuses
 
 | Status | Meaning |
 |---|---|
@@ -195,7 +195,7 @@ using the **Saga pattern** (Garcia-Molina & Salem, 1987):
 | `COMPENSATED` | A step failed; compensation recipes were invoked for completed steps |
 | `PARTIAL` | Reserved for future partial-completion modes |
 
-### 7.4 Typed Contracts
+### 5.3 Typed Contracts
 
 `WorkflowDefinition`, `WorkflowStep`, `WorkflowStepResult`, `WorkflowResult`
 — all use `extra="forbid"`.
@@ -204,7 +204,7 @@ using the **Saga pattern** (Garcia-Molina & Salem, 1987):
 
 ## 6. Kill Switch
 
-### 7.1 Purpose
+### 6.1 Purpose
 
 The kill switch is an **emergency stop** that halts ALL automated recipe execution
 before any graph node runs.  It is intended for:
@@ -213,7 +213,7 @@ before any graph node runs.  It is intended for:
 - Maintenance windows.
 - Operator-initiated pauses pending policy review.
 
-### 7.2 Activation
+### 6.2 Activation
 
 ```bash
 export ASOE_KILL_SWITCH=1   # accepted values: 1, true, yes (case-insensitive)
@@ -221,7 +221,7 @@ export ASOE_KILL_SWITCH=1   # accepted values: 1, true, yes (case-insensitive)
 
 No process restart required.  The check runs at each `run_graph()` call.
 
-### 7.3 Behaviour
+### 6.3 Behaviour
 
 When active:
 
@@ -230,13 +230,13 @@ When active:
 - `explanation` = `"Automated execution halted: ASOE_KILL_SWITCH is active. …"`
 - The TraceRecord is still emitted to the observability log.
 
-### 7.4 Deactivation
+### 6.4 Deactivation
 
 ```bash
 unset ASOE_KILL_SWITCH      # or set to 0 / false / no
 ```
 
-### 7.5 Implementation reference
+### 6.5 Implementation reference
 
 `hardening/kill_switch.py` — `is_kill_switch_active()`, `apply_kill_switch()`
 
@@ -276,7 +276,9 @@ When active, `run_graph()` uses `build_explain_graph()`, which replaces the
 | `shadow_audit` | runs | **runs** (real verdict) |
 | `select_recipe` | runs | runs |
 | `validate_types` | runs | runs |
-| `execute_recipe` | **runs** | **replaced** by `explain_only` |
+| `resolve_dependencies` | runs | **skipped** |
+| `execute_recipe` | runs | **replaced** by `explain_only` |
+| `apply_effects` | runs | **skipped** |
 
 The Compliance Shadow and circuit breaker both execute — the explanation
 includes the **real** shadow verdict.
@@ -287,7 +289,7 @@ Terminal outcome:
 
 **No SAP writes.  No MCP calls.  No recipe side-effects.**
 
-### 7.4 Implementation reference
+### 7.3 Implementation reference
 
 `hardening/explain_mode.py` — `is_explain_mode_active()`, `build_explain_summary()`
 `orchestration/nodes.py` — `explain_only()` node

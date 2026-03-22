@@ -33,7 +33,10 @@ constraints/
   router.py          # ConstraintRouter — three-tier backend selection
   fallback_backend.py    # DeterministicFallbackBackend (no LLM, CI/test)
   outlines_backend.py    # OutlinesConstrainedBackend (production Outlines regex)
-  guidance_backend.py    # GuidanceConstrainedBackend (Guidance library)
+  guidance_backend.py    # GuidanceRegexBackend (regex patterns for Guidance / Outlines)
+
+llm/
+  backends.py        # get_outlines_model() — cached Outlines + HuggingFace model loader (used by OutlinesConstrainedBackend)
 
 orchestration/
   graph.py           # LangGraph graph builder: build_graph(), build_explain_graph()
