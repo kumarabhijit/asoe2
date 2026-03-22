@@ -6,7 +6,7 @@ credit profiles, and EDI 850 events that exercise all four supported intents:
 
 Usage
 -----
-    python tests/sandbox/seed.py                      # → tests/sandbox/sandbox.db
+    python tests/sandbox/seed.py                      # -> tests/sandbox/sandbox.db
     python tests/sandbox/seed.py --db /tmp/test.db    # custom path
     python tests/sandbox/seed.py --reset              # drop and re-create
 
@@ -27,14 +27,39 @@ DB_DEFAULT = Path(__file__).parent / "sandbox.db"
 # ---------------------------------------------------------------------------
 
 SCHEMA = """
+-- Customer master data — retailers placing orders via EDI 850
+CREATE TABLE IF NOT EXISTS customers (
+    retailer_id   TEXT PRIMARY KEY,
+    name          TEXT    NOT NULL,
+    region        TEXT    NOT NULL DEFAULT 'US-EAST',
+    tier          TEXT    NOT NULL DEFAULT 'STANDARD',
+    active        INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT    NOT NULL
+);
+
+-- Distribution centers — fulfillment locations
+CREATE TABLE IF NOT EXISTS distribution_centers (
+    dc_id         TEXT PRIMARY KEY,
+    name          TEXT    NOT NULL,
+    region        TEXT    NOT NULL,
+    capacity_pct  REAL    NOT NULL DEFAULT 100.0,
+    active        INTEGER NOT NULL DEFAULT 1
+);
+
+-- SAP condition-based pricing — authoritative base prices
 CREATE TABLE IF NOT EXISTS sap_pricing (
     sku          TEXT PRIMARY KEY,
     description  TEXT,
+    category     TEXT    NOT NULL DEFAULT 'GENERAL',
     base_price   REAL    NOT NULL,
     currency     TEXT    NOT NULL DEFAULT 'USD',
+    dc_id        TEXT,
     updated_at   TEXT    NOT NULL
 );
 
+-- Retailer-specific contract prices negotiated against the SAP base price.
+-- discount_pct is the pre-computed percentage discount from base_price.
+-- PriceAdjustmentRecipe rejects discounts > 15 %.
 CREATE TABLE IF NOT EXISTS retailer_contracts (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     retailer_id     TEXT    NOT NULL,
@@ -46,13 +71,32 @@ CREATE TABLE IF NOT EXISTS retailer_contracts (
     UNIQUE(retailer_id, sku)
 );
 
+-- Active promotions that may cause legitimate price mismatches
+CREATE TABLE IF NOT EXISTS promotions (
+    promo_id      TEXT PRIMARY KEY,
+    sku           TEXT    NOT NULL,
+    promo_type    TEXT    NOT NULL DEFAULT 'SEASONAL',
+    discount_pct  REAL    NOT NULL,
+    start_date    TEXT    NOT NULL,
+    end_date      TEXT    NOT NULL,
+    region        TEXT,
+    active        INTEGER NOT NULL DEFAULT 1
+);
+
+-- Credit exposure data used by CreditHoldReleaseRecipe.
+-- current_exposure > credit_limit triggers a credit block event.
 CREATE TABLE IF NOT EXISTS credit_profiles (
     retailer_id       TEXT PRIMARY KEY,
     credit_limit      REAL NOT NULL,
     current_exposure  REAL NOT NULL,
+    risk_rating       TEXT NOT NULL DEFAULT 'NORMAL',
+    last_review_date  TEXT,
     updated_at        TEXT NOT NULL
 );
 
+-- Pre-loaded EDI 850 events covering all four supported intents.
+-- metadata is a JSON blob carrying intent-specific fields
+-- (signal_scores for DUPLICATE_PO, credit fields for CREDIT_BLOCK, etc.)
 CREATE TABLE IF NOT EXISTS edi_events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     event_id    TEXT    UNIQUE NOT NULL,
@@ -63,6 +107,7 @@ CREATE TABLE IF NOT EXISTS edi_events (
     po_price    REAL,
     sap_price   REAL,
     line_count  INTEGER NOT NULL DEFAULT 1,
+    dc_id       TEXT,
     metadata    TEXT    NOT NULL DEFAULT '{}',
     created_at  TEXT    NOT NULL
 );
@@ -72,39 +117,113 @@ CREATE TABLE IF NOT EXISTS edi_events (
 # Seed data
 # ---------------------------------------------------------------------------
 
-_SAP_PRICING = [
-    ("SKU-001", "Premium Detergent 5L",   100.00, "USD"),
-    ("SKU-002", "Budget Detergent 2L",     45.00, "USD"),
-    ("SKU-003", "Fabric Softener 3L",      62.00, "USD"),
-    ("SKU-004", "Dish Soap 1L",            18.00, "USD"),
-    ("SKU-005", "All-Purpose Cleaner 4L",  55.00, "USD"),
+_NOW = datetime.now(timezone.utc).isoformat()
+_CONTRACT_START = "2025-01-01"
+_CONTRACT_END   = "2026-12-31"
+
+# ---- Customers (10 retailers) -------------------------------------------
+
+_CUSTOMERS = [
+    # (retailer_id, name, region, tier)
+    ("R-01", "MegaMart Inc.",          "US-EAST",    "PREMIUM"),
+    ("R-02", "ValueShop Corp.",        "US-EAST",    "STANDARD"),
+    ("R-03", "BudgetBuy LLC",          "US-SOUTH",   "BASIC"),
+    ("R-04", "QuickStop Retail",       "US-MIDWEST",  "STANDARD"),
+    ("R-05", "CleanWorld Stores",      "US-WEST",    "PREMIUM"),
+    ("R-06", "FreshChoice Markets",    "US-EAST",    "STANDARD"),
+    ("R-07", "SaveMore Distributors",  "US-SOUTH",   "BASIC"),
+    ("R-08", "PrimeGoods Ltd.",        "US-WEST",    "PREMIUM"),
+    ("R-09", "AllDay Convenience",     "US-MIDWEST",  "STANDARD"),
+    ("R-10", "EcoSupply Co.",          "US-EAST",    "BASIC"),
 ]
+
+# ---- Distribution Centers (5 DCs) ---------------------------------------
+
+_DISTRIBUTION_CENTERS = [
+    # (dc_id, name, region, capacity_pct)
+    ("DC-EAST-01",    "East Coast Hub",       "US-EAST",     85.0),
+    ("DC-SOUTH-01",   "Southern Warehouse",   "US-SOUTH",    72.0),
+    ("DC-MIDWEST-01", "Midwest Fulfillment",  "US-MIDWEST",  90.0),
+    ("DC-WEST-01",    "West Coast Center",    "US-WEST",     68.0),
+    ("DC-WEST-02",    "Pacific Overflow",     "US-WEST",     45.0),
+]
+
+# ---- SAP Pricing (10 SKUs) -----------------------------------------------
+
+_SAP_PRICING = [
+    # (sku, description, category, base_price, currency, dc_id)
+    ("SKU-001", "Premium Detergent 5L",    "CLEANING",   100.00, "USD", "DC-EAST-01"),
+    ("SKU-002", "Budget Detergent 2L",     "CLEANING",    45.00, "USD", "DC-EAST-01"),
+    ("SKU-003", "Fabric Softener 3L",      "CLEANING",    62.00, "USD", "DC-SOUTH-01"),
+    ("SKU-004", "Dish Soap 1L",            "CLEANING",    18.00, "USD", "DC-MIDWEST-01"),
+    ("SKU-005", "All-Purpose Cleaner 4L",  "CLEANING",    55.00, "USD", "DC-WEST-01"),
+    ("SKU-006", "Laundry Pods 60ct",       "CLEANING",    34.00, "USD", "DC-EAST-01"),
+    ("SKU-007", "Glass Cleaner 750ml",     "CLEANING",    12.50, "USD", "DC-SOUTH-01"),
+    ("SKU-008", "Floor Polish 2L",         "CLEANING",    28.00, "USD", "DC-MIDWEST-01"),
+    ("SKU-009", "Hand Soap Refill 1L",     "PERSONAL",    15.00, "USD", "DC-WEST-01"),
+    ("SKU-010", "Stain Remover 500ml",     "CLEANING",    22.00, "USD", "DC-EAST-01"),
+]
+
+# ---- Retailer Contracts (15 contracts) ------------------------------------
 
 _RETAILER_CONTRACTS = [
-    # retailer_id, sku, contract_price, discount_pct
-    ("R-01", "SKU-001",  90.00, 10.0),  # 10 % — within 15 % threshold
+    # (retailer_id, sku, contract_price, discount_pct)
+    # R-01 MegaMart — PREMIUM tier, negotiated discounts
+    ("R-01", "SKU-001",  90.00, 10.0),   # 10% — within 15% threshold
     ("R-01", "SKU-002",  40.50, 10.0),
-    ("R-02", "SKU-001",  92.00,  8.0),  # 8 % — within threshold
+    ("R-01", "SKU-006",  29.00, 14.7),   # near threshold edge
+    # R-02 ValueShop — STANDARD tier
+    ("R-02", "SKU-001",  92.00,  8.0),   # 8% — within threshold
     ("R-02", "SKU-003",  55.80, 10.0),
-    ("R-03", "SKU-001",  78.00, 22.0),  # 22 % — EXCEEDS threshold → recipe FAILED
+    # R-03 BudgetBuy — aggressive discount, will exceed threshold
+    ("R-03", "SKU-001",  78.00, 22.0),   # 22% — EXCEEDS 15% threshold -> FAILED
+    ("R-03", "SKU-007",  10.00, 20.0),   # 20% — also exceeds
+    # R-04 QuickStop
     ("R-04", "SKU-004",  16.00, 11.1),
-    ("R-05", "SKU-005",  52.25,  4.9),
+    ("R-04", "SKU-008",  25.20, 10.0),
+    # R-05 CleanWorld — PREMIUM
+    ("R-05", "SKU-005",  52.25,  5.0),
+    ("R-05", "SKU-009",  13.50, 10.0),
+    # R-06 FreshChoice
+    ("R-06", "SKU-001",  88.00, 12.0),   # 12% — within threshold
+    ("R-06", "SKU-010",  19.80, 10.0),
+    # R-08 PrimeGoods — PREMIUM
+    ("R-08", "SKU-001",  87.00, 13.0),   # 13% — within threshold, close to edge
+    ("R-08", "SKU-003",  54.00, 12.9),
 ]
+
+# ---- Promotions (seasonal / regional) ------------------------------------
+
+_PROMOTIONS = [
+    # (promo_id, sku, promo_type, discount_pct, start_date, end_date, region)
+    ("PROMO-2025-Q1-A", "SKU-001", "SEASONAL",  5.0, "2025-01-01", "2025-03-31", "US-EAST"),
+    ("PROMO-2025-Q1-B", "SKU-006", "CLEARANCE", 15.0, "2025-02-01", "2025-04-30", None),
+    ("PROMO-2025-Q2-A", "SKU-003", "SEASONAL",  8.0, "2025-04-01", "2025-06-30", "US-SOUTH"),
+    ("PROMO-2025-SPR",  "SKU-010", "BUNDLE",   10.0, "2025-03-01", "2025-05-31", None),
+]
+
+# ---- Credit Profiles (8 retailers with credit data) ----------------------
 
 _CREDIT_PROFILES = [
-    # retailer_id, credit_limit, current_exposure
-    ("R-01", 10_000.00,  9_200.00),  # gap $800  — released by ORDER_MANAGER
-    ("R-02", 15_000.00, 14_600.00),  # gap $400  — released
-    ("R-03",  5_000.00,  4_800.00),  # gap $200  — released
-    ("R-05", 20_000.00, 25_500.00),  # OVER LIMIT by $5,500 → REJECTED
+    # (retailer_id, credit_limit, current_exposure, risk_rating, last_review_date)
+    ("R-01", 10_000.00, 10_100.00, "WATCH",    "2025-03-01"),  # over by $100 — within $5k tolerance
+    ("R-02", 15_000.00, 14_600.00, "NORMAL",   "2025-03-10"),  # under limit — healthy
+    ("R-03",  5_000.00,  4_800.00, "NORMAL",   "2025-02-15"),  # under limit — healthy
+    ("R-05", 20_000.00, 25_500.00, "HIGH",     "2025-03-15"),  # OVER by $5,500 -> REJECTED
+    ("R-06", 12_000.00, 11_800.00, "NORMAL",   "2025-03-12"),  # gap $200 — healthy
+    ("R-07",  3_000.00,  7_500.00, "HIGH",     "2025-01-20"),  # OVER by $4,500 — within tolerance
+    ("R-08", 50_000.00, 35_000.00, "NORMAL",   "2025-03-18"),  # well under limit
+    ("R-10",  8_000.00, 13_200.00, "HIGH",     "2025-02-28"),  # OVER by $5,200 -> REJECTED
 ]
 
-_NOW = datetime.now(timezone.utc).isoformat()
-_CONTRACT_START = "2024-01-01"
-_CONTRACT_END   = "2025-12-31"
+# ---- EDI Events (20 events) -----------------------------------------------
 
 _EDI_EVENTS = [
-    # ── CONTRACTUAL_CORRECTION — price within 15 % discount ────────────────
+    # ======================================================================
+    # CONTRACTUAL_CORRECTION — price mismatch within/beyond 15% discount
+    # ======================================================================
+
+    # CC-001: 10% discount, within threshold -> GREEN -> COMPLETE
     {
         "event_id":    "EVT-CC-001",
         "event_type":  "EDI_850_PRICE_MISMATCH",
@@ -114,8 +233,10 @@ _EDI_EVENTS = [
         "po_price":    90.0,
         "sap_price":   100.0,
         "line_count":  1,
-        "metadata":    json.dumps({"contract_ref": "CTR-R01-2024", "note": "10% contract discount"}),
+        "dc_id":       "DC-EAST-01",
+        "metadata":    json.dumps({"contract_ref": "CTR-R01-2025", "note": "10% contract discount"}),
     },
+    # CC-002: 8% discount, within threshold -> GREEN -> COMPLETE
     {
         "event_id":    "EVT-CC-002",
         "event_type":  "EDI_850_PRICE_MISMATCH",
@@ -125,9 +246,10 @@ _EDI_EVENTS = [
         "po_price":    92.0,
         "sap_price":   100.0,
         "line_count":  1,
-        "metadata":    json.dumps({"contract_ref": "CTR-R02-2024", "note": "8% contract discount"}),
+        "dc_id":       "DC-EAST-01",
+        "metadata":    json.dumps({"contract_ref": "CTR-R02-2025", "note": "8% contract discount"}),
     },
-    # ── CONTRACTUAL_CORRECTION — discount EXCEEDS 15 %, recipe returns FAILED
+    # CC-003: 22% discount, EXCEEDS threshold -> GREEN but recipe returns FAILED
     {
         "event_id":    "EVT-CC-003",
         "event_type":  "EDI_850_PRICE_MISMATCH",
@@ -137,9 +259,67 @@ _EDI_EVENTS = [
         "po_price":    78.0,
         "sap_price":   100.0,
         "line_count":  1,
-        "metadata":    json.dumps({"contract_ref": "CTR-R03-2024", "discount_claimed": "22%"}),
+        "dc_id":       "DC-SOUTH-01",
+        "metadata":    json.dumps({"contract_ref": "CTR-R03-2025", "discount_claimed": "22%"}),
     },
-    # ── CREDIT_BLOCK — shadow YELLOW → MANUAL_REVIEW_REQUIRED ──────────────
+    # CC-004: 12% discount (R-06), within threshold -> GREEN -> COMPLETE
+    {
+        "event_id":    "EVT-CC-004",
+        "event_type":  "EDI_850_PRICE_MISMATCH",
+        "order_id":    "SO-1004",
+        "retailer_id": "R-06",
+        "sku":         "SKU-001",
+        "po_price":    88.0,
+        "sap_price":   100.0,
+        "line_count":  1,
+        "dc_id":       "DC-EAST-01",
+        "metadata":    json.dumps({"contract_ref": "CTR-R06-2025", "note": "12% contract discount"}),
+    },
+    # CC-005: 13% discount (R-08), within threshold, close to edge -> COMPLETE
+    {
+        "event_id":    "EVT-CC-005",
+        "event_type":  "EDI_850_PRICE_MISMATCH",
+        "order_id":    "SO-1005",
+        "retailer_id": "R-08",
+        "sku":         "SKU-001",
+        "po_price":    87.0,
+        "sap_price":   100.0,
+        "line_count":  1,
+        "dc_id":       "DC-WEST-01",
+        "metadata":    json.dumps({"contract_ref": "CTR-R08-2025", "note": "13% PREMIUM discount"}),
+    },
+    # CC-006: 14.7% discount (R-01 SKU-006), within threshold, edge case
+    {
+        "event_id":    "EVT-CC-006",
+        "event_type":  "EDI_850_PRICE_MISMATCH",
+        "order_id":    "SO-1006",
+        "retailer_id": "R-01",
+        "sku":         "SKU-006",
+        "po_price":    29.0,
+        "sap_price":   34.0,
+        "line_count":  1,
+        "dc_id":       "DC-EAST-01",
+        "metadata":    json.dumps({"contract_ref": "CTR-R01-2025", "note": "14.7% near-edge discount"}),
+    },
+    # CC-007: 20% discount (R-03 SKU-007), EXCEEDS threshold -> FAILED
+    {
+        "event_id":    "EVT-CC-007",
+        "event_type":  "EDI_850_PRICE_MISMATCH",
+        "order_id":    "SO-1007",
+        "retailer_id": "R-03",
+        "sku":         "SKU-007",
+        "po_price":    10.0,
+        "sap_price":   12.5,
+        "line_count":  1,
+        "dc_id":       "DC-SOUTH-01",
+        "metadata":    json.dumps({"contract_ref": "CTR-R03-2025", "discount_claimed": "20%"}),
+    },
+
+    # ======================================================================
+    # CREDIT_BLOCK — credit hold/release scenarios
+    # ======================================================================
+
+    # CB-001: ORDER_MANAGER, $100 over limit (within $5k tolerance) -> YELLOW -> MANUAL_REVIEW
     {
         "event_id":    "EVT-CB-001",
         "event_type":  "EDI_850_PRICE_MISMATCH",
@@ -149,12 +329,14 @@ _EDI_EVENTS = [
         "po_price":    100.0,
         "sap_price":   100.0,
         "line_count":  1,
+        "dc_id":       "DC-EAST-01",
         "metadata":    json.dumps({
             "requester_role":    "ORDER_MANAGER",
             "credit_limit":      10000.0,
             "current_exposure":  10100.0,
         }),
     },
+    # CB-002: FINANCE_DIRECTOR, $5,500 over (exceeds $5k tolerance) -> YELLOW -> REJECTED
     {
         "event_id":    "EVT-CB-002",
         "event_type":  "EDI_850_PRICE_MISMATCH",
@@ -164,14 +346,56 @@ _EDI_EVENTS = [
         "po_price":    100.0,
         "sap_price":   100.0,
         "line_count":  1,
+        "dc_id":       "DC-WEST-01",
         "metadata":    json.dumps({
             "requester_role":    "FINANCE_DIRECTOR",
             "credit_limit":      20000.0,
             "current_exposure":  25500.0,
-            "note":              "exposure $5,500 over limit — rejected",
+            "note":              "exposure $5,500 over limit - rejected",
         }),
     },
-    # ── MASS_PRICING_ERROR — line_count > 10, shadow RED → BLOCKED ─────────
+    # CB-003: ORDER_MANAGER, $4,500 over (R-07, within tolerance) -> YELLOW -> MANUAL_REVIEW
+    {
+        "event_id":    "EVT-CB-003",
+        "event_type":  "EDI_850_PRICE_MISMATCH",
+        "order_id":    "SO-2003",
+        "retailer_id": "R-07",
+        "sku":         "SKU-004",
+        "po_price":    18.0,
+        "sap_price":   18.0,
+        "line_count":  1,
+        "dc_id":       "DC-SOUTH-01",
+        "metadata":    json.dumps({
+            "requester_role":    "ORDER_MANAGER",
+            "credit_limit":      3000.0,
+            "current_exposure":  7500.0,
+            "note":              "$4,500 over limit - within $5k tolerance",
+        }),
+    },
+    # CB-004: FINANCE_DIRECTOR, $5,200 over (R-10, exceeds tolerance) -> YELLOW -> REJECTED
+    {
+        "event_id":    "EVT-CB-004",
+        "event_type":  "EDI_850_PRICE_MISMATCH",
+        "order_id":    "SO-2004",
+        "retailer_id": "R-10",
+        "sku":         "SKU-010",
+        "po_price":    22.0,
+        "sap_price":   22.0,
+        "line_count":  1,
+        "dc_id":       "DC-EAST-01",
+        "metadata":    json.dumps({
+            "requester_role":    "FINANCE_DIRECTOR",
+            "credit_limit":      8000.0,
+            "current_exposure":  13200.0,
+            "note":              "$5,200 over limit - exceeds tolerance, rejected",
+        }),
+    },
+
+    # ======================================================================
+    # MASS_PRICING_ERROR — line_count > 10, shadow RED -> BLOCKED
+    # ======================================================================
+
+    # MPE-001: 15 lines, systemic risk -> RED -> BLOCKED
     {
         "event_id":    "EVT-MPE-001",
         "event_type":  "EDI_850_PRICE_MISMATCH",
@@ -181,9 +405,50 @@ _EDI_EVENTS = [
         "po_price":    50.0,
         "sap_price":   62.0,
         "line_count":  15,
-        "metadata":    json.dumps({"batch_ref": "BATCH-2024-01", "note": "15-line batch — systemic risk"}),
+        "dc_id":       "DC-SOUTH-01",
+        "metadata":    json.dumps({
+            "batch_ref": "BATCH-2025-01",
+            "note":      "15-line batch - systemic risk",
+        }),
     },
-    # ── DUPLICATE_PO — composite score 0.97 → AUTO_BLOCK ───────────────────
+    # MPE-002: 25 lines, large batch -> RED -> BLOCKED
+    {
+        "event_id":    "EVT-MPE-002",
+        "event_type":  "EDI_850_PRICE_MISMATCH",
+        "order_id":    "SO-3002",
+        "retailer_id": "R-06",
+        "sku":         "SKU-001",
+        "po_price":    85.0,
+        "sap_price":   100.0,
+        "line_count":  25,
+        "dc_id":       "DC-EAST-01",
+        "metadata":    json.dumps({
+            "batch_ref": "BATCH-2025-02",
+            "note":      "25-line batch - major systemic risk",
+        }),
+    },
+    # MPE-003: 11 lines, just over threshold -> RED -> BLOCKED
+    {
+        "event_id":    "EVT-MPE-003",
+        "event_type":  "EDI_850_PRICE_MISMATCH",
+        "order_id":    "SO-3003",
+        "retailer_id": "R-08",
+        "sku":         "SKU-009",
+        "po_price":    13.0,
+        "sap_price":   15.0,
+        "line_count":  11,
+        "dc_id":       "DC-WEST-01",
+        "metadata":    json.dumps({
+            "batch_ref": "BATCH-2025-03",
+            "note":      "11 lines - just over threshold",
+        }),
+    },
+
+    # ======================================================================
+    # DUPLICATE_PO — composite score determines action
+    # ======================================================================
+
+    # DPO-001: composite 0.98 -> AUTO_BLOCK (all signals near 1.0)
     {
         "event_id":    "EVT-DPO-001",
         "event_type":  "EDI_850_DUPLICATE_PO",
@@ -193,6 +458,7 @@ _EDI_EVENTS = [
         "po_price":    16.0,
         "sap_price":   18.0,
         "line_count":  1,
+        "dc_id":       "DC-MIDWEST-01",
         "metadata":    json.dumps({
             "signal_scores": {
                 "po_number":     1.0,
@@ -206,7 +472,7 @@ _EDI_EVENTS = [
             },
         }),
     },
-    # ── DUPLICATE_PO — composite score 0.55 → SOFT_FLAG ───────────────────
+    # DPO-002: composite 0.65 -> SOFT_FLAG (mixed signals)
     {
         "event_id":    "EVT-DPO-002",
         "event_type":  "EDI_850_DUPLICATE_PO",
@@ -216,6 +482,7 @@ _EDI_EVENTS = [
         "po_price":    16.0,
         "sap_price":   18.0,
         "line_count":  1,
+        "dc_id":       "DC-MIDWEST-01",
         "metadata":    json.dumps({
             "signal_scores": {
                 "po_number":     1.0,
@@ -224,6 +491,54 @@ _EDI_EVENTS = [
                 "amount":        0.5,
                 "timestamp":     0.0,
                 "ship_to":       0.5,
+                "channel":       0.5,
+                "delivery_date": 0.0,
+            },
+        }),
+    },
+    # DPO-003: composite 0.82 -> REVIEW_REQUIRED (high but below auto-block)
+    {
+        "event_id":    "EVT-DPO-003",
+        "event_type":  "EDI_850_DUPLICATE_PO",
+        "order_id":    "PO-9003",
+        "retailer_id": "R-09",
+        "sku":         "SKU-008",
+        "po_price":    25.20,
+        "sap_price":   28.0,
+        "line_count":  1,
+        "dc_id":       "DC-MIDWEST-01",
+        "metadata":    json.dumps({
+            "signal_scores": {
+                "po_number":     1.0,
+                "customer_id":   1.0,
+                "line_items":    0.8,
+                "amount":        0.9,
+                "timestamp":     0.5,
+                "ship_to":       0.7,
+                "channel":       0.6,
+                "delivery_date": 0.8,
+            },
+        }),
+    },
+    # DPO-004: composite 0.40 -> CLEAR (below soft_flag threshold 0.50)
+    {
+        "event_id":    "EVT-DPO-004",
+        "event_type":  "EDI_850_DUPLICATE_PO",
+        "order_id":    "PO-9004",
+        "retailer_id": "R-06",
+        "sku":         "SKU-010",
+        "po_price":    19.80,
+        "sap_price":   22.0,
+        "line_count":  1,
+        "dc_id":       "DC-EAST-01",
+        "metadata":    json.dumps({
+            "signal_scores": {
+                "po_number":     1.0,
+                "customer_id":   0.5,
+                "line_items":    0.0,
+                "amount":        0.3,
+                "timestamp":     0.0,
+                "ship_to":       0.0,
                 "channel":       0.5,
                 "delivery_date": 0.0,
             },
@@ -242,17 +557,34 @@ def seed(db_path: Path, reset: bool = False) -> None:
 
     if reset and db_path.exists():
         db_path.unlink()
-        print(f"🗑  Removed existing database: {db_path}")
+        print(f"Removed existing database: {db_path}")
 
     conn = sqlite3.connect(db_path)
     conn.executescript(SCHEMA)
 
+    # Customers
+    conn.executemany(
+        "INSERT OR REPLACE INTO customers "
+        "  (retailer_id, name, region, tier, active, created_at) "
+        "VALUES (?, ?, ?, ?, 1, ?)",
+        [(rid, name, region, tier, _NOW) for rid, name, region, tier in _CUSTOMERS],
+    )
+
+    # Distribution Centers
+    conn.executemany(
+        "INSERT OR REPLACE INTO distribution_centers "
+        "  (dc_id, name, region, capacity_pct, active) "
+        "VALUES (?, ?, ?, ?, 1)",
+        _DISTRIBUTION_CENTERS,
+    )
+
     # SAP pricing
     conn.executemany(
         "INSERT OR REPLACE INTO sap_pricing "
-        "  (sku, description, base_price, currency, updated_at) "
-        "VALUES (?, ?, ?, ?, ?)",
-        [(sku, desc, price, cur, _NOW) for sku, desc, price, cur in _SAP_PRICING],
+        "  (sku, description, category, base_price, currency, dc_id, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [(sku, desc, cat, price, cur, dc, _NOW)
+         for sku, desc, cat, price, cur, dc in _SAP_PRICING],
     )
 
     # Retailer contracts
@@ -264,12 +596,21 @@ def seed(db_path: Path, reset: bool = False) -> None:
          for rid, sku, cp, dp in _RETAILER_CONTRACTS],
     )
 
+    # Promotions
+    conn.executemany(
+        "INSERT OR REPLACE INTO promotions "
+        "  (promo_id, sku, promo_type, discount_pct, start_date, end_date, region, active) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
+        _PROMOTIONS,
+    )
+
     # Credit profiles
     conn.executemany(
         "INSERT OR REPLACE INTO credit_profiles "
-        "  (retailer_id, credit_limit, current_exposure, updated_at) "
-        "VALUES (?, ?, ?, ?)",
-        [(rid, cl, ce, _NOW) for rid, cl, ce, in _CREDIT_PROFILES],
+        "  (retailer_id, credit_limit, current_exposure, risk_rating, last_review_date, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        [(rid, cl, ce, rr, lrd, _NOW)
+         for rid, cl, ce, rr, lrd in _CREDIT_PROFILES],
     )
 
     # EDI events
@@ -277,19 +618,22 @@ def seed(db_path: Path, reset: bool = False) -> None:
         conn.execute(
             "INSERT OR REPLACE INTO edi_events "
             "  (event_id, event_type, order_id, retailer_id, sku, "
-            "   po_price, sap_price, line_count, metadata, created_at) "
+            "   po_price, sap_price, line_count, dc_id, metadata, created_at) "
             "VALUES "
             "  (:event_id, :event_type, :order_id, :retailer_id, :sku, "
-            "   :po_price, :sap_price, :line_count, :metadata, :created_at)",
+            "   :po_price, :sap_price, :line_count, :dc_id, :metadata, :created_at)",
             {**ev, "created_at": _NOW},
         )
 
     conn.commit()
     conn.close()
 
-    print(f"✅  Seeded: {db_path}")
+    print(f"Seeded: {db_path}")
+    print(f"    {len(_CUSTOMERS)} customers")
+    print(f"    {len(_DISTRIBUTION_CENTERS)} distribution centers")
     print(f"    {len(_SAP_PRICING)} SKUs")
     print(f"    {len(_RETAILER_CONTRACTS)} retailer contracts")
+    print(f"    {len(_PROMOTIONS)} promotions")
     print(f"    {len(_CREDIT_PROFILES)} credit profiles")
     print(f"    {len(_EDI_EVENTS)} EDI events")
     print()
@@ -323,6 +667,28 @@ def load_events(db_path: Path) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def load_customers(db_path: Path) -> list[dict]:
+    """Return all customers from the database as dicts."""
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT * FROM customers WHERE active = 1 ORDER BY retailer_id"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def load_promotions(db_path: Path) -> list[dict]:
+    """Return all active promotions from the database as dicts."""
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT * FROM promotions WHERE active = 1 ORDER BY promo_id"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
 def lookup_sap_price(db_path: Path, sku: str) -> float | None:
     conn = sqlite3.connect(db_path)
     row = conn.execute(
@@ -330,6 +696,26 @@ def lookup_sap_price(db_path: Path, sku: str) -> float | None:
     ).fetchone()
     conn.close()
     return row[0] if row else None
+
+
+def lookup_customer(db_path: Path, retailer_id: str) -> dict | None:
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        "SELECT * FROM customers WHERE retailer_id = ?", (retailer_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def lookup_credit_profile(db_path: Path, retailer_id: str) -> dict | None:
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        "SELECT * FROM credit_profiles WHERE retailer_id = ?", (retailer_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
 # ---------------------------------------------------------------------------

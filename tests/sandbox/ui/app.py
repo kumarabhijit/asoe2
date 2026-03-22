@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -32,7 +33,14 @@ import streamlit as st
 # ---- ASOE imports (after path fix) --------------------------------
 from contracts.models import GraphState, Intent, OrderEvent
 from orchestration.graph import run_graph
-from tests.sandbox.seed import load_events, DB_DEFAULT
+from tests.sandbox.seed import (
+    load_events,
+    load_customers,
+    load_promotions,
+    lookup_customer,
+    lookup_credit_profile,
+    DB_DEFAULT,
+)
 
 # ------------------------------------------------------------------
 # Page config
@@ -161,6 +169,24 @@ def _render_sidebar() -> Optional[OrderEvent]:
         # Show raw DB row
         with st.sidebar.expander("Raw DB row"):
             st.json(row)
+
+        # Show customer + credit context for selected event
+        rid = row.get("retailer_id")
+        if rid and db.exists():
+            cust = lookup_customer(db, rid)
+            credit = lookup_credit_profile(db, rid)
+            if cust or credit:
+                with st.sidebar.expander("Customer context"):
+                    if cust:
+                        st.write(f"**{cust['name']}** ({cust['tier']})")
+                        st.write(f"Region: {cust['region']}")
+                    if credit:
+                        over = credit["current_exposure"] - credit["credit_limit"]
+                        st.write(f"Credit limit: ${credit['credit_limit']:,.0f}")
+                        st.write(f"Exposure: ${credit['current_exposure']:,.0f}")
+                        if over > 0:
+                            st.warning(f"Over limit by ${over:,.0f}")
+                        st.write(f"Risk: {credit['risk_rating']}")
 
         run_clicked = st.sidebar.button("▶  Run event", type="primary")
         if run_clicked:
@@ -299,6 +325,58 @@ def _render_trace(state: GraphState) -> None:
 
 
 # ------------------------------------------------------------------
+# Data browser
+# ------------------------------------------------------------------
+
+def _render_data_browser(db: Path) -> None:
+    """Show reference data tables in an expandable section."""
+    with st.expander("📊 Sandbox data browser"):
+        tab_cust, tab_sku, tab_promo, tab_credit = st.tabs(
+            ["Customers", "SKU Master", "Promotions", "Credit Profiles"]
+        )
+
+        conn = sqlite3.connect(db)
+        conn.row_factory = sqlite3.Row
+
+        with tab_cust:
+            rows = conn.execute(
+                "SELECT retailer_id, name, region, tier FROM customers "
+                "WHERE active = 1 ORDER BY retailer_id"
+            ).fetchall()
+            if rows:
+                st.dataframe([dict(r) for r in rows], use_container_width=True)
+
+        with tab_sku:
+            rows = conn.execute(
+                "SELECT sku, description, category, base_price, currency, dc_id "
+                "FROM sap_pricing ORDER BY sku"
+            ).fetchall()
+            if rows:
+                st.dataframe([dict(r) for r in rows], use_container_width=True)
+
+        with tab_promo:
+            rows = conn.execute(
+                "SELECT promo_id, sku, promo_type, discount_pct, start_date, end_date, region "
+                "FROM promotions WHERE active = 1 ORDER BY promo_id"
+            ).fetchall()
+            if rows:
+                st.dataframe([dict(r) for r in rows], use_container_width=True)
+            else:
+                st.info("No active promotions.")
+
+        with tab_credit:
+            rows = conn.execute(
+                "SELECT retailer_id, credit_limit, current_exposure, risk_rating, "
+                "       last_review_date "
+                "FROM credit_profiles ORDER BY retailer_id"
+            ).fetchall()
+            if rows:
+                st.dataframe([dict(r) for r in rows], use_container_width=True)
+
+        conn.close()
+
+
+# ------------------------------------------------------------------
 # Main
 # ------------------------------------------------------------------
 
@@ -321,6 +399,11 @@ def main() -> None:
         st.write(f"**DB path:** `{_db_path()}`")
 
     event = _render_sidebar()
+
+    # Data browser (always visible)
+    db = _db_path()
+    if db.exists():
+        _render_data_browser(db)
 
     if event is None:
         st.info("Select an event in the sidebar and click **▶ Run event** to begin.")
