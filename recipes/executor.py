@@ -41,7 +41,11 @@ class RecipeExecutor:
                 "order_id": "SO-1001",
                 "line_item": 1,
                 "requested_price": 92.0,
-                "erp_context": {"base_price": 100.0, "max_discount_allowed": 0.15},
+                "erp_context": {
+                    "base_price": 100.0,
+                    "max_discount_allowed": 0.15,
+                    "condition_type": "YK07",
+                },
             },
             trace_id="<uuid from ComplianceDecision>",
             intent_selected="CONTRACTUAL_CORRECTION",

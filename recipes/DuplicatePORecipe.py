@@ -27,11 +27,11 @@ from __future__ import annotations
 #   - MASS_PRICING_ERROR intent routes to FAIL_TO_HUMAN upstream; this recipe
 #     is invoked only for DUPLICATE_PO intent.
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 # ---------------------------------------------------------------------------
 # Signal weights — sourced from the product specification.
-# Must sum to 1.0.
+# Must sum to 1.0.  These are algorithmic, not policy thresholds.
 # ---------------------------------------------------------------------------
 
 _WEIGHTS: Dict[str, float] = {
@@ -46,14 +46,6 @@ _WEIGHTS: Dict[str, float] = {
 }
 
 assert abs(sum(_WEIGHTS.values()) - 1.0) < 1e-9, "Signal weights must sum to 1.0"
-
-# ---------------------------------------------------------------------------
-# Classification thresholds (inclusive lower bound)
-# ---------------------------------------------------------------------------
-
-_THRESHOLD_AUTO_BLOCK      = 0.90
-_THRESHOLD_REVIEW_REQUIRED = 0.70
-_THRESHOLD_SOFT_FLAG       = 0.50
 
 # ---------------------------------------------------------------------------
 # Action mapping — one deterministic action per classification
@@ -71,15 +63,24 @@ def detect_duplicate_po(
     incoming_po_number: str,
     customer_id: str,
     signal_scores: Dict[str, float],
+    threshold_auto_block: float = 0.90,
+    threshold_review_required: float = 0.70,
+    threshold_soft_flag: float = 0.50,
 ) -> Dict[str, Any]:
     """Score and classify an incoming PO against pre-computed signal scores.
 
+    Classification thresholds are injected by the orchestration layer so the
+    same logic can serve different customer / vendor threshold sets.
+
     Args:
-        incoming_po_number: Normalized PO number of the incoming order.
-        customer_id:        Sold-to / bill-to party identifier.
-        signal_scores:      Per-signal match scores in [0.0, 1.0].
-                            Keys must match those in _WEIGHTS; missing keys
-                            default to 0.0 (worst-case / conservative).
+        incoming_po_number:        Normalized PO number of the incoming order.
+        customer_id:               Sold-to / bill-to party identifier.
+        signal_scores:             Per-signal match scores in [0.0, 1.0].
+                                   Keys must match those in _WEIGHTS; missing
+                                   keys default to 0.0 (conservative).
+        threshold_auto_block:      Score >= this → AUTO_BLOCK.
+        threshold_review_required: Score >= this → REVIEW_REQUIRED.
+        threshold_soft_flag:       Score >= this → SOFT_FLAG.
 
     Returns:
         Dict with keys: status, composite_score, classification,
@@ -94,13 +95,13 @@ def detect_duplicate_po(
     composite_score = round(sum(breakdown.values()), 6)
 
     # Classify using closed lower-bound thresholds.
-    if composite_score >= _THRESHOLD_AUTO_BLOCK:
+    if composite_score >= threshold_auto_block:
         classification = "AUTO_BLOCK"
         status = "BLOCKED"
-    elif composite_score >= _THRESHOLD_REVIEW_REQUIRED:
+    elif composite_score >= threshold_review_required:
         classification = "REVIEW_REQUIRED"
         status = "REVIEW_REQUIRED"
-    elif composite_score >= _THRESHOLD_SOFT_FLAG:
+    elif composite_score >= threshold_soft_flag:
         classification = "SOFT_FLAG"
         status = "SOFT_FLAG"
     else:

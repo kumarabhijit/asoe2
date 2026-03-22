@@ -39,12 +39,17 @@ def _price_params(
     requested_price=92.0,
     base_price=100.0,
     threshold=0.15,
+    condition_type="YK07",
 ):
     return {
         "order_id": order_id,
         "line_item": line_item,
         "requested_price": requested_price,
-        "erp_context": {"base_price": base_price, "max_discount_allowed": threshold},
+        "erp_context": {
+            "base_price": base_price,
+            "max_discount_allowed": threshold,
+            "condition_type": condition_type,
+        },
     }
 
 
@@ -53,12 +58,16 @@ def _credit_params(
     requester_role="ORDER_MANAGER",
     credit_limit=10_000.0,
     current_exposure=9_000.0,
+    authorized_roles=("ORDER_MANAGER", "FINANCE_DIRECTOR"),
+    exposure_tolerance=5_000.0,
 ):
     return {
         "order_id": order_id,
         "requester_role": requester_role,
         "credit_limit": credit_limit,
         "current_exposure": current_exposure,
+        "authorized_roles": authorized_roles,
+        "exposure_tolerance": exposure_tolerance,
     }
 
 

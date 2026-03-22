@@ -3,13 +3,13 @@ from __future__ import annotations
 from typing import Optional
 
 from contracts.models import GraphState, Intent
-from contracts.policy import CIRCUIT_BREAKER_MAX_VARIANCE
+from contracts.policy import CIRCUIT_BREAKER_MAX_VARIANCE, MASS_UPDATE_LINE_COUNT_THRESHOLD
 from constraints.specs import IntentDecision, RecipeProposal, ShadowDecisionSchema
 
 
 class DeterministicFallbackBackend:
     def classify_intent(self, state: GraphState) -> IntentDecision:
-        if state.event.line_count > 10:
+        if state.event.line_count > MASS_UPDATE_LINE_COUNT_THRESHOLD:
             return IntentDecision(intent="MASS_PRICING_ERROR", confidence=0.95, rationale="line_count > 10")
         if state.event.event_type in ("EDI_850_DUPLICATE_PO", "DUPLICATE"):
             return IntentDecision(intent="DUPLICATE_PO", confidence=0.90, rationale="duplicate PO event type")
@@ -40,10 +40,10 @@ class DeterministicFallbackBackend:
                 reasons=["Circuit breaker threshold exceeded for total batch variance."],
                 policy_hits=["CIRCUIT_BREAKER_VARIANCE"],
             )
-        if state.event.line_count > 10:
+        if state.event.line_count > MASS_UPDATE_LINE_COUNT_THRESHOLD:
             return ShadowDecisionSchema(
                 status="RED",
-                reasons=[">10 line items suggests mass update risk."],
+                reasons=[f">{MASS_UPDATE_LINE_COUNT_THRESHOLD} line items suggests mass update risk."],
                 policy_hits=["MASS_UPDATE_DETECTED"],
             )
         if state.intent == Intent.CREDIT_BLOCK:

@@ -226,15 +226,21 @@ No process restart required for either switch — checked at each `run_graph()` 
 
 | Constant | Value | Consumed by |
 |---|---|---|
-| `MAX_DISCOUNT_ALLOWED` | `0.15` (15%) | `PriceAdjustmentRecipe.py` |
-| `PRICE_CONDITION_TYPE` | `"YK07"` | `PriceAdjustmentRecipe.py` |
-| `CREDIT_AUTHORIZED_ROLES` | `("ORDER_MANAGER", "FINANCE_DIRECTOR")` | `CreditHoldReleaseRecipe.py` |
-| `CREDIT_EXPOSURE_TOLERANCE` | `5_000.0` | `CreditHoldReleaseRecipe.py` |
+| `MAX_DISCOUNT_ALLOWED` | `0.15` (15%) | `orchestration/nodes.py` → injected into `PriceAdjustmentRecipe` via `erp_context` |
+| `PRICE_CONDITION_TYPE` | `"YK07"` | `orchestration/nodes.py` → injected into `PriceAdjustmentRecipe` via `erp_context` |
+| `CREDIT_AUTHORIZED_ROLES` | `("ORDER_MANAGER", "FINANCE_DIRECTOR")` | `orchestration/nodes.py` → injected into `CreditHoldReleaseRecipe` as param |
+| `CREDIT_EXPOSURE_TOLERANCE` | `5_000.0` | `orchestration/nodes.py` → injected into `CreditHoldReleaseRecipe` as param |
+| `DUPLICATE_PO_THRESHOLD_AUTO_BLOCK` | `0.90` | `orchestration/nodes.py` → injected into `DuplicatePORecipe` as param |
+| `DUPLICATE_PO_THRESHOLD_REVIEW_REQUIRED` | `0.70` | `orchestration/nodes.py` → injected into `DuplicatePORecipe` as param |
+| `DUPLICATE_PO_THRESHOLD_SOFT_FLAG` | `0.50` | `orchestration/nodes.py` → injected into `DuplicatePORecipe` as param |
+| `MASS_UPDATE_LINE_COUNT_THRESHOLD` | `10` | `constraints/fallback_backend.py` |
 | `CIRCUIT_BREAKER_MAX_UPDATES` | `50` | `orchestration/utils.py` |
 | `CIRCUIT_BREAKER_MAX_VARIANCE` | `10_000.0` | `orchestration/utils.py`, `constraints/fallback_backend.py` |
 | `DISCREPANCY_THRESHOLD` | `0.15` | `orchestration/utils.py` |
 
-Evolution path: module constants → env vars → K8s ConfigMap → policy service.
+**Design principle:** Recipes never import from `policy.py`. All thresholds are injected by the orchestration layer (`validate_types` node) so the same recipe logic can serve different customer / vendor threshold sets.
+
+Evolution path: module constants → env vars → K8s ConfigMap → per-customer policy service.
 
 ---
 

@@ -20,8 +20,8 @@ from recipes.DuplicatePORecipe import detect_duplicate_po
 # ---------------------------------------------------------------------------
 
 class TestPriceAdjustmentRecipe:
-    def _ctx(self, base: float = 100.0, threshold: float = 0.15):
-        return {"base_price": base, "max_discount_allowed": threshold}
+    def _ctx(self, base: float = 100.0, threshold: float = 0.15, condition_type: str = "YK07"):
+        return {"base_price": base, "max_discount_allowed": threshold, "condition_type": condition_type}
 
     # -- success path --------------------------------------------------------
 
@@ -110,6 +110,9 @@ class TestPriceAdjustmentRecipe:
 
 class TestCreditHoldReleaseRecipe:
 
+    _ROLES = ("ORDER_MANAGER", "FINANCE_DIRECTOR")
+    _TOLERANCE = 5_000.0
+
     # -- success path --------------------------------------------------------
 
     def test_order_manager_within_limit_succeeds(self):
@@ -118,6 +121,8 @@ class TestCreditHoldReleaseRecipe:
             requester_role="ORDER_MANAGER",
             credit_limit=10_000.0,
             current_exposure=9_000.0,
+            authorized_roles=self._ROLES,
+            exposure_tolerance=self._TOLERANCE,
         )
         assert result["status"] == "RELEASED"
 
@@ -127,6 +132,8 @@ class TestCreditHoldReleaseRecipe:
             requester_role="FINANCE_DIRECTOR",
             credit_limit=50_000.0,
             current_exposure=45_000.0,
+            authorized_roles=self._ROLES,
+            exposure_tolerance=self._TOLERANCE,
         )
         assert result["status"] == "RELEASED"
 
@@ -136,6 +143,8 @@ class TestCreditHoldReleaseRecipe:
             requester_role="ORDER_MANAGER",
             credit_limit=10_000.0,
             current_exposure=9_000.0,
+            authorized_roles=self._ROLES,
+            exposure_tolerance=self._TOLERANCE,
         )
         assert result["order_id"] == "SO-2001"
 
@@ -145,6 +154,8 @@ class TestCreditHoldReleaseRecipe:
             requester_role="ORDER_MANAGER",
             credit_limit=10_000.0,
             current_exposure=9_000.0,
+            authorized_roles=self._ROLES,
+            exposure_tolerance=self._TOLERANCE,
         )
         assert result["workflow"] == "AUTO_APPROVED"
 
@@ -155,6 +166,8 @@ class TestCreditHoldReleaseRecipe:
             requester_role="ORDER_MANAGER",
             credit_limit=10_000.0,
             current_exposure=15_000.0,   # exactly $5,000 over (not >5000)
+            authorized_roles=self._ROLES,
+            exposure_tolerance=self._TOLERANCE,
         )
         assert result["status"] == "RELEASED"
 
@@ -164,6 +177,8 @@ class TestCreditHoldReleaseRecipe:
         result = release_credit_hold(
             order_id="SO-2", requester_role="CSR",
             credit_limit=10_000.0, current_exposure=9_500.0,
+            authorized_roles=self._ROLES,
+            exposure_tolerance=self._TOLERANCE,
         )
         assert result["status"] == "BLOCKED"
 
@@ -171,6 +186,8 @@ class TestCreditHoldReleaseRecipe:
         result = release_credit_hold(
             order_id="SO-2", requester_role="CSR",
             credit_limit=10_000.0, current_exposure=9_500.0,
+            authorized_roles=self._ROLES,
+            exposure_tolerance=self._TOLERANCE,
         )
         assert "reason" in result
 
@@ -178,6 +195,8 @@ class TestCreditHoldReleaseRecipe:
         result = release_credit_hold(
             order_id="SO-2", requester_role="ADMIN",
             credit_limit=10_000.0, current_exposure=9_500.0,
+            authorized_roles=self._ROLES,
+            exposure_tolerance=self._TOLERANCE,
         )
         assert result["status"] == "BLOCKED"
 
@@ -189,6 +208,8 @@ class TestCreditHoldReleaseRecipe:
             requester_role="ORDER_MANAGER",
             credit_limit=10_000.0,
             current_exposure=15_001.0,   # $5,001 over limit
+            authorized_roles=self._ROLES,
+            exposure_tolerance=self._TOLERANCE,
         )
         assert result["status"] == "REJECTED"
 
@@ -198,6 +219,8 @@ class TestCreditHoldReleaseRecipe:
             requester_role="ORDER_MANAGER",
             credit_limit=10_000.0,
             current_exposure=20_000.0,
+            authorized_roles=self._ROLES,
+            exposure_tolerance=self._TOLERANCE,
         )
         assert "reason" in result
         assert "5,000" in result["reason"] or "5000" in result["reason"]

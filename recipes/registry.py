@@ -30,13 +30,13 @@ REGISTRY = {
     "CreditHoldReleaseRecipe.py": RecipeSpec(
         name="CreditHoldReleaseRecipe.py",
         func=release_credit_hold,
-        required_params=("order_id", "requester_role", "credit_limit", "current_exposure"),
+        required_params=("order_id", "requester_role", "credit_limit", "current_exposure", "authorized_roles", "exposure_tolerance"),
         allowed_intents=("CREDIT_BLOCK",),
     ),
     "DuplicatePORecipe.py": RecipeSpec(
         name="DuplicatePORecipe.py",
         func=detect_duplicate_po,
-        required_params=("incoming_po_number", "customer_id", "signal_scores"),
+        required_params=("incoming_po_number", "customer_id", "signal_scores", "threshold_auto_block", "threshold_review_required", "threshold_soft_flag"),
         allowed_intents=("DUPLICATE_PO",),
     ),
 }

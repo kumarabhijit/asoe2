@@ -110,17 +110,24 @@ via `_validate_event()` before the state machine advances.  Invalid events
 All business thresholds are centralised in `contracts/policy.py`.  No recipe,
 node, or utility may hardcode a threshold value.
 
-| Constant | Value | Used by |
+| Constant | Value | Injected into |
 |---|---|---|
-| `MAX_DISCOUNT_ALLOWED` | `0.15` (15%) | `PriceAdjustmentRecipe.py` |
-| `PRICE_CONDITION_TYPE` | `"YK07"` | `PriceAdjustmentRecipe.py` |
-| `CREDIT_AUTHORIZED_ROLES` | `("ORDER_MANAGER", "FINANCE_DIRECTOR")` | `CreditHoldReleaseRecipe.py` |
-| `CREDIT_EXPOSURE_TOLERANCE` | `5_000.0` | `CreditHoldReleaseRecipe.py` |
+| `MAX_DISCOUNT_ALLOWED` | `0.15` (15%) | `PriceAdjustmentRecipe` via `erp_context` |
+| `PRICE_CONDITION_TYPE` | `"YK07"` | `PriceAdjustmentRecipe` via `erp_context` |
+| `CREDIT_AUTHORIZED_ROLES` | `("ORDER_MANAGER", "FINANCE_DIRECTOR")` | `CreditHoldReleaseRecipe` as param |
+| `CREDIT_EXPOSURE_TOLERANCE` | `5_000.0` | `CreditHoldReleaseRecipe` as param |
+| `DUPLICATE_PO_THRESHOLD_AUTO_BLOCK` | `0.90` | `DuplicatePORecipe` as param |
+| `DUPLICATE_PO_THRESHOLD_REVIEW_REQUIRED` | `0.70` | `DuplicatePORecipe` as param |
+| `DUPLICATE_PO_THRESHOLD_SOFT_FLAG` | `0.50` | `DuplicatePORecipe` as param |
+| `MASS_UPDATE_LINE_COUNT_THRESHOLD` | `10` | `constraints/fallback_backend.py` |
 | `CIRCUIT_BREAKER_MAX_UPDATES` | `50` | `orchestration/utils.py` |
 | `CIRCUIT_BREAKER_MAX_VARIANCE` | `10_000.0` | `orchestration/utils.py`, `constraints/fallback_backend.py` |
 | `DISCREPANCY_THRESHOLD` | `0.15` | `orchestration/utils.py` |
 
-Auditors can verify that a threshold change requires modifying exactly one file.
+**Key audit property:** Recipes never import thresholds directly from `policy.py`.
+All thresholds are injected by the orchestration layer (`validate_types` node),
+so the same recipe logic can serve different customer / vendor threshold sets.
+A threshold change requires modifying exactly one file (`contracts/policy.py`).
 
 ---
 
