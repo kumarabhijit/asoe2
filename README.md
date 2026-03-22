@@ -121,7 +121,7 @@ cloud LLM — the `DeterministicFallbackBackend` is used by default.
 
 ```bash
 # 1. Install sandbox dependencies (streamlit only; outlines/transformers optional)
-pip install streamlit
+uv pip install streamlit
 
 # 2. Seed the SQLite database with sample SAP pricing, contracts, and EDI events
 python tests/sandbox/seed.py
