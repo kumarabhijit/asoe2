@@ -153,8 +153,17 @@ Deployed at the API Gateway level. If the automated state machine attempts to ex
 ### E. Structured Observability (LangFuse-Aligned)
 Every graph execution emits a trace record as structured JSON via stdlib logging. Fields are aligned to the LangFuse trace schema (trace_id, intent, shadow verdict, recipe, gateway calls, terminal status) so a future LangFuse handler can forward records with minimal adaptation. No LangFuse package dependency exists today — stdlib logging is the single emit point, keeping the system self-host friendly and auditable from day one.
 
-### F. Externalized Policy
-All business thresholds live in a single centralized policy module. This includes discount caps, SAP condition types, authorized roles, credit exposure tolerance, circuit breaker limits, and discrepancy thresholds. Recipes and orchestration nodes import from this module; no threshold is hardcoded elsewhere. Evolution path: module constants → env vars → K8s ConfigMap → policy service.
+### F. Externalized Policy & Recipe-Policy Decoupling
+All business thresholds live in a single centralized policy module (`contracts/policy.py`). This includes discount caps, SAP condition types, authorized roles, credit exposure tolerance, duplicate PO classification thresholds, mass-update line-count thresholds, circuit breaker limits, and discrepancy thresholds.
+
+**Recipes never import from the policy module.** All thresholds are injected by the orchestration layer — specifically, the `validate_types` node reads policy constants and passes them into recipe parameters via `RecipeInvocation.params`. This decoupling ensures:
+
+1. **Immutable recipe logic.** The same recipe code serves different customer / vendor threshold sets without modification. A `PriceAdjustmentRecipe` with a 15% discount cap for Retailer A and a 20% cap for Retailer B uses identical code — only the injected `max_discount_allowed` value differs.
+2. **Single point of threshold injection.** Auditors can verify which thresholds were active by inspecting `state.invocation.params` at one traceable location (`orchestration/nodes.py → validate_types`).
+3. **Per-customer extensibility.** The evolution path — module constants → env vars → K8s ConfigMap → per-customer policy service — requires changes only in the orchestration layer and policy source, never in recipes.
+4. **Fail-safe defaults.** If the orchestration layer fails to inject a threshold, `RecipeExecutor` required-params validation catches the `None` value and returns a structured error before the recipe runs.
+
+This invariant is enforced by tests that verify recipe module source code contains no `contracts.policy` imports (see `TestRecipePolicyDecoupling`).
 
 ### G. Hexagonal Gateway Pattern
 Recipes never call external systems directly. Instead, recipe specs declare dependencies (data needed pre-execution) and effects (writes to apply post-execution) as typed tuples. The orchestration layer resolves dependencies before recipe execution and applies effects after, both mediated by a gateway executor with per-call timeout enforcement. All calls are logged with trace_id correlation. A stub adapter satisfies the same protocol, enabling full graph execution in tests without network access.
@@ -225,3 +234,4 @@ The following invariants are enforced by code, not configuration. Violating them
 | 8 | Recipe executor has no audit, enforce, or classify methods |
 | 9 | Skill definitions are loaded verbatim — no summarisation or rewriting |
 | 10 | All constrained outputs are validated by Pydantic before state advances |
+| 11 | Recipes never import from the policy module — all thresholds are injected by the orchestration layer |

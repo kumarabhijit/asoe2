@@ -10,7 +10,7 @@ from constraints.specs import IntentDecision, RecipeProposal, ShadowDecisionSche
 class DeterministicFallbackBackend:
     def classify_intent(self, state: GraphState) -> IntentDecision:
         if state.event.line_count > MASS_UPDATE_LINE_COUNT_THRESHOLD:
-            return IntentDecision(intent="MASS_PRICING_ERROR", confidence=0.95, rationale="line_count > 10")
+            return IntentDecision(intent="MASS_PRICING_ERROR", confidence=0.95, rationale=f"line_count > {MASS_UPDATE_LINE_COUNT_THRESHOLD}")
         if state.event.event_type in ("EDI_850_DUPLICATE_PO", "DUPLICATE"):
             return IntentDecision(intent="DUPLICATE_PO", confidence=0.90, rationale="duplicate PO event type")
         if state.event.requester_role and state.event.credit_limit is not None and state.event.current_exposure is not None:

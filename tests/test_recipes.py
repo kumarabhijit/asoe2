@@ -331,3 +331,52 @@ class TestDuplicatePORecipe:
         result = detect_duplicate_po("PO-009", "cust-9", {})
         assert result["status"] == "PASS"
         assert result["composite_score"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Architectural invariant: recipes must NOT import from contracts.policy
+# ---------------------------------------------------------------------------
+
+class TestRecipePolicyDecoupling:
+    """Guard against regression of the recipe-policy decoupling invariant.
+
+    Recipes are immutable execution logic.  All thresholds must be injected
+    by the orchestration layer — recipes must never import from the policy
+    module directly.
+    """
+
+    @staticmethod
+    def _has_policy_import(module) -> bool:
+        """Check whether *module* has an actual import of contracts.policy."""
+        import ast, inspect, textwrap
+        source = inspect.getsource(module)
+        tree = ast.parse(textwrap.dedent(source))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module and "contracts.policy" in node.module:
+                return True
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if "contracts.policy" in alias.name:
+                        return True
+        return False
+
+    def test_price_adjustment_no_policy_import(self):
+        import inspect
+        mod = inspect.getmodule(execute_price_correction)
+        assert not self._has_policy_import(mod), (
+            "PriceAdjustmentRecipe must not import from contracts.policy"
+        )
+
+    def test_credit_hold_release_no_policy_import(self):
+        import inspect
+        mod = inspect.getmodule(release_credit_hold)
+        assert not self._has_policy_import(mod), (
+            "CreditHoldReleaseRecipe must not import from contracts.policy"
+        )
+
+    def test_duplicate_po_no_policy_import(self):
+        import inspect
+        mod = inspect.getmodule(detect_duplicate_po)
+        assert not self._has_policy_import(mod), (
+            "DuplicatePORecipe must not import from contracts.policy"
+        )

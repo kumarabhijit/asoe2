@@ -27,7 +27,7 @@ from __future__ import annotations
 #   - MASS_PRICING_ERROR intent routes to FAIL_TO_HUMAN upstream; this recipe
 #     is invoked only for DUPLICATE_PO intent.
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 # ---------------------------------------------------------------------------
 # Signal weights — sourced from the product specification.
