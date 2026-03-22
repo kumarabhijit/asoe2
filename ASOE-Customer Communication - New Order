@@ -1,0 +1,40 @@
+ASOE — Email Order Extraction: Functional Specification
+Overview
+The feature ingests inbound customer emails (with any combination of body text, PDF, Excel, and image attachments), runs intent classification, extracts structured order data with per-field confidence scoring, presents a side-by-side human review UI, and emits a canonical JSON payload to any connected ERP. Every extraction is auditable and human-confirmed before touching any ERP system.
+
+Phase 1 — Email Ingestion & Intent Classification
+Ingestion happens via IMAP polling or webhook (SendGrid Inbound Parse, Postmark, etc.). Each incoming email is immediately assigned a stable email_id and persisted before any processing begins — if extraction fails, the raw email is never lost.
+Intent classification runs synchronously on arrival. The model evaluates the subject line, sender domain (matched against customer master), body text signals, and attachment names/types to produce a probability distribution across intents: PURCHASE_ORDER, PRICE_INQUIRY, PRICE_DISPUTE, ORDER_AMENDMENT, CANCELLATION, and OTHER. Any intent below 60% confidence routes to the Unclassified queue with no extraction attempted.
+Source inventory is built before extraction: each attachment is inspected for type, estimated quality (PDF text-layer vs. scanned image, Excel structure vs. free-form, image DPI/legibility), and flagged if locked, corrupted, or unsupported. The user sees this inventory before committing to extraction so they can reject a bad file upfront.
+
+Phase 2 — Extraction Engine
+Extraction runs in parallel across all sources, then merges results. The source priority hierarchy (highest to lowest) is: structured PDF table → structured Excel → OCR from image → email body free text. When the same field appears in multiple sources, the highest-confidence value wins by default, but every conflict is surfaced explicitly to the user — never silently resolved.
+Fields extracted for order header: PO number, customer name, order date, requested delivery date, ship-to address, bill-to address, payment terms, currency, special instructions, buyer contact.
+Fields extracted per line item: line number, SKU/item code, product description, quantity, unit of measure, unit price, extended price, discount/promo code, tax code.
+Confidence scoring is per-field, not per-source. A field extracted from a clean PDF table might score 99%; the same field OCR'd from a blurry photo might score 55%. The score reflects extraction certainty, not business validity. Thresholds: ≥85% = high (green), 60–84% = medium (amber), below 60% = low (red). Low-confidence fields are never auto-confirmed — they always require human sign-off.
+
+Phase 3 — Review UI
+The review screen is a fixed two-panel layout: left panel shows the source document with color-coded highlights tied to extracted fields; right panel shows the structured field list with confidence badges, source attribution per field, and inline editing.
+Editing is inline — clicking any field activates it for editing. Edits are tracked: fields_manually_edited increments in the extraction metadata, and each edit logs the before/after value and the editor's identity. This audit trail is included in the final JSON output.
+Blocking conditions — the Confirm button is disabled until: all required fields have a value (empty required fields shown with red border and explicit error), all conflicts have been either accepted or overridden, and the user has explicitly reviewed any low-confidence fields (system requires a checkbox acknowledgment per low-confidence field, not a blanket "I reviewed everything").
+Conflict resolution UI — when two sources disagree on a field, both values appear side by side under the field with a "Use this" toggle. Selecting one dismisses the conflict. The unselected value is stored in extraction_meta.conflicts for audit purposes.
+The system should be able to learn based on user edits and in future order, if it make changes based on learnings, it should call it out explicitly for the user.
+
+Phase 4 — Confirmation & ERP Output
+On confirmation, the system emits a canonical JSON document. The schema is fixed and ERP-agnostic — ERP-specific adapters (SAP BAPI, NetSuite REST, webhook, flat file) translate from this canonical format. This separation means adding a new ERP target never requires touching the extraction logic.
+The JSON always includes an extraction_meta block containing: source list, conflict count, manually edited field count, human confirmation flag, confirmer identity, and timestamp. This block enables downstream audit trails and SLA reporting.
+Pre-flight checks run at send time: all required fields populated, no open conflicts, ERP connection health, duplicate PO check against existing orders. Failures block transmission with a specific error — not a generic "something went wrong."
+ERP routing is per-tenant configuration. A tenant can have multiple ERP targets (e.g., SAP for domestic orders, NetSuite for international), and the routing rule can be based on customer, region, or order type. The user sees only the targets applicable to the current order.
+
+Key Edge Cases (all handled in spec)
+The 12 edge cases shown in the mockup's fourth panel are the definitive list. The three most architecturally significant ones:
+Duplicate PO detection must happen at intent classification time, not at send time. Catching it late creates orphan drafts and confuses the reviewer. The system checks PO number against the order database as soon as intent is classified as PURCHASE_ORDER.
+Multi-order emails — a customer who sends "here are our 3 POs for this week" in one email — require the system to split into independent extraction sessions while preserving the shared source_email_id. Each order goes through review and confirmation independently, but the email is only archived once all sessions are resolved.
+Partial extraction with missing line items is treated as a draft, never sent to ERP. The system must distinguish between "header only found, attachment not yet processed" (transient state, retryable) and "fully processed, line items genuinely absent" (missing data, requires manual entry). These two states look identical in the raw extraction output but have very different user prompts.
+
+What we are explicitly not building in v1
+Auto-send without human review. Even at 99% confidence, a human confirms before any order touches an ERP. This can be revisited in v2 with an autonomy matrix (similar to what already exists in ASOE), but v1 is human-in-the-loop by default.
+ERP write-back of extracted data back into the email thread. Out of scope — the JSON goes to ERP, the email thread stays read-only.
+Learning/feedback loop from manual edits. Logged and stored, but the model retraining pipeline is a separate workstream.
+
+When you're ready to build, the natural implementation order is: ingestion + persistence layer → intent classifier → extraction engine (body first, then PDF, then Excel, then image) → review UI → ERP adapter framework. The UI is the most visible but the extraction engine is the hardest and should be prototyped early.
