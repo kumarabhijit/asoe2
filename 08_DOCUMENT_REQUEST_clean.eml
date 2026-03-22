@@ -1,0 +1,30 @@
+From: dcreceiving@costco-logistics.com
+To: orders@acme-cpg.com
+Subject: Need ASN and BOL for PO-88424 — DC system requirement
+Date: Mon, 17 Mar 2025 07:58:12 -0800
+Message-ID: <test-008-docrequest-clean@costco-logistics.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+
+Hi,
+
+Our DC receiving system requires an ASN (Advanced Shipping Notice) and the signed BOL before we can process inbound receipts. We have not yet received these documents for the following order:
+
+PO Number: PO-88424
+Customer: Costco Wholesale
+Expected Items: SKU-5521 (Family Pack x6), SKU-5525 (Mega Pack x12)
+
+Documents needed:
+1. ASN — in EDI 856 format or PDF
+2. BOL — signed copy, PDF preferred
+3. If available: Delivery confirmation / POD
+
+Without these documents, our system cannot close the receiving record and payment will be delayed. Can you please send these to this email address or upload to our Costco Supplier Portal?
+
+Our supplier portal ID is: CST-SUPPLIER-7741
+
+Thank you,
+Rachel Nguyen
+DC Documentation Coordinator
+Costco Logistics
+dcreceiving@costco-logistics.com

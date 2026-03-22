@@ -1,0 +1,34 @@
+From: inventory@cvs-health.com
+To: orders@acme-cpg.com
+Subject: Short shipment credit request — Order PO-88426
+Date: Tue, 18 Mar 2025 10:14:33 -0500
+Message-ID: <test-006-returns-clean@cvs-health.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+
+Hi,
+
+We received order PO-88426 at our Northeast DC on March 16th. Upon receiving and counting, we identified a short shipment on one of the lines.
+
+Order: PO-88426
+Delivery Date: March 16, 2025
+
+Short shipment details:
+- SKU-7701 (Energy Drink 4pk): Ordered 480cs, received 440cs — SHORT 40cs
+- SKU-7705 (Energy Drink 8pk): Ordered 240cs, received 240cs — OK
+
+The BOL shows 720cs total shipped but our physical count came to 680cs. We have photos of the pallet and the BOL signed by our dock team if needed.
+
+We need a credit memo for the 40cs shortage on SKU-7701:
+40cs × $8.96/cs = $358.40
+
+Please confirm:
+1. You've received this short-ship claim
+2. Credit memo #, amount, and expected posting date
+3. Whether you need any supporting documentation from us
+
+Thank you,
+Kevin Marsh
+Inventory Control
+CVS Health Supply Chain
+inventory@cvs-health.com | (401) 555-0228

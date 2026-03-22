@@ -1,0 +1,33 @@
+From: ap@albertsons-finance.com
+To: orders@acme-cpg.com
+Subject: Invoice discrepancy — Invoice #9040195 vs. contracted rate
+Date: Mon, 17 Mar 2025 15:55:42 -0700
+Message-ID: <test-005-invoice-clean@albertsons-finance.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+
+Hello Accounts Receivable,
+
+Our accounts payable team is reviewing invoice #9040195 dated March 12, 2025 and we've identified a discrepancy between the invoiced price and our contracted rate.
+
+Invoice details:
+Invoice Number: 9040195
+Invoice Date: March 12, 2025
+Invoiced Amount: $6,912.00
+PO Reference: PO-88425 (SKU-0099, Juice 1L x12)
+
+Issue:
+The invoice shows $19.20/cs for 360 cases. Our current contract (effective Jan 1, 2025) has us at $17.28/cs for this item. That's a difference of $1.92/cs × 360cs = $691.20 overcharge.
+
+Can you please:
+1. Confirm the correct contracted price for SKU-0099 under our current agreement
+2. Issue a credit memo for $691.20 if the overcharge is confirmed
+3. Send us a copy of invoice #9040195 for our records
+
+Please respond within 5 business days per our payment terms.
+
+Thank you,
+Linda Cho
+Accounts Payable Supervisor
+Albertsons Companies
+ap@albertsons-finance.com | (208) 555-0177

@@ -1,0 +1,38 @@
+From: ap@albertsons-finance.com
+To: orders@acme-cpg.com
+Subject: Multiple order inquiries — see attached spreadsheet
+Date: Wed, 19 Mar 2025 09:44:00 -0700
+Message-ID: <test-022-edge-attachment-only@albertsons-finance.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="--boundary-test-022"
+
+----boundary-test-022
+Content-Type: text/plain; charset=UTF-8
+
+Hi,
+
+Please see the attached spreadsheet — it contains a list of 8 open orders we need status updates on, along with some pricing questions. All the PO numbers, SKUs, and specific questions are in the file.
+
+Let me know if you can't open the attachment.
+
+Thanks,
+Linda Cho
+Accounts Payable Supervisor
+Albertsons Companies
+ap@albertsons-finance.com | (208) 555-0177
+
+----boundary-test-022
+Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+Content-Disposition: attachment; filename="Albertsons_Open_Order_Inquiries_Mar2025.xlsx"
+Content-Transfer-Encoding: base64
+
+[SIMULATED ATTACHMENT — Binary content not included in test file]
+[In real test: attach a real .xlsx with columns: PO_Number, SKU, Inquiry_Type, Question]
+[Sample rows:
+  PO-88425 | SKU-0099 | Order Status | What is the current processing status?
+  PO-88426 | SKU-7701 | Shipment     | Has this shipped? Tracking number?
+  N/A      | SKU-1181 | Price        | What is our Q2 contracted price?
+  9040195  | N/A      | Invoice      | Can we get a copy of this invoice?
+]
+
+----boundary-test-022--

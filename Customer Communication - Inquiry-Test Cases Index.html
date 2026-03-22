@@ -1,0 +1,1074 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ASOE Email Intelligence — Test Suite Index</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --blue: #007AFF; --blue-soft: #E8F1FF; --blue-mid: #C7DCFF;
+    --green: #34C759; --green-soft: #E6F9EC;
+    --orange: #FF9500; --orange-soft: #FFF3E0;
+    --red: #FF3B30; --red-soft: #FFEDEC;
+    --purple: #AF52DE; --purple-soft: #F5EAFF;
+    --teal: #32ADE6; --teal-soft: #E5F6FD;
+    --indigo: #5856D6; --indigo-soft: #EEECFF;
+    --gray-50: #FAFAFA; --gray-100: #F5F5F7; --gray-200: #E8E8ED;
+    --gray-300: #D1D1D6; --gray-400: #AEAEB2; --gray-500: #8E8E93;
+    --gray-600: #636366; --gray-700: #48484A; --gray-900: #1C1C1E;
+    --text: #1C1C1E; --text-2: #3A3A3C; --text-3: #636366; --text-4: #AEAEB2;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.07); --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+    --r-sm: 6px; --r-md: 10px; --r-lg: 14px;
+  }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'DM Sans', -apple-system, sans-serif;
+    background: var(--gray-100); color: var(--text);
+    font-size: 13px; line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Nav */
+  nav {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(250,250,250,0.92);
+    backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--gray-200);
+    padding: 0 32px; height: 48px;
+    display: flex; align-items: center; gap: 24px;
+  }
+  .nav-brand {
+    font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 8px;
+  }
+  .nav-mark {
+    width: 24px; height: 24px; border-radius: 6px;
+    background: var(--blue); color: white;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 800;
+  }
+  .nav-filters { display: flex; gap: 4px; flex: 1; }
+  .filter-btn {
+    padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600;
+    border: none; background: var(--gray-200); color: var(--text-3);
+    cursor: pointer; font-family: inherit; transition: all 0.15s;
+  }
+  .filter-btn:hover { background: var(--gray-300); }
+  .filter-btn.active { background: var(--blue); color: white; }
+  .nav-count { font-size: 11px; color: var(--text-4); font-weight: 500; }
+
+  /* Layout */
+  main { max-width: 1200px; margin: 0 auto; padding: 24px 32px 64px; }
+
+  /* Hero */
+  .hero { margin-bottom: 28px; }
+  .hero-title { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 6px; }
+  .hero-title span { color: var(--blue); }
+  .hero-sub { color: var(--text-3); font-size: 14px; }
+  .hero-stats {
+    display: flex; gap: 24px; margin-top: 16px;
+    padding: 16px 20px; background: white; border-radius: var(--r-lg);
+    border: 1px solid var(--gray-200); box-shadow: var(--shadow-sm);
+    width: fit-content;
+  }
+  .stat { display: flex; flex-direction: column; gap: 2px; }
+  .stat-val { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; color: var(--text); }
+  .stat-label { font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-4); }
+  .stat-div { width: 1px; background: var(--gray-200); }
+
+  /* Section header */
+  .section-head {
+    display: flex; align-items: center; gap: 10px;
+    margin: 28px 0 12px;
+  }
+  .section-label {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--text-4);
+    flex-shrink: 0;
+  }
+  .section-line { flex: 1; height: 1px; background: var(--gray-200); }
+  .section-count {
+    font-size: 10px; font-weight: 700; color: var(--text-4);
+    background: var(--gray-200); padding: 2px 7px; border-radius: 20px;
+  }
+
+  /* Test cards grid */
+  .cards-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  }
+
+  /* Test card */
+  .test-card {
+    background: white; border-radius: var(--r-lg);
+    border: 1px solid var(--gray-200); box-shadow: var(--shadow-sm);
+    overflow: hidden; transition: box-shadow 0.15s;
+  }
+  .test-card:hover { box-shadow: var(--shadow-md); }
+  .test-card.hidden { display: none; }
+
+  .card-top {
+    padding: 14px 16px 12px;
+    border-bottom: 1px solid var(--gray-100);
+    display: flex; gap: 12px; align-items: flex-start;
+  }
+  .card-num {
+    width: 28px; height: 28px; border-radius: 7px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; flex-shrink: 0; margin-top: 1px;
+  }
+  .card-meta { flex: 1; min-width: 0; }
+  .card-filename {
+    font-family: 'DM Mono', monospace; font-size: 10.5px;
+    color: var(--text-3); margin-bottom: 5px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  .card-subject {
+    font-size: 13px; font-weight: 600; color: var(--text);
+    line-height: 1.35; margin-bottom: 4px;
+  }
+  .card-sender { font-size: 11px; color: var(--text-4); }
+  .card-badges { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+
+  .card-body { padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+
+  /* Rows within card */
+  .spec-row { display: flex; gap: 10px; align-items: flex-start; }
+  .spec-row-label {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.05em;
+    text-transform: uppercase; color: var(--text-4);
+    min-width: 92px; padding-top: 1px; flex-shrink: 0;
+  }
+  .spec-row-val { font-size: 12px; color: var(--text-2); line-height: 1.5; flex: 1; }
+
+  /* Expected behavior section */
+  .expect-block {
+    background: var(--gray-50); border-radius: var(--r-sm);
+    border: 1px solid var(--gray-200); padding: 10px 12px;
+  }
+  .expect-title {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--text-4); margin-bottom: 8px;
+  }
+  .expect-row {
+    display: flex; gap: 8px; font-size: 11px; padding: 3px 0;
+    border-bottom: 1px dashed var(--gray-200); align-items: flex-start;
+  }
+  .expect-row:last-child { border-bottom: none; padding-bottom: 0; }
+  .expect-key { color: var(--text-3); font-weight: 600; min-width: 110px; flex-shrink: 0; }
+  .expect-val { color: var(--text); line-height: 1.45; }
+
+  /* Badge */
+  .badge {
+    display: inline-flex; align-items: center; gap: 3px;
+    padding: 2px 7px; border-radius: 20px;
+    font-size: 10px; font-weight: 700; white-space: nowrap;
+    letter-spacing: 0.02em;
+  }
+  .badge-dot { width: 4px; height: 4px; border-radius: 50%; flex-shrink: 0; }
+
+  /* Intent colors */
+  .c-price    { background: var(--blue-soft); color: var(--blue); }
+  .c-avail    { background: var(--green-soft); color: #1a7a36; }
+  .c-order    { background: var(--orange-soft); color: #b06800; }
+  .c-shipment { background: var(--teal-soft); color: #0a6e9e; }
+  .c-invoice  { background: var(--purple-soft); color: var(--purple); }
+  .c-returns  { background: var(--red-soft); color: var(--red); }
+  .c-contract { background: var(--indigo-soft); color: var(--indigo); }
+  .c-document { background: var(--gray-100); color: var(--gray-600); }
+  .c-subst    { background: var(--orange-soft); color: #b06800; }
+  .c-quota    { background: var(--teal-soft); color: #0a6e9e; }
+  .c-complaint{ background: var(--red-soft); color: var(--red); }
+  .c-multi    { background: var(--indigo-soft); color: var(--indigo); }
+  .c-edge     { background: #1C1C1E; color: #F5F5F7; }
+  .c-prefilter{ background: var(--gray-200); color: var(--gray-600); }
+
+  /* Pipeline state badges */
+  .s-process  { background: var(--blue-soft); color: var(--blue); }
+  .s-clarify  { background: var(--orange-soft); color: #b06800; }
+  .s-draft    { background: var(--green-soft); color: #1a7a36; }
+  .s-escalate { background: var(--red-soft); color: var(--red); }
+  .s-prefilter{ background: var(--gray-200); color: var(--gray-600); }
+  .s-triage   { background: var(--purple-soft); color: var(--purple); }
+  .s-hold     { background: var(--orange-soft); color: #b06800; }
+
+  /* Priority dot */
+  .pri-high   { background: var(--red); }
+  .pri-med    { background: var(--orange); }
+  .pri-low    { background: var(--green); }
+  .pri-filter { background: var(--gray-400); }
+
+  /* Divider line */
+  hr { border: none; border-top: 1px dashed var(--gray-200); margin: 8px 0; }
+
+  /* Warning / info callout inside card */
+  .card-note {
+    font-size: 11px; padding: 7px 10px; border-radius: var(--r-sm);
+    line-height: 1.5; display: flex; gap: 6px;
+  }
+  .card-note-icon { flex-shrink: 0; }
+
+  code {
+    font-family: 'DM Mono', monospace; font-size: 10.5px;
+    background: var(--gray-100); padding: 1px 5px; border-radius: 3px;
+    color: var(--purple);
+  }
+
+  /* Legend */
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 20px;
+    padding: 12px 16px; background: white; border-radius: var(--r-md);
+    border: 1px solid var(--gray-200);
+  }
+  .legend-item {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 11px; color: var(--text-3);
+  }
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-brand"><div class="nav-mark">◈</div>ASOE Test Suite</div>
+  <div class="nav-filters">
+    <button class="filter-btn active" onclick="filterCards('all', this)">All (27)</button>
+    <button class="filter-btn" onclick="filterCards('single', this)">Single Intent (11)</button>
+    <button class="filter-btn" onclick="filterCards('multi', this)">Multi-Intent (3)</button>
+    <button class="filter-btn" onclick="filterCards('edge', this)">Edge Cases (11)</button>
+    <button class="filter-btn" onclick="filterCards('prefilter', this)">Pre-Filter (2)</button>
+    <button class="filter-btn" onclick="filterCards('escalate', this)">Auto-Escalate</button>
+  </div>
+  <div class="nav-count" id="count-display">27 test emails</div>
+</nav>
+
+<main>
+  <div class="hero">
+    <div class="hero-title">Email Intelligence <span>Test Suite</span></div>
+    <div class="hero-sub">27 sample .eml files covering all intent types, multi-intent combinations, and edge cases for the ASOE Email Inquiry Agent.</div>
+    <div class="hero-stats">
+      <div class="stat"><div class="stat-val">27</div><div class="stat-label">Total Emails</div></div>
+      <div class="stat-div"></div>
+      <div class="stat"><div class="stat-val">11</div><div class="stat-label">Intent Types</div></div>
+      <div class="stat-div"></div>
+      <div class="stat"><div class="stat-val">3</div><div class="stat-label">Multi-Intent</div></div>
+      <div class="stat-div"></div>
+      <div class="stat"><div class="stat-val">13</div><div class="stat-label">Edge Cases</div></div>
+      <div class="stat-div"></div>
+      <div class="stat"><div class="stat-val">6</div><div class="stat-label">Customers</div></div>
+    </div>
+  </div>
+
+  <!-- Legend -->
+  <div class="legend">
+    <span style="font-size:10px;font-weight:700;letter-spacing:0.06em;color:var(--text-4);text-transform:uppercase;margin-right:4px;align-self:center;">Expected outcome:</span>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div>Draft Generated → Human Review</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--orange)"></div>Clarification Needed</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div>Auto-Escalate (no AI draft)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--purple)"></div>Manual Triage Queue</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--gray-400)"></div>Pre-Filter / Discard</div>
+  </div>
+
+  <!-- ── SINGLE INTENT ── -->
+  <div class="section-head">
+    <div class="section-label">Single Intent</div>
+    <div class="section-line"></div>
+    <div class="section-count">11 emails</div>
+  </div>
+
+  <div class="cards-grid">
+
+    <!-- 01 -->
+    <div class="test-card" data-tags="single price">
+      <div class="card-top">
+        <div class="card-num" style="background:var(--blue-soft);color:var(--blue);">01</div>
+        <div class="card-meta">
+          <div class="card-filename">01_PRICE_INQUIRY_clean.eml</div>
+          <div class="card-subject">Q4 pricing on 12-pk Cola line — SKU-0042 / SKU-0043</div>
+          <div class="card-sender">sarah.reynolds@walmart-buyers.com · Walmart</div>
+          <div class="card-badges">
+            <span class="badge c-price">💲 Price Inquiry</span>
+            <span class="badge s-draft">→ Draft Ready</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Entities</span><span class="spec-row-val"><code>SKU-0042</code>, <code>SKU-0043</code>, qty 480cs + 240cs, implicit Q4 date range</span></div>
+        <div class="spec-row"><span class="spec-row-label">ERP Lookups</span><span class="spec-row-val">VK13/KONV — contract pricing for both materials, condition type PR00 + ZPROM</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">Intent confidence</span><span class="expect-val">HIGH (≥ 90%) — explicit SKUs, quantities, pricing language</span></div>
+          <div class="expect-row"><span class="expect-key">Entity extraction</span><span class="expect-val">Both SKUs extracted, Q4 inferred as Oct 1 – Dec 31 date range</span></div>
+          <div class="expect-row"><span class="expect-key">Sensitivity flag</span><span class="expect-val">⚠ Pricing disclosure — CS must review before send</span></div>
+          <div class="expect-row"><span class="expect-key">Draft content</span><span class="expect-val">Per-SKU price, validity window, promo condition if active, contract reference</span></div>
+          <div class="expect-row"><span class="expect-key">Autonomy tier</span><span class="expect-val">L1 mandatory (pricing always requires human review)</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 02 -->
+    <div class="test-card" data-tags="single availability">
+      <div class="card-top">
+        <div class="card-num" style="background:var(--green-soft);color:#1a7a36;">02</div>
+        <div class="card-meta">
+          <div class="card-filename">02_PRODUCT_AVAILABILITY_clean.eml</div>
+          <div class="card-subject">Availability check — Snack Bar 48ct (SKU-3310) for Feb promo</div>
+          <div class="card-sender">dcplanning@kroger-logistics.com · Kroger</div>
+          <div class="card-badges">
+            <span class="badge c-avail">📦 Availability</span>
+            <span class="badge s-draft">→ Draft Ready</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Entities</span><span class="spec-row-val"><code>SKU-3310</code>, qty 500cs, ship date Feb 7 2025, DC: Cincinnati OH</span></div>
+        <div class="spec-row"><span class="spec-row-label">ERP Lookups</span><span class="spec-row-val">CO09 ATP check, MARD unrestricted stock, plant availability at relevant DCs</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">Intent confidence</span><span class="expect-val">HIGH — explicit SKU, qty, date, and DC location provided</span></div>
+          <div class="expect-row"><span class="expect-key">Date parsing</span><span class="expect-val">"February 7, 2025" → <code>2025-02-07</code> ISO</span></div>
+          <div class="expect-row"><span class="expect-key">Draft content</span><span class="expect-val">Available qty, ATP date, allocation risk status, max available if &lt; 500cs</span></div>
+          <div class="expect-row"><span class="expect-key">Happy path</span><span class="expect-val">500cs confirmed → draft confirms ship date</span></div>
+          <div class="expect-row"><span class="expect-key">Partial path</span><span class="expect-val">&lt; 500cs available → draft states max qty + earliest full ATP date</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 03 -->
+    <div class="test-card" data-tags="single order">
+      <div class="card-top">
+        <div class="card-num" style="background:var(--orange-soft);color:#b06800;">03</div>
+        <div class="card-meta">
+          <div class="card-filename">03_ORDER_STATUS_clean.eml</div>
+          <div class="card-subject">Order confirmation status — PO 88423</div>
+          <div class="card-sender">procurement@target-corp.com · Target</div>
+          <div class="card-badges">
+            <span class="badge c-order">📋 Order Status</span>
+            <span class="badge s-draft">→ Draft Ready</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Entities</span><span class="spec-row-val"><code>PO-88423</code>, 4 lines (SKU-3310 through SKU-3320), submitted Mar 14</span></div>
+        <div class="spec-row"><span class="spec-row-label">ERP Lookups</span><span class="spec-row-val">VA03/VBAK — order header, VBAP — all 4 line statuses, VBUP — per-line processing status, delivery blocks</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">Intent confidence</span><span class="expect-val">HIGH — explicit PO number, 4 specific SKUs named</span></div>
+          <div class="expect-row"><span class="expect-key">Draft content</span><span class="expect-val">Overall order status, per-line status, any holds with reason codes, estimated ship date</span></div>
+          <div class="expect-row"><span class="expect-key">Block handling</span><span class="expect-val">If any line is blocked, draft names the block reason and next action</span></div>
+          <div class="expect-row"><span class="expect-key">Autonomy tier</span><span class="expect-val">Eligible for L2 (spot-check) after track record established</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 04 -->
+    <div class="test-card" data-tags="single shipment">
+      <div class="card-top">
+        <div class="card-num" style="background:var(--teal-soft);color:#0a6e9e;">04</div>
+        <div class="card-meta">
+          <div class="card-filename">04_SHIPMENT_STATUS_clean.eml</div>
+          <div class="card-subject">Inbound shipment overdue — BOL 7723981 / Order PO-88424</div>
+          <div class="card-sender">receiving@costco-dc.com · Costco</div>
+          <div class="card-badges">
+            <span class="badge c-shipment">🚚 Shipment Status</span>
+            <span class="badge s-draft">→ Draft Ready</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Entities</span><span class="spec-row-val"><code>PO-88424</code>, <code>BOL 7723981</code>, scheduled delivery Mar 19, 270cs total</span></div>
+        <div class="spec-row"><span class="spec-row-label">ERP Lookups</span><span class="spec-row-val">VL03N — delivery doc, LIKP — shipment header, carrier assignment, tracking integration</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">Intent confidence</span><span class="expect-val">HIGH — dual identifiers (PO + BOL), clear urgency signal</span></div>
+          <div class="expect-row"><span class="expect-key">Urgency detection</span><span class="expect-val">"urgently" keyword → priority flag in queue</span></div>
+          <div class="expect-row"><span class="expect-key">Draft content</span><span class="expect-val">Carrier, tracking #, last known location, revised ETA, escalation if carrier data stale</span></div>
+          <div class="expect-row"><span class="expect-key">Data freshness</span><span class="expect-val">If carrier data &gt; 4h old → warning note appended to draft</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 05 -->
+    <div class="test-card" data-tags="single invoice">
+      <div class="card-top">
+        <div class="card-num" style="background:var(--purple-soft);color:var(--purple);">05</div>
+        <div class="card-meta">
+          <div class="card-filename">05_INVOICE_BILLING_clean.eml</div>
+          <div class="card-subject">Invoice discrepancy — Invoice #9040195 vs. contracted rate</div>
+          <div class="card-sender">ap@albertsons-finance.com · Albertsons</div>
+          <div class="card-badges">
+            <span class="badge c-invoice">🧾 Invoice / Billing</span>
+            <span class="badge s-draft">→ Draft Ready</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Entities</span><span class="spec-row-val"><code>Invoice #9040195</code>, <code>PO-88425</code>, <code>SKU-0099</code>, Δ $691.20, 360cs</span></div>
+        <div class="spec-row"><span class="spec-row-label">ERP Lookups</span><span class="spec-row-val">VF03/VBRK — invoice details, VK13 — contracted price for SKU-0099, credit memo status</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">Intent confidence</span><span class="expect-val">HIGH — invoice number, PO, SKU, computed delta all present</span></div>
+          <div class="expect-row"><span class="expect-key">Math validation</span><span class="expect-val">Agent verifies: 360cs × $1.92/cs = $691.20 ✓ — confirm calculation in draft</span></div>
+          <div class="expect-row"><span class="expect-key">Draft content</span><span class="expect-val">Confirm/dispute the price, credit memo initiation status, invoice PDF retrieval</span></div>
+          <div class="expect-row"><span class="expect-key">Sensitivity flag</span><span class="expect-val">⚠ Pricing + credit — CS approval required before send</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 06 -->
+    <div class="test-card" data-tags="single returns">
+      <div class="card-top">
+        <div class="card-num" style="background:var(--red-soft);color:var(--red);">06</div>
+        <div class="card-meta">
+          <div class="card-filename">06_RETURNS_CREDITS_clean.eml</div>
+          <div class="card-subject">Short shipment credit request — Order PO-88426</div>
+          <div class="card-sender">inventory@cvs-health.com · CVS</div>
+          <div class="card-badges">
+            <span class="badge c-returns">↩️ Returns / Credits</span>
+            <span class="badge s-draft">→ Draft Ready</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Entities</span><span class="spec-row-val"><code>PO-88426</code>, <code>SKU-7701</code>, short 40cs, claimed amount $358.40</span></div>
+        <div class="spec-row"><span class="spec-row-label">ERP Lookups</span><span class="spec-row-val">LIKP — shipped qty from delivery, VBRK — invoice qty billed, FBL5N — open credit memos</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">Reason code</span><span class="expect-val">"short shipment" language → infer reason code ZSHRT, flag for CS to confirm</span></div>
+          <div class="expect-row"><span class="expect-key">Math check</span><span class="expect-val">40cs × $8.96 = $358.40 ✓ agent validates claim arithmetic</span></div>
+          <div class="expect-row"><span class="expect-key">Draft content</span><span class="expect-val">Acknowledgment of claim, credit memo reference or pending status, doc request if needed</span></div>
+          <div class="expect-row"><span class="expect-key">Human gate</span><span class="expect-val">CS must approve credit initiation — draft is acknowledgment only</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 07 -->
+    <div class="test-card" data-tags="single contract">
+      <div class="card-top">
+        <div class="card-num" style="background:var(--indigo-soft);color:var(--indigo);">07</div>
+        <div class="card-meta">
+          <div class="card-filename">07_CONTRACT_AGREEMENT_clean.eml</div>
+          <div class="card-subject">Contract renewal — current pricing tier and volume commitment</div>
+          <div class="card-sender">buying@kroger-hq.com · Kroger</div>
+          <div class="card-badges">
+            <span class="badge c-contract">📝 Contract</span>
+            <span class="badge s-draft">→ Draft Ready</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Entities</span><span class="spec-row-val"><code>SKU-1181</code>, expiry Apr 30 2025, volume commitment, Tier 2 reference</span></div>
+        <div class="spec-row"><span class="spec-row-label">ERP Lookups</span><span class="spec-row-val">ME33/contract table — active contract, KONV — pricing tier, YTD volume vs. commitment</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">Sensitivity flag</span><span class="expect-val">⚠ HIGH — MFN clause, penalty clause, volume shortfall → requires senior CS or sales approval</span></div>
+          <div class="expect-row"><span class="expect-key">Draft content</span><span class="expect-val">Current tier, YTD volume, commitment gap (if any), contract reference number</span></div>
+          <div class="expect-row"><span class="expect-key">Escalation trigger</span><span class="expect-val">Penalty clause question → flag to Trade Ops even if other fields answered by AI</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 08 -->
+    <div class="test-card" data-tags="single document">
+      <div class="card-top">
+        <div class="card-num" style="background:var(--gray-100);color:var(--gray-600);">08</div>
+        <div class="card-meta">
+          <div class="card-filename">08_DOCUMENT_REQUEST_clean.eml</div>
+          <div class="card-subject">Need ASN and BOL for PO-88424 — DC system requirement</div>
+          <div class="card-sender">dcreceiving@costco-logistics.com · Costco</div>
+          <div class="card-badges">
+            <span class="badge c-document">📄 Document Request</span>
+            <span class="badge s-draft">→ Draft Ready</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Entities</span><span class="spec-row-val"><code>PO-88424</code>, doc types: ASN (EDI 856), BOL (PDF), POD optional</span></div>
+        <div class="spec-row"><span class="spec-row-label">ERP Lookups</span><span class="spec-row-val">NAST output table, GOS attachments on delivery, EDI outbound log for 856 transmission</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">Doc retrieval</span><span class="expect-val">Fetch stored ASN + BOL from GOS / output mgmt, attach to draft email</span></div>
+          <div class="expect-row"><span class="expect-key">EDI check</span><span class="expect-val">Verify if 856 ASN was already transmitted to Costco EDI ID — log result</span></div>
+          <div class="expect-row"><span class="expect-key">Draft content</span><span class="expect-val">Confirmation of docs attached, EDI transmission status, portal upload option</span></div>
+          <div class="expect-row"><span class="expect-key">Autonomy tier</span><span class="expect-val">Eligible for L3 auto-send if docs successfully retrieved and order confirmed</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 09 -->
+    <div class="test-card" data-tags="single substitution">
+      <div class="card-top">
+        <div class="card-num" style="background:var(--orange-soft);color:#b06800;">09</div>
+        <div class="card-meta">
+          <div class="card-filename">09_PRODUCT_SUBSTITUTION_clean.eml</div>
+          <div class="card-subject">Approved substitute needed — SKU-0042 out of stock at DC</div>
+          <div class="card-sender">replenishment@target-corp.com · Target</div>
+          <div class="card-badges">
+            <span class="badge c-subst">🔄 Substitution</span>
+            <span class="badge s-draft">→ Draft Ready</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Entities</span><span class="spec-row-val"><code>SKU-0042</code> (OOS), proposed sub <code>SKU-0051</code>, qty 480cs, deadline Mar 26</span></div>
+        <div class="spec-row"><span class="spec-row-label">ERP Lookups</span><span class="spec-row-val">MARA — substitution records / cross-reference table, MARD — sub SKU stock, VK13 — sub pricing</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">Sub lookup</span><span class="expect-val">Check approved substitute list for SKU-0042 in material master cross-ref</span></div>
+          <div class="expect-row"><span class="expect-key">Pricing parity</span><span class="expect-val">Compare SKU-0042 vs SKU-0051 contract price — flag if different</span></div>
+          <div class="expect-row"><span class="expect-key">Draft content</span><span class="expect-val">Approved subs list, availability of SKU-0051 (480cs), pricing comparison, planogram note</span></div>
+          <div class="expect-row"><span class="expect-key">Human gate</span><span class="expect-val">Planogram flexibility clause → sales team should confirm approval, flag in draft</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 10 -->
+    <div class="test-card" data-tags="single quota">
+      <div class="card-top">
+        <div class="card-num" style="background:var(--teal-soft);color:#0a6e9e;">10</div>
+        <div class="card-meta">
+          <div class="card-filename">10_QUOTA_ALLOCATION_clean.eml</div>
+          <div class="card-subject">Holiday promo allocation remaining — SKU-3310 Snack Bar</div>
+          <div class="card-sender">promo-planning@walmart-buyers.com · Walmart</div>
+          <div class="card-badges">
+            <span class="badge c-quota">📊 Quota / Allocation</span>
+            <span class="badge s-draft">→ Draft Ready</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Entities</span><span class="spec-row-val"><code>SKU-3310</code>, <code>ZPROM-441822</code>, reference to prior <code>PO-88423</code></span></div>
+        <div class="spec-row"><span class="spec-row-label">ERP Lookups</span><span class="spec-row-val">QQMA00 / quota arrangement, draw-down against ZPROM-441822, expiry date</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">Allocation math</span><span class="expect-val">Total allocated − already drawn (incl. PO-88423) = remaining balance</span></div>
+          <div class="expect-row"><span class="expect-key">Escalation trigger</span><span class="expect-val">Remaining &lt; 200cs → note in draft that customer intends to escalate to sales</span></div>
+          <div class="expect-row"><span class="expect-key">Draft content</span><span class="expect-val">Allocated qty, drawn qty, remaining, expiry date, top-up order deadline</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 11 -->
+    <div class="test-card" data-tags="single complaint escalate">
+      <div class="card-top">
+        <div class="card-num" style="background:var(--red-soft);color:var(--red);">11</div>
+        <div class="card-meta">
+          <div class="card-filename">11_COMPLAINT_DISPUTE_clean.eml</div>
+          <div class="card-subject">Formal dispute — Deduction $4,200 against March 2025 invoices</div>
+          <div class="card-sender">deductions@kroger-finance.com · Kroger</div>
+          <div class="card-badges">
+            <span class="badge c-complaint">⚠️ Complaint / Dispute</span>
+            <span class="badge s-escalate">🔴 Auto-Escalate</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Entities</span><span class="spec-row-val"><code>PO-88421</code>, <code>PO-88422</code>, <code>SKU-0043/0051/1181</code>, deduction $4,200</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">AI action</span><span class="expect-val">ERP lookup runs for context ONLY. No substantive AI draft generated.</span></div>
+          <div class="expect-row"><span class="expect-key">Draft type</span><span class="expect-val">Acknowledgment only: "We've received your claim and are reviewing…"</span></div>
+          <div class="expect-row"><span class="expect-key">Routing</span><span class="expect-val">Flag to senior CS + Trade Ops immediately. High priority queue.</span></div>
+          <div class="expect-row"><span class="expect-key">⚠ Test checkpoint</span><span class="expect-val">Verify system does NOT auto-draft a substantive pricing or credit response</span></div>
+        </div>
+        <div class="card-note" style="background:var(--red-soft);color:var(--red);">
+          <span class="card-note-icon">🔴</span>
+          <span><strong>Critical test:</strong> This email must ALWAYS route to human escalation. Failure to escalate is a pipeline bug.</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── MULTI INTENT ── -->
+  <div class="section-head">
+    <div class="section-label">Multi-Intent</div>
+    <div class="section-line"></div>
+    <div class="section-count">3 emails</div>
+  </div>
+
+  <div class="cards-grid">
+
+    <!-- 12 -->
+    <div class="test-card" data-tags="multi">
+      <div class="card-top">
+        <div class="card-num" style="background:var(--indigo-soft);color:var(--indigo);">12</div>
+        <div class="card-meta">
+          <div class="card-filename">12_MULTI_OrderStatus_Shipment.eml</div>
+          <div class="card-subject">Two questions — PO-88423 status + tracking for PO-88421</div>
+          <div class="card-sender">procurement@target-corp.com · Target</div>
+          <div class="card-badges">
+            <span class="badge c-order">📋 Order Status</span>
+            <span class="badge c-shipment">🚚 Shipment</span>
+            <span class="badge c-multi">2 Intents</span>
+            <span class="badge s-draft">→ Draft Ready</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Entities</span><span class="spec-row-val">Intent 1: <code>PO-88423</code>. Intent 2: <code>PO-88421</code>, <code>BOL 7723981</code></span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">Intent split</span><span class="expect-val">System detects 2 intents via "---" section markers + different PO refs</span></div>
+          <div class="expect-row"><span class="expect-key">Parallel lookup</span><span class="expect-val">Both ERP queries fire simultaneously, not sequentially</span></div>
+          <div class="expect-row"><span class="expect-key">Draft structure</span><span class="expect-val">Sectioned reply: [Order Status — PO-88423] block then [Tracking — PO-88421] block</span></div>
+          <div class="expect-row"><span class="expect-key">⚠ Test checkpoint</span><span class="expect-val">Verify both sections present. Verify PO numbers are NOT cross-mixed in response.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 13 -->
+    <div class="test-card" data-tags="multi">
+      <div class="card-top">
+        <div class="card-num" style="background:var(--indigo-soft);color:var(--indigo);">13</div>
+        <div class="card-meta">
+          <div class="card-filename">13_MULTI_Price_Availability.eml</div>
+          <div class="card-subject">Price + availability check — Sparkling Water & Snack Bars</div>
+          <div class="card-sender">buying@kroger-hq.com · Kroger</div>
+          <div class="card-badges">
+            <span class="badge c-price">💲 Price</span>
+            <span class="badge c-avail">📦 Availability</span>
+            <span class="badge c-multi">2 Intents</span>
+            <span class="badge s-draft">→ Draft Ready</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Entities</span><span class="spec-row-val"><code>SKU-1181</code>, qty 500cs, ship date Jun 1, conflicting price $10 vs $11.40</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">Price conflict</span><span class="expect-val">Customer states $10 vs $11.40 — ERP authoritative price should resolve which is correct</span></div>
+          <div class="expect-row"><span class="expect-key">Promo check</span><span class="expect-val">Query active promo conditions (TPR/off-invoice) on SKU-1181 through Jul 31</span></div>
+          <div class="expect-row"><span class="expect-key">Draft structure</span><span class="expect-val">[Pricing] block then [Availability] block, with promo calendar appended</span></div>
+          <div class="expect-row"><span class="expect-key">Sensitivity</span><span class="expect-val">⚠ Pricing block requires CS approval before send even if availability block is clean</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 14 -->
+    <div class="test-card" data-tags="multi">
+      <div class="card-top">
+        <div class="card-num" style="background:var(--indigo-soft);color:var(--indigo);">14</div>
+        <div class="card-meta">
+          <div class="card-filename">14_MULTI_3intents_OrderStatus_Invoice_DocRequest.eml</div>
+          <div class="card-subject">Three things needed — PO-88425 status, invoice copy, ASN</div>
+          <div class="card-sender">ap@albertsons-finance.com · Albertsons</div>
+          <div class="card-badges">
+            <span class="badge c-order">📋 Order</span>
+            <span class="badge c-invoice">🧾 Invoice</span>
+            <span class="badge c-document">📄 Doc</span>
+            <span class="badge c-multi">3 Intents</span>
+            <span class="badge s-draft">→ Draft Ready</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Entities</span><span class="spec-row-val">Intent 1: <code>PO-88425</code>. Intent 2: <code>Invoice #9040195</code>. Intent 3: <code>PO-88425</code> EDI ASN</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">Intent 1 + 3 overlap</span><span class="expect-val">PO-88425 referenced by two intents — share the single order ERP result, don't query twice</span></div>
+          <div class="expect-row"><span class="expect-key">Invoice PDF</span><span class="expect-val">GOS retrieval of Invoice #9040195 as attachment</span></div>
+          <div class="expect-row"><span class="expect-key">ASN timing note</span><span class="expect-val">ASN for PO-88425 cannot be sent until order ships — draft must note this clearly</span></div>
+          <div class="expect-row"><span class="expect-key">⚠ Test checkpoint</span><span class="expect-val">Verify all 3 intents addressed. Verify PO-88425 only queried once (de-duplicated).</span></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── EDGE CASES ── -->
+  <div class="section-head">
+    <div class="section-label">Edge Cases</div>
+    <div class="section-line"></div>
+    <div class="section-count">13 emails</div>
+  </div>
+
+  <div class="cards-grid">
+
+    <!-- 15 -->
+    <div class="test-card" data-tags="edge">
+      <div class="card-top">
+        <div class="card-num" style="background:#1C1C1E;color:#F5F5F7;">15</div>
+        <div class="card-meta">
+          <div class="card-filename">15_EDGE_low_confidence_vague.eml</div>
+          <div class="card-subject">"Quick check on our stuff"</div>
+          <div class="card-sender">mark.sellers@walmart-buyers.com · Walmart (known sender)</div>
+          <div class="card-badges">
+            <span class="badge c-edge">⚡ Edge: Low Confidence</span>
+            <span class="badge s-clarify">→ CS Selects Intent</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Entities</span><span class="spec-row-val">None extractable. "last week", "stuff" — no order #, SKU, or specific signal.</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">Intent confidence</span><span class="expect-val">&lt; 40% — below halt threshold, NO ERP lookup attempted</span></div>
+          <div class="expect-row"><span class="expect-key">CS action</span><span class="expect-val">Surface to CS queue with "Intent Unknown" state. Show top-3 intent candidates for manual selection.</span></div>
+          <div class="expect-row"><span class="expect-key">Clarification</span><span class="expect-val">Optional: generate clarification email to customer asking what they're referring to</span></div>
+          <div class="expect-row"><span class="expect-key">⚠ Test checkpoint</span><span class="expect-val">Verify NO ERP lookup is fired. Verify NO draft is generated without human intent confirmation.</span></div>
+        </div>
+        <div class="card-note" style="background:var(--orange-soft);color:#7A4F00;">
+          <span class="card-note-icon">⚡</span>
+          <span>Known sender = not routed to unknown triage. Goes to low-confidence clarification queue instead.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 16 -->
+    <div class="test-card" data-tags="edge">
+      <div class="card-top">
+        <div class="card-num" style="background:#1C1C1E;color:#F5F5F7;">16</div>
+        <div class="card-meta">
+          <div class="card-filename">16_EDGE_unknown_sender.eml</div>
+          <div class="card-subject">Interested in your cola and snack product lines — pricing inquiry</div>
+          <div class="card-sender">new.buyer@freshmart-grocery.com · FreshMart (UNKNOWN)</div>
+          <div class="card-badges">
+            <span class="badge c-edge">⚡ Edge: Unknown Sender</span>
+            <span class="badge s-triage">→ Manual Triage</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Trigger</span><span class="spec-row-val">Domain <code>freshmart-grocery.com</code> not in SAP customer master. New prospect.</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">Pipeline halt</span><span class="expect-val">Stage 2 (Sender Resolution) fails → STOP. No further stages run.</span></div>
+          <div class="expect-row"><span class="expect-key">Queue routing</span><span class="expect-val">→ "Unknown Sender" triage queue. CS creates contact record or routes to sales.</span></div>
+          <div class="expect-row"><span class="expect-key">No ERP lookup</span><span class="expect-val">Zero ERP queries. No AI draft. No pricing data exposed to unverified contact.</span></div>
+          <div class="expect-row"><span class="expect-key">⚠ Test checkpoint</span><span class="expect-val">Verify pipeline halts at Stage 2. Verify no pricing data is returned or drafted.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 17 -->
+    <div class="test-card" data-tags="edge">
+      <div class="card-top">
+        <div class="card-num" style="background:#1C1C1E;color:#F5F5F7;">17</div>
+        <div class="card-meta">
+          <div class="card-filename">17_EDGE_ambiguous_no_order_number.eml</div>
+          <div class="card-subject">"That big cola order — what's the status?"</div>
+          <div class="card-sender">sarah.reynolds@walmart-buyers.com · Walmart (known sender)</div>
+          <div class="card-badges">
+            <span class="badge c-edge">⚡ Edge: Ambiguous Ref</span>
+            <span class="badge s-clarify">→ Fuzzy Lookup</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Signals</span><span class="spec-row-val">"couple weeks back", "cola", "Southeast region", "~400 cases" — no order #</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">Fuzzy lookup</span><span class="expect-val">Query Walmart orders for cola SKUs (0042, 0043) in last 21 days, Southeast sales org</span></div>
+          <div class="expect-row"><span class="expect-key">1 result found</span><span class="expect-val">→ Proceed with flag: "We assumed you meant PO-88421 — please confirm"</span></div>
+          <div class="expect-row"><span class="expect-key">2–5 results found</span><span class="expect-val">→ Surface to CS with list of matching orders to select from</span></div>
+          <div class="expect-row"><span class="expect-key">6+ results</span><span class="expect-val">→ Generate clarification email requesting order number</span></div>
+          <div class="expect-row"><span class="expect-key">⚠ Test checkpoint</span><span class="expect-val">Verify assumed order is explicitly flagged in draft, not silently assumed.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 18 -->
+    <div class="test-card" data-tags="edge">
+      <div class="card-top">
+        <div class="card-num" style="background:#1C1C1E;color:#F5F5F7;">18</div>
+        <div class="card-meta">
+          <div class="card-filename">18_EDGE_missing_required_entity_no_sku.eml</div>
+          <div class="card-subject">Need pricing on your new energy drink product</div>
+          <div class="card-sender">dcplanning@kroger-logistics.com · Kroger</div>
+          <div class="card-badges">
+            <span class="badge c-edge">⚡ Edge: Missing Entity</span>
+            <span class="badge s-clarify">→ Clarification Draft</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Problem</span><span class="spec-row-val">Intent = Price Inquiry (clear). Required entity <code>material_id</code> = MISSING. "4-pack energy drink" is ambiguous (SKU-7701?).</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">Intent confidence</span><span class="expect-val">HIGH for price inquiry. Entity extraction: PARTIAL — no valid SKU extracted.</span></div>
+          <div class="expect-row"><span class="expect-key">Attempted match</span><span class="expect-val">Attempt fuzzy match: "4-pack energy drink" → likely SKU-7701, flag as inferred</span></div>
+          <div class="expect-row"><span class="expect-key">Clarification path</span><span class="expect-val">Generate clarification email: "Could you confirm the SKU or product name? We have SKU-7701 (4pk) and SKU-7705 (8pk) in our energy drink line."</span></div>
+          <div class="expect-row"><span class="expect-key">⚠ Test checkpoint</span><span class="expect-val">Verify no pricing data is returned for an unconfirmed SKU.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 19 -->
+    <div class="test-card" data-tags="edge">
+      <div class="card-top">
+        <div class="card-num" style="background:#1C1C1E;color:#F5F5F7;">19</div>
+        <div class="card-meta">
+          <div class="card-filename">19_EDGE_thread_reply_different_intent.eml</div>
+          <div class="card-subject">Re: Order confirmation status — PO 88423 [NEW: invoice dispute]</div>
+          <div class="card-sender">procurement@target-corp.com · Target</div>
+          <div class="card-badges">
+            <span class="badge c-edge">⚡ Edge: Thread Intent Shift</span>
+            <span class="badge c-invoice">🧾 Invoice (new intent)</span>
+            <span class="badge s-draft">→ Draft Ready</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Context</span><span class="spec-row-val">Reply to order status thread. Original intent: Order Status. New intent: Invoice Dispute on same order. References <code>Invoice #9040201</code>, delta ~$2,300.</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">Thread processing</span><span class="expect-val">Process only the NEW customer turn. Thread history = context only (PO-88423 already known).</span></div>
+          <div class="expect-row"><span class="expect-key">Intent detection</span><span class="expect-val">Detect intent shift: Invoice Dispute (NOT Order Status, despite thread subject line)</span></div>
+          <div class="expect-row"><span class="expect-key">Subject line trap</span><span class="expect-val">⚠ System must NOT classify as Order Status just because the subject says "Order confirmation"</span></div>
+          <div class="expect-row"><span class="expect-key">⚠ Test checkpoint</span><span class="expect-val">Verify new intent (Invoice Dispute) is detected from body, not subject line.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 20 -->
+    <div class="test-card" data-tags="edge">
+      <div class="card-top">
+        <div class="card-num" style="background:#1C1C1E;color:#F5F5F7;">20</div>
+        <div class="card-meta">
+          <div class="card-filename">20_EDGE_non_english_spanish.eml</div>
+          <div class="card-subject">Consulta de estado de pedido — PO-88430 (Spanish)</div>
+          <div class="card-sender">compras@walmart-mexico.com · Walmart MX (known account)</div>
+          <div class="card-badges">
+            <span class="badge c-edge">⚡ Edge: Non-English</span>
+            <span class="badge s-triage">→ v1: Manual Triage</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Language</span><span class="spec-row-val">Spanish. Known customer account (Walmart MX). Order Status intent detectable if translated.</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">v1 behavior</span><span class="expect-val">Detect non-English → route to manual triage with language flag: <code>LANG: es</code></span></div>
+          <div class="expect-row"><span class="expect-key">v2 behavior</span><span class="expect-val">Translate body → process → generate response in Spanish</span></div>
+          <div class="expect-row"><span class="expect-key">Sender note</span><span class="expect-val">Known account — not routed to unknown sender queue. Just language-flagged.</span></div>
+          <div class="expect-row"><span class="expect-key">⚠ Test checkpoint</span><span class="expect-val">v1: Verify language detected. Verify routed to manual triage (not unknown sender queue).</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 21 -->
+    <div class="test-card" data-tags="edge">
+      <div class="card-top">
+        <div class="card-num" style="background:#1C1C1E;color:#F5F5F7;">21</div>
+        <div class="card-meta">
+          <div class="card-filename">21_EDGE_erp_data_not_found.eml</div>
+          <div class="card-subject">Urgent — need status on PO-99999 and order 0000012345</div>
+          <div class="card-sender">procurement@target-corp.com · Target</div>
+          <div class="card-badges">
+            <span class="badge c-edge">⚡ Edge: ERP Not Found</span>
+            <span class="badge s-draft">→ Partial Draft</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Problem</span><span class="spec-row-val"><code>PO-99999</code> does not exist. <code>0000012345</code> likely does not exist either.</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">Lookup result</span><span class="expect-val">Both return 0 records from VA03/VBAK</span></div>
+          <div class="expect-row"><span class="expect-key">Draft behavior</span><span class="expect-val">Partial draft: "We could not locate PO-99999 or order 0000012345 in our system. Could you verify the reference numbers?"</span></div>
+          <div class="expect-row"><span class="expect-key">No fabrication</span><span class="expect-val">⚠ Agent must NOT invent order status. Must explicitly state "not found".</span></div>
+          <div class="expect-row"><span class="expect-key">Log entry</span><span class="expect-val">Log lookup miss for audit: <code>LOOKUP_MISS: PO-99999, SO-0000012345</code></span></div>
+          <div class="expect-row"><span class="expect-key">⚠ Test checkpoint</span><span class="expect-val">Verify "not found" is stated. Verify no fabricated order data in draft.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 22 -->
+    <div class="test-card" data-tags="edge">
+      <div class="card-top">
+        <div class="card-num" style="background:#1C1C1E;color:#F5F5F7;">22</div>
+        <div class="card-meta">
+          <div class="card-filename">22_EDGE_attachment_no_body_data.eml</div>
+          <div class="card-subject">Multiple order inquiries — see attached spreadsheet</div>
+          <div class="card-sender">ap@albertsons-finance.com · Albertsons</div>
+          <div class="card-badges">
+            <span class="badge c-edge">⚡ Edge: Data in Attachment</span>
+            <span class="badge s-triage">→ v1: Flag for CS</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Problem</span><span class="spec-row-val">Email body has zero extractable entities. All order numbers and questions are in the <code>.xlsx</code> attachment.</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">Body extraction</span><span class="expect-val">Entity extraction returns empty set from body text</span></div>
+          <div class="expect-row"><span class="expect-key">Attachment flag</span><span class="expect-val">Attachment detected (<code>.xlsx</code>) → flag in queue: "Entities may be in attachment"</span></div>
+          <div class="expect-row"><span class="expect-key">v1 behavior</span><span class="expect-val">Route to CS with message: "No data found in email body. Spreadsheet attached — please extract and re-submit or process manually."</span></div>
+          <div class="expect-row"><span class="expect-key">v2 behavior</span><span class="expect-val">Parse Excel attachment, extract structured rows, process each as a separate sub-inquiry</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 23 -->
+    <div class="test-card" data-tags="edge prefilter">
+      <div class="card-top">
+        <div class="card-num" style="background:var(--gray-200);color:var(--gray-600);">23</div>
+        <div class="card-meta">
+          <div class="card-filename">23_EDGE_ooo_autoreply_prefilter.eml</div>
+          <div class="card-subject">Out of Office: Re: Q4 pricing on 12-pk Cola line</div>
+          <div class="card-sender">sarah.reynolds@walmart-buyers.com (OOO autoresponder)</div>
+          <div class="card-badges">
+            <span class="badge c-prefilter">🚫 Pre-Filter</span>
+            <span class="badge s-prefilter">→ Silent Discard</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Signals</span><span class="spec-row-val">Header: <code>Auto-Submitted: auto-replied</code>, <code>X-Auto-Response-Suppress: OOF</code>, OOO keyword in body</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">Pre-filter check</span><span class="expect-val">Auto-Submitted header detected → classify as SYSTEM_EMAIL at ingestion</span></div>
+          <div class="expect-row"><span class="expect-key">Action</span><span class="expect-val">Silent discard. No queue entry. No ERP lookup. Log: <code>PREFILTER: OOO_AUTORESPONDER</code></span></div>
+          <div class="expect-row"><span class="expect-key">No CS action</span><span class="expect-val">CS queue should NOT see this email at all</span></div>
+          <div class="expect-row"><span class="expect-key">⚠ Test checkpoint</span><span class="expect-val">Verify zero queue entries created. Verify only a discard log entry exists.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 24 -->
+    <div class="test-card" data-tags="edge">
+      <div class="card-top">
+        <div class="card-num" style="background:#1C1C1E;color:#F5F5F7;">24</div>
+        <div class="card-meta">
+          <div class="card-filename">24_EDGE_partial_erp_result.eml</div>
+          <div class="card-subject">Status check — three open POs from Southeast region</div>
+          <div class="card-sender">promo-planning@walmart-buyers.com · Walmart</div>
+          <div class="card-badges">
+            <span class="badge c-edge">⚡ Edge: Partial ERP Result</span>
+            <span class="badge s-draft">→ Partial Draft</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Problem</span><span class="spec-row-val">3 orders referenced. <code>PO-88421</code> ✓ found. <code>PO-88422</code> ✓ found. <code>PO-88431/88435</code> — uncertain, likely not found.</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">Fan-out queries</span><span class="expect-val">3 parallel lookups (PO-88421, PO-88422, both PO-88431 and PO-88435)</span></div>
+          <div class="expect-row"><span class="expect-key">Partial result</span><span class="expect-val">2 of 3 orders found. Draft covers the 2 found. Explicitly states PO-88431/88435 not found.</span></div>
+          <div class="expect-row"><span class="expect-key">Account mismatch</span><span class="expect-val">⚠ PO-88422 is a Kroger order — sender is Walmart. Flag possible cross-account data request.</span></div>
+          <div class="expect-row"><span class="expect-key">⚠ Test checkpoint</span><span class="expect-val">Verify partial draft (not full failure). Verify PO-88422 account mismatch is flagged.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 25 -->
+    <div class="test-card" data-tags="edge escalate">
+      <div class="card-top">
+        <div class="card-num" style="background:#1C1C1E;color:#F5F5F7;">25</div>
+        <div class="card-meta">
+          <div class="card-filename">25_EDGE_crosslinked_orderstatus_dispute.eml</div>
+          <div class="card-subject">PO-88422 — status question AND formal pricing dispute</div>
+          <div class="card-sender">deductions@kroger-finance.com · Kroger (CC: buyer)</div>
+          <div class="card-badges">
+            <span class="badge c-order">📋 Order Status</span>
+            <span class="badge c-complaint">⚠️ Dispute</span>
+            <span class="badge c-edge">⚡ Cross-linked</span>
+            <span class="badge s-escalate">🔴 Auto-Escalate</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Complexity</span><span class="spec-row-val">Issue 1 (Order Status on Line 2) and Issue 2 (Pricing Dispute on same Line 2) are causally linked. One may be the root cause of the other.</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">Dispute detection</span><span class="expect-val">DISPUTE intent present → auto-escalate REGARDLESS of other intents</span></div>
+          <div class="expect-row"><span class="expect-key">ERP lookup</span><span class="expect-val">Still runs for context: delivery block reason, pricing condition on Line 2</span></div>
+          <div class="expect-row"><span class="expect-key">Draft type</span><span class="expect-val">Acknowledgment only. Context summary for CS/Trade Ops reviewer.</span></div>
+          <div class="expect-row"><span class="expect-key">Cross-link note</span><span class="expect-val">Draft internal note: "Hold on Line 2 may be price-related — potential root cause of both issues"</span></div>
+          <div class="expect-row"><span class="expect-key">⚠ Test checkpoint</span><span class="expect-val">Verify escalation despite Order Status intent also being present. Verify no substantive response drafted.</span></div>
+        </div>
+        <div class="card-note" style="background:var(--red-soft);color:var(--red);">
+          <span class="card-note-icon">🔴</span>
+          <span><strong>Dispute detection must win.</strong> Any email with a dispute intent must escalate — regardless of other intents in the same email.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 26 -->
+    <div class="test-card" data-tags="edge">
+      <div class="card-top">
+        <div class="card-num" style="background:#1C1C1E;color:#F5F5F7;">26</div>
+        <div class="card-meta">
+          <div class="card-filename">26_EDGE_sensitive_pricing_disclosure.eml</div>
+          <div class="card-subject">Confidential — requesting full pricing waterfall for our account</div>
+          <div class="card-sender">buying@kroger-hq.com · Kroger</div>
+          <div class="card-badges">
+            <span class="badge c-price">💲 Price Inquiry</span>
+            <span class="badge c-edge">⚡ Sensitive Disclosure</span>
+            <span class="badge s-escalate">🔴 Approval Required</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Sensitivity</span><span class="spec-row-val">Requests MFN clause, net-net price, all rebates/billbacks — maximum pricing sensitivity level</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">Sensitivity flag</span><span class="expect-val">⚠ HIGH — MFN clause + rebate/billback detail = max sensitivity level</span></div>
+          <div class="expect-row"><span class="expect-key">ERP lookup</span><span class="expect-val">Runs for internal context only — data NOT included in customer-facing draft</span></div>
+          <div class="expect-row"><span class="expect-key">Draft content</span><span class="expect-val">All pricing fields = [REDACTED — Requires Trade Ops Approval]. Draft routes to Trade Ops, not CS.</span></div>
+          <div class="expect-row"><span class="expect-key">MFN handling</span><span class="expect-val">MFN question never answered by AI — immediate escalation to Sales leadership</span></div>
+          <div class="expect-row"><span class="expect-key">⚠ Test checkpoint</span><span class="expect-val">Verify NO contract pricing, rebate, or MFN data appears in the customer-facing draft.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 27 -->
+    <div class="test-card" data-tags="edge prefilter">
+      <div class="card-top">
+        <div class="card-num" style="background:var(--gray-200);color:var(--gray-600);">27</div>
+        <div class="card-meta">
+          <div class="card-filename">27_EDGE_bounce_ndr_prefilter.eml</div>
+          <div class="card-subject">Delivery Status Notification (Failure)</div>
+          <div class="card-sender">mailer-daemon@walmart-buyers.com (NDR / bounce)</div>
+          <div class="card-badges">
+            <span class="badge c-prefilter">🚫 Pre-Filter</span>
+            <span class="badge s-prefilter">→ Silent Discard</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="spec-row"><span class="spec-row-label">Signals</span><span class="spec-row-val">Sender: <code>mailer-daemon@</code>, <code>Auto-Submitted: auto-generated</code>, NDR headers, <code>message/delivery-status</code> MIME type</span></div>
+        <div class="expect-block">
+          <div class="expect-title">Expected Pipeline Behavior</div>
+          <div class="expect-row"><span class="expect-key">Pre-filter check</span><span class="expect-val"><code>mailer-daemon</code> sender pattern + delivery-status MIME → SYSTEM_EMAIL</span></div>
+          <div class="expect-row"><span class="expect-key">Action</span><span class="expect-val">Silent discard. Log: <code>PREFILTER: BOUNCE_NDR</code>. No queue entry.</span></div>
+          <div class="expect-row"><span class="expect-key">Bonus check</span><span class="expect-val">Log the failed recipient address for CS awareness if needed: <code>old.contact@walmart-buyers.com</code></span></div>
+          <div class="expect-row"><span class="expect-key">⚠ Test checkpoint</span><span class="expect-val">Verify zero queue entries. Verify discard log entry with NDR classification reason.</span></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</main>
+
+<script>
+function filterCards(tag, btn) {
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const cards = document.querySelectorAll('.test-card');
+  let visible = 0;
+  cards.forEach(card => {
+    const tags = card.dataset.tags || '';
+    if (tag === 'all' || tags.includes(tag)) {
+      card.classList.remove('hidden');
+      visible++;
+    } else {
+      card.classList.add('hidden');
+    }
+  });
+  document.getElementById('count-display').textContent = visible + ' test email' + (visible !== 1 ? 's' : '');
+}
+
+// Smooth highlight on scroll
+document.querySelectorAll('.nav-pill').forEach(p => {
+  p.addEventListener('click', () => {
+    document.querySelectorAll('.nav-pill').forEach(x => x.classList.remove('active'));
+    p.classList.add('active');
+  });
+});
+</script>
+
+</body>
+</html>

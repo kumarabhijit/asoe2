@@ -1,0 +1,30 @@
+From: procurement@target-corp.com
+To: orders@acme-cpg.com
+Subject: Order confirmation status — PO 88423
+Date: Wed, 19 Mar 2025 08:47:30 -0600
+Message-ID: <test-003-orderstatus-clean@target-corp.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+
+Hi,
+
+I submitted purchase order 88423 through our EDI system three business days ago and our system is still showing it as "Pending Acknowledgment." I need to confirm it's been received and entered into your system correctly.
+
+PO Number: 88423
+Submitted: March 14, 2025
+Expected lines: 4 (SKU-3310, SKU-3312, SKU-3315, SKU-3320)
+Total expected value: approx. $22,000
+
+Can you please confirm:
+- Has the PO been received and entered in your system?
+- What is the current processing status?
+- Are there any holds or issues on any of the lines?
+- What's the expected ship date?
+
+We have a store reset scheduled for early April and need this confirmed ASAP.
+
+Thank you,
+Jennifer Park
+Procurement Coordinator
+Target Corporation
+procurement@target-corp.com | (612) 555-0244
