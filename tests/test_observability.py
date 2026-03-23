@@ -356,3 +356,310 @@ class TestTracerInvariants:
         before_status = state.final_status
         Tracer().build_record(state)
         assert state.final_status == before_status
+
+
+# ---------------------------------------------------------------------------
+# LangFuse sink — observability/langfuse_sink.py
+# ---------------------------------------------------------------------------
+
+from observability.langfuse_sink import forward, reset_client
+
+
+class TestLangFuseSinkDisabled:
+    """LangFuse sink is a no-op when keys are not set or package is missing."""
+
+    def setup_method(self):
+        reset_client()
+
+    def teardown_method(self):
+        reset_client()
+
+    def test_forward_returns_false_when_keys_not_set(self, monkeypatch):
+        monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
+        monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
+        record = TraceRecord(trace_id="t", event_id="e", final_status="COMPLETE")
+        assert forward(record) is False
+
+    def test_forward_returns_false_when_public_key_empty(self, monkeypatch):
+        monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "")
+        monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test")
+        record = TraceRecord(trace_id="t", event_id="e")
+        assert forward(record) is False
+
+    def test_forward_returns_false_when_secret_key_empty(self, monkeypatch):
+        monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
+        monkeypatch.setenv("LANGFUSE_SECRET_KEY", "")
+        record = TraceRecord(trace_id="t", event_id="e")
+        assert forward(record) is False
+
+    def test_forward_returns_false_when_langfuse_import_fails(self, monkeypatch):
+        monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
+        monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test")
+        # Simulate langfuse not installed by patching the import
+        import builtins
+        real_import = builtins.__import__
+
+        def _block_langfuse(name, *args, **kwargs):
+            if name == "langfuse":
+                raise ImportError("no langfuse")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", _block_langfuse)
+        record = TraceRecord(trace_id="t", event_id="e")
+        assert forward(record) is False
+
+    def test_reset_client_allows_reinitialisation(self, monkeypatch):
+        monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
+        monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
+        record = TraceRecord(trace_id="t", event_id="e")
+        assert forward(record) is False
+        # After reset, the client re-checks env vars
+        reset_client()
+        assert forward(record) is False  # still no keys
+
+
+class TestLangFuseSinkWithMockClient:
+    """LangFuse sink forwards correctly when a mock client is injected."""
+
+    def setup_method(self):
+        reset_client()
+
+    def teardown_method(self):
+        reset_client()
+
+    def test_forward_creates_trace_with_correct_fields(self, monkeypatch):
+        import observability.langfuse_sink as sink
+
+        # Inject a mock client directly
+        mock_trace = type("MockTrace", (), {
+            "span": lambda self, **kw: None,
+            "score": lambda self, **kw: None,
+        })()
+        mock_client = type("MockClient", (), {
+            "trace": lambda self, **kw: mock_trace,
+            "flush": lambda self: None,
+        })()
+
+        sink._langfuse_client = mock_client
+        sink._initialised = True
+
+        record = TraceRecord(
+            trace_id="tid-lf-1",
+            event_id="SO-LF-1",
+            intent_selected="CONTRACTUAL_CORRECTION",
+            skill_name="pricing-reconciliation",
+            shadow_verdict="GREEN",
+            shadow_policy_hits=[],
+            recipe_name="PriceAdjustmentRecipe.py",
+            final_status="COMPLETE",
+            explanation="ok",
+        )
+        assert forward(record) is True
+
+    def test_forward_creates_spans_for_each_pipeline_stage(self, monkeypatch):
+        import observability.langfuse_sink as sink
+
+        spans_created = []
+
+        mock_trace = type("MockTrace", (), {
+            "span": lambda self, **kw: spans_created.append(kw),
+            "score": lambda self, **kw: None,
+        })()
+        mock_client = type("MockClient", (), {
+            "trace": lambda self, **kw: mock_trace,
+            "flush": lambda self: None,
+        })()
+
+        sink._langfuse_client = mock_client
+        sink._initialised = True
+
+        record = TraceRecord(
+            trace_id="tid-lf-2",
+            event_id="SO-LF-2",
+            intent_selected="CREDIT_BLOCK",
+            skill_name="credit-hold",
+            shadow_verdict="YELLOW",
+            shadow_policy_hits=["CREDIT_RELEASE_REVIEW"],
+            recipe_name="CreditHoldReleaseRecipe.py",
+            final_status="MANUAL_REVIEW_REQUIRED",
+        )
+        forward(record)
+
+        span_names = [s["name"] for s in spans_created]
+        assert "classify" in span_names
+        assert "load_skill" in span_names
+        assert "shadow_audit" in span_names
+        assert "execute_recipe" in span_names
+
+    def test_forward_shadow_audit_span_warning_level_on_non_green(self, monkeypatch):
+        import observability.langfuse_sink as sink
+
+        spans_created = []
+
+        mock_trace = type("MockTrace", (), {
+            "span": lambda self, **kw: spans_created.append(kw),
+            "score": lambda self, **kw: None,
+        })()
+        mock_client = type("MockClient", (), {
+            "trace": lambda self, **kw: mock_trace,
+            "flush": lambda self: None,
+        })()
+
+        sink._langfuse_client = mock_client
+        sink._initialised = True
+
+        record = TraceRecord(
+            trace_id="t", event_id="e",
+            shadow_verdict="RED",
+            shadow_policy_hits=["MASS_ERROR_POLICY"],
+        )
+        forward(record)
+
+        shadow_span = [s for s in spans_created if s["name"] == "shadow_audit"][0]
+        assert shadow_span["level"] == "WARNING"
+
+    def test_forward_shadow_audit_span_default_level_on_green(self, monkeypatch):
+        import observability.langfuse_sink as sink
+
+        spans_created = []
+
+        mock_trace = type("MockTrace", (), {
+            "span": lambda self, **kw: spans_created.append(kw),
+            "score": lambda self, **kw: None,
+        })()
+        mock_client = type("MockClient", (), {
+            "trace": lambda self, **kw: mock_trace,
+            "flush": lambda self: None,
+        })()
+
+        sink._langfuse_client = mock_client
+        sink._initialised = True
+
+        record = TraceRecord(
+            trace_id="t", event_id="e",
+            shadow_verdict="GREEN",
+            shadow_policy_hits=[],
+        )
+        forward(record)
+
+        shadow_span = [s for s in spans_created if s["name"] == "shadow_audit"][0]
+        assert shadow_span["level"] == "DEFAULT"
+
+    def test_forward_score_1_on_complete(self, monkeypatch):
+        import observability.langfuse_sink as sink
+
+        scores_created = []
+
+        mock_trace = type("MockTrace", (), {
+            "span": lambda self, **kw: None,
+            "score": lambda self, **kw: scores_created.append(kw),
+        })()
+        mock_client = type("MockClient", (), {
+            "trace": lambda self, **kw: mock_trace,
+            "flush": lambda self: None,
+        })()
+
+        sink._langfuse_client = mock_client
+        sink._initialised = True
+
+        record = TraceRecord(trace_id="t", event_id="e", final_status="COMPLETE")
+        forward(record)
+
+        assert len(scores_created) == 1
+        assert scores_created[0]["value"] == 1.0
+        assert scores_created[0]["comment"] == "COMPLETE"
+
+    def test_forward_score_0_on_fail_to_human(self, monkeypatch):
+        import observability.langfuse_sink as sink
+
+        scores_created = []
+
+        mock_trace = type("MockTrace", (), {
+            "span": lambda self, **kw: None,
+            "score": lambda self, **kw: scores_created.append(kw),
+        })()
+        mock_client = type("MockClient", (), {
+            "trace": lambda self, **kw: mock_trace,
+            "flush": lambda self: None,
+        })()
+
+        sink._langfuse_client = mock_client
+        sink._initialised = True
+
+        record = TraceRecord(trace_id="t", event_id="e", final_status="FAIL_TO_HUMAN")
+        forward(record)
+
+        assert len(scores_created) == 1
+        assert scores_created[0]["value"] == 0.0
+
+    def test_forward_skips_spans_when_fields_are_none(self, monkeypatch):
+        import observability.langfuse_sink as sink
+
+        spans_created = []
+
+        mock_trace = type("MockTrace", (), {
+            "span": lambda self, **kw: spans_created.append(kw),
+            "score": lambda self, **kw: None,
+        })()
+        mock_client = type("MockClient", (), {
+            "trace": lambda self, **kw: mock_trace,
+            "flush": lambda self: None,
+        })()
+
+        sink._langfuse_client = mock_client
+        sink._initialised = True
+
+        # Minimal record — no intent, no skill, no shadow, no recipe
+        record = TraceRecord(trace_id="t", event_id="e")
+        forward(record)
+
+        assert len(spans_created) == 0
+
+    def test_forward_catches_client_exception(self, monkeypatch):
+        import observability.langfuse_sink as sink
+
+        def _exploding_trace(**kw):
+            raise RuntimeError("LangFuse down")
+
+        mock_client = type("MockClient", (), {
+            "trace": _exploding_trace,
+            "flush": lambda self: None,
+        })()
+
+        sink._langfuse_client = mock_client
+        sink._initialised = True
+
+        record = TraceRecord(trace_id="t", event_id="e", final_status="COMPLETE")
+        # Must not raise — returns False
+        assert forward(record) is False
+
+
+class TestTracerEmitWithLangFuse:
+    """Tracer.emit() calls LangFuse sink without blocking stdlib logging."""
+
+    def setup_method(self):
+        reset_client()
+
+    def teardown_method(self):
+        reset_client()
+
+    def test_emit_still_writes_to_stdlib_logger(self, caplog, monkeypatch):
+        monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
+        monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
+        record = TraceRecord(trace_id="tid-dual", event_id="SO-D")
+        with caplog.at_level(logging.INFO, logger="asoe.observability"):
+            Tracer().emit(record)
+        payload = json.loads(caplog.records[0].message)
+        assert payload["trace"]["trace_id"] == "tid-dual"
+
+    def test_emit_does_not_raise_when_sink_fails(self, caplog, monkeypatch):
+        # Patch forward to raise — emit must not propagate
+        monkeypatch.setattr(
+            "observability.langfuse_sink.forward",
+            lambda r: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+        record = TraceRecord(trace_id="t", event_id="e")
+        with caplog.at_level(logging.INFO, logger="asoe.observability"):
+            Tracer().emit(record)  # must not raise
+        # stdlib log still emitted
+        assert len(caplog.records) >= 1
