@@ -22,11 +22,15 @@ conventions, and test coverage.
 
 ---
 
-## ORIENTATION — KNOW WHERE YOU ARE
+## ORIENTATION & PLANNING (MANDATORY OUTPUT)
 
-Before planning your change, answer these questions (to yourself, not aloud):
+Before writing or modifying any code, you MUST output a <pre_flight_analysis>
+block. This block makes your assumptions visible so the user can catch errors
+before code is written.
 
-1. Which layer does this change belong to?
+In the block, briefly and explicitly answer:
+
+1. **Layer identification:** Which layer(s) does this change belong to?
    - contracts/      — Pydantic models, typed state, policy constants
    - skills/         — SKILL.md files (reasoning guidance only, no execution logic)
    - recipes/        — deterministic business logic (pure functions, no I/O)
@@ -39,17 +43,34 @@ Before planning your change, answer these questions (to yourself, not aloud):
    - observability/  — structured tracing (TraceRecord)
    - tests/          — pytest suite
 
-2. Does this change cross a layer boundary?
-   If yes, identify every file on both sides and plan the change as a
-   coordinated set. Do not leave layers out of sync.
+2. **Boundary crossing:** Does this change cross a layer boundary? If yes,
+   list every file on both sides that needs coordinated updates.
 
-3. Does this change touch a constrained vocabulary?
-   If yes, update all four sync points (see README § "Defining and enforcing
-   constraints"):
+3. **Constrained vocabulary:** Does this touch a constrained vocabulary?
+   If yes, acknowledge all four sync points:
    - contracts/models.py (Intent enum)
    - constraints/specs.py (Literal types)
    - constraints/guidance_backend.py (regex patterns)
    - constraints/fallback_backend.py (classification branches)
+
+4. **Checklist confirmation:** Explicitly state:
+   "I confirm all Change Planning Checklist items are met."
+
+   The checklist items are:
+   - [ ] I have identified the exact files I will modify.
+   - [ ] I have read each of those files in their current state.
+   - [ ] I know which tests cover the code I am changing.
+   - [ ] My change does not introduce execution logic into a SKILL file.
+   - [ ] My change does not introduce business logic into orchestration nodes.
+   - [ ] My change does not bypass or weaken Compliance Shadow gating.
+   - [ ] My change does not add untyped fields to GraphState.
+   - [ ] My change does not hardcode thresholds outside contracts/policy.py.
+   - [ ] My change does not add speculative features beyond the stated task.
+   - [ ] If I am adding a new recipe, I am following prompts/po-spec-to-asoe.md.
+   - [ ] If I am updating docs, I am following prompts/update_docs.md.
+
+Only after completing the <pre_flight_analysis> block may you proceed with
+code changes.
 
 ---
 
@@ -75,24 +96,6 @@ architectural clarification.
 
 ---
 
-## CHANGE PLANNING CHECKLIST
-
-Before writing code, confirm each item:
-
-- [ ] I have identified the exact files I will modify.
-- [ ] I have read each of those files in their current state.
-- [ ] I know which tests cover the code I am changing.
-- [ ] My change does not introduce execution logic into a SKILL file.
-- [ ] My change does not introduce business logic into orchestration nodes.
-- [ ] My change does not bypass or weaken Compliance Shadow gating.
-- [ ] My change does not add untyped fields to GraphState.
-- [ ] My change does not hardcode thresholds outside contracts/policy.py.
-- [ ] My change does not add speculative features beyond the stated task.
-- [ ] If I am adding a new recipe, I am following prompts/po-spec-to-asoe.md.
-- [ ] If I am updating docs, I am following prompts/update_docs.md.
-
----
-
 ## IMPLEMENTATION RULES
 
 ### Scope
@@ -110,7 +113,6 @@ Before writing code, confirm each item:
 - Free-form text is allowed only for human-facing explanation fields.
 
 ### State and contracts
-- All new Pydantic models use extra="forbid".
 - Keep separate: inbound event data, decision state, compliance result,
   recipe output, final response.
 - Do not overload fields with mixed meanings.
@@ -137,6 +139,8 @@ Before writing code, confirm each item:
 
 ## COMMIT RULES
 
+- Once all tests pass, run git add and git commit yourself — do not print
+  the suggested commands and wait for the user to execute them.
 - Stage only the files changed by this task.
 - Commit message format: "<type>: <concise description>"
   Types: feat, fix, refactor, test, docs, chore
