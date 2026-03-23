@@ -113,6 +113,35 @@ python main.py
 This runs a single demo `OrderEvent` through the full graph and prints the
 resulting `GraphState`.  Honoured by kill switch and explain mode.
 
+### Sandbox CLI (headless runner)
+
+The CLI runner executes sandbox scenarios through the full pipeline and prints
+execution traces to the terminal.  No browser or Streamlit required.
+
+```bash
+# 1. Seed the SQLite database (if not already done)
+python tests/sandbox/seed.py
+
+# 2. Run all 18 seeded events
+PYTHONPATH=. python tests/sandbox/cli.py
+
+# 3. Run a single event
+PYTHONPATH=. python tests/sandbox/cli.py --event EVT-CC-001
+
+# 4. Filter by intent
+PYTHONPATH=. python tests/sandbox/cli.py --intent CREDIT_BLOCK
+
+# 5. Show full JSON trace and prompt previews
+PYTHONPATH=. python tests/sandbox/cli.py --event EVT-CC-001 --json --prompts
+
+# 6. Summary only (suppress per-event traces)
+PYTHONPATH=. python tests/sandbox/cli.py --quiet
+```
+
+The runner uses `DeterministicFallbackBackend` by default.  Set
+`LOCAL_LLM_BACKEND_CLASS` to use a real constrained-generation model (see
+environment variables below).
+
 ### Sandbox UI (local interactive visualiser)
 
 The sandbox runs all four intents through the live pipeline and displays a
@@ -282,6 +311,7 @@ docs/               AUDITOR_GUIDE.md
   specs/            Product-owner reference specs (not runtime code)
 tests/              pytest test suite (525 tests)
   sandbox/          Local execution sandbox (not part of CI test suite)
+    cli.py          Headless CLI runner — run events from the terminal (no Streamlit needed)
     seed.py         SQLite seeder — creates sandbox.db with customers, DCs, promotions, SAP / EDI data
     ui/app.py       Streamlit execution-trace visualiser
     llm/local_backend.py  LocalHFBackend — Outlines + HuggingFace model (optional)
@@ -316,6 +346,7 @@ k8s/                Kubernetes manifests for AKS production deployment
 | `prompts/po-spec-to-asoe.md` | Step-by-step prompt for converting a Product Owner specification into ASOE Skill–Shadow–Recipe components |
 | `prompts/triple_check_review_board.md` | Reusable review prompt — three-persona architecture, security, and test coverage assessment |
 | `tests/sandbox/seed.py` | Sandbox seeder: customers, DCs, promotions, SAP pricing, retailer contracts, credit profiles, and 18 EDI events covering all four intents |
+| `tests/sandbox/cli.py` | Headless CLI runner — run sandbox events from the terminal without Streamlit |
 | `tests/sandbox/ui/app.py` | Streamlit execution-trace visualiser — select event, run pipeline, inspect trace |
 
 **Start here if you are:**
