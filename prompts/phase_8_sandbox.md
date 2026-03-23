@@ -31,6 +31,14 @@ Phase 8 components:
    - Standalone functions that build intent, recipe, and shadow prompts
      from raw event dicts (used by the UI Prompt Preview expander).
 
+5. Headless CLI runner (tests/sandbox/cli.py)
+   - Runs seeded events through the full run_graph() pipeline from the terminal.
+   - Flags: --event <id>, --intent <name>, --json, --prompts, --quiet, --db <path>.
+   - Prints per-event execution traces (intent, shadow, recipe, status)
+     and a colour-coded summary table.
+   - No Streamlit dependency — uses only core + sandbox seed modules.
+   - Honours ASOE_EXPLAIN_MODE, ASOE_KILL_SWITCH, LOCAL_LLM_BACKEND_CLASS.
+
 Constraints:
 - Sandbox code must not alter contracts/, orchestration/, compliance/,
   recipes/, or any other production module.

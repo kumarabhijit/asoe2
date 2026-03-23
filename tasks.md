@@ -198,8 +198,19 @@ States:
 - [x] Used by the UI "Prompt Preview" expander to show what the LLM would receive
 ✅ Outcome: prompt transparency for demos and audits
 
-### 8.5 Sandbox Dependencies (`tests/sandbox/requirements-sandbox.txt`)
-- [x] `streamlit>=1.35.0`
+### 8.6 Headless CLI Runner (`tests/sandbox/cli.py`)
+- [x] Run all seeded events or filter by `--event` / `--intent`
+- [x] Per-event execution trace: intent, shadow verdict, recipe, final status, gateway activity
+- [x] `--json` flag for full GraphState JSON dump
+- [x] `--prompts` flag for LLM prompt previews (intent, recipe, shadow)
+- [x] `--quiet` flag for summary-only output
+- [x] Colour-coded summary table with pass/fail/error counts
+- [x] Honours `ASOE_EXPLAIN_MODE`, `ASOE_KILL_SWITCH`, `LOCAL_LLM_BACKEND_CLASS`
+- [x] No Streamlit dependency — uses only core modules + sandbox seed
+✅ Outcome: engineers can run sandbox scenarios from the terminal without a browser
+
+### 8.7 Sandbox Dependencies (`tests/sandbox/requirements-sandbox.txt`)
+- [x] `streamlit>=1.35.0` (required only for UI, not CLI runner)
 - [x] `outlines`, `transformers`, `torch`, `accelerate`, `huggingface-hub` (all optional)
 - [x] Core production deps not duplicated
 ✅ Outcome: sandbox installs are isolated from CI and production requirements
