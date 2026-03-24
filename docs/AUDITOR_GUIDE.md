@@ -361,8 +361,22 @@ to the `asoe.observability` Python logger.  The record contains:
 | `final_status` | `COMPLETE`, `FAIL_TO_HUMAN`, `BLOCKED`, `MANUAL_REVIEW_REQUIRED`, `REJECTED` |
 | `explanation` | Human-readable reason for the terminal decision |
 
-The record is JSON-serialisable and field-compatible with LangFuse trace schema
-for future self-hosted forwarding.
+The record is JSON-serialisable and field-compatible with LangFuse trace schema.
+
+### LangFuse Forwarding (Optional)
+
+When `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are set and the `langfuse`
+package is installed, `Tracer.emit()` forwards each `TraceRecord` to LangFuse
+in addition to stdlib logging.  This creates a LangFuse trace per graph execution
+with spans for `classify`, `load_skill`, `shadow_audit`, and `execute_recipe`,
+plus a `terminal_status` score (1.0 = COMPLETE, 0.0 = otherwise).
+
+**Stdlib logging remains the authoritative audit record.**  LangFuse is additive
+— all forwarding errors are caught and logged at WARNING/DEBUG level; they never
+block execution.  LangFuse keys are managed via Azure Key Vault CSI in production
+(`k8s/core/secret-provider.yaml`).
+
+Implementation: `observability/langfuse_sink.py`.
 
 ---
 

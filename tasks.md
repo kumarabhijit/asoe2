@@ -243,6 +243,51 @@ States:
 - [x] Non-root security context on all pods
 ✅ Outcome: deployment manifests align with architecture_v2.md §2 infrastructure stack
 ---
+## PHASE 10 — LangFuse Observability Integration
+### 10.1 LangFuse Sink (`observability/langfuse_sink.py`)
+- [x] Implement lazy-init LangFuse client (env-var driven: `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST`)
+- [x] `forward()` — maps `TraceRecord` to LangFuse trace + spans (classify, load_skill, shadow_audit, execute_recipe) + terminal_status score
+- [x] `flush()` — explicit flush for short-lived processes (CLI runner)
+- [x] `reset_client()` — test helper for re-initialisation
+- [x] Failure isolation: all LangFuse errors caught; stdlib logging remains authoritative
+✅ Outcome: optional LangFuse forwarding with zero impact on existing behaviour
+
+### 10.2 Tracer Integration
+- [x] `Tracer.emit()` calls `langfuse_sink.forward()` after stdlib logging
+- [x] Import is lazy (inside `emit()`); no module-level langfuse dependency
+- [x] Exception isolation: forward failure logged at DEBUG, never blocks
+✅ Outcome: dual-emit (stdlib + LangFuse) with backward compatibility
+
+### 10.3 Dependency & Configuration
+- [x] `pyproject.toml` — `langfuse` added as optional dependency group
+- [x] `Dockerfile.core` and `Dockerfile.ui` — `langfuse>=2.0.0` in pip install
+- [x] `Dockerfile.inference` — no change (no observability module)
+- [x] `docker-compose.yml` — `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST` in shared `x-core-env`
+- [x] `.env.example` — LangFuse env vars documented
+- [x] `k8s/core/secret-provider.yaml` — `langfuse-public-key` and `langfuse-secret-key` synced from Azure Key Vault
+✅ Outcome: LangFuse keys managed via Key Vault CSI in production, env vars in dev
+
+### 10.4 Sandbox Support
+- [x] CLI runner (`tests/sandbox/cli.py`) — `--langfuse-flush` flag, LangFuse status in env banner
+- [x] Streamlit UI (`tests/sandbox/ui/app.py`) — LangFuse status in environment expander
+- [x] `requirements-sandbox.txt` — `langfuse>=2.0.0` as commented optional dep
+✅ Outcome: sandbox tools forward traces to LangFuse when configured
+
+### 10.5 Tests
+- [x] 15 new tests in `tests/test_observability.py` (540 total)
+- [x] `TestLangFuseSinkDisabled` — no-op when keys missing, package missing, keys empty
+- [x] `TestLangFuseSinkWithMockClient` — trace/span/score creation, level mapping, exception isolation
+- [x] `TestTracerEmitWithLangFuse` — dual-emit, sink failure does not block stdlib
+- [x] All tests network-free (mock client injection, no live LangFuse connection)
+✅ Outcome: full coverage without CI network dependency
+
+### 10.6 Documentation
+- [x] `DESIGN.md` §9 — LangFuse forwarding table, env var reference, container contents
+- [x] `README.md` — LangFuse section (install, configure, test commands, sandbox usage, Docker)
+- [x] `docs/AUDITOR_GUIDE.md` — audit trail section updated with LangFuse forwarding
+- [x] `tasks.md` — this phase checklist
+✅ Outcome: docs cover setup, testing, and production deployment
+---
 ## REVIEW FINDINGS — Triple-Check Technical Review Board (2026-03-20)
 
 ### Critical

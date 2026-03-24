@@ -61,7 +61,7 @@ observability/
 
 tests/
   conftest.py        # Shared fixtures (StubGateway, sample events, backend setup)
-  test_*.py          # Unit and integration tests (16 files, 525 tests)
+  test_*.py          # Unit and integration tests (16 files, 540 tests)
   sandbox/           # Interactive exploration tools (see §10)
 ```
 
@@ -379,5 +379,5 @@ Production: Kubernetes manifests in `k8s/` (namespace, deployments, services, se
 | `test_workflows.py` | WorkflowRunner Saga execution and compensation |
 
 ```bash
-python -m pytest   # Expected: 525 passed
+python -m pytest   # Expected: 540 passed
 ```
