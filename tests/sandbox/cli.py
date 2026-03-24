@@ -32,6 +32,9 @@ Optional env vars
     LOCAL_LLM_BACKEND_CLASS   e.g. tests.sandbox.llm.local_backend.LocalHFBackend
     ASOE_EXPLAIN_MODE         1 = dry-run mode (no recipe side effects)
     ASOE_KILL_SWITCH          1 = kill switch active
+    LANGFUSE_PUBLIC_KEY       LangFuse public key (enables trace forwarding)
+    LANGFUSE_SECRET_KEY       LangFuse secret key (required alongside public key)
+    LANGFUSE_HOST             LangFuse host URL (omit for LangFuse Cloud)
 """
 from __future__ import annotations
 
@@ -298,6 +301,10 @@ def main() -> int:
                         help="Print LLM prompt previews for each event")
     parser.add_argument("--quiet", action="store_true",
                         help="Suppress per-event trace; show only summary table")
+    parser.add_argument("--langfuse-flush", action="store_true",
+                        dest="langfuse_flush",
+                        help="Flush LangFuse traces before exit (requires "
+                             "LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY)")
 
     args = parser.parse_args()
 
@@ -343,6 +350,9 @@ def main() -> int:
                             "DeterministicFallbackBackend (default)")
     explain_mode = os.getenv("ASOE_EXPLAIN_MODE", "0") == "1"
     kill_switch = os.getenv("ASOE_KILL_SWITCH", "0") == "1"
+    langfuse_configured = bool(
+        os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY")
+    )
 
     print(f"\n{'=' * 80}")
     print(f"  {_BOLD}ASOE Sandbox — CLI Runner{_RESET}")
@@ -350,6 +360,11 @@ def main() -> int:
     print(f"  LLM backend:   {backend_cls}")
     print(f"  Explain mode:  {'ON (dry-run)' if explain_mode else 'OFF'}")
     print(f"  Kill switch:   {f'{_RED}ACTIVE{_RESET}' if kill_switch else 'inactive'}")
+    langfuse_host = os.getenv("LANGFUSE_HOST", "cloud")
+    if langfuse_configured:
+        print(f"  LangFuse:      {_GREEN}enabled{_RESET} ({langfuse_host})")
+    else:
+        print(f"  LangFuse:      {_DIM}disabled (set LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY){_RESET}")
     print(f"  DB path:       {db}")
     print(f"  Events:        {len(events)}")
     print(f"{'=' * 80}")
@@ -404,6 +419,16 @@ def main() -> int:
 
     # Summary table
     _print_summary(results)
+
+    # Flush LangFuse traces if requested
+    if args.langfuse_flush:
+        try:
+            from observability.langfuse_sink import flush
+            flush()
+            if langfuse_configured:
+                print(f"  {_GREEN}LangFuse traces flushed.{_RESET}\n")
+        except Exception as exc:
+            print(f"  {_YELLOW}LangFuse flush failed: {exc}{_RESET}\n")
 
     # Exit code: 0 if no errors, 1 otherwise
     has_errors = any(r.get("error") for r in results)
