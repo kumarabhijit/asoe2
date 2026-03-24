@@ -334,9 +334,9 @@ Three-container split (mirrors dependency groups in `pyproject.toml`):
 
 | Container | Dockerfile | Contents |
 |---|---|---|
-| Core | `Dockerfile.core` | Orchestration engine, recipes, Compliance Shadow |
-| UI | `Dockerfile.ui` | Streamlit sandbox UI (core + streamlit, no GPU deps) |
-| Inference | `Dockerfile.inference` | Local LLM inference (Outlines + torch + transformers) |
+| Core | `Dockerfile.core` | Orchestration engine, recipes, Compliance Shadow, LangFuse |
+| UI | `Dockerfile.ui` | Streamlit sandbox UI (core + streamlit + LangFuse, no GPU deps) |
+| Inference | `Dockerfile.inference` | Local LLM inference (Outlines + torch + transformers, no LangFuse) |
 
 All images: non-root user (`asoe`, UID 1000), `uv` for deterministic dependency resolution.
 
