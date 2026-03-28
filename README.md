@@ -247,11 +247,143 @@ environment banner.  The `--langfuse-flush` flag on the CLI runner is
 important for short-lived processes where the background sender may not
 complete before exit.
 
-**Docker:** LangFuse is pre-installed in the `core` and `ui` containers.
-Set `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` in `.env` or via
-`docker compose` environment — the `x-core-env` shared block passes them
-to both services automatically.  In production (AKS), keys are injected
-via Azure Key Vault CSI (`k8s/core/secret-provider.yaml`).
+**ASOE Docker containers:** LangFuse client is pre-installed in the `core`
+and `ui` containers.  Set `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`
+in `.env` or via `docker compose` environment — the `x-core-env` shared
+block passes them to both services automatically.  In production (AKS),
+keys are injected via Azure Key Vault CSI (`k8s/core/secret-provider.yaml`).
+
+#### Setting up a LangFuse server
+
+You need a running LangFuse server to receive traces.  There are three
+options: LangFuse Cloud, Docker, or native (no Docker).
+
+**Option A — LangFuse Cloud (no server setup)**
+
+1. Sign up at [cloud.langfuse.com](https://cloud.langfuse.com) (free tier available)
+2. Create a project → **Settings → API Keys** → generate keys
+3. Export the keys:
+   ```bash
+   export LANGFUSE_PUBLIC_KEY=pk-lf-...
+   export LANGFUSE_SECRET_KEY=sk-lf-...
+   # No LANGFUSE_HOST needed — defaults to cloud.langfuse.com
+   ```
+
+**Option B — Self-hosted LangFuse via Docker**
+
+```bash
+# 1. Create a docker-compose.yml for LangFuse
+cat > /tmp/langfuse-docker-compose.yml << 'EOF'
+services:
+  langfuse-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+      POSTGRES_DB: langfuse
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  langfuse:
+    image: langfuse/langfuse:2
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://langfuse:langfuse@langfuse-db:5432/langfuse
+      NEXTAUTH_SECRET: $(openssl rand -base64 32)
+      NEXTAUTH_URL: http://localhost:3000
+      SALT: $(openssl rand -base64 32)
+      TELEMETRY_ENABLED: "false"
+      LANGFUSE_INIT_ORG_ID: "asoe-org"
+      LANGFUSE_INIT_ORG_NAME: "ASOE"
+      LANGFUSE_INIT_PROJECT_ID: "asoe-project"
+      LANGFUSE_INIT_PROJECT_NAME: "ASOE Dev"
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: "pk-lf-asoe-dev"
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: "sk-lf-asoe-dev"
+      LANGFUSE_INIT_USER_EMAIL: "admin@asoe.local"
+      LANGFUSE_INIT_USER_NAME: "ASOE Admin"
+      LANGFUSE_INIT_USER_PASSWORD: "change-me-in-production"
+    ports:
+      - "3000:3000"
+EOF
+
+# 2. Start LangFuse
+docker compose -f /tmp/langfuse-docker-compose.yml up -d
+
+# 3. Wait for health check
+curl -sf http://localhost:3000/api/public/health
+# → {"status":"OK","version":"2.x.x"}
+
+# 4. Run ASOE with the pre-provisioned keys
+export LANGFUSE_PUBLIC_KEY=pk-lf-asoe-dev
+export LANGFUSE_SECRET_KEY=sk-lf-asoe-dev
+export LANGFUSE_HOST=http://localhost:3000
+```
+
+**Option C — Self-hosted LangFuse without Docker (native)**
+
+Requires: Node.js (22+), PostgreSQL (16+), pnpm.
+
+```bash
+# 1. Start PostgreSQL and create database
+pg_ctlcluster 16 main start
+sudo -u postgres psql -c "CREATE USER langfuse WITH PASSWORD 'langfuse' CREATEDB;"
+sudo -u postgres psql -c "CREATE DATABASE langfuse OWNER langfuse;"
+
+# 2. Clone LangFuse v2.95.1 (Postgres-only — no ClickHouse/S3 required)
+git clone --depth 1 --branch v2.95.1 https://github.com/langfuse/langfuse.git
+cd langfuse
+
+# 3. Configure .env
+cat > .env << 'ENVEOF'
+DATABASE_URL=postgresql://langfuse:langfuse@localhost:5432/langfuse
+DIRECT_URL=postgresql://langfuse:langfuse@localhost:5432/langfuse
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=your-secret-here-min-32-chars-long
+SALT=your-salt-here-min-32-chars-long
+ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000
+LANGFUSE_INIT_ORG_ID=asoe-org
+LANGFUSE_INIT_ORG_NAME=ASOE
+LANGFUSE_INIT_PROJECT_ID=asoe-project
+LANGFUSE_INIT_PROJECT_NAME=ASOE Dev
+LANGFUSE_INIT_PROJECT_PUBLIC_KEY=pk-lf-asoe-dev
+LANGFUSE_INIT_PROJECT_SECRET_KEY=sk-lf-asoe-dev
+LANGFUSE_INIT_USER_EMAIL=admin@asoe.local
+LANGFUSE_INIT_USER_NAME=ASOE Admin
+LANGFUSE_INIT_USER_PASSWORD=change-me-in-production
+PORT=3000
+ENVEOF
+
+# 4. Install, migrate, build, start
+npm install -g pnpm
+PUPPETEER_SKIP_DOWNLOAD=1 pnpm install --no-frozen-lockfile
+pnpm --filter=shared run db:migrate
+pnpm run build
+pnpm --filter=web run start &
+
+# 5. Health check
+curl -sf http://localhost:3000/api/public/health
+# → {"status":"OK","version":"2.95.1"}
+
+# 6. Run ASOE sandbox against the server
+export LANGFUSE_PUBLIC_KEY=pk-lf-asoe-dev
+export LANGFUSE_SECRET_KEY=sk-lf-asoe-dev
+export LANGFUSE_HOST=http://localhost:3000
+PYTHONPATH=. python tests/sandbox/cli.py --langfuse-flush
+
+# 7. Verify traces arrived
+curl -u pk-lf-asoe-dev:sk-lf-asoe-dev http://localhost:3000/api/public/traces
+```
+
+> **Note:** LangFuse v3.x+ requires ClickHouse and S3 in addition to
+> PostgreSQL.  For local development, v2.95.1 is recommended as it only
+> needs PostgreSQL.
 
 ### Docker (containerized — local build)
 
