@@ -418,6 +418,39 @@ class TestLangFuseSinkDisabled:
         assert forward(record) is False  # still no keys
 
 
+def _make_mock_client():
+    """Build a mock LangFuse v4 client with call recording.
+
+    Returns (client, observations, scores) where observations and scores
+    are lists that accumulate kwargs from start_observation / create_score.
+    """
+    observations = []
+    scores = []
+
+    class MockObservation:
+        def __init__(self, **kw):
+            self._kw = kw
+            observations.append(kw)
+
+        def start_observation(self, **kw):
+            return MockObservation(**kw)
+
+        def end(self):
+            pass
+
+    class MockClient:
+        def start_observation(self, **kw):
+            return MockObservation(**kw)
+
+        def create_score(self, **kw):
+            scores.append(kw)
+
+        def flush(self):
+            pass
+
+    return MockClient(), observations, scores
+
+
 class TestLangFuseSinkWithMockClient:
     """LangFuse sink forwards correctly when a mock client is injected."""
 
@@ -430,16 +463,7 @@ class TestLangFuseSinkWithMockClient:
     def test_forward_creates_trace_with_correct_fields(self, monkeypatch):
         import observability.langfuse_sink as sink
 
-        # Inject a mock client directly
-        mock_trace = type("MockTrace", (), {
-            "span": lambda self, **kw: None,
-            "score": lambda self, **kw: None,
-        })()
-        mock_client = type("MockClient", (), {
-            "trace": lambda self, **kw: mock_trace,
-            "flush": lambda self: None,
-        })()
-
+        mock_client, observations, scores = _make_mock_client()
         sink._langfuse_client = mock_client
         sink._initialised = True
 
@@ -455,21 +479,14 @@ class TestLangFuseSinkWithMockClient:
             explanation="ok",
         )
         assert forward(record) is True
+        # Root observation is created
+        assert observations[0]["name"] == "asoe-graph-execution"
+        assert observations[0]["input"] == {"event_id": "SO-LF-1"}
 
     def test_forward_creates_spans_for_each_pipeline_stage(self, monkeypatch):
         import observability.langfuse_sink as sink
 
-        spans_created = []
-
-        mock_trace = type("MockTrace", (), {
-            "span": lambda self, **kw: spans_created.append(kw),
-            "score": lambda self, **kw: None,
-        })()
-        mock_client = type("MockClient", (), {
-            "trace": lambda self, **kw: mock_trace,
-            "flush": lambda self: None,
-        })()
-
+        mock_client, observations, scores = _make_mock_client()
         sink._langfuse_client = mock_client
         sink._initialised = True
 
@@ -485,26 +502,16 @@ class TestLangFuseSinkWithMockClient:
         )
         forward(record)
 
-        span_names = [s["name"] for s in spans_created]
-        assert "classify" in span_names
-        assert "load_skill" in span_names
-        assert "shadow_audit" in span_names
-        assert "execute_recipe" in span_names
+        obs_names = [o["name"] for o in observations]
+        assert "classify" in obs_names
+        assert "load_skill" in obs_names
+        assert "shadow_audit" in obs_names
+        assert "execute_recipe" in obs_names
 
     def test_forward_shadow_audit_span_warning_level_on_non_green(self, monkeypatch):
         import observability.langfuse_sink as sink
 
-        spans_created = []
-
-        mock_trace = type("MockTrace", (), {
-            "span": lambda self, **kw: spans_created.append(kw),
-            "score": lambda self, **kw: None,
-        })()
-        mock_client = type("MockClient", (), {
-            "trace": lambda self, **kw: mock_trace,
-            "flush": lambda self: None,
-        })()
-
+        mock_client, observations, scores = _make_mock_client()
         sink._langfuse_client = mock_client
         sink._initialised = True
 
@@ -515,23 +522,13 @@ class TestLangFuseSinkWithMockClient:
         )
         forward(record)
 
-        shadow_span = [s for s in spans_created if s["name"] == "shadow_audit"][0]
-        assert shadow_span["level"] == "WARNING"
+        shadow_obs = [o for o in observations if o.get("name") == "shadow_audit"][0]
+        assert shadow_obs["level"] == "WARNING"
 
     def test_forward_shadow_audit_span_default_level_on_green(self, monkeypatch):
         import observability.langfuse_sink as sink
 
-        spans_created = []
-
-        mock_trace = type("MockTrace", (), {
-            "span": lambda self, **kw: spans_created.append(kw),
-            "score": lambda self, **kw: None,
-        })()
-        mock_client = type("MockClient", (), {
-            "trace": lambda self, **kw: mock_trace,
-            "flush": lambda self: None,
-        })()
-
+        mock_client, observations, scores = _make_mock_client()
         sink._langfuse_client = mock_client
         sink._initialised = True
 
@@ -542,70 +539,40 @@ class TestLangFuseSinkWithMockClient:
         )
         forward(record)
 
-        shadow_span = [s for s in spans_created if s["name"] == "shadow_audit"][0]
-        assert shadow_span["level"] == "DEFAULT"
+        shadow_obs = [o for o in observations if o.get("name") == "shadow_audit"][0]
+        assert shadow_obs["level"] == "DEFAULT"
 
     def test_forward_score_1_on_complete(self, monkeypatch):
         import observability.langfuse_sink as sink
 
-        scores_created = []
-
-        mock_trace = type("MockTrace", (), {
-            "span": lambda self, **kw: None,
-            "score": lambda self, **kw: scores_created.append(kw),
-        })()
-        mock_client = type("MockClient", (), {
-            "trace": lambda self, **kw: mock_trace,
-            "flush": lambda self: None,
-        })()
-
+        mock_client, observations, scores = _make_mock_client()
         sink._langfuse_client = mock_client
         sink._initialised = True
 
         record = TraceRecord(trace_id="t", event_id="e", final_status="COMPLETE")
         forward(record)
 
-        assert len(scores_created) == 1
-        assert scores_created[0]["value"] == 1.0
-        assert scores_created[0]["comment"] == "COMPLETE"
+        assert len(scores) == 1
+        assert scores[0]["value"] == 1.0
+        assert scores[0]["comment"] == "COMPLETE"
 
     def test_forward_score_0_on_fail_to_human(self, monkeypatch):
         import observability.langfuse_sink as sink
 
-        scores_created = []
-
-        mock_trace = type("MockTrace", (), {
-            "span": lambda self, **kw: None,
-            "score": lambda self, **kw: scores_created.append(kw),
-        })()
-        mock_client = type("MockClient", (), {
-            "trace": lambda self, **kw: mock_trace,
-            "flush": lambda self: None,
-        })()
-
+        mock_client, observations, scores = _make_mock_client()
         sink._langfuse_client = mock_client
         sink._initialised = True
 
         record = TraceRecord(trace_id="t", event_id="e", final_status="FAIL_TO_HUMAN")
         forward(record)
 
-        assert len(scores_created) == 1
-        assert scores_created[0]["value"] == 0.0
+        assert len(scores) == 1
+        assert scores[0]["value"] == 0.0
 
     def test_forward_skips_spans_when_fields_are_none(self, monkeypatch):
         import observability.langfuse_sink as sink
 
-        spans_created = []
-
-        mock_trace = type("MockTrace", (), {
-            "span": lambda self, **kw: spans_created.append(kw),
-            "score": lambda self, **kw: None,
-        })()
-        mock_client = type("MockClient", (), {
-            "trace": lambda self, **kw: mock_trace,
-            "flush": lambda self: None,
-        })()
-
+        mock_client, observations, scores = _make_mock_client()
         sink._langfuse_client = mock_client
         sink._initialised = True
 
@@ -613,16 +580,19 @@ class TestLangFuseSinkWithMockClient:
         record = TraceRecord(trace_id="t", event_id="e")
         forward(record)
 
-        assert len(spans_created) == 0
+        # Only root observation, no child spans
+        assert len(observations) == 1
+        assert observations[0]["name"] == "asoe-graph-execution"
 
     def test_forward_catches_client_exception(self, monkeypatch):
         import observability.langfuse_sink as sink
 
-        def _exploding_trace(**kw):
+        def _exploding_start(**kw):
             raise RuntimeError("LangFuse down")
 
         mock_client = type("MockClient", (), {
-            "trace": _exploding_trace,
+            "start_observation": _exploding_start,
+            "create_score": lambda self, **kw: None,
             "flush": lambda self: None,
         })()
 
