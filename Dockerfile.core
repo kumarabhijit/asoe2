@@ -33,7 +33,8 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 COPY pyproject.toml uv.lock ./
 RUN uv pip install --system --no-cache-dir \
     "langgraph>=0.2.0" \
-    "pydantic>=2.7.0"
+    "pydantic>=2.7.0" \
+    "langfuse>=2.0.0"
 
 # ── Compatibility patch ───────────────────────────────────────────────────────
 # pydantic 2.12.5 calls typing._eval_type(prefer_fwd_module=True) but Python

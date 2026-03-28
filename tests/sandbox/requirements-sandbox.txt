@@ -21,3 +21,7 @@ accelerate>=0.30.0       # faster model loading on multi-core CPU / GPU
 
 # ── Hugging Face Hub (for auto-downloading model weights) ───────────────────
 huggingface-hub>=0.23.0
+
+# ── LangFuse observability (optional — set LANGFUSE_PUBLIC_KEY + SECRET_KEY) ─
+# Uncomment to enable trace forwarding from sandbox runs to LangFuse.
+# langfuse>=2.0.0

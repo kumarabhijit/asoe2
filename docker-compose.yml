@@ -24,6 +24,10 @@ x-core-env: &core-env
   PYTHONUNBUFFERED: "1"
   ASOE_KILL_SWITCH: "${ASOE_KILL_SWITCH:-0}"
   ASOE_EXPLAIN_MODE: "${ASOE_EXPLAIN_MODE:-0}"
+  # LangFuse observability (optional — set in .env or via Key Vault)
+  LANGFUSE_PUBLIC_KEY: "${LANGFUSE_PUBLIC_KEY:-}"
+  LANGFUSE_SECRET_KEY: "${LANGFUSE_SECRET_KEY:-}"
+  LANGFUSE_HOST: "${LANGFUSE_HOST:-}"
   # Runtime proxy (optional — set in .env or shell)
   HTTP_PROXY: "${HTTP_PROXY:-}"
   HTTPS_PROXY: "${HTTPS_PROXY:-}"

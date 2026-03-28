@@ -61,7 +61,7 @@ observability/
 
 tests/
   conftest.py        # Shared fixtures (StubGateway, sample events, backend setup)
-  test_*.py          # Unit and integration tests (16 files, 525 tests)
+  test_*.py          # Unit and integration tests (16 files, 540 tests)
   sandbox/           # Interactive exploration tools (see §10)
 ```
 
@@ -265,7 +265,30 @@ Emitted via stdlib logging to the `asoe.observability` logger. Fields:
 | `final_status` | `COMPLETE`, `FAIL_TO_HUMAN`, `BLOCKED`, `MANUAL_REVIEW_REQUIRED`, `REJECTED` |
 | `explanation` | Human-readable reason for the terminal decision |
 
-JSON-serialisable. Field-compatible with LangFuse trace schema for future self-hosted forwarding.
+JSON-serialisable. Field-compatible with LangFuse trace schema.
+
+### LangFuse Forwarding (Optional)
+
+`observability/langfuse_sink.py` → `forward()`, `flush()`, `reset_client()`
+
+When `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are set and the `langfuse` package is installed, `Tracer.emit()` forwards each `TraceRecord` to LangFuse in addition to stdlib logging.
+
+| LangFuse entity | ASOE source |
+|---|---|
+| `trace.id` | `TraceRecord.trace_id` |
+| `trace.name` | `"asoe-graph-execution"` |
+| `trace.input` | `{ event_id }` |
+| `trace.output` | `{ final_status, explanation }` |
+| `trace.metadata` | `{ constrained_output_schemas, gateway_calls, rag_chunks }` |
+| span `classify` | `intent_selected` |
+| span `load_skill` | `skill_name` |
+| span `shadow_audit` | `shadow_verdict`, `shadow_policy_hits` (level=WARNING if non-GREEN) |
+| span `execute_recipe` | `recipe_name` |
+| score `terminal_status` | 1.0 if COMPLETE, 0.0 otherwise |
+
+**SDK compatibility:** The sink auto-detects the installed langfuse SDK version via `_is_v2()`. Langfuse v2 (`client.trace()` → `trace.span()` / `trace.score()`) and v4+ (`client.start_observation()` / `client.create_score()`) are both supported. See `prompts/phase_10_langfuse.md` for the full integration specification.
+
+**Failure isolation:** All LangFuse errors are caught and logged at WARNING/DEBUG level. Forwarding failures never block graph execution. Stdlib logging remains the authoritative audit record.
 
 ---
 
@@ -301,6 +324,9 @@ Pods authenticate via Azure Workload Identity (temporary tokens). No credentials
 | `ASOE_KILL_SWITCH` | `0` | `1` / `true` / `yes` → halt all execution |
 | `ASOE_EXPLAIN_MODE` | `0` | `1` / `true` / `yes` → dry-run only, no recipe execution |
 | `USE_OUTLINES_BACKEND` | `0` | `1` → use `OutlinesConstrainedBackend` (requires `outlines` package) |
+| `LANGFUSE_PUBLIC_KEY` | _(unset)_ | LangFuse public key — enables trace forwarding when set (requires `langfuse` package) |
+| `LANGFUSE_SECRET_KEY` | _(unset)_ | LangFuse secret key — required alongside public key |
+| `LANGFUSE_HOST` | _(unset)_ | LangFuse host URL — omit for LangFuse Cloud, set for self-hosted |
 
 ---
 
@@ -310,9 +336,9 @@ Three-container split (mirrors dependency groups in `pyproject.toml`):
 
 | Container | Dockerfile | Contents |
 |---|---|---|
-| Core | `Dockerfile.core` | Orchestration engine, recipes, Compliance Shadow |
-| UI | `Dockerfile.ui` | Streamlit sandbox UI (core + streamlit, no GPU deps) |
-| Inference | `Dockerfile.inference` | Local LLM inference (Outlines + torch + transformers) |
+| Core | `Dockerfile.core` | Orchestration engine, recipes, Compliance Shadow, LangFuse |
+| UI | `Dockerfile.ui` | Streamlit sandbox UI (core + streamlit + LangFuse, no GPU deps) |
+| Inference | `Dockerfile.inference` | Local LLM inference (Outlines + torch + transformers, no LangFuse) |
 
 All images: non-root user (`asoe`, UID 1000), `uv` for deterministic dependency resolution.
 
@@ -355,5 +381,5 @@ Production: Kubernetes manifests in `k8s/` (namespace, deployments, services, se
 | `test_workflows.py` | WorkflowRunner Saga execution and compensation |
 
 ```bash
-python -m pytest   # Expected: 525 passed
+python -m pytest   # Expected: 540 passed
 ```

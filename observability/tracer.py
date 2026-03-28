@@ -186,6 +186,17 @@ class Tracer:
 
         The log message contains a ``trace`` key so log aggregators and a
         future LangFuse handler can extract the payload without string parsing.
+
+        If LangFuse is configured (env vars set + package installed), the
+        record is also forwarded to LangFuse.  Forwarding failures are
+        logged but never block execution.
         """
         payload = {"trace": json.loads(record.to_json())}
         logger.info(json.dumps(payload))
+
+        # Optional LangFuse forwarding — additive, never blocks.
+        try:
+            from observability.langfuse_sink import forward
+            forward(record)
+        except Exception as exc:
+            logger.debug("LangFuse sink unavailable: %s", exc)

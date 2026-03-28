@@ -100,7 +100,7 @@ bash scripts/apply-patches.sh .venv/bin/python   # re-run after any pydantic rei
 python -m pytest
 ```
 
-Expected: **525 passed, 0 failed, 1 warning** (the warning is from `langchain_core` pydantic.v1 deprecation — not a blocker).
+Expected: **540 passed, 0 failed, 1 warning** (the warning is from `langchain_core` pydantic.v1 deprecation — not a blocker).
 
 > **Verified on Python 3.14.3 (stable).**
 
@@ -172,6 +172,218 @@ PYTHONPATH=. streamlit run tests/sandbox/ui/app.py
 `LocalHFBackend` uses Outlines constrained-JSON generation — the same
 guarantee as `OutlinesConstrainedBackend` in production.  If the model fails
 to load it falls back silently to `DeterministicFallbackBackend`.
+
+### LangFuse observability (optional)
+
+Every `run_graph()` call emits a `TraceRecord` to the stdlib `asoe.observability`
+logger.  When LangFuse is configured, the same record is also forwarded to
+LangFuse as a trace with spans — no code changes needed.
+
+**Install:**
+
+```bash
+# Optional — only if you want LangFuse forwarding
+uv pip install "langfuse>=2.0.0"
+```
+
+**Configure (env vars or `.env`):**
+
+```bash
+export LANGFUSE_PUBLIC_KEY=pk-lf-...
+export LANGFUSE_SECRET_KEY=sk-lf-...
+# Omit LANGFUSE_HOST for LangFuse Cloud; set for self-hosted:
+# export LANGFUSE_HOST=https://langfuse.your-domain.com
+```
+
+**What gets sent to LangFuse:**
+
+| LangFuse entity | ASOE source |
+|---|---|
+| `trace.id` | `TraceRecord.trace_id` |
+| `trace.name` | `"asoe-graph-execution"` |
+| `trace.input` | `{ event_id }` |
+| `trace.output` | `{ final_status, explanation }` |
+| `trace.metadata` | `{ constrained_output_schemas, gateway_calls, rag_chunks }` |
+| span `classify` | `intent_selected` |
+| span `load_skill` | `skill_name` |
+| span `shadow_audit` | `shadow_verdict`, `shadow_policy_hits` (level=WARNING if non-GREEN) |
+| span `execute_recipe` | `recipe_name` |
+| score `terminal_status` | 1.0 if COMPLETE, 0.0 otherwise |
+
+**Failure isolation:** LangFuse errors are caught and logged; they never block
+graph execution.  Stdlib logging remains the authoritative audit record.
+
+**Run observability tests (including LangFuse):**
+
+```bash
+# All observability + LangFuse sink tests (no LangFuse keys needed — tests use mocks)
+python -m pytest tests/test_observability.py -v
+
+# Run just the LangFuse-specific test classes
+python -m pytest tests/test_observability.py -v -k "LangFuse"
+```
+
+The LangFuse tests cover: disabled mode (no keys / no package), mock client
+forwarding (trace creation, span creation per pipeline stage, shadow level,
+terminal status scores, exception isolation), and `Tracer.emit()` dual-emit
+(stdlib + LangFuse sink).  All tests are network-free — no live LangFuse
+connection required.
+
+**Run sandbox with LangFuse forwarding:**
+
+```bash
+# CLI runner — traces are forwarded automatically; --langfuse-flush ensures
+# all pending traces are sent before the process exits
+LANGFUSE_PUBLIC_KEY=pk-lf-... LANGFUSE_SECRET_KEY=sk-lf-... \
+  PYTHONPATH=. python tests/sandbox/cli.py --langfuse-flush
+
+# Streamlit UI — traces are forwarded automatically on each "Run event"
+LANGFUSE_PUBLIC_KEY=pk-lf-... LANGFUSE_SECRET_KEY=sk-lf-... \
+  PYTHONPATH=. streamlit run tests/sandbox/ui/app.py
+```
+
+Both sandbox tools show LangFuse status (enabled/disabled) in their
+environment banner.  The `--langfuse-flush` flag on the CLI runner is
+important for short-lived processes where the background sender may not
+complete before exit.
+
+**ASOE Docker containers:** LangFuse client is pre-installed in the `core`
+and `ui` containers.  Set `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`
+in `.env` or via `docker compose` environment — the `x-core-env` shared
+block passes them to both services automatically.  In production (AKS),
+keys are injected via Azure Key Vault CSI (`k8s/core/secret-provider.yaml`).
+
+#### Setting up a LangFuse server
+
+You need a running LangFuse server to receive traces.  There are three
+options: LangFuse Cloud, Docker, or native (no Docker).
+
+**Option A — LangFuse Cloud (no server setup)**
+
+1. Sign up at [cloud.langfuse.com](https://cloud.langfuse.com) (free tier available)
+2. Create a project → **Settings → API Keys** → generate keys
+3. Export the keys:
+   ```bash
+   export LANGFUSE_PUBLIC_KEY=pk-lf-...
+   export LANGFUSE_SECRET_KEY=sk-lf-...
+   # No LANGFUSE_HOST needed — defaults to cloud.langfuse.com
+   ```
+
+**Option B — Self-hosted LangFuse via Docker**
+
+```bash
+# 1. Create a docker-compose.yml for LangFuse
+cat > /tmp/langfuse-docker-compose.yml << 'EOF'
+services:
+  langfuse-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+      POSTGRES_DB: langfuse
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  langfuse:
+    image: langfuse/langfuse:2
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://langfuse:langfuse@langfuse-db:5432/langfuse
+      NEXTAUTH_SECRET: $(openssl rand -base64 32)
+      NEXTAUTH_URL: http://localhost:3000
+      SALT: $(openssl rand -base64 32)
+      TELEMETRY_ENABLED: "false"
+      LANGFUSE_INIT_ORG_ID: "asoe-org"
+      LANGFUSE_INIT_ORG_NAME: "ASOE"
+      LANGFUSE_INIT_PROJECT_ID: "asoe-project"
+      LANGFUSE_INIT_PROJECT_NAME: "ASOE Dev"
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: "pk-lf-asoe-dev"
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: "sk-lf-asoe-dev"
+      LANGFUSE_INIT_USER_EMAIL: "admin@asoe.local"
+      LANGFUSE_INIT_USER_NAME: "ASOE Admin"
+      LANGFUSE_INIT_USER_PASSWORD: "change-me-in-production"
+    ports:
+      - "3000:3000"
+EOF
+
+# 2. Start LangFuse
+docker compose -f /tmp/langfuse-docker-compose.yml up -d
+
+# 3. Wait for health check
+curl -sf http://localhost:3000/api/public/health
+# → {"status":"OK","version":"2.x.x"}
+
+# 4. Run ASOE with the pre-provisioned keys
+export LANGFUSE_PUBLIC_KEY=pk-lf-asoe-dev
+export LANGFUSE_SECRET_KEY=sk-lf-asoe-dev
+export LANGFUSE_HOST=http://localhost:3000
+```
+
+**Option C — Self-hosted LangFuse without Docker (native)**
+
+Requires: Node.js (22+), PostgreSQL (16+), pnpm.
+
+```bash
+# 1. Start PostgreSQL and create database
+pg_ctlcluster 16 main start
+sudo -u postgres psql -c "CREATE USER langfuse WITH PASSWORD 'langfuse' CREATEDB;"
+sudo -u postgres psql -c "CREATE DATABASE langfuse OWNER langfuse;"
+
+# 2. Clone LangFuse v2.95.1 (Postgres-only — no ClickHouse/S3 required)
+git clone --depth 1 --branch v2.95.1 https://github.com/langfuse/langfuse.git
+cd langfuse
+
+# 3. Configure .env
+cat > .env << 'ENVEOF'
+DATABASE_URL=postgresql://langfuse:langfuse@localhost:5432/langfuse
+DIRECT_URL=postgresql://langfuse:langfuse@localhost:5432/langfuse
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=your-secret-here-min-32-chars-long
+SALT=your-salt-here-min-32-chars-long
+ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000
+LANGFUSE_INIT_ORG_ID=asoe-org
+LANGFUSE_INIT_ORG_NAME=ASOE
+LANGFUSE_INIT_PROJECT_ID=asoe-project
+LANGFUSE_INIT_PROJECT_NAME=ASOE Dev
+LANGFUSE_INIT_PROJECT_PUBLIC_KEY=pk-lf-asoe-dev
+LANGFUSE_INIT_PROJECT_SECRET_KEY=sk-lf-asoe-dev
+LANGFUSE_INIT_USER_EMAIL=admin@asoe.local
+LANGFUSE_INIT_USER_NAME=ASOE Admin
+LANGFUSE_INIT_USER_PASSWORD=change-me-in-production
+PORT=3000
+ENVEOF
+
+# 4. Install, migrate, build, start
+npm install -g pnpm
+PUPPETEER_SKIP_DOWNLOAD=1 pnpm install --no-frozen-lockfile
+pnpm --filter=shared run db:migrate
+pnpm run build
+pnpm --filter=web run start &
+
+# 5. Health check
+curl -sf http://localhost:3000/api/public/health
+# → {"status":"OK","version":"2.95.1"}
+
+# 6. Run ASOE sandbox against the server
+export LANGFUSE_PUBLIC_KEY=pk-lf-asoe-dev
+export LANGFUSE_SECRET_KEY=sk-lf-asoe-dev
+export LANGFUSE_HOST=http://localhost:3000
+PYTHONPATH=. python tests/sandbox/cli.py --langfuse-flush
+
+# 7. Verify traces arrived
+curl -u pk-lf-asoe-dev:sk-lf-asoe-dev http://localhost:3000/api/public/traces
+```
+
+> **Note:** LangFuse v3.x+ requires ClickHouse and S3 in addition to
+> PostgreSQL.  For local development, v2.95.1 is recommended as it only
+> needs PostgreSQL.
 
 ### Docker (containerized — local build)
 
@@ -305,11 +517,13 @@ orchestration/      LangGraph state machine
   graph.py          build_graph() / build_explain_graph() / run_graph()
   nodes.py          One function per LangGraph node (incl. resolve_dependencies, apply_effects)
   utils.py          circuit_breaker(), compute_discrepancy()
-observability/      LangFuse-ready structured tracing (no langfuse import)
+observability/      Structured tracing with optional LangFuse forwarding
+  tracer.py         TraceRecord builder + stdlib JSON emitter + LangFuse sink call
+  langfuse_sink.py  Optional LangFuse forwarder (lazy init, failure-isolated, no-op without keys)
 hardening/          Kill switch + explain mode implementation
 docs/               AUDITOR_GUIDE.md
   specs/            Product-owner reference specs (not runtime code)
-tests/              pytest test suite (525 tests)
+tests/              pytest test suite (540 tests)
   sandbox/          Local execution sandbox (not part of CI test suite)
     cli.py          Headless CLI runner — run events from the terminal (no Streamlit needed)
     seed.py         SQLite seeder — creates sandbox.db with customers, DCs, promotions, SAP / EDI data
@@ -345,6 +559,7 @@ k8s/                Kubernetes manifests for AKS production deployment
 | `contracts/policy.py` | Centralised business thresholds — discount limits, circuit breaker bounds, credit exposure tolerance |
 | `prompts/po-spec-to-asoe.md` | Step-by-step prompt for converting a Product Owner specification into ASOE Skill–Shadow–Recipe components |
 | `prompts/triple_check_review_board.md` | Reusable review prompt — three-persona architecture, security, and test coverage assessment |
+| `prompts/phase_10_langfuse.md` | LangFuse integration prompt — sink design, trace mapping, self-hosted setup, SDK compatibility, test plan |
 | `tests/sandbox/seed.py` | Sandbox seeder: customers, DCs, promotions, SAP pricing, retailer contracts, credit profiles, and 18 EDI events covering all four intents |
 | `tests/sandbox/cli.py` | Headless CLI runner — run sandbox events from the terminal without Streamlit |
 | `tests/sandbox/ui/app.py` | Streamlit execution-trace visualiser — select event, run pipeline, inspect trace |
@@ -365,12 +580,12 @@ k8s/                Kubernetes manifests for AKS production deployment
 | 2 | Compliance Shadow (`compliance/shadow.py`) — GREEN / YELLOW / RED, TraceID, reasons, policy hits |
 | 3 | Recipe registry + deterministic executor (`recipes/`) + immutable `ExecutionLog` |
 | 4 | LangGraph state machine (`orchestration/`) + circuit breaker (>50 updates or >$10 k variance) |
-| 5 | LangFuse-ready tracing (`observability/tracer.py`) + golden regression tests |
+| 5 | Structured tracing (`observability/tracer.py`) with optional LangFuse forwarding (`observability/langfuse_sink.py`) + golden regression tests |
 | 6 | Kill switch, read-only explain mode, auditor docs, constrained-generation safeguard documentation |
 | 7 | Infrastructure gateways (Ports & Adapters), multi-step workflows (Saga pattern), DUPLICATE_PO fallback routing |
 | 8 | Local execution sandbox — SQLite seeder, Streamlit UI, LocalHFBackend (Outlines + HuggingFace) |
 | 9 | Containerized deployment — 3 Dockerfiles (core/ui/inference), docker-compose for local dev, K8s manifests for AKS |
-| Review | Triple-Check Technical Review Board — resolved 10 findings (1 Critical, 1 High, 8 Medium); 7 Low findings debated and accepted (SKIP); test count 490 → 525 |
+| Review | Triple-Check Technical Review Board — resolved 10 findings (1 Critical, 1 High, 8 Medium); 7 Low findings debated and accepted (SKIP); test count 490 → 525 → 540 (LangFuse) |
 
 ---
 
@@ -385,6 +600,9 @@ k8s/                Kubernetes manifests for AKS production deployment
 | `LOCAL_LLM_BACKEND_CLASS` | _(unset)_ | Fully-qualified class to use as the constrained backend (e.g. `tests.sandbox.llm.local_backend.LocalHFBackend`) |
 | `LOCAL_LLM_MODEL` | `Qwen/Qwen2.5-0.5B-Instruct` | HuggingFace model id for `LocalHFBackend` |
 | `LOCAL_LLM_DEVICE` | `cpu` | Compute device for `LocalHFBackend` (`cpu` / `cuda` / `mps`) |
+| `LANGFUSE_PUBLIC_KEY` | _(unset)_ | LangFuse public key — enables trace forwarding when set (requires `langfuse` package) |
+| `LANGFUSE_SECRET_KEY` | _(unset)_ | LangFuse secret key — required alongside public key |
+| `LANGFUSE_HOST` | _(unset)_ | LangFuse host URL — omit for LangFuse Cloud, set for self-hosted |
 | `HTTP_PROXY` | _(unset)_ | HTTP proxy URL — used at build time (Dockerfile ARG) and runtime (container env) |
 | `HTTPS_PROXY` | _(unset)_ | HTTPS proxy URL — same as above |
 | `NO_PROXY` | _(unset)_ | Comma-separated list of hosts to bypass proxy |

@@ -11,6 +11,9 @@ Optional env vars
     LOCAL_LLM_BACKEND_CLASS   e.g. tests.sandbox.llm.local_backend.LocalHFBackend
     LOCAL_LLM_MODEL           HuggingFace model id (default: Qwen/Qwen2.5-0.5B-Instruct)
     ASOE_EXPLAIN_MODE         1 = dry-run mode (no recipe side effects)
+    LANGFUSE_PUBLIC_KEY       LangFuse public key (enables trace forwarding)
+    LANGFUSE_SECRET_KEY       LangFuse secret key (required alongside public key)
+    LANGFUSE_HOST             LangFuse host URL (omit for LangFuse Cloud)
 """
 from __future__ import annotations
 
@@ -392,10 +395,19 @@ def main() -> None:
     explain_mode = os.getenv("ASOE_EXPLAIN_MODE", "0") == "1"
     kill_switch  = os.getenv("ASOE_KILL_SWITCH",  "0") == "1"
 
+    langfuse_configured = bool(
+        os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY")
+    )
+
     with st.expander("ℹ️  Environment"):
         st.write(f"**LLM backend:** `{backend_cls}`")
         st.write(f"**Explain mode:** {'ON (dry-run)' if explain_mode else 'OFF'}")
         st.write(f"**Kill switch:**  {'🔴 ACTIVE' if kill_switch else '✅ inactive'}")
+        langfuse_host = os.getenv("LANGFUSE_HOST", "cloud")
+        if langfuse_configured:
+            st.write(f"**LangFuse:** ✅ enabled ({langfuse_host})")
+        else:
+            st.write("**LangFuse:** disabled (set `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`)")
         st.write(f"**DB path:** `{_db_path()}`")
 
     event = _render_sidebar()
