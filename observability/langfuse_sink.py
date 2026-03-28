@@ -8,6 +8,7 @@ from __future__ import annotations
 #   - Stdlib logging remains the primary emit channel; LangFuse is additive.
 #   - Configured via env vars: LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST.
 #   - Secret management: keys should be injected via Azure Key Vault CSI in production.
+#   - Supports both langfuse v2 (trace/span/score) and v4+ (start_observation/create_score).
 
 import logging
 import os
@@ -72,86 +73,143 @@ def reset_client() -> None:
     _initialised = False
 
 
+def _is_v2(client: Any) -> bool:
+    """Return True if the client exposes the v2 API (trace/span/score)."""
+    return hasattr(client, "trace") and not hasattr(client, "start_observation")
+
+
+def _forward_v2(client: Any, record: Any) -> bool:
+    """Forward using langfuse v2 API: client.trace() → trace.span() / trace.score()."""
+    trace = client.trace(
+        id=record.trace_id or None,
+        name="asoe-graph-execution",
+        input={"event_id": record.event_id},
+        output={"final_status": record.final_status, "explanation": record.explanation},
+        metadata={
+            "constrained_output_schemas": record.constrained_output_schemas,
+            "gateway_calls": record.gateway_calls,
+            "rag_chunks": record.rag_chunks,
+        },
+    )
+
+    if record.intent_selected:
+        trace.span(
+            name="classify",
+            output={"intent": record.intent_selected},
+        )
+
+    if record.skill_name:
+        trace.span(
+            name="load_skill",
+            output={"skill_name": record.skill_name},
+        )
+
+    if record.shadow_verdict:
+        trace.span(
+            name="shadow_audit",
+            output={
+                "verdict": record.shadow_verdict,
+                "policy_hits": record.shadow_policy_hits,
+            },
+            level="WARNING" if record.shadow_verdict != "GREEN" else "DEFAULT",
+        )
+
+    if record.recipe_name:
+        trace.span(
+            name="execute_recipe",
+            output={"recipe_name": record.recipe_name},
+        )
+
+    if record.final_status:
+        trace.score(
+            name="terminal_status",
+            value=1.0 if record.final_status == "COMPLETE" else 0.0,
+            comment=record.final_status,
+        )
+
+    return True
+
+
+def _forward_v4(client: Any, record: Any) -> bool:
+    """Forward using langfuse v4+ API: start_observation / create_score."""
+    # v4 requires 32 lowercase hex chars (no dashes) for trace IDs.
+    raw_id = record.trace_id or ""
+    trace_id = raw_id.replace("-", "").lower() if raw_id else None
+    trace_ctx = {"trace_id": trace_id} if trace_id else None
+
+    root = client.start_observation(
+        trace_context=trace_ctx,
+        name="asoe-graph-execution",
+        input={"event_id": record.event_id},
+        output={"final_status": record.final_status, "explanation": record.explanation},
+        metadata={
+            "constrained_output_schemas": record.constrained_output_schemas,
+            "gateway_calls": record.gateway_calls,
+            "rag_chunks": record.rag_chunks,
+        },
+    )
+
+    if record.intent_selected:
+        child = root.start_observation(
+            name="classify",
+            output={"intent": record.intent_selected},
+        )
+        child.end()
+
+    if record.skill_name:
+        child = root.start_observation(
+            name="load_skill",
+            output={"skill_name": record.skill_name},
+        )
+        child.end()
+
+    if record.shadow_verdict:
+        child = root.start_observation(
+            name="shadow_audit",
+            output={
+                "verdict": record.shadow_verdict,
+                "policy_hits": record.shadow_policy_hits,
+            },
+            level="WARNING" if record.shadow_verdict != "GREEN" else "DEFAULT",
+        )
+        child.end()
+
+    if record.recipe_name:
+        child = root.start_observation(
+            name="execute_recipe",
+            output={"recipe_name": record.recipe_name},
+        )
+        child.end()
+
+    root.end()
+
+    if record.final_status and trace_id:
+        client.create_score(
+            trace_id=trace_id,
+            name="terminal_status",
+            value=1.0 if record.final_status == "COMPLETE" else 0.0,
+            comment=record.final_status,
+        )
+
+    return True
+
+
 def forward(record: Any) -> bool:
     """Forward a TraceRecord to LangFuse.
 
     Creates a LangFuse trace with spans mirroring the graph pipeline stages.
     Returns True if the record was forwarded, False otherwise.
 
-    Compatible with langfuse v4+ API (start_observation / create_score).
+    Auto-detects langfuse SDK version and uses the appropriate API.
     """
     client = _get_client()
     if client is None:
         return False
 
     try:
-        # LangFuse v4 requires 32 lowercase hex chars (no dashes).
-        raw_id = record.trace_id or ""
-        trace_id = raw_id.replace("-", "").lower() if raw_id else None
-        trace_ctx = {"trace_id": trace_id} if trace_id else None
-
-        # Root span — represents one run_graph() execution.
-        root = client.start_observation(
-            trace_context=trace_ctx,
-            name="asoe-graph-execution",
-            input={"event_id": record.event_id},
-            output={"final_status": record.final_status, "explanation": record.explanation},
-            metadata={
-                "constrained_output_schemas": record.constrained_output_schemas,
-                "gateway_calls": record.gateway_calls,
-                "rag_chunks": record.rag_chunks,
-            },
-        )
-
-        # Child span: intent classification
-        if record.intent_selected:
-            child = root.start_observation(
-                name="classify",
-                output={"intent": record.intent_selected},
-            )
-            child.end()
-
-        # Child span: skill loading
-        if record.skill_name:
-            child = root.start_observation(
-                name="load_skill",
-                output={"skill_name": record.skill_name},
-            )
-            child.end()
-
-        # Child span: compliance shadow audit
-        if record.shadow_verdict:
-            child = root.start_observation(
-                name="shadow_audit",
-                output={
-                    "verdict": record.shadow_verdict,
-                    "policy_hits": record.shadow_policy_hits,
-                },
-                level="WARNING" if record.shadow_verdict != "GREEN" else "DEFAULT",
-            )
-            child.end()
-
-        # Child span: recipe execution
-        if record.recipe_name:
-            child = root.start_observation(
-                name="execute_recipe",
-                output={"recipe_name": record.recipe_name},
-            )
-            child.end()
-
-        root.end()
-
-        # Score: terminal status (allows LangFuse dashboard filtering)
-        if record.final_status and trace_id:
-            client.create_score(
-                trace_id=trace_id,
-                name="terminal_status",
-                value=1.0 if record.final_status == "COMPLETE" else 0.0,
-                comment=record.final_status,
-            )
-
-        return True
-
+        if _is_v2(client):
+            return _forward_v2(client, record)
+        return _forward_v4(client, record)
     except Exception as exc:
         logger.warning("LangFuse forward failed: %s", exc)
         return False
