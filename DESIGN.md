@@ -286,6 +286,8 @@ When `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are set and the `langfuse` 
 | span `execute_recipe` | `recipe_name` |
 | score `terminal_status` | 1.0 if COMPLETE, 0.0 otherwise |
 
+**SDK compatibility:** The sink auto-detects the installed langfuse SDK version via `_is_v2()`. Langfuse v2 (`client.trace()` → `trace.span()` / `trace.score()`) and v4+ (`client.start_observation()` / `client.create_score()`) are both supported. See `prompts/phase_10_langfuse.md` for the full integration specification.
+
 **Failure isolation:** All LangFuse errors are caught and logged at WARNING/DEBUG level. Forwarding failures never block graph execution. Stdlib logging remains the authoritative audit record.
 
 ---

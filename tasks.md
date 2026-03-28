@@ -244,12 +244,15 @@ States:
 ✅ Outcome: deployment manifests align with architecture_v2.md §2 infrastructure stack
 ---
 ## PHASE 10 — LangFuse Observability Integration
+Build prompt: `prompts/phase_10_langfuse.md`
 ### 10.1 LangFuse Sink (`observability/langfuse_sink.py`)
 - [x] Implement lazy-init LangFuse client (env-var driven: `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST`)
 - [x] `forward()` — maps `TraceRecord` to LangFuse trace + spans (classify, load_skill, shadow_audit, execute_recipe) + terminal_status score
 - [x] `flush()` — explicit flush for short-lived processes (CLI runner)
 - [x] `reset_client()` — test helper for re-initialisation
 - [x] Failure isolation: all LangFuse errors caught; stdlib logging remains authoritative
+- [x] SDK compatibility: auto-detects langfuse v2 (trace/span/score) vs v4+ (start_observation/create_score)
+- [x] Verified end-to-end against self-hosted LangFuse v2.95.1 (19 traces with spans + scores confirmed via API)
 ✅ Outcome: optional LangFuse forwarding with zero impact on existing behaviour
 
 ### 10.2 Tracer Integration

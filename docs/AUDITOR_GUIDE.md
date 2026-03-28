@@ -377,6 +377,7 @@ block execution.  LangFuse keys are managed via Azure Key Vault CSI in productio
 (`k8s/core/secret-provider.yaml`).
 
 Implementation: `observability/langfuse_sink.py`.
+Full integration specification: `prompts/phase_10_langfuse.md`.
 
 ---
 
