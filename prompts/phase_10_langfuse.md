@@ -94,6 +94,19 @@ Each run_graph() call produces one LangFuse trace:
   span "execute_recipe"   recipe_name
   score "terminal_status" 1.0 if COMPLETE, 0.0 otherwise
 
+terminal_status score values:
+
+  final_status              value   meaning
+  ───────────────────────── ─────── ─────────────────────────────────
+  COMPLETE                  1.0     Recipe executed successfully
+  FAIL_TO_HUMAN             0.0     Escalated to human
+  MANUAL_REVIEW_REQUIRED    0.0     Shadow YELLOW — requires review
+  BLOCKED                   0.0     Shadow RED — halted by policy
+  REJECTED                  0.0     Rejected by policy
+
+The comment field on the score contains the exact final_status string,
+enabling root-cause filtering in the LangFuse dashboard.
+
 ────────────────────────────────────────────────────────────────────────
 TESTS
 ────────────────────────────────────────────────────────────────────────

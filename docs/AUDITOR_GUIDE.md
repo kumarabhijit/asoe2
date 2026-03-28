@@ -369,7 +369,19 @@ When `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are set and the `langfuse`
 package is installed, `Tracer.emit()` forwards each `TraceRecord` to LangFuse
 in addition to stdlib logging.  This creates a LangFuse trace per graph execution
 with spans for `classify`, `load_skill`, `shadow_audit`, and `execute_recipe`,
-plus a `terminal_status` score (1.0 = COMPLETE, 0.0 = otherwise).
+plus a `terminal_status` score that enables dashboard filtering and success-rate
+tracking:
+
+| `final_status` | Score `value` | Meaning |
+|---|---|---|
+| `COMPLETE` | **1.0** | Recipe executed successfully |
+| `FAIL_TO_HUMAN` | 0.0 | Escalated to human (circuit breaker, missing params, gateway failure) |
+| `MANUAL_REVIEW_REQUIRED` | 0.0 | Shadow returned YELLOW — requires review |
+| `BLOCKED` | 0.0 | Shadow returned RED — halted by policy |
+| `REJECTED` | 0.0 | Rejected by policy |
+
+The score's `comment` field contains the exact `final_status` string, allowing
+auditors to distinguish failure reasons when filtering traces with `value=0.0`.
 
 **Stdlib logging remains the authoritative audit record.**  LangFuse is additive
 — all forwarding errors are caught and logged at WARNING/DEBUG level; they never
