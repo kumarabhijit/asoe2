@@ -210,6 +210,18 @@ export LANGFUSE_SECRET_KEY=sk-lf-...
 | span `execute_recipe` | `recipe_name` |
 | score `terminal_status` | 1.0 if COMPLETE, 0.0 otherwise |
 
+**`terminal_status` score values:** This score enables LangFuse dashboard
+filtering (success vs failure), success-rate tracking over time, and alerting.
+The `comment` field preserves the exact status for root-cause analysis.
+
+| `final_status` | Score `value` | Meaning |
+|---|---|---|
+| `COMPLETE` | **1.0** | Recipe executed successfully |
+| `FAIL_TO_HUMAN` | 0.0 | Escalated to human (circuit breaker, missing params, gateway failure) |
+| `MANUAL_REVIEW_REQUIRED` | 0.0 | Shadow returned YELLOW — requires review |
+| `BLOCKED` | 0.0 | Shadow returned RED — halted by policy |
+| `REJECTED` | 0.0 | Rejected by policy |
+
 **Failure isolation:** LangFuse errors are caught and logged; they never block
 graph execution.  Stdlib logging remains the authoritative audit record.
 
