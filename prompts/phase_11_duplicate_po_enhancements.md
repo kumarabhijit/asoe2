@@ -169,7 +169,7 @@ what template and what data, not how to render or deliver.
 
 ## PHASE 11.7 — Tests
 
-44 new tests (540 → 584 total):
+44 new tests added across existing test files:
 
   test_recipes.py:
     TestDuplicatePODecisionTree     — 11 tests (one per leaf + defaults)

@@ -206,6 +206,6 @@ DEFINITION OF DONE
 - [ ] k8s secrets wired (secret-provider.yaml)
 - [ ] Sandbox tools show LangFuse status and support --langfuse-flush
 - [ ] Tests cover disabled, mock, and failure paths (network-free)
-- [ ] python -m pytest passes (584+ tests)
+- [ ] python -m pytest passes — all tests pass, zero failures
 - [ ] Docs updated (README, AUDITOR_GUIDE, tasks.md, DESIGN.md)
 ```
