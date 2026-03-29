@@ -581,6 +581,293 @@ class TestDuplicatePONotificationTemplate:
 
 
 # ---------------------------------------------------------------------------
+# EC04 — Exact duplicate PO resend (Costco-style)
+#
+# Scenario: a retailer resends a PO because the first email bounced.
+# All signals should score high (same PO number, customer, line items, amount,
+# ship-to, channel, delivery date).  System must detect as duplicate and
+# select the correct resolution action based on fulfillment/revision context.
+# ---------------------------------------------------------------------------
+
+class TestDuplicatePOResend:
+    """EC04-style tests: exact PO resend triggers duplicate detection."""
+
+    def _resend_signals(self) -> dict:
+        """Resend: same PO, same customer, same lines, same amount,
+        same ship-to, same channel, same delivery date. Only timestamp
+        differs (resend is later)."""
+        return {
+            "po_number":     1.0,
+            "customer_id":   1.0,
+            "line_items":    1.0,
+            "amount":        1.0,
+            "timestamp":     0.3,   # different send time
+            "ship_to":       1.0,
+            "channel":       1.0,
+            "delivery_date": 1.0,
+        }
+
+    def test_resend_scores_above_auto_block(self):
+        """Exact resend (timestamp differs) composite = 0.92 >= 0.90."""
+        result = detect_duplicate_po("PO-88424", "COSTCO", self._resend_signals())
+        assert result["composite_score"] >= 0.90
+        assert result["classification"] == "AUTO_BLOCK"
+
+    def test_resend_not_fulfilled_blocks_and_notifies(self):
+        """Original not yet fulfilled — true duplicate, block it."""
+        result = detect_duplicate_po(
+            "PO-88424", "COSTCO", self._resend_signals(),
+            original_fulfilled=False, has_revision_indicator=False,
+            line_items_identical=True,
+        )
+        assert result["recommended_action"] == "BLOCK_AND_NOTIFY"
+        assert result["notification_template"] == "duplicate_po_blocked"
+
+    def test_resend_already_fulfilled_allows_both(self):
+        """Original already shipped — likely a reorder, allow both."""
+        result = detect_duplicate_po(
+            "PO-88424", "COSTCO", self._resend_signals(),
+            original_fulfilled=True, has_revision_indicator=False,
+            line_items_identical=True,
+        )
+        assert result["recommended_action"] == "ALLOW_BOTH"
+        assert result["notification_template"] is None
+
+    def test_resend_with_revision_indicator_supersedes(self):
+        """Resend includes a revision indicator — supersede original."""
+        result = detect_duplicate_po(
+            "PO-88424", "COSTCO", self._resend_signals(),
+            original_fulfilled=False, has_revision_indicator=True,
+            line_items_identical=False,
+        )
+        assert result["recommended_action"] == "SUPERSEDE"
+        assert result["notification_template"] == "duplicate_po_amended"
+
+    def test_resend_with_amended_lines_merges(self):
+        """Resend has different line items and no revision flag — merge."""
+        result = detect_duplicate_po(
+            "PO-88424", "COSTCO", self._resend_signals(),
+            original_fulfilled=False, has_revision_indicator=False,
+            line_items_identical=False,
+        )
+        assert result["recommended_action"] == "MERGE"
+        assert result["notification_template"] == "duplicate_po_amended"
+
+    def test_resend_echoes_po_number_and_customer(self):
+        result = detect_duplicate_po("PO-88424", "COSTCO", self._resend_signals())
+        assert result["incoming_po_number"] == "PO-88424"
+        assert result["customer_id"] == "COSTCO"
+
+    def test_resend_signal_breakdown_has_all_eight_signals(self):
+        result = detect_duplicate_po("PO-88424", "COSTCO", self._resend_signals())
+        assert len(result["signal_breakdown"]) == 8
+
+    def test_resend_autonomy_l3_for_block_and_notify(self):
+        """BLOCK_AND_NOTIFY is L3 (auto-execute) per policy."""
+        autonomy = {
+            "BLOCK_AND_NOTIFY": "L3", "MERGE": "L2", "SUPERSEDE": "L2",
+            "ALLOW_BOTH": "L3", "ESCALATE": "L1", "REQUEST_BUYER_CONFIRMATION": "L2",
+        }
+        result = detect_duplicate_po(
+            "PO-88424", "COSTCO", self._resend_signals(),
+            original_fulfilled=False, has_revision_indicator=False,
+            line_items_identical=True, autonomy_levels=autonomy,
+        )
+        assert result["autonomy_level"] == "L3"
+
+
+# ---------------------------------------------------------------------------
+# EC08 — Multiple POs in single message (Amazon batch-style)
+#
+# Scenario: a retailer sends a weekly batch containing 3 distinct POs.
+# Each PO must be scored independently.  Different POs should get different
+# classifications depending on their individual signal scores.
+# ---------------------------------------------------------------------------
+
+class TestDuplicatePOMultiplePOBatch:
+    """EC08-style tests: batch of POs processed independently."""
+
+    def _batch_po_signals(self) -> list:
+        """Three POs from the same batch email, each with different signals."""
+        return [
+            # PO-AMZ-001: matches an existing PO exactly
+            {
+                "po_id": "PO-AMZ-001", "customer": "AMAZON",
+                "signals": {
+                    "po_number": 1.0, "customer_id": 1.0, "line_items": 1.0,
+                    "amount": 1.0, "timestamp": 0.8, "ship_to": 1.0,
+                    "channel": 1.0, "delivery_date": 1.0,
+                },
+            },
+            # PO-AMZ-002: partial match (different line items, amount)
+            {
+                "po_id": "PO-AMZ-002", "customer": "AMAZON",
+                "signals": {
+                    "po_number": 0.8, "customer_id": 1.0, "line_items": 0.4,
+                    "amount": 0.3, "timestamp": 0.0, "ship_to": 0.5,
+                    "channel": 1.0, "delivery_date": 0.5,
+                },
+            },
+            # PO-AMZ-003: no match in system
+            {
+                "po_id": "PO-AMZ-003", "customer": "AMAZON",
+                "signals": {
+                    "po_number": 0.0, "customer_id": 1.0, "line_items": 0.0,
+                    "amount": 0.0, "timestamp": 0.0, "ship_to": 0.0,
+                    "channel": 1.0, "delivery_date": 0.0,
+                },
+            },
+        ]
+
+    def test_batch_each_po_classified_independently(self):
+        """Each PO in a batch gets its own classification."""
+        results = [
+            detect_duplicate_po(po["po_id"], po["customer"], po["signals"])
+            for po in self._batch_po_signals()
+        ]
+        classifications = [r["classification"] for r in results]
+        # PO-AMZ-001 → AUTO_BLOCK, PO-AMZ-002 → SOFT_FLAG, PO-AMZ-003 → PASS
+        assert classifications[0] == "AUTO_BLOCK"
+        assert classifications[1] == "SOFT_FLAG"
+        assert classifications[2] == "PASS"
+
+    def test_batch_po1_exact_match_blocked(self):
+        po = self._batch_po_signals()[0]
+        result = detect_duplicate_po(po["po_id"], po["customer"], po["signals"])
+        assert result["status"] == "BLOCKED"
+        assert result["composite_score"] >= 0.90
+
+    def test_batch_po2_partial_match_soft_flag(self):
+        po = self._batch_po_signals()[1]
+        result = detect_duplicate_po(po["po_id"], po["customer"], po["signals"])
+        assert result["status"] == "SOFT_FLAG"
+        assert 0.50 <= result["composite_score"] < 0.70
+
+    def test_batch_po3_no_match_pass(self):
+        po = self._batch_po_signals()[2]
+        result = detect_duplicate_po(po["po_id"], po["customer"], po["signals"])
+        assert result["status"] == "PASS"
+        assert result["recommended_action"] == "ALLOW_BOTH"
+
+    def test_batch_po_numbers_echoed_correctly(self):
+        """Each result echoes back the correct PO number."""
+        for po in self._batch_po_signals():
+            result = detect_duplicate_po(po["po_id"], po["customer"], po["signals"])
+            assert result["incoming_po_number"] == po["po_id"]
+            assert result["customer_id"] == po["customer"]
+
+
+# ---------------------------------------------------------------------------
+# Additional Duplicate PO edge cases and threshold boundaries
+# ---------------------------------------------------------------------------
+
+class TestDuplicatePOEdgeCases:
+    """Additional edge case and boundary tests for Duplicate PO detection."""
+
+    def test_score_at_review_boundary_is_review_required(self):
+        """Score exactly 0.70 must classify as REVIEW_REQUIRED (closed lower bound)."""
+        # po_number(0.30) + customer_id(0.15) + line_items(0.20) +
+        # amount(0.10*0.5=0.05) = 0.70
+        signals = {k: 0.0 for k in (
+            "po_number", "customer_id", "line_items", "amount",
+            "timestamp", "ship_to", "channel", "delivery_date",
+        )}
+        signals.update({
+            "po_number": 1.0, "customer_id": 1.0, "line_items": 1.0, "amount": 0.5,
+        })
+        result = detect_duplicate_po("PO-EDGE-01", "cust-edge", signals)
+        assert abs(result["composite_score"] - 0.70) < 1e-6
+        assert result["classification"] == "REVIEW_REQUIRED"
+
+    def test_score_at_soft_flag_boundary_is_soft_flag(self):
+        """Score exactly 0.50 must classify as SOFT_FLAG (closed lower bound)."""
+        # po_number(0.30) + customer_id(0.15) + amount(0.10*0.5=0.05) = 0.50
+        signals = {k: 0.0 for k in (
+            "po_number", "customer_id", "line_items", "amount",
+            "timestamp", "ship_to", "channel", "delivery_date",
+        )}
+        signals.update({"po_number": 1.0, "customer_id": 1.0, "amount": 0.5})
+        result = detect_duplicate_po("PO-EDGE-02", "cust-edge", signals)
+        assert abs(result["composite_score"] - 0.50) < 1e-6
+        assert result["classification"] == "SOFT_FLAG"
+
+    def test_score_just_below_soft_flag_is_pass(self):
+        """Score 0.45 (below 0.50) must be PASS."""
+        # po_number(0.30) + customer_id(0.15) = 0.45
+        signals = {k: 0.0 for k in (
+            "po_number", "customer_id", "line_items", "amount",
+            "timestamp", "ship_to", "channel", "delivery_date",
+        )}
+        signals.update({"po_number": 1.0, "customer_id": 1.0})
+        result = detect_duplicate_po("PO-EDGE-03", "cust-edge", signals)
+        assert result["composite_score"] == 0.45
+        assert result["classification"] == "PASS"
+
+    def test_score_just_below_review_boundary_is_soft_flag(self):
+        """Score 0.65 (below 0.70) must be SOFT_FLAG."""
+        signals = {k: 0.0 for k in (
+            "po_number", "customer_id", "line_items", "amount",
+            "timestamp", "ship_to", "channel", "delivery_date",
+        )}
+        signals.update({"po_number": 1.0, "customer_id": 1.0, "line_items": 1.0})
+        result = detect_duplicate_po("PO-EDGE-04", "cust-edge", signals)
+        assert result["composite_score"] == 0.65
+        assert result["classification"] == "SOFT_FLAG"
+
+    def test_custom_thresholds_lower_auto_block(self):
+        """A stricter auto_block threshold (0.80) blocks more aggressively."""
+        signals = {k: 0.0 for k in (
+            "po_number", "customer_id", "line_items", "amount",
+            "timestamp", "ship_to", "channel", "delivery_date",
+        )}
+        signals.update({
+            "po_number": 1.0, "customer_id": 1.0, "line_items": 1.0,
+            "amount": 1.0, "timestamp": 0.5,
+        })
+        # composite = 0.30 + 0.15 + 0.20 + 0.10 + 0.05 = 0.80
+        result = detect_duplicate_po(
+            "PO-EDGE-05", "cust-edge", signals,
+            threshold_auto_block=0.80,
+        )
+        assert result["classification"] == "AUTO_BLOCK"
+
+    def test_custom_thresholds_higher_auto_block_keeps_review(self):
+        """A relaxed auto_block threshold (0.95) keeps score 0.80 as REVIEW_REQUIRED."""
+        signals = {k: 0.0 for k in (
+            "po_number", "customer_id", "line_items", "amount",
+            "timestamp", "ship_to", "channel", "delivery_date",
+        )}
+        signals.update({
+            "po_number": 1.0, "customer_id": 1.0, "line_items": 1.0,
+            "amount": 1.0, "timestamp": 0.5,
+        })
+        result = detect_duplicate_po(
+            "PO-EDGE-06", "cust-edge", signals,
+            threshold_auto_block=0.95,
+        )
+        assert result["classification"] == "REVIEW_REQUIRED"
+
+    def test_only_po_number_signal_present(self):
+        """Only po_number matches — score = 0.30, well below SOFT_FLAG."""
+        signals = {"po_number": 1.0}
+        result = detect_duplicate_po("PO-EDGE-07", "cust-edge", signals)
+        assert result["composite_score"] == 0.30
+        assert result["classification"] == "PASS"
+
+    def test_fractional_signal_scores_aggregate_correctly(self):
+        """Verify weighted aggregation with fractional scores."""
+        signals = {
+            "po_number": 0.5, "customer_id": 0.5, "line_items": 0.5,
+            "amount": 0.5, "timestamp": 0.5, "ship_to": 0.5,
+            "channel": 0.5, "delivery_date": 0.5,
+        }
+        result = detect_duplicate_po("PO-EDGE-08", "cust-edge", signals)
+        # All weights sum to 1.0; each signal is 0.5 → composite = 0.50
+        assert abs(result["composite_score"] - 0.50) < 1e-6
+        assert result["classification"] == "SOFT_FLAG"
+
+
+# ---------------------------------------------------------------------------
 # Architectural invariant: recipes must NOT import from contracts.policy
 # ---------------------------------------------------------------------------
 

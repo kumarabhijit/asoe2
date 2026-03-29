@@ -278,6 +278,75 @@ class TestDuplicatePOPath:
 
 
 # ---------------------------------------------------------------------------
+# EC04 — Duplicate PO resend path (Costco-style exact resend)
+# ---------------------------------------------------------------------------
+
+class TestDuplicatePOResendPath:
+    """End-to-end graph tests for an exact PO resend scenario (EC04)."""
+
+    def test_resend_classified_as_duplicate_po(self, duplicate_po_resend_event):
+        result = run_graph(duplicate_po_resend_event)
+        assert result.intent == Intent.DUPLICATE_PO
+
+    def test_resend_shadow_is_green(self, duplicate_po_resend_event):
+        result = run_graph(duplicate_po_resend_event)
+        assert result.shadow is not None
+        assert result.shadow.status.value == "GREEN"
+
+    def test_resend_classified_as_auto_block(self, duplicate_po_resend_event):
+        result = run_graph(duplicate_po_resend_event)
+        assert result.execution_log.outputs.get("classification") == "AUTO_BLOCK"
+
+    def test_resend_composite_score_above_threshold(self, duplicate_po_resend_event):
+        result = run_graph(duplicate_po_resend_event)
+        assert result.execution_log.outputs.get("composite_score", 0) >= 0.90
+
+    def test_resend_selects_duplicate_po_recipe(self, duplicate_po_resend_event):
+        result = run_graph(duplicate_po_resend_event)
+        assert result.execution_log.recipe_name == "DuplicatePORecipe.py"
+
+    def test_resend_terminal_status_blocked(self, duplicate_po_resend_event):
+        result = run_graph(duplicate_po_resend_event)
+        assert result.final_status == TerminalStatus.BLOCKED
+
+    def test_resend_notification_effect_dispatched(self, duplicate_po_resend_event):
+        result = run_graph(duplicate_po_resend_event)
+        assert result.execution_log.outputs.get("notification_template") == "duplicate_po_blocked"
+        notif = [e for e in result.effect_results if e.gateway_name == "buyer_notification"]
+        assert len(notif) == 1
+
+
+# ---------------------------------------------------------------------------
+# EC08 — Batch PO path (one new PO from multi-PO email, no match → PASS)
+# ---------------------------------------------------------------------------
+
+class TestDuplicatePOBatchPath:
+    """End-to-end graph tests for a batch PO that has no existing match (EC08)."""
+
+    def test_batch_po_classified_as_duplicate_po(self, duplicate_po_batch_event):
+        result = run_graph(duplicate_po_batch_event)
+        assert result.intent == Intent.DUPLICATE_PO
+
+    def test_batch_po_low_score_passes(self, duplicate_po_batch_event):
+        result = run_graph(duplicate_po_batch_event)
+        assert result.execution_log.outputs.get("classification") == "PASS"
+        assert result.final_status == TerminalStatus.COMPLETE
+
+    def test_batch_po_recommends_allow_both(self, duplicate_po_batch_event):
+        result = run_graph(duplicate_po_batch_event)
+        assert result.execution_log.outputs.get("recommended_action") == "ALLOW_BOTH"
+
+    def test_batch_po_no_notification_template(self, duplicate_po_batch_event):
+        result = run_graph(duplicate_po_batch_event)
+        assert result.execution_log.outputs.get("notification_template") is None
+
+    def test_batch_po_shadow_is_green(self, duplicate_po_batch_event):
+        result = run_graph(duplicate_po_batch_event)
+        assert result.shadow is not None
+        assert result.shadow.status.value == "GREEN"
+
+
+# ---------------------------------------------------------------------------
 # Loop-safety — graph always terminates (no hidden loops)
 # ---------------------------------------------------------------------------
 
