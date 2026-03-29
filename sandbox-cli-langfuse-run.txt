@@ -1,0 +1,991 @@
+
+================================================================================
+  [1mASOE Sandbox — CLI Runner[0m
+================================================================================
+  LLM backend:   DeterministicFallbackBackend (default)
+  Explain mode:  OFF
+  Kill switch:   inactive
+  LangFuse:      [32menabled[0m (http://localhost:3000)
+  DB path:       /home/user/asoe2/tests/sandbox/sandbox.db
+  Events:        22
+================================================================================
+
+────────────────────────────────────────────────────────────────────────────────
+  [1/22] [1mEVT-CC-001[0m  (SO-1001 · CONTRACTUAL_CORRECTION)
+────────────────────────────────────────────────────────────────────────────────
+
+  [1mIntent:[0m          CONTRACTUAL_CORRECTION
+  [1mShadow Verdict:[0m  [32mGREEN[0m
+  [1mRecipe:[0m          PriceAdjustmentRecipe.py
+  [1mFinal Status:[0m    [32mCOMPLETE[0m
+
+  [1mExecution Trace[0m
+  ────────────────────────────────────────────────────────────
+  [2m│[0m 1. Ingest                 order_id=SO-1001  event_type=EDI_850_PRICE_MISMATCH
+  [2m│[0m 2. Classify               intent=CONTRACTUAL_CORRECTION  confidence=0.90
+  [2m│[0m 3. Load Skill             skill=pricing-reconciliation
+  [2m│[0m 4. Circuit Breaker        batch_variance=10.00
+  [2m│[0m 5. Compliance Shadow      verdict=GREEN  policy_hits=[]
+  [2m│[0m 6. Select Recipe          recipe=PriceAdjustmentRecipe.py
+  [2m│[0m 7. Resolve Dependencies   keys=none
+  [2m│[0m 8. Execute Recipe         status=COMPLETE
+  [2m│[0m 9. Apply Effects          effects=0
+
+  [1mCompliance Shadow Detail[0m
+  Reasons:     ['No blocking policy hit detected.']
+  Policy hits: []
+
+  [1mExplanation[0m
+  Deterministic execution completed successfully.
+
+────────────────────────────────────────────────────────────────────────────────
+  [2/22] [1mEVT-CC-002[0m  (SO-1002 · CONTRACTUAL_CORRECTION)
+────────────────────────────────────────────────────────────────────────────────
+
+  [1mIntent:[0m          CONTRACTUAL_CORRECTION
+  [1mShadow Verdict:[0m  [32mGREEN[0m
+  [1mRecipe:[0m          PriceAdjustmentRecipe.py
+  [1mFinal Status:[0m    [32mCOMPLETE[0m
+
+  [1mExecution Trace[0m
+  ────────────────────────────────────────────────────────────
+  [2m│[0m 1. Ingest                 order_id=SO-1002  event_type=EDI_850_PRICE_MISMATCH
+  [2m│[0m 2. Classify               intent=CONTRACTUAL_CORRECTION  confidence=0.90
+  [2m│[0m 3. Load Skill             skill=pricing-reconciliation
+  [2m│[0m 4. Circuit Breaker        batch_variance=8.00
+  [2m│[0m 5. Compliance Shadow      verdict=GREEN  policy_hits=[]
+  [2m│[0m 6. Select Recipe          recipe=PriceAdjustmentRecipe.py
+  [2m│[0m 7. Resolve Dependencies   keys=none
+  [2m│[0m 8. Execute Recipe         status=COMPLETE
+  [2m│[0m 9. Apply Effects          effects=0
+
+  [1mCompliance Shadow Detail[0m
+  Reasons:     ['No blocking policy hit detected.']
+  Policy hits: []
+
+  [1mExplanation[0m
+  Deterministic execution completed successfully.
+
+────────────────────────────────────────────────────────────────────────────────
+  [3/22] [1mEVT-CC-003[0m  (SO-1003 · CONTRACTUAL_CORRECTION)
+────────────────────────────────────────────────────────────────────────────────
+
+  [1mIntent:[0m          CONTRACTUAL_CORRECTION
+  [1mShadow Verdict:[0m  [32mGREEN[0m
+  [1mRecipe:[0m          PriceAdjustmentRecipe.py
+  [1mFinal Status:[0m    [31mFAIL_TO_HUMAN[0m
+
+  [1mExecution Trace[0m
+  ────────────────────────────────────────────────────────────
+  [2m│[0m 1. Ingest                 order_id=SO-1003  event_type=EDI_850_PRICE_MISMATCH
+  [2m│[0m 2. Classify               intent=CONTRACTUAL_CORRECTION  confidence=0.90
+  [2m│[0m 3. Load Skill             skill=pricing-reconciliation
+  [2m│[0m 4. Circuit Breaker        batch_variance=22.00
+  [2m│[0m 5. Compliance Shadow      verdict=GREEN  policy_hits=[]
+  [2m│[0m 6. Select Recipe          recipe=PriceAdjustmentRecipe.py
+  [2m│[0m 7. Resolve Dependencies   keys=none
+  [2m│[0m 8. Execute Recipe         status=FAIL_TO_HUMAN
+  [2m│[0m 9. Apply Effects          effects=0
+
+  [1mCompliance Shadow Detail[0m
+  Reasons:     ['No blocking policy hit detected.']
+  Policy hits: []
+
+  [1mExplanation[0m
+  Discount 22.00% exceeds 15% threshold.
+
+────────────────────────────────────────────────────────────────────────────────
+  [4/22] [1mEVT-CC-004[0m  (SO-1004 · CONTRACTUAL_CORRECTION)
+────────────────────────────────────────────────────────────────────────────────
+
+  [1mIntent:[0m          CONTRACTUAL_CORRECTION
+  [1mShadow Verdict:[0m  [32mGREEN[0m
+  [1mRecipe:[0m          PriceAdjustmentRecipe.py
+  [1mFinal Status:[0m    [32mCOMPLETE[0m
+
+  [1mExecution Trace[0m
+  ────────────────────────────────────────────────────────────
+  [2m│[0m 1. Ingest                 order_id=SO-1004  event_type=EDI_850_PRICE_MISMATCH
+  [2m│[0m 2. Classify               intent=CONTRACTUAL_CORRECTION  confidence=0.90
+  [2m│[0m 3. Load Skill             skill=pricing-reconciliation
+  [2m│[0m 4. Circuit Breaker        batch_variance=12.00
+  [2m│[0m 5. Compliance Shadow      verdict=GREEN  policy_hits=[]
+  [2m│[0m 6. Select Recipe          recipe=PriceAdjustmentRecipe.py
+  [2m│[0m 7. Resolve Dependencies   keys=none
+  [2m│[0m 8. Execute Recipe         status=COMPLETE
+  [2m│[0m 9. Apply Effects          effects=0
+
+  [1mCompliance Shadow Detail[0m
+  Reasons:     ['No blocking policy hit detected.']
+  Policy hits: []
+
+  [1mExplanation[0m
+  Deterministic execution completed successfully.
+
+────────────────────────────────────────────────────────────────────────────────
+  [5/22] [1mEVT-CC-005[0m  (SO-1005 · CONTRACTUAL_CORRECTION)
+────────────────────────────────────────────────────────────────────────────────
+
+  [1mIntent:[0m          CONTRACTUAL_CORRECTION
+  [1mShadow Verdict:[0m  [32mGREEN[0m
+  [1mRecipe:[0m          PriceAdjustmentRecipe.py
+  [1mFinal Status:[0m    [32mCOMPLETE[0m
+
+  [1mExecution Trace[0m
+  ────────────────────────────────────────────────────────────
+  [2m│[0m 1. Ingest                 order_id=SO-1005  event_type=EDI_850_PRICE_MISMATCH
+  [2m│[0m 2. Classify               intent=CONTRACTUAL_CORRECTION  confidence=0.90
+  [2m│[0m 3. Load Skill             skill=pricing-reconciliation
+  [2m│[0m 4. Circuit Breaker        batch_variance=13.00
+  [2m│[0m 5. Compliance Shadow      verdict=GREEN  policy_hits=[]
+  [2m│[0m 6. Select Recipe          recipe=PriceAdjustmentRecipe.py
+  [2m│[0m 7. Resolve Dependencies   keys=none
+  [2m│[0m 8. Execute Recipe         status=COMPLETE
+  [2m│[0m 9. Apply Effects          effects=0
+
+  [1mCompliance Shadow Detail[0m
+  Reasons:     ['No blocking policy hit detected.']
+  Policy hits: []
+
+  [1mExplanation[0m
+  Deterministic execution completed successfully.
+
+────────────────────────────────────────────────────────────────────────────────
+  [6/22] [1mEVT-CC-006[0m  (SO-1006 · CONTRACTUAL_CORRECTION)
+────────────────────────────────────────────────────────────────────────────────
+
+  [1mIntent:[0m          CONTRACTUAL_CORRECTION
+  [1mShadow Verdict:[0m  [32mGREEN[0m
+  [1mRecipe:[0m          PriceAdjustmentRecipe.py
+  [1mFinal Status:[0m    [32mCOMPLETE[0m
+
+  [1mExecution Trace[0m
+  ────────────────────────────────────────────────────────────
+  [2m│[0m 1. Ingest                 order_id=SO-1006  event_type=EDI_850_PRICE_MISMATCH
+  [2m│[0m 2. Classify               intent=CONTRACTUAL_CORRECTION  confidence=0.90
+  [2m│[0m 3. Load Skill             skill=pricing-reconciliation
+  [2m│[0m 4. Circuit Breaker        batch_variance=5.00
+  [2m│[0m 5. Compliance Shadow      verdict=GREEN  policy_hits=[]
+  [2m│[0m 6. Select Recipe          recipe=PriceAdjustmentRecipe.py
+  [2m│[0m 7. Resolve Dependencies   keys=none
+  [2m│[0m 8. Execute Recipe         status=COMPLETE
+  [2m│[0m 9. Apply Effects          effects=0
+
+  [1mCompliance Shadow Detail[0m
+  Reasons:     ['No blocking policy hit detected.']
+  Policy hits: []
+
+  [1mExplanation[0m
+  Deterministic execution completed successfully.
+
+────────────────────────────────────────────────────────────────────────────────
+  [7/22] [1mEVT-CC-007[0m  (SO-1007 · CONTRACTUAL_CORRECTION)
+────────────────────────────────────────────────────────────────────────────────
+
+  [1mIntent:[0m          CONTRACTUAL_CORRECTION
+  [1mShadow Verdict:[0m  [32mGREEN[0m
+  [1mRecipe:[0m          PriceAdjustmentRecipe.py
+  [1mFinal Status:[0m    [31mFAIL_TO_HUMAN[0m
+
+  [1mExecution Trace[0m
+  ────────────────────────────────────────────────────────────
+  [2m│[0m 1. Ingest                 order_id=SO-1007  event_type=EDI_850_PRICE_MISMATCH
+  [2m│[0m 2. Classify               intent=CONTRACTUAL_CORRECTION  confidence=0.90
+  [2m│[0m 3. Load Skill             skill=pricing-reconciliation
+  [2m│[0m 4. Circuit Breaker        batch_variance=2.50
+  [2m│[0m 5. Compliance Shadow      verdict=GREEN  policy_hits=[]
+  [2m│[0m 6. Select Recipe          recipe=PriceAdjustmentRecipe.py
+  [2m│[0m 7. Resolve Dependencies   keys=none
+  [2m│[0m 8. Execute Recipe         status=FAIL_TO_HUMAN
+  [2m│[0m 9. Apply Effects          effects=0
+
+  [1mCompliance Shadow Detail[0m
+  Reasons:     ['No blocking policy hit detected.']
+  Policy hits: []
+
+  [1mExplanation[0m
+  Discount 20.00% exceeds 15% threshold.
+
+────────────────────────────────────────────────────────────────────────────────
+  [8/22] [1mEVT-CB-001[0m  (SO-2001 · CREDIT_BLOCK)
+────────────────────────────────────────────────────────────────────────────────
+shadow_enforce
+
+  [1mIntent:[0m          CREDIT_BLOCK
+  [1mShadow Verdict:[0m  [33mYELLOW[0m
+  [1mRecipe:[0m          —
+  [1mFinal Status:[0m    [33mMANUAL_REVIEW_REQUIRED[0m
+
+  [1mExecution Trace[0m
+  ────────────────────────────────────────────────────────────
+  [2m│[0m 1. Ingest                 order_id=SO-2001  event_type=EDI_850_PRICE_MISMATCH
+  [2m│[0m 2. Classify               intent=CREDIT_BLOCK  confidence=0.80
+  [2m│[0m 3. Load Skill             skill=pricing-reconciliation
+  [2m│[0m 4. Circuit Breaker        batch_variance=0.00
+  [2m│[0m 5. Compliance Shadow      verdict=YELLOW  policy_hits=['CREDIT_RELEASE_REVIEW']
+  [2m│[0m 6. Select Recipe          recipe=—
+  [2m│[0m 7. Resolve Dependencies   keys=none
+  [2m│[0m 8. Execute Recipe         status=MANUAL_REVIEW_REQUIRED
+  [2m│[0m 9. Apply Effects          effects=0
+
+  [1mCompliance Shadow Detail[0m
+  Reasons:     ['Credit path requires manual review by policy.']
+  Policy hits: ['CREDIT_RELEASE_REVIEW']
+
+  [1mExplanation[0m
+  Compliance Shadow returned YELLOW. Routing to MANUAL_REVIEW_REQUIRED. Credit path requires manual review by policy.
+
+────────────────────────────────────────────────────────────────────────────────
+  [9/22] [1mEVT-CB-002[0m  (SO-2002 · CREDIT_BLOCK)
+────────────────────────────────────────────────────────────────────────────────
+shadow_enforce
+
+  [1mIntent:[0m          CREDIT_BLOCK
+  [1mShadow Verdict:[0m  [33mYELLOW[0m
+  [1mRecipe:[0m          —
+  [1mFinal Status:[0m    [33mMANUAL_REVIEW_REQUIRED[0m
+
+  [1mExecution Trace[0m
+  ────────────────────────────────────────────────────────────
+  [2m│[0m 1. Ingest                 order_id=SO-2002  event_type=EDI_850_PRICE_MISMATCH
+  [2m│[0m 2. Classify               intent=CREDIT_BLOCK  confidence=0.80
+  [2m│[0m 3. Load Skill             skill=pricing-reconciliation
+  [2m│[0m 4. Circuit Breaker        batch_variance=0.00
+  [2m│[0m 5. Compliance Shadow      verdict=YELLOW  policy_hits=['CREDIT_RELEASE_REVIEW']
+  [2m│[0m 6. Select Recipe          recipe=—
+  [2m│[0m 7. Resolve Dependencies   keys=none
+  [2m│[0m 8. Execute Recipe         status=MANUAL_REVIEW_REQUIRED
+  [2m│[0m 9. Apply Effects          effects=0
+
+  [1mCompliance Shadow Detail[0m
+  Reasons:     ['Credit path requires manual review by policy.']
+  Policy hits: ['CREDIT_RELEASE_REVIEW']
+
+  [1mExplanation[0m
+  Compliance Shadow returned YELLOW. Routing to MANUAL_REVIEW_REQUIRED. Credit path requires manual review by policy.
+
+────────────────────────────────────────────────────────────────────────────────
+  [10/22] [1mEVT-CB-003[0m  (SO-2003 · CREDIT_BLOCK)
+────────────────────────────────────────────────────────────────────────────────
+shadow_enforce
+
+  [1mIntent:[0m          CREDIT_BLOCK
+  [1mShadow Verdict:[0m  [33mYELLOW[0m
+  [1mRecipe:[0m          —
+  [1mFinal Status:[0m    [33mMANUAL_REVIEW_REQUIRED[0m
+
+  [1mExecution Trace[0m
+  ────────────────────────────────────────────────────────────
+  [2m│[0m 1. Ingest                 order_id=SO-2003  event_type=EDI_850_PRICE_MISMATCH
+  [2m│[0m 2. Classify               intent=CREDIT_BLOCK  confidence=0.80
+  [2m│[0m 3. Load Skill             skill=pricing-reconciliation
+  [2m│[0m 4. Circuit Breaker        batch_variance=0.00
+  [2m│[0m 5. Compliance Shadow      verdict=YELLOW  policy_hits=['CREDIT_RELEASE_REVIEW']
+  [2m│[0m 6. Select Recipe          recipe=—
+  [2m│[0m 7. Resolve Dependencies   keys=none
+  [2m│[0m 8. Execute Recipe         status=MANUAL_REVIEW_REQUIRED
+  [2m│[0m 9. Apply Effects          effects=0
+
+  [1mCompliance Shadow Detail[0m
+  Reasons:     ['Credit path requires manual review by policy.']
+  Policy hits: ['CREDIT_RELEASE_REVIEW']
+
+  [1mExplanation[0m
+  Compliance Shadow returned YELLOW. Routing to MANUAL_REVIEW_REQUIRED. Credit path requires manual review by policy.
+
+────────────────────────────────────────────────────────────────────────────────
+  [11/22] [1mEVT-CB-004[0m  (SO-2004 · CREDIT_BLOCK)
+────────────────────────────────────────────────────────────────────────────────
+shadow_enforce
+
+  [1mIntent:[0m          CREDIT_BLOCK
+  [1mShadow Verdict:[0m  [33mYELLOW[0m
+  [1mRecipe:[0m          —
+  [1mFinal Status:[0m    [33mMANUAL_REVIEW_REQUIRED[0m
+
+  [1mExecution Trace[0m
+  ────────────────────────────────────────────────────────────
+  [2m│[0m 1. Ingest                 order_id=SO-2004  event_type=EDI_850_PRICE_MISMATCH
+  [2m│[0m 2. Classify               intent=CREDIT_BLOCK  confidence=0.80
+  [2m│[0m 3. Load Skill             skill=pricing-reconciliation
+  [2m│[0m 4. Circuit Breaker        batch_variance=0.00
+  [2m│[0m 5. Compliance Shadow      verdict=YELLOW  policy_hits=['CREDIT_RELEASE_REVIEW']
+  [2m│[0m 6. Select Recipe          recipe=—
+  [2m│[0m 7. Resolve Dependencies   keys=none
+  [2m│[0m 8. Execute Recipe         status=MANUAL_REVIEW_REQUIRED
+  [2m│[0m 9. Apply Effects          effects=0
+
+  [1mCompliance Shadow Detail[0m
+  Reasons:     ['Credit path requires manual review by policy.']
+  Policy hits: ['CREDIT_RELEASE_REVIEW']
+
+  [1mExplanation[0m
+  Compliance Shadow returned YELLOW. Routing to MANUAL_REVIEW_REQUIRED. Credit path requires manual review by policy.
+
+────────────────────────────────────────────────────────────────────────────────
+  [12/22] [1mEVT-MPE-001[0m  (SO-3001 · MASS_PRICING_ERROR)
+────────────────────────────────────────────────────────────────────────────────
+shadow_enforce
+
+  [1mIntent:[0m          MASS_PRICING_ERROR
+  [1mShadow Verdict:[0m  [31mRED[0m
+  [1mRecipe:[0m          —
+  [1mFinal Status:[0m    [31mBLOCKED[0m
+
+  [1mExecution Trace[0m
+  ────────────────────────────────────────────────────────────
+  [2m│[0m 1. Ingest                 order_id=SO-3001  event_type=EDI_850_PRICE_MISMATCH
+  [2m│[0m 2. Classify               intent=MASS_PRICING_ERROR  confidence=0.95
+  [2m│[0m 3. Load Skill             skill=pricing-reconciliation
+  [2m│[0m 4. Circuit Breaker        batch_variance=180.00
+  [2m│[0m 5. Compliance Shadow      verdict=RED  policy_hits=['HITL_REQUIRED_FOR_SYSTEMIC_FAILURE']
+  [2m│[0m 6. Select Recipe          recipe=—
+  [2m│[0m 7. Resolve Dependencies   keys=none
+  [2m│[0m 8. Execute Recipe         status=BLOCKED
+  [2m│[0m 9. Apply Effects          effects=0
+
+  [1mCompliance Shadow Detail[0m
+  Reasons:     ['Systemic pricing failure requires human escalation.']
+  Policy hits: ['HITL_REQUIRED_FOR_SYSTEMIC_FAILURE']
+
+  [1mExplanation[0m
+  Compliance Shadow returned RED. Execution halted. Systemic pricing failure requires human escalation.
+
+────────────────────────────────────────────────────────────────────────────────
+  [13/22] [1mEVT-MPE-002[0m  (SO-3002 · MASS_PRICING_ERROR)
+────────────────────────────────────────────────────────────────────────────────
+shadow_enforce
+
+  [1mIntent:[0m          MASS_PRICING_ERROR
+  [1mShadow Verdict:[0m  [31mRED[0m
+  [1mRecipe:[0m          —
+  [1mFinal Status:[0m    [31mBLOCKED[0m
+
+  [1mExecution Trace[0m
+  ────────────────────────────────────────────────────────────
+  [2m│[0m 1. Ingest                 order_id=SO-3002  event_type=EDI_850_PRICE_MISMATCH
+  [2m│[0m 2. Classify               intent=MASS_PRICING_ERROR  confidence=0.95
+  [2m│[0m 3. Load Skill             skill=pricing-reconciliation
+  [2m│[0m 4. Circuit Breaker        batch_variance=375.00
+  [2m│[0m 5. Compliance Shadow      verdict=RED  policy_hits=['HITL_REQUIRED_FOR_SYSTEMIC_FAILURE']
+  [2m│[0m 6. Select Recipe          recipe=—
+  [2m│[0m 7. Resolve Dependencies   keys=none
+  [2m│[0m 8. Execute Recipe         status=BLOCKED
+  [2m│[0m 9. Apply Effects          effects=0
+
+  [1mCompliance Shadow Detail[0m
+  Reasons:     ['Systemic pricing failure requires human escalation.']
+  Policy hits: ['HITL_REQUIRED_FOR_SYSTEMIC_FAILURE']
+
+  [1mExplanation[0m
+  Compliance Shadow returned RED. Execution halted. Systemic pricing failure requires human escalation.
+
+────────────────────────────────────────────────────────────────────────────────
+  [14/22] [1mEVT-MPE-003[0m  (SO-3003 · MASS_PRICING_ERROR)
+────────────────────────────────────────────────────────────────────────────────
+shadow_enforce
+
+  [1mIntent:[0m          MASS_PRICING_ERROR
+  [1mShadow Verdict:[0m  [31mRED[0m
+  [1mRecipe:[0m          —
+  [1mFinal Status:[0m    [31mBLOCKED[0m
+
+  [1mExecution Trace[0m
+  ────────────────────────────────────────────────────────────
+  [2m│[0m 1. Ingest                 order_id=SO-3003  event_type=EDI_850_PRICE_MISMATCH
+  [2m│[0m 2. Classify               intent=MASS_PRICING_ERROR  confidence=0.95
+  [2m│[0m 3. Load Skill             skill=pricing-reconciliation
+  [2m│[0m 4. Circuit Breaker        batch_variance=22.00
+  [2m│[0m 5. Compliance Shadow      verdict=RED  policy_hits=['HITL_REQUIRED_FOR_SYSTEMIC_FAILURE']
+  [2m│[0m 6. Select Recipe          recipe=—
+  [2m│[0m 7. Resolve Dependencies   keys=none
+  [2m│[0m 8. Execute Recipe         status=BLOCKED
+  [2m│[0m 9. Apply Effects          effects=0
+
+  [1mCompliance Shadow Detail[0m
+  Reasons:     ['Systemic pricing failure requires human escalation.']
+  Policy hits: ['HITL_REQUIRED_FOR_SYSTEMIC_FAILURE']
+
+  [1mExplanation[0m
+  Compliance Shadow returned RED. Execution halted. Systemic pricing failure requires human escalation.
+
+────────────────────────────────────────────────────────────────────────────────
+  [15/22] [1mEVT-DPO-001[0m  (PO-9001 · DUPLICATE_PO)
+────────────────────────────────────────────────────────────────────────────────
+
+  [1mIntent:[0m          DUPLICATE_PO
+  [1mShadow Verdict:[0m  [32mGREEN[0m
+  [1mRecipe:[0m          DuplicatePORecipe.py
+  [1mFinal Status:[0m    [31mBLOCKED[0m
+
+  [1mExecution Trace[0m
+  ────────────────────────────────────────────────────────────
+  [2m│[0m 1. Ingest                 order_id=PO-9001  event_type=EDI_850_DUPLICATE_PO
+  [2m│[0m 2. Classify               intent=DUPLICATE_PO  confidence=0.90
+  [2m│[0m 3. Load Skill             skill=duplicate-po
+  [2m│[0m 4. Circuit Breaker        batch_variance=2.00
+  [2m│[0m 5. Compliance Shadow      verdict=GREEN  policy_hits=[]
+  [2m│[0m 6. Select Recipe          recipe=DuplicatePORecipe.py
+  [2m│[0m 7. Resolve Dependencies   keys=['fulfillment_status', 'matched_po_details']
+  [2m│[0m 8. Execute Recipe         status=BLOCKED
+  [2m│[0m 9. Apply Effects          effects=1
+
+  [1mCompliance Shadow Detail[0m
+  Reasons:     ['No blocking policy hit detected.']
+  Policy hits: []
+
+  [1mDuplicate PO Detail[0m
+  Composite score:     0.9800
+  Classification:      AUTO_BLOCK
+  Recommended action:  BLOCK_AND_NOTIFY
+  Autonomy level:      L3
+  Notification:        duplicate_po_blocked
+  Signal breakdown:
+    po_number        0.3000  [2m████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    line_items       0.2000  [2m████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    customer_id      0.1500  [2m██████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    amount           0.1000  [2m████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    timestamp        0.0800  [2m███░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    ship_to          0.0500  [2m██░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    channel          0.0500  [2m██░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    delivery_date    0.0500  [2m██░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+
+  [1mExplanation[0m
+  Recipe returned BLOCKED.
+
+  [1mGateway Activity[0m
+  Resolved dependencies: {
+    "fulfillment_status": {
+        "fulfilled": false
+    },
+    "matched_po_details": {
+        "has_revision_indicator": false,
+        "line_items_identical": true
+    }
+}
+  Effect results: [
+    {
+        "gateway_name": "buyer_notification",
+        "operation": "send",
+        "status": "SUCCESS",
+        "data": {
+            "delivered": true
+        },
+        "error": null,
+        "duration_ms": 0
+    }
+]
+
+────────────────────────────────────────────────────────────────────────────────
+  [16/22] [1mEVT-DPO-002[0m  (PO-9002 · DUPLICATE_PO)
+────────────────────────────────────────────────────────────────────────────────
+
+  [1mIntent:[0m          DUPLICATE_PO
+  [1mShadow Verdict:[0m  [32mGREEN[0m
+  [1mRecipe:[0m          DuplicatePORecipe.py
+  [1mFinal Status:[0m    [33mMANUAL_REVIEW_REQUIRED[0m
+
+  [1mExecution Trace[0m
+  ────────────────────────────────────────────────────────────
+  [2m│[0m 1. Ingest                 order_id=PO-9002  event_type=EDI_850_DUPLICATE_PO
+  [2m│[0m 2. Classify               intent=DUPLICATE_PO  confidence=0.90
+  [2m│[0m 3. Load Skill             skill=duplicate-po
+  [2m│[0m 4. Circuit Breaker        batch_variance=2.00
+  [2m│[0m 5. Compliance Shadow      verdict=GREEN  policy_hits=[]
+  [2m│[0m 6. Select Recipe          recipe=DuplicatePORecipe.py
+  [2m│[0m 7. Resolve Dependencies   keys=['fulfillment_status', 'matched_po_details']
+  [2m│[0m 8. Execute Recipe         status=MANUAL_REVIEW_REQUIRED
+  [2m│[0m 9. Apply Effects          effects=1
+
+  [1mCompliance Shadow Detail[0m
+  Reasons:     ['No blocking policy hit detected.']
+  Policy hits: []
+
+  [1mDuplicate PO Detail[0m
+  Composite score:     0.6500
+  Classification:      SOFT_FLAG
+  Recommended action:  REQUEST_BUYER_CONFIRMATION
+  Autonomy level:      L2
+  Notification:        duplicate_po_inquiry
+  Signal breakdown:
+    po_number        0.3000  [2m████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    customer_id      0.1500  [2m██████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    line_items       0.1000  [2m████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    amount           0.0500  [2m██░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    ship_to          0.0250  [2m█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    channel          0.0250  [2m█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    timestamp        0.0000  [2m░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    delivery_date    0.0000  [2m░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+
+  [1mExplanation[0m
+  Autonomy level L2: REQUEST_BUYER_CONFIRMATION requires human approval.
+
+  [1mGateway Activity[0m
+  Resolved dependencies: {
+    "fulfillment_status": {
+        "fulfilled": false
+    },
+    "matched_po_details": {
+        "has_revision_indicator": false,
+        "line_items_identical": true
+    }
+}
+  Effect results: [
+    {
+        "gateway_name": "buyer_notification",
+        "operation": "send",
+        "status": "SUCCESS",
+        "data": {
+            "delivered": true
+        },
+        "error": null,
+        "duration_ms": 0
+    }
+]
+
+────────────────────────────────────────────────────────────────────────────────
+  [17/22] [1mEVT-DPO-003[0m  (PO-9003 · DUPLICATE_PO)
+────────────────────────────────────────────────────────────────────────────────
+
+  [1mIntent:[0m          DUPLICATE_PO
+  [1mShadow Verdict:[0m  [32mGREEN[0m
+  [1mRecipe:[0m          DuplicatePORecipe.py
+  [1mFinal Status:[0m    [33mMANUAL_REVIEW_REQUIRED[0m
+
+  [1mExecution Trace[0m
+  ────────────────────────────────────────────────────────────
+  [2m│[0m 1. Ingest                 order_id=PO-9003  event_type=EDI_850_DUPLICATE_PO
+  [2m│[0m 2. Classify               intent=DUPLICATE_PO  confidence=0.90
+  [2m│[0m 3. Load Skill             skill=duplicate-po
+  [2m│[0m 4. Circuit Breaker        batch_variance=2.80
+  [2m│[0m 5. Compliance Shadow      verdict=GREEN  policy_hits=[]
+  [2m│[0m 6. Select Recipe          recipe=DuplicatePORecipe.py
+  [2m│[0m 7. Resolve Dependencies   keys=['fulfillment_status', 'matched_po_details']
+  [2m│[0m 8. Execute Recipe         status=MANUAL_REVIEW_REQUIRED
+  [2m│[0m 9. Apply Effects          effects=1
+
+  [1mCompliance Shadow Detail[0m
+  Reasons:     ['No blocking policy hit detected.']
+  Policy hits: []
+
+  [1mDuplicate PO Detail[0m
+  Composite score:     0.8550
+  Classification:      REVIEW_REQUIRED
+  Recommended action:  ESCALATE
+  Autonomy level:      L1
+  Notification:        [2mnone[0m
+  Signal breakdown:
+    po_number        0.3000  [2m████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    line_items       0.1600  [2m██████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    customer_id      0.1500  [2m██████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    amount           0.0900  [2m███░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    timestamp        0.0500  [2m██░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    delivery_date    0.0400  [2m█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    ship_to          0.0350  [2m█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    channel          0.0300  [2m█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+
+  [1mExplanation[0m
+  Autonomy level L1: ESCALATE requires human approval.
+
+  [1mGateway Activity[0m
+  Resolved dependencies: {
+    "fulfillment_status": {
+        "fulfilled": false
+    },
+    "matched_po_details": {
+        "has_revision_indicator": false,
+        "line_items_identical": true
+    }
+}
+  Effect results: [
+    {
+        "gateway_name": "buyer_notification",
+        "operation": "send",
+        "status": "SUCCESS",
+        "data": {
+            "delivered": true
+        },
+        "error": null,
+        "duration_ms": 0
+    }
+]
+
+────────────────────────────────────────────────────────────────────────────────
+  [18/22] [1mEVT-DPO-004[0m  (PO-9004 · DUPLICATE_PO)
+────────────────────────────────────────────────────────────────────────────────
+
+  [1mIntent:[0m          DUPLICATE_PO
+  [1mShadow Verdict:[0m  [32mGREEN[0m
+  [1mRecipe:[0m          DuplicatePORecipe.py
+  [1mFinal Status:[0m    [32mCOMPLETE[0m
+
+  [1mExecution Trace[0m
+  ────────────────────────────────────────────────────────────
+  [2m│[0m 1. Ingest                 order_id=PO-9004  event_type=EDI_850_DUPLICATE_PO
+  [2m│[0m 2. Classify               intent=DUPLICATE_PO  confidence=0.90
+  [2m│[0m 3. Load Skill             skill=duplicate-po
+  [2m│[0m 4. Circuit Breaker        batch_variance=2.20
+  [2m│[0m 5. Compliance Shadow      verdict=GREEN  policy_hits=[]
+  [2m│[0m 6. Select Recipe          recipe=DuplicatePORecipe.py
+  [2m│[0m 7. Resolve Dependencies   keys=['fulfillment_status', 'matched_po_details']
+  [2m│[0m 8. Execute Recipe         status=COMPLETE
+  [2m│[0m 9. Apply Effects          effects=1
+
+  [1mCompliance Shadow Detail[0m
+  Reasons:     ['No blocking policy hit detected.']
+  Policy hits: []
+
+  [1mDuplicate PO Detail[0m
+  Composite score:     0.4300
+  Classification:      PASS
+  Recommended action:  ALLOW_BOTH
+  Autonomy level:      L3
+  Notification:        [2mnone[0m
+  Signal breakdown:
+    po_number        0.3000  [2m████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    customer_id      0.0750  [2m███░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    amount           0.0300  [2m█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    channel          0.0250  [2m█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    line_items       0.0000  [2m░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    timestamp        0.0000  [2m░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    ship_to          0.0000  [2m░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    delivery_date    0.0000  [2m░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+
+  [1mExplanation[0m
+  Deterministic execution completed successfully.
+
+  [1mGateway Activity[0m
+  Resolved dependencies: {
+    "fulfillment_status": {
+        "fulfilled": false
+    },
+    "matched_po_details": {
+        "has_revision_indicator": false,
+        "line_items_identical": true
+    }
+}
+  Effect results: [
+    {
+        "gateway_name": "buyer_notification",
+        "operation": "send",
+        "status": "SUCCESS",
+        "data": {
+            "delivered": true
+        },
+        "error": null,
+        "duration_ms": 0
+    }
+]
+
+────────────────────────────────────────────────────────────────────────────────
+  [19/22] [1mEVT-DPO-005[0m  (PO-88424 · DUPLICATE_PO)
+────────────────────────────────────────────────────────────────────────────────
+
+  [1mIntent:[0m          DUPLICATE_PO
+  [1mShadow Verdict:[0m  [32mGREEN[0m
+  [1mRecipe:[0m          DuplicatePORecipe.py
+  [1mFinal Status:[0m    [31mBLOCKED[0m
+
+  [1mExecution Trace[0m
+  ────────────────────────────────────────────────────────────
+  [2m│[0m 1. Ingest                 order_id=PO-88424  event_type=EDI_850_DUPLICATE_PO
+  [2m│[0m 2. Classify               intent=DUPLICATE_PO  confidence=0.90
+  [2m│[0m 3. Load Skill             skill=duplicate-po
+  [2m│[0m 4. Circuit Breaker        batch_variance=0.00
+  [2m│[0m 5. Compliance Shadow      verdict=GREEN  policy_hits=[]
+  [2m│[0m 6. Select Recipe          recipe=DuplicatePORecipe.py
+  [2m│[0m 7. Resolve Dependencies   keys=['fulfillment_status', 'matched_po_details']
+  [2m│[0m 8. Execute Recipe         status=BLOCKED
+  [2m│[0m 9. Apply Effects          effects=1
+
+  [1mCompliance Shadow Detail[0m
+  Reasons:     ['No blocking policy hit detected.']
+  Policy hits: []
+
+  [1mDuplicate PO Detail[0m
+  Composite score:     0.9300
+  Classification:      AUTO_BLOCK
+  Recommended action:  BLOCK_AND_NOTIFY
+  Autonomy level:      L3
+  Notification:        duplicate_po_blocked
+  Signal breakdown:
+    po_number        0.3000  [2m████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    line_items       0.2000  [2m████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    customer_id      0.1500  [2m██████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    amount           0.1000  [2m████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    ship_to          0.0500  [2m██░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    channel          0.0500  [2m██░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    delivery_date    0.0500  [2m██░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    timestamp        0.0300  [2m█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+
+  [1mExplanation[0m
+  Recipe returned BLOCKED.
+
+  [1mGateway Activity[0m
+  Resolved dependencies: {
+    "fulfillment_status": {
+        "fulfilled": false
+    },
+    "matched_po_details": {
+        "has_revision_indicator": false,
+        "line_items_identical": true
+    }
+}
+  Effect results: [
+    {
+        "gateway_name": "buyer_notification",
+        "operation": "send",
+        "status": "SUCCESS",
+        "data": {
+            "delivered": true
+        },
+        "error": null,
+        "duration_ms": 0
+    }
+]
+
+────────────────────────────────────────────────────────────────────────────────
+  [20/22] [1mEVT-DPO-006[0m  (PO-AMZ-001 · DUPLICATE_PO)
+────────────────────────────────────────────────────────────────────────────────
+
+  [1mIntent:[0m          DUPLICATE_PO
+  [1mShadow Verdict:[0m  [32mGREEN[0m
+  [1mRecipe:[0m          DuplicatePORecipe.py
+  [1mFinal Status:[0m    [31mBLOCKED[0m
+
+  [1mExecution Trace[0m
+  ────────────────────────────────────────────────────────────
+  [2m│[0m 1. Ingest                 order_id=PO-AMZ-001  event_type=EDI_850_DUPLICATE_PO
+  [2m│[0m 2. Classify               intent=DUPLICATE_PO  confidence=0.90
+  [2m│[0m 3. Load Skill             skill=duplicate-po
+  [2m│[0m 4. Circuit Breaker        batch_variance=0.00
+  [2m│[0m 5. Compliance Shadow      verdict=GREEN  policy_hits=[]
+  [2m│[0m 6. Select Recipe          recipe=DuplicatePORecipe.py
+  [2m│[0m 7. Resolve Dependencies   keys=['fulfillment_status', 'matched_po_details']
+  [2m│[0m 8. Execute Recipe         status=BLOCKED
+  [2m│[0m 9. Apply Effects          effects=1
+
+  [1mCompliance Shadow Detail[0m
+  Reasons:     ['No blocking policy hit detected.']
+  Policy hits: []
+
+  [1mDuplicate PO Detail[0m
+  Composite score:     0.9800
+  Classification:      AUTO_BLOCK
+  Recommended action:  BLOCK_AND_NOTIFY
+  Autonomy level:      L3
+  Notification:        duplicate_po_blocked
+  Signal breakdown:
+    po_number        0.3000  [2m████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    line_items       0.2000  [2m████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    customer_id      0.1500  [2m██████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    amount           0.1000  [2m████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    timestamp        0.0800  [2m███░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    ship_to          0.0500  [2m██░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    channel          0.0500  [2m██░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    delivery_date    0.0500  [2m██░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+
+  [1mBatch Context (EC08)[0m
+  Source email ID:     EC08-multiple-pos-amazon
+  Batch PO index:      1
+
+  [1mExplanation[0m
+  Recipe returned BLOCKED.
+
+  [1mGateway Activity[0m
+  Resolved dependencies: {
+    "fulfillment_status": {
+        "fulfilled": false
+    },
+    "matched_po_details": {
+        "has_revision_indicator": false,
+        "line_items_identical": true
+    }
+}
+  Effect results: [
+    {
+        "gateway_name": "buyer_notification",
+        "operation": "send",
+        "status": "SUCCESS",
+        "data": {
+            "delivered": true
+        },
+        "error": null,
+        "duration_ms": 0
+    }
+]
+
+────────────────────────────────────────────────────────────────────────────────
+  [21/22] [1mEVT-DPO-007[0m  (PO-AMZ-002 · DUPLICATE_PO)
+────────────────────────────────────────────────────────────────────────────────
+
+  [1mIntent:[0m          DUPLICATE_PO
+  [1mShadow Verdict:[0m  [32mGREEN[0m
+  [1mRecipe:[0m          DuplicatePORecipe.py
+  [1mFinal Status:[0m    [33mMANUAL_REVIEW_REQUIRED[0m
+
+  [1mExecution Trace[0m
+  ────────────────────────────────────────────────────────────
+  [2m│[0m 1. Ingest                 order_id=PO-AMZ-002  event_type=EDI_850_DUPLICATE_PO
+  [2m│[0m 2. Classify               intent=DUPLICATE_PO  confidence=0.90
+  [2m│[0m 3. Load Skill             skill=duplicate-po
+  [2m│[0m 4. Circuit Breaker        batch_variance=0.00
+  [2m│[0m 5. Compliance Shadow      verdict=GREEN  policy_hits=[]
+  [2m│[0m 6. Select Recipe          recipe=DuplicatePORecipe.py
+  [2m│[0m 7. Resolve Dependencies   keys=['fulfillment_status', 'matched_po_details']
+  [2m│[0m 8. Execute Recipe         status=MANUAL_REVIEW_REQUIRED
+  [2m│[0m 9. Apply Effects          effects=1
+
+  [1mCompliance Shadow Detail[0m
+  Reasons:     ['No blocking policy hit detected.']
+  Policy hits: []
+
+  [1mDuplicate PO Detail[0m
+  Composite score:     0.6000
+  Classification:      SOFT_FLAG
+  Recommended action:  REQUEST_BUYER_CONFIRMATION
+  Autonomy level:      L2
+  Notification:        duplicate_po_inquiry
+  Signal breakdown:
+    po_number        0.2400  [2m█████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    customer_id      0.1500  [2m██████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    line_items       0.0800  [2m███░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    channel          0.0500  [2m██░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    amount           0.0300  [2m█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    ship_to          0.0250  [2m█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    delivery_date    0.0250  [2m█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    timestamp        0.0000  [2m░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+
+  [1mBatch Context (EC08)[0m
+  Source email ID:     EC08-multiple-pos-amazon
+  Batch PO index:      2
+
+  [1mExplanation[0m
+  Autonomy level L2: REQUEST_BUYER_CONFIRMATION requires human approval.
+
+  [1mGateway Activity[0m
+  Resolved dependencies: {
+    "fulfillment_status": {
+        "fulfilled": false
+    },
+    "matched_po_details": {
+        "has_revision_indicator": false,
+        "line_items_identical": true
+    }
+}
+  Effect results: [
+    {
+        "gateway_name": "buyer_notification",
+        "operation": "send",
+        "status": "SUCCESS",
+        "data": {
+            "delivered": true
+        },
+        "error": null,
+        "duration_ms": 0
+    }
+]
+
+────────────────────────────────────────────────────────────────────────────────
+  [22/22] [1mEVT-DPO-008[0m  (PO-AMZ-003 · DUPLICATE_PO)
+────────────────────────────────────────────────────────────────────────────────
+
+  [1mIntent:[0m          DUPLICATE_PO
+  [1mShadow Verdict:[0m  [32mGREEN[0m
+  [1mRecipe:[0m          DuplicatePORecipe.py
+  [1mFinal Status:[0m    [32mCOMPLETE[0m
+
+  [1mExecution Trace[0m
+  ────────────────────────────────────────────────────────────
+  [2m│[0m 1. Ingest                 order_id=PO-AMZ-003  event_type=EDI_850_DUPLICATE_PO
+  [2m│[0m 2. Classify               intent=DUPLICATE_PO  confidence=0.90
+  [2m│[0m 3. Load Skill             skill=duplicate-po
+  [2m│[0m 4. Circuit Breaker        batch_variance=0.00
+  [2m│[0m 5. Compliance Shadow      verdict=GREEN  policy_hits=[]
+  [2m│[0m 6. Select Recipe          recipe=DuplicatePORecipe.py
+  [2m│[0m 7. Resolve Dependencies   keys=['fulfillment_status', 'matched_po_details']
+  [2m│[0m 8. Execute Recipe         status=COMPLETE
+  [2m│[0m 9. Apply Effects          effects=1
+
+  [1mCompliance Shadow Detail[0m
+  Reasons:     ['No blocking policy hit detected.']
+  Policy hits: []
+
+  [1mDuplicate PO Detail[0m
+  Composite score:     0.2000
+  Classification:      PASS
+  Recommended action:  ALLOW_BOTH
+  Autonomy level:      L3
+  Notification:        [2mnone[0m
+  Signal breakdown:
+    customer_id      0.1500  [2m██████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    channel          0.0500  [2m██░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    po_number        0.0000  [2m░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    line_items       0.0000  [2m░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    amount           0.0000  [2m░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    timestamp        0.0000  [2m░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    ship_to          0.0000  [2m░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+    delivery_date    0.0000  [2m░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░[0m
+
+  [1mBatch Context (EC08)[0m
+  Source email ID:     EC08-multiple-pos-amazon
+  Batch PO index:      3
+
+  [1mExplanation[0m
+  Deterministic execution completed successfully.
+
+  [1mGateway Activity[0m
+  Resolved dependencies: {
+    "fulfillment_status": {
+        "fulfilled": false
+    },
+    "matched_po_details": {
+        "has_revision_indicator": false,
+        "line_items_identical": true
+    }
+}
+  Effect results: [
+    {
+        "gateway_name": "buyer_notification",
+        "operation": "send",
+        "status": "SUCCESS",
+        "data": {
+            "delivered": true
+        },
+        "error": null,
+        "duration_ms": 0
+    }
+]
+
+================================================================================
+  [1mSUMMARY[0m
+================================================================================
+  EVENT ID         INTENT                     SHADOW     STATUS                      
+  ────────────────────────────────────────────────────────────────────────────
+  EVT-CC-001       CONTRACTUAL_CORRECTION     [32mGREEN[0m         [32mCOMPLETE[0m
+  EVT-CC-002       CONTRACTUAL_CORRECTION     [32mGREEN[0m         [32mCOMPLETE[0m
+  EVT-CC-003       CONTRACTUAL_CORRECTION     [32mGREEN[0m         [31mFAIL_TO_HUMAN[0m
+  EVT-CC-004       CONTRACTUAL_CORRECTION     [32mGREEN[0m         [32mCOMPLETE[0m
+  EVT-CC-005       CONTRACTUAL_CORRECTION     [32mGREEN[0m         [32mCOMPLETE[0m
+  EVT-CC-006       CONTRACTUAL_CORRECTION     [32mGREEN[0m         [32mCOMPLETE[0m
+  EVT-CC-007       CONTRACTUAL_CORRECTION     [32mGREEN[0m         [31mFAIL_TO_HUMAN[0m
+  EVT-CB-001       CREDIT_BLOCK               [33mYELLOW[0m        [33mMANUAL_REVIEW_REQUIRED[0m
+  EVT-CB-002       CREDIT_BLOCK               [33mYELLOW[0m        [33mMANUAL_REVIEW_REQUIRED[0m
+  EVT-CB-003       CREDIT_BLOCK               [33mYELLOW[0m        [33mMANUAL_REVIEW_REQUIRED[0m
+  EVT-CB-004       CREDIT_BLOCK               [33mYELLOW[0m        [33mMANUAL_REVIEW_REQUIRED[0m
+  EVT-MPE-001      MASS_PRICING_ERROR         [31mRED[0m           [31mBLOCKED[0m
+  EVT-MPE-002      MASS_PRICING_ERROR         [31mRED[0m           [31mBLOCKED[0m
+  EVT-MPE-003      MASS_PRICING_ERROR         [31mRED[0m           [31mBLOCKED[0m
+  EVT-DPO-001      DUPLICATE_PO               [32mGREEN[0m         [31mBLOCKED[0m
+  EVT-DPO-002      DUPLICATE_PO               [32mGREEN[0m         [33mMANUAL_REVIEW_REQUIRED[0m
+  EVT-DPO-003      DUPLICATE_PO               [32mGREEN[0m         [33mMANUAL_REVIEW_REQUIRED[0m
+  EVT-DPO-004      DUPLICATE_PO               [32mGREEN[0m         [32mCOMPLETE[0m
+  EVT-DPO-005      DUPLICATE_PO               [32mGREEN[0m         [31mBLOCKED[0m
+  EVT-DPO-006      DUPLICATE_PO               [32mGREEN[0m         [31mBLOCKED[0m
+  EVT-DPO-007      DUPLICATE_PO               [32mGREEN[0m         [33mMANUAL_REVIEW_REQUIRED[0m
+  EVT-DPO-008      DUPLICATE_PO               [32mGREEN[0m         [32mCOMPLETE[0m
+  ────────────────────────────────────────────────────────────────────────────
+  Total: 22  |  [32mCOMPLETE: 7[0m  |  [33mNon-complete: 15[0m  |  [31mErrors: 0[0m
+
+  [32mLangFuse traces flushed.[0m
+
