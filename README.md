@@ -12,51 +12,30 @@ ASOE is the Agentic System of Engagement where AI agents and humans collaborate 
 
 Enterprise order-to-cash workflows are powered by an **order pipeline** — a chain of statuses and transactions an order goes through from creation to completion. This pipeline is built on three distinct layers, each with a clear responsibility:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                    The Order Pipeline — "Sandwich" Architecture                  │
-│                                                                                  │
-│   ┌──────────────────────────────────────────────────────────────────────────┐   │
-│   │                     OMS Layer — "System of Action"                        │   │
-│   │                                                                          │   │
-│   │  Captures orders from multiple channels (EDI 850, API, email, portal).   │   │
-│   │  Validates, routes to nearest warehouse, updates customer on shipping.   │   │
-│   │  Manages the operational lifecycle: what is happening NOW.               │   │
-│   │                                                                          │   │
-│   │  Examples: SAP SD, Oracle OMS, NetSuite, Microsoft Dynamics              │   │
-│   └────────────────────────────────┬─────────────────────────────────────────┘   │
-│                                    │                                             │
-│                                    ▼ orders flow down                            │
-│                                                                                  │
-│   ┌──────────────────────────────────────────────────────────────────────────┐   │
-│   │              EMS Layer — "Referee" / "Control Tower"  (ASOE)             │   │
-│   │                                                                          │   │
-│   │  Watches data as it moves between OMS and ERP. If a "stop" condition     │   │
-│   │  is met (pricing mismatch, fraud, duplicate PO, credit block), pulls     │   │
-│   │  the order into a holding pen for automated or human resolution.         │   │
-│   │                                                                          │   │
-│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │   │
-│   │  │ Classify │─►│ Shadow   │─►│ Select   │─►│ Execute  │─►│ Notify   │  │   │
-│   │  │ Intent   │  │ Audit    │  │ Recipe   │  │ Recipe   │  │ Buyer    │  │   │
-│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘  └──────────┘  │   │
-│   │                                                                          │   │
-│   │  Reads context from OMS ▲  │  Writes corrections to ERP ▼               │   │
-│   │  (via gateway deps)     │  │  (via gateway effects)                      │   │
-│   └─────────────────────────┼──┼─────────────────────────────────────────────┘   │
-│                              │  │                                                │
-│                              │  ▼ clean data flows down                          │
-│                                                                                  │
-│   ┌──────────────────────────────────────────────────────────────────────────┐   │
-│   │                     ERP Layer — "System of Record"                        │   │
-│   │                                                                          │   │
-│   │  Processes clean data: invoicing, general ledger, condition records,     │   │
-│   │  credit management, procurement, payroll. Manages the financial          │   │
-│   │  lifecycle: what HAS happened.                                           │   │
-│   │                                                                          │   │
-│   │  Examples: SAP S/4HANA, Oracle EBS/Fusion, NetSuite, Dynamics 365       │   │
-│   └──────────────────────────────────────────────────────────────────────────┘   │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph OMS["OMS Layer — System of Action"]
+        direction LR
+        OMS_DESC["Captures orders from EDI 850, API, email, portal<br/>Validates, routes to warehouse, updates shipping<br/>Manages operational lifecycle: what is happening NOW<br/><i>Examples: SAP SD, Oracle OMS, NetSuite, Dynamics</i>"]
+    end
+
+    subgraph EMS["EMS Layer — Control Tower (ASOE)"]
+        direction LR
+        CLASSIFY["Classify<br/>Intent"] --> SHADOW["Shadow<br/>Audit"]
+        SHADOW --> SELECT["Select<br/>Recipe"]
+        SELECT --> EXECUTE["Execute<br/>Recipe"]
+        EXECUTE --> NOTIFY["Notify<br/>Buyer"]
+    end
+
+    subgraph ERP["ERP Layer — System of Record"]
+        direction LR
+        ERP_DESC["Processes clean data: invoicing, general ledger,<br/>condition records, credit, procurement, payroll<br/>Manages financial lifecycle: what HAS happened<br/><i>Examples: SAP S/4HANA, Oracle EBS, NetSuite, Dynamics 365</i>"]
+    end
+
+    OMS -- "Orders flow down<br/>(exceptions detected)" --> EMS
+    EMS -- "Clean data flows down<br/>(corrections applied)" --> ERP
+    EMS -. "Reads context<br/>(gateway deps)" .-> OMS
+    EMS -. "Writes corrections<br/>(gateway effects)" .-> ERP
 ```
 
 ### OMS Layer — Order Management System (System of Action)
@@ -148,26 +127,28 @@ parameters are type-validated.
 
 ## Architecture overview
 
-```
-OrderEvent
-    │
-    ▼
- ingest ──► classify ──► load_skill ──► validate_circuit_breaker
-                                                │
-                                          (breach → FAIL_TO_HUMAN)
-                                                │
-                                          shadow_audit
-                                                │
-                                   GREEN ◄──────┤──────► YELLOW → MANUAL_REVIEW_REQUIRED
-                                     │          └──────► RED    → BLOCKED
-                                     ▼
-                              select_recipe ──► validate_types ──► resolve_dependencies
-                                                                         │
-                                                                   (gw fail → FAIL_TO_HUMAN)
-                                                                         │
-                                                                   execute_recipe ──► apply_effects
-                                                                                          │
-                                                                                   COMPLETE / FAIL_TO_HUMAN
+```mermaid
+graph TD
+    EVENT["OrderEvent"] --> INGEST["ingest"]
+    INGEST --> CLASSIFY["classify"]
+    CLASSIFY --> SKILL["load_skill"]
+    SKILL --> CB{"validate_circuit_breaker"}
+
+    CB -- "breach" --> FTH1["FAIL_TO_HUMAN"]
+    CB -- "ok" --> SA{"shadow_audit"}
+
+    SA -- "RED" --> BLOCKED["BLOCKED"]
+    SA -- "YELLOW" --> MRR["MANUAL_REVIEW_REQUIRED"]
+    SA -- "GREEN" --> SR["select_recipe"]
+
+    SR --> VT["validate_types"]
+    VT --> RD{"resolve_dependencies"}
+
+    RD -- "gateway fail" --> FTH2["FAIL_TO_HUMAN"]
+    RD -- "ok" --> ER["execute_recipe"]
+
+    ER --> AE["apply_effects"]
+    AE --> DONE["COMPLETE"]
 ```
 
 **Key invariants:**
