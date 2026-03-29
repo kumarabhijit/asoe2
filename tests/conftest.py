@@ -120,3 +120,61 @@ def duplicate_po_event() -> GraphState:
             },
         )
     )
+
+
+@pytest.fixture
+def duplicate_po_resend_event() -> GraphState:
+    """EC04: exact PO resend (Costco-style) — high signals, timestamp lower."""
+    return GraphState(
+        event=OrderEvent(
+            order_id="PO-88424",
+            line_item=1,
+            po_price=36.0,
+            sap_base_price=36.0,
+            event_type="EDI_850_DUPLICATE_PO",
+            retailer_id="R-05",
+            line_count=2,
+            metadata={
+                "signal_scores": {
+                    "po_number": 1.0,
+                    "customer_id": 1.0,
+                    "line_items": 1.0,
+                    "amount": 1.0,
+                    "timestamp": 0.3,
+                    "ship_to": 1.0,
+                    "channel": 1.0,
+                    "delivery_date": 1.0,
+                },
+            },
+        )
+    )
+
+
+@pytest.fixture
+def duplicate_po_batch_event() -> GraphState:
+    """EC08: one PO from a multi-PO batch (Amazon-style) — no match → PASS."""
+    return GraphState(
+        event=OrderEvent(
+            order_id="PO-AMZ-003",
+            line_item=1,
+            po_price=8.96,
+            sap_base_price=8.96,
+            event_type="EDI_850_DUPLICATE_PO",
+            retailer_id="R-08",
+            line_count=1,
+            metadata={
+                "signal_scores": {
+                    "po_number": 0.0,
+                    "customer_id": 1.0,
+                    "line_items": 0.0,
+                    "amount": 0.0,
+                    "timestamp": 0.0,
+                    "ship_to": 0.0,
+                    "channel": 1.0,
+                    "delivery_date": 0.0,
+                },
+                "source_email_id": "EC08-multiple-pos-amazon",
+                "batch_po_index": 3,
+            },
+        )
+    )

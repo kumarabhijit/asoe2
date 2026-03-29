@@ -51,10 +51,56 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from contracts.models import GraphState, Intent, OrderEvent
+from contracts.models import GatewayResponse, GraphState, Intent, OrderEvent
+from gateways.registry import register_gateway, clear_registry
+from gateways.stub import StubGateway
 from orchestration.graph import run_graph
 from tests.sandbox.seed import load_events, DB_DEFAULT
 from tests.sandbox.llm.prompts import intent_prompt, recipe_prompt, shadow_prompt
+
+
+def _register_sandbox_gateways() -> None:
+    """Register stub gateways for DuplicatePO resolution context.
+
+    The DuplicatePORecipe declares gateway dependencies (oms/get_fulfillment_status,
+    oms/get_matched_po_details) and effects (buyer_notification/send).  These stubs
+    provide canned responses so the sandbox CLI runs without real OMS/notification
+    connectivity.
+    """
+    clear_registry()
+    oms_stub = StubGateway(
+        "oms",
+        responses={
+            "get_fulfillment_status": GatewayResponse(
+                gateway_name="oms",
+                operation="get_fulfillment_status",
+                status="SUCCESS",
+                data={"fulfilled": False},
+            ),
+            "get_matched_po_details": GatewayResponse(
+                gateway_name="oms",
+                operation="get_matched_po_details",
+                status="SUCCESS",
+                data={
+                    "has_revision_indicator": False,
+                    "line_items_identical": True,
+                },
+            ),
+        },
+    )
+    notification_stub = StubGateway(
+        "buyer_notification",
+        responses={
+            "send": GatewayResponse(
+                gateway_name="buyer_notification",
+                operation="send",
+                status="SUCCESS",
+                data={"delivered": True},
+            ),
+        },
+    )
+    register_gateway(oms_stub)
+    register_gateway(notification_stub)
 
 # ── ANSI colours ──────────────────────────────────────────────────────────
 
@@ -186,6 +232,46 @@ def _print_trace(state: GraphState, *, show_json: bool = False,
         print(f"  Reasons:     {state.shadow.reasons}")
         print(f"  Policy hits: {state.shadow.policy_hits}")
 
+    # DPO-specific detail (EC04/EC08 scenarios)
+    if (state.execution_log
+            and state.intent
+            and state.intent.value == "DUPLICATE_PO"):
+        outputs = state.execution_log.outputs or {}
+        composite   = outputs.get("composite_score")
+        classif     = outputs.get("classification")
+        action      = outputs.get("recommended_action")
+        autonomy    = outputs.get("autonomy_level")
+        notif_tpl   = outputs.get("notification_template")
+        breakdown   = outputs.get("signal_breakdown")
+
+        print(f"\n  {_BOLD}Duplicate PO Detail{_RESET}")
+        if composite is not None:
+            print(f"  Composite score:     {composite:.4f}")
+        if classif:
+            print(f"  Classification:      {classif}")
+        if action:
+            print(f"  Recommended action:  {action}")
+        if autonomy:
+            print(f"  Autonomy level:      {autonomy}")
+        if notif_tpl:
+            print(f"  Notification:        {notif_tpl}")
+        else:
+            print(f"  Notification:        {_DIM}none{_RESET}")
+        if breakdown:
+            print(f"  Signal breakdown:")
+            for signal, weight in sorted(breakdown.items(), key=lambda x: -x[1]):
+                bar = "█" * int(weight * 40) + "░" * (40 - int(weight * 40))
+                print(f"    {signal:<16s} {weight:.4f}  {_DIM}{bar}{_RESET}")
+
+        # Batch metadata (EC08)
+        meta = state.event.metadata or {}
+        if meta.get("source_email_id") or meta.get("batch_po_index"):
+            print(f"\n  {_BOLD}Batch Context (EC08){_RESET}")
+            if meta.get("source_email_id"):
+                print(f"  Source email ID:     {meta['source_email_id']}")
+            if meta.get("batch_po_index"):
+                print(f"  Batch PO index:      {meta['batch_po_index']}")
+
     # Explanation
     if state.explanation:
         print(f"\n  {_BOLD}Explanation{_RESET}")
@@ -307,6 +393,9 @@ def main() -> int:
                              "LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY)")
 
     args = parser.parse_args()
+
+    # Register stub gateways for DuplicatePO dependencies
+    _register_sandbox_gateways()
 
     db = _db_path(args.db)
     if not db.exists():

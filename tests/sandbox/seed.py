@@ -544,6 +544,116 @@ _EDI_EVENTS = [
             },
         }),
     },
+
+    # ---- EC04: Exact resend — Costco PO bounced, resent same order --------
+    # DPO-005: composite 0.92 -> AUTO_BLOCK (all signals high, timestamp lower)
+    {
+        "event_id":    "EVT-DPO-005",
+        "event_type":  "EDI_850_DUPLICATE_PO",
+        "order_id":    "PO-88424",
+        "retailer_id": "R-05",
+        "sku":         "SKU-005",
+        "po_price":    36.0,
+        "sap_price":   36.0,
+        "line_count":  2,
+        "dc_id":       "DC-WEST-01",
+        "metadata":    json.dumps({
+            "signal_scores": {
+                "po_number":     1.0,
+                "customer_id":   1.0,
+                "line_items":    1.0,
+                "amount":        1.0,
+                "timestamp":     0.3,
+                "ship_to":       1.0,
+                "channel":       1.0,
+                "delivery_date": 1.0,
+            },
+            "note": "EC04 — exact resend (first email bounced)",
+        }),
+    },
+
+    # ---- EC08: Multiple POs in single batch email — Amazon weekly batch ---
+    # DPO-006: 1st PO in batch, exact match -> AUTO_BLOCK
+    {
+        "event_id":    "EVT-DPO-006",
+        "event_type":  "EDI_850_DUPLICATE_PO",
+        "order_id":    "PO-AMZ-001",
+        "retailer_id": "R-08",
+        "sku":         "SKU-001",
+        "po_price":    14.88,
+        "sap_price":   14.88,
+        "line_count":  2,
+        "dc_id":       "DC-WEST-01",
+        "metadata":    json.dumps({
+            "signal_scores": {
+                "po_number":     1.0,
+                "customer_id":   1.0,
+                "line_items":    1.0,
+                "amount":        1.0,
+                "timestamp":     0.8,
+                "ship_to":       1.0,
+                "channel":       1.0,
+                "delivery_date": 1.0,
+            },
+            "source_email_id": "EC08-multiple-pos-amazon",
+            "batch_po_index":  1,
+            "note": "EC08 — batch PO 1 of 3, exact match in system",
+        }),
+    },
+    # DPO-007: 2nd PO in batch, partial match -> SOFT_FLAG
+    {
+        "event_id":    "EVT-DPO-007",
+        "event_type":  "EDI_850_DUPLICATE_PO",
+        "order_id":    "PO-AMZ-002",
+        "retailer_id": "R-08",
+        "sku":         "SKU-003",
+        "po_price":    9.60,
+        "sap_price":   9.60,
+        "line_count":  2,
+        "dc_id":       "DC-SOUTH-01",
+        "metadata":    json.dumps({
+            "signal_scores": {
+                "po_number":     0.8,
+                "customer_id":   1.0,
+                "line_items":    0.4,
+                "amount":        0.3,
+                "timestamp":     0.0,
+                "ship_to":       0.5,
+                "channel":       1.0,
+                "delivery_date": 0.5,
+            },
+            "source_email_id": "EC08-multiple-pos-amazon",
+            "batch_po_index":  2,
+            "note": "EC08 — batch PO 2 of 3, partial match",
+        }),
+    },
+    # DPO-008: 3rd PO in batch, no match -> PASS
+    {
+        "event_id":    "EVT-DPO-008",
+        "event_type":  "EDI_850_DUPLICATE_PO",
+        "order_id":    "PO-AMZ-003",
+        "retailer_id": "R-08",
+        "sku":         "SKU-009",
+        "po_price":    8.96,
+        "sap_price":   8.96,
+        "line_count":  1,
+        "dc_id":       "DC-WEST-02",
+        "metadata":    json.dumps({
+            "signal_scores": {
+                "po_number":     0.0,
+                "customer_id":   1.0,
+                "line_items":    0.0,
+                "amount":        0.0,
+                "timestamp":     0.0,
+                "ship_to":       0.0,
+                "channel":       1.0,
+                "delivery_date": 0.0,
+            },
+            "source_email_id": "EC08-multiple-pos-amazon",
+            "batch_po_index":  3,
+            "note": "EC08 — batch PO 3 of 3, no existing match",
+        }),
+    },
 ]
 
 

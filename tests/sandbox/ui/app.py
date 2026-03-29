@@ -34,7 +34,9 @@ if str(_REPO_ROOT) not in sys.path:
 import streamlit as st
 
 # ---- ASOE imports (after path fix) --------------------------------
-from contracts.models import GraphState, Intent, OrderEvent
+from contracts.models import GatewayResponse, GraphState, Intent, OrderEvent
+from gateways.registry import register_gateway, clear_registry
+from gateways.stub import StubGateway
 from orchestration.graph import run_graph
 from tests.sandbox.seed import (
     load_events,
@@ -44,6 +46,44 @@ from tests.sandbox.seed import (
     lookup_credit_profile,
     DB_DEFAULT,
 )
+
+
+def _register_sandbox_gateways() -> None:
+    """Register stub gateways for DuplicatePO resolution context."""
+    clear_registry()
+    oms_stub = StubGateway(
+        "oms",
+        responses={
+            "get_fulfillment_status": GatewayResponse(
+                gateway_name="oms",
+                operation="get_fulfillment_status",
+                status="SUCCESS",
+                data={"fulfilled": False},
+            ),
+            "get_matched_po_details": GatewayResponse(
+                gateway_name="oms",
+                operation="get_matched_po_details",
+                status="SUCCESS",
+                data={
+                    "has_revision_indicator": False,
+                    "line_items_identical": True,
+                },
+            ),
+        },
+    )
+    notification_stub = StubGateway(
+        "buyer_notification",
+        responses={
+            "send": GatewayResponse(
+                gateway_name="buyer_notification",
+                operation="send",
+                status="SUCCESS",
+                data={"delivered": True},
+            ),
+        },
+    )
+    register_gateway(oms_stub)
+    register_gateway(notification_stub)
 
 # ------------------------------------------------------------------
 # Page config
@@ -212,6 +252,13 @@ def _render_sidebar() -> Optional[OrderEvent]:
         submitted   = st.form_submit_button("▶  Run event", type="primary")
 
     if submitted:
+        metadata: Dict[str, Any] = {}
+        if event_type == "EDI_850_DUPLICATE_PO":
+            metadata["signal_scores"] = {
+                "po_number": 1.0, "customer_id": 1.0, "line_items": 1.0,
+                "amount": 1.0, "timestamp": 0.5, "ship_to": 1.0,
+                "channel": 1.0, "delivery_date": 1.0,
+            }
         return OrderEvent(
             order_id=order_id,
             event_type=event_type,
@@ -220,6 +267,7 @@ def _render_sidebar() -> Optional[OrderEvent]:
             sap_base_price=float(sap_price),
             retailer_id=retailer_id,
             line_count=int(line_count),
+            metadata=metadata,
         )
     return None
 
@@ -280,6 +328,53 @@ def _render_trace(state: GraphState) -> None:
     if state.explanation:
         st.subheader("Explanation")
         st.info(state.explanation)
+
+    # ---- Duplicate PO detail (EC04/EC08 scenarios) ----
+    if state.execution_log and intent_val == "DUPLICATE_PO":
+        outputs = state.execution_log.outputs or {}
+        composite = outputs.get("composite_score")
+        classif   = outputs.get("classification")
+        action    = outputs.get("recommended_action")
+        autonomy  = outputs.get("autonomy_level")
+        notif_tpl = outputs.get("notification_template")
+        breakdown = outputs.get("signal_breakdown")
+
+        st.subheader("🔍 Duplicate PO detail")
+        dcol1, dcol2, dcol3 = st.columns(3)
+        if composite is not None:
+            dcol1.metric("Composite score", f"{composite:.4f}")
+        if classif:
+            dcol2.metric("Classification", classif)
+        if action:
+            dcol3.metric("Recommended action", action)
+
+        acol1, acol2 = st.columns(2)
+        if autonomy:
+            acol1.metric("Autonomy level", autonomy)
+        if notif_tpl:
+            acol2.metric("Notification template", notif_tpl)
+        else:
+            acol2.metric("Notification template", "none")
+
+        if breakdown:
+            st.markdown("**Signal breakdown:**")
+            import pandas as _pd
+            df = _pd.DataFrame([
+                {"Signal": sig, "Weight": wt}
+                for sig, wt in sorted(breakdown.items(), key=lambda x: -x[1])
+            ])
+            st.bar_chart(df.set_index("Signal"))
+
+        # Batch metadata (EC08)
+        meta = state.event.metadata or {}
+        if meta.get("source_email_id") or meta.get("batch_po_index"):
+            st.markdown("**Batch context (EC08):**")
+            if meta.get("source_email_id"):
+                st.write(f"Source email ID: `{meta['source_email_id']}`")
+            if meta.get("batch_po_index"):
+                st.write(f"Batch PO index: `{meta['batch_po_index']}`")
+
+        st.divider()
 
     # ---- SKILL.md viewer ----
     skill_md = _load_skill_text(intent_val)
@@ -384,6 +479,9 @@ def _render_data_browser(db: Path) -> None:
 # ------------------------------------------------------------------
 
 def main() -> None:
+    # Register stub gateways for DuplicatePO dependencies
+    _register_sandbox_gateways()
+
     st.title("⚙️  ASOE Execution Sandbox")
     st.caption(
         "Select a seeded EDI event (or enter a custom one) and run it "
