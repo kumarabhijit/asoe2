@@ -333,6 +333,141 @@ class TestDuplicatePORecipe:
         assert result["composite_score"] == 0.0
 
 
+class TestDuplicatePODecisionTree:
+    """Tests for the resolution decision tree (spec §3.2).
+
+    Each test covers one leaf node of the decision tree, verifying that
+    resolution context (original_fulfilled, has_revision_indicator,
+    line_items_identical) refines the recommended_action within a
+    classification tier.
+    """
+
+    def _perfect_signals(self) -> dict:
+        return {k: 1.0 for k in (
+            "po_number", "customer_id", "line_items", "amount",
+            "timestamp", "ship_to", "channel", "delivery_date",
+        )}
+
+    def _review_signals(self) -> dict:
+        """Composite ~0.75 → REVIEW_REQUIRED."""
+        signals = {k: 0.0 for k in (
+            "po_number", "customer_id", "line_items", "amount",
+            "timestamp", "ship_to", "channel", "delivery_date",
+        )}
+        signals.update({"po_number": 1.0, "customer_id": 1.0, "line_items": 1.0, "amount": 1.0})
+        return signals
+
+    # -- AUTO_BLOCK: identical lines + not fulfilled → BLOCK_AND_NOTIFY ------
+
+    def test_auto_block_identical_not_fulfilled_blocks(self):
+        result = detect_duplicate_po(
+            "PO-DT01", "cust-1", self._perfect_signals(),
+            original_fulfilled=False, has_revision_indicator=False, line_items_identical=True,
+        )
+        assert result["classification"] == "AUTO_BLOCK"
+        assert result["recommended_action"] == "BLOCK_AND_NOTIFY"
+
+    # -- AUTO_BLOCK: identical lines + fulfilled → ALLOW_BOTH ----------------
+
+    def test_auto_block_identical_fulfilled_allows_both(self):
+        result = detect_duplicate_po(
+            "PO-DT02", "cust-2", self._perfect_signals(),
+            original_fulfilled=True, has_revision_indicator=False, line_items_identical=True,
+        )
+        assert result["classification"] == "AUTO_BLOCK"
+        assert result["recommended_action"] == "ALLOW_BOTH"
+
+    # -- AUTO_BLOCK: revision indicator → SUPERSEDE --------------------------
+
+    def test_auto_block_revision_indicator_supersedes(self):
+        result = detect_duplicate_po(
+            "PO-DT03", "cust-3", self._perfect_signals(),
+            original_fulfilled=False, has_revision_indicator=True, line_items_identical=False,
+        )
+        assert result["classification"] == "AUTO_BLOCK"
+        assert result["recommended_action"] == "SUPERSEDE"
+
+    # -- AUTO_BLOCK: lines differ + no revision → MERGE ---------------------
+
+    def test_auto_block_lines_differ_no_revision_merges(self):
+        result = detect_duplicate_po(
+            "PO-DT04", "cust-4", self._perfect_signals(),
+            original_fulfilled=False, has_revision_indicator=False, line_items_identical=False,
+        )
+        assert result["classification"] == "AUTO_BLOCK"
+        assert result["recommended_action"] == "MERGE"
+
+    # -- REVIEW_REQUIRED: revision indicator → SUPERSEDE --------------------
+
+    def test_review_required_revision_indicator_supersedes(self):
+        result = detect_duplicate_po(
+            "PO-DT05", "cust-5", self._review_signals(),
+            original_fulfilled=False, has_revision_indicator=True, line_items_identical=False,
+        )
+        assert result["classification"] == "REVIEW_REQUIRED"
+        assert result["recommended_action"] == "SUPERSEDE"
+
+    # -- REVIEW_REQUIRED: identical lines → ESCALATE -----------------------
+
+    def test_review_required_identical_lines_escalates(self):
+        result = detect_duplicate_po(
+            "PO-DT06", "cust-6", self._review_signals(),
+            original_fulfilled=False, has_revision_indicator=False, line_items_identical=True,
+        )
+        assert result["classification"] == "REVIEW_REQUIRED"
+        assert result["recommended_action"] == "ESCALATE"
+
+    # -- REVIEW_REQUIRED: lines differ → REQUEST_BUYER_CONFIRMATION --------
+
+    def test_review_required_lines_differ_requests_confirmation(self):
+        result = detect_duplicate_po(
+            "PO-DT07", "cust-7", self._review_signals(),
+            original_fulfilled=False, has_revision_indicator=False, line_items_identical=False,
+        )
+        assert result["classification"] == "REVIEW_REQUIRED"
+        assert result["recommended_action"] == "REQUEST_BUYER_CONFIRMATION"
+
+    # -- SOFT_FLAG / PASS: context does not change defaults ----------------
+
+    def test_soft_flag_with_context_uses_default(self):
+        """SOFT_FLAG always returns REQUEST_BUYER_CONFIRMATION regardless of context."""
+        signals = {k: 0.0 for k in (
+            "po_number", "customer_id", "line_items", "amount",
+            "timestamp", "ship_to", "channel", "delivery_date",
+        )}
+        signals.update({"po_number": 1.0, "customer_id": 1.0, "line_items": 1.0})  # 0.65
+        result = detect_duplicate_po(
+            "PO-DT08", "cust-8", signals,
+            original_fulfilled=True, has_revision_indicator=False, line_items_identical=True,
+        )
+        assert result["classification"] == "SOFT_FLAG"
+        assert result["recommended_action"] == "REQUEST_BUYER_CONFIRMATION"
+
+    def test_pass_with_context_uses_default(self):
+        """PASS always returns ALLOW_BOTH regardless of context."""
+        result = detect_duplicate_po(
+            "PO-DT09", "cust-9", {k: 0.0 for k in (
+            "po_number", "customer_id", "line_items", "amount",
+            "timestamp", "ship_to", "channel", "delivery_date",
+        )},
+            original_fulfilled=False, has_revision_indicator=True, line_items_identical=False,
+        )
+        assert result["classification"] == "PASS"
+        assert result["recommended_action"] == "ALLOW_BOTH"
+
+    # -- No context → falls back to default --------------------------------
+
+    def test_auto_block_no_context_uses_default(self):
+        result = detect_duplicate_po("PO-DT10", "cust-10", self._perfect_signals())
+        assert result["classification"] == "AUTO_BLOCK"
+        assert result["recommended_action"] == "BLOCK_AND_NOTIFY"
+
+    def test_review_required_no_context_uses_default(self):
+        result = detect_duplicate_po("PO-DT11", "cust-11", self._review_signals())
+        assert result["classification"] == "REVIEW_REQUIRED"
+        assert result["recommended_action"] == "ESCALATE"
+
+
 # ---------------------------------------------------------------------------
 # Architectural invariant: recipes must NOT import from contracts.policy
 # ---------------------------------------------------------------------------

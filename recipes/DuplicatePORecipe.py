@@ -117,12 +117,71 @@ def detect_duplicate_po(
         classification = "PASS"
         status = "PASS"
 
+    # Determine recommended action via decision tree when resolution
+    # context is available, otherwise fall back to default mapping.
+    recommended_action = _resolve_action(
+        classification,
+        original_fulfilled=original_fulfilled,
+        has_revision_indicator=has_revision_indicator,
+        line_items_identical=line_items_identical,
+    )
+
     return {
         "status": status,
         "composite_score": composite_score,
         "classification": classification,
-        "recommended_action": _DEFAULT_ACTIONS[classification],
+        "recommended_action": recommended_action,
         "signal_breakdown": breakdown,
         "incoming_po_number": incoming_po_number,
         "customer_id": customer_id,
     }
+
+
+def _resolve_action(
+    classification: str,
+    *,
+    original_fulfilled: Optional[bool],
+    has_revision_indicator: Optional[bool],
+    line_items_identical: Optional[bool],
+) -> str:
+    """Decision tree mapping (classification + resolution context) → action.
+
+    When all resolution context fields are None (no gateway data), falls back
+    to the default action for the classification tier.
+
+    Decision tree (spec §3.2):
+      AUTO_BLOCK:
+        identical lines + not fulfilled   → BLOCK_AND_NOTIFY  (true duplicate)
+        identical lines + fulfilled       → ALLOW_BOTH        (likely reorder)
+        revision indicator present        → SUPERSEDE
+        lines differ, no revision         → MERGE
+      REVIEW_REQUIRED:
+        revision indicator present        → SUPERSEDE
+        identical lines                   → ESCALATE
+        lines differ                      → REQUEST_BUYER_CONFIRMATION
+      SOFT_FLAG / PASS: default action (low confidence, context doesn't refine)
+    """
+    has_context = any(v is not None for v in (
+        original_fulfilled, has_revision_indicator, line_items_identical,
+    ))
+
+    if not has_context:
+        return _DEFAULT_ACTIONS[classification]
+
+    if classification == "AUTO_BLOCK":
+        if line_items_identical and not original_fulfilled:
+            return "BLOCK_AND_NOTIFY"
+        if line_items_identical and original_fulfilled:
+            return "ALLOW_BOTH"
+        if has_revision_indicator:
+            return "SUPERSEDE"
+        return "MERGE"
+
+    if classification == "REVIEW_REQUIRED":
+        if has_revision_indicator:
+            return "SUPERSEDE"
+        if line_items_identical:
+            return "ESCALATE"
+        return "REQUEST_BUYER_CONFIRMATION"
+
+    return _DEFAULT_ACTIONS[classification]
