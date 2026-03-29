@@ -89,6 +89,7 @@ If `OutlinesConstrainedBackend` fails to initialise (missing `outlines` package)
 | `IntentDecision` | `AllowedIntent` | `CONTRACTUAL_CORRECTION`, `CREDIT_BLOCK`, `MASS_PRICING_ERROR`, `DUPLICATE_PO` |
 | `ShadowDecision` | `AllowedShadowStatus` | `GREEN`, `YELLOW`, `RED` |
 | `RecipeProposal` | `AllowedRecipeName` | `PriceAdjustmentRecipe.py`, `CreditHoldReleaseRecipe.py`, `DuplicatePORecipe.py` |
+| _(recipe output)_ | `AllowedResolutionAction` | `BLOCK_AND_NOTIFY`, `MERGE`, `SUPERSEDE`, `ALLOW_BOTH`, `ESCALATE`, `REQUEST_BUYER_CONFIRMATION` |
 
 ---
 
@@ -233,6 +234,7 @@ No process restart required for either switch — checked at each `run_graph()` 
 | `DUPLICATE_PO_THRESHOLD_AUTO_BLOCK` | `0.90` | `orchestration/nodes.py` → injected into `DuplicatePORecipe` as param |
 | `DUPLICATE_PO_THRESHOLD_REVIEW_REQUIRED` | `0.70` | `orchestration/nodes.py` → injected into `DuplicatePORecipe` as param |
 | `DUPLICATE_PO_THRESHOLD_SOFT_FLAG` | `0.50` | `orchestration/nodes.py` → injected into `DuplicatePORecipe` as param |
+| `DUPLICATE_PO_AUTONOMY_LEVELS` | `dict` (action → L1–L4) | `orchestration/nodes.py` → injected into `DuplicatePORecipe` as param |
 | `MASS_UPDATE_LINE_COUNT_THRESHOLD` | `10` | `constraints/fallback_backend.py` |
 | `CIRCUIT_BREAKER_MAX_UPDATES` | `50` | `orchestration/utils.py` |
 | `CIRCUIT_BREAKER_MAX_VARIANCE` | `10_000.0` | `orchestration/utils.py`, `constraints/fallback_backend.py` |
@@ -391,5 +393,5 @@ Production: Kubernetes manifests in `k8s/` (namespace, deployments, services, se
 | `test_workflows.py` | WorkflowRunner Saga execution and compensation |
 
 ```bash
-python -m pytest   # Expected: 540 passed
+python -m pytest   # Expected: 584 passed
 ```
