@@ -1,0 +1,1124 @@
+{
+  "export_info": {
+    "source": "ASOE Sandbox CLI",
+    "langfuse_version": "2.95.1",
+    "sdk_version": "2.60.10",
+    "total_traces": 22,
+    "total_events": 22
+  },
+  "traces": [
+    {
+      "trace_id": "b6f03dd0-34a1-43e0-81dc-208d8fc87fed",
+      "name": "asoe-graph-execution",
+      "event_id": "PO-88424",
+      "input": {
+        "event_id": "PO-88424"
+      },
+      "output": {
+        "explanation": "Recipe returned BLOCKED.",
+        "final_status": "BLOCKED"
+      },
+      "metadata": {
+        "rag_chunks": [],
+        "gateway_calls": [
+          "buyer_notification/send:SUCCESS",
+          "dep:fulfillment_status:resolved",
+          "dep:matched_po_details:resolved"
+        ],
+        "constrained_output_schemas": {
+          "intent": "IntentDecision",
+          "recipe": "RecipeProposal",
+          "shadow": "ShadowDecisionSchema"
+        }
+      },
+      "observations": [
+        {
+          "name": "classify",
+          "output": {
+            "intent": "DUPLICATE_PO"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "load_skill",
+          "output": {
+            "skill_name": "duplicate-po"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "shadow_audit",
+          "output": {
+            "verdict": "GREEN",
+            "policy_hits": []
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "execute_recipe",
+          "output": {
+            "recipe_name": "DuplicatePORecipe.py"
+          },
+          "level": "DEFAULT"
+        }
+      ]
+    },
+    {
+      "trace_id": "1c68a3a5-884c-4ad7-8bdd-25bfba53cf31",
+      "name": "asoe-graph-execution",
+      "event_id": "PO-9001",
+      "input": {
+        "event_id": "PO-9001"
+      },
+      "output": {
+        "explanation": "Recipe returned BLOCKED.",
+        "final_status": "BLOCKED"
+      },
+      "metadata": {
+        "rag_chunks": [],
+        "gateway_calls": [
+          "buyer_notification/send:SUCCESS",
+          "dep:fulfillment_status:resolved",
+          "dep:matched_po_details:resolved"
+        ],
+        "constrained_output_schemas": {
+          "intent": "IntentDecision",
+          "recipe": "RecipeProposal",
+          "shadow": "ShadowDecisionSchema"
+        }
+      },
+      "observations": [
+        {
+          "name": "classify",
+          "output": {
+            "intent": "DUPLICATE_PO"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "load_skill",
+          "output": {
+            "skill_name": "duplicate-po"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "shadow_audit",
+          "output": {
+            "verdict": "GREEN",
+            "policy_hits": []
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "execute_recipe",
+          "output": {
+            "recipe_name": "DuplicatePORecipe.py"
+          },
+          "level": "DEFAULT"
+        }
+      ]
+    },
+    {
+      "trace_id": "6bb90612-0212-48ee-90df-633b2dadff13",
+      "name": "asoe-graph-execution",
+      "event_id": "PO-9002",
+      "input": {
+        "event_id": "PO-9002"
+      },
+      "output": {
+        "explanation": "Autonomy level L2: REQUEST_BUYER_CONFIRMATION requires human approval.",
+        "final_status": "MANUAL_REVIEW_REQUIRED"
+      },
+      "metadata": {
+        "rag_chunks": [],
+        "gateway_calls": [
+          "buyer_notification/send:SUCCESS",
+          "dep:fulfillment_status:resolved",
+          "dep:matched_po_details:resolved"
+        ],
+        "constrained_output_schemas": {
+          "intent": "IntentDecision",
+          "recipe": "RecipeProposal",
+          "shadow": "ShadowDecisionSchema"
+        }
+      },
+      "observations": [
+        {
+          "name": "classify",
+          "output": {
+            "intent": "DUPLICATE_PO"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "load_skill",
+          "output": {
+            "skill_name": "duplicate-po"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "shadow_audit",
+          "output": {
+            "verdict": "GREEN",
+            "policy_hits": []
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "execute_recipe",
+          "output": {
+            "recipe_name": "DuplicatePORecipe.py"
+          },
+          "level": "DEFAULT"
+        }
+      ]
+    },
+    {
+      "trace_id": "ad5bc5f2-e552-42d3-815f-00d6deaa3024",
+      "name": "asoe-graph-execution",
+      "event_id": "PO-9003",
+      "input": {
+        "event_id": "PO-9003"
+      },
+      "output": {
+        "explanation": "Autonomy level L1: ESCALATE requires human approval.",
+        "final_status": "MANUAL_REVIEW_REQUIRED"
+      },
+      "metadata": {
+        "rag_chunks": [],
+        "gateway_calls": [
+          "buyer_notification/send:SUCCESS",
+          "dep:fulfillment_status:resolved",
+          "dep:matched_po_details:resolved"
+        ],
+        "constrained_output_schemas": {
+          "intent": "IntentDecision",
+          "recipe": "RecipeProposal",
+          "shadow": "ShadowDecisionSchema"
+        }
+      },
+      "observations": [
+        {
+          "name": "classify",
+          "output": {
+            "intent": "DUPLICATE_PO"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "load_skill",
+          "output": {
+            "skill_name": "duplicate-po"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "shadow_audit",
+          "output": {
+            "verdict": "GREEN",
+            "policy_hits": []
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "execute_recipe",
+          "output": {
+            "recipe_name": "DuplicatePORecipe.py"
+          },
+          "level": "DEFAULT"
+        }
+      ]
+    },
+    {
+      "trace_id": "714db467-e4a5-4f4d-9d2e-2601b2fb135a",
+      "name": "asoe-graph-execution",
+      "event_id": "PO-9004",
+      "input": {
+        "event_id": "PO-9004"
+      },
+      "output": {
+        "explanation": "Deterministic execution completed successfully.",
+        "final_status": "COMPLETE"
+      },
+      "metadata": {
+        "rag_chunks": [],
+        "gateway_calls": [
+          "buyer_notification/send:SUCCESS",
+          "dep:fulfillment_status:resolved",
+          "dep:matched_po_details:resolved"
+        ],
+        "constrained_output_schemas": {
+          "intent": "IntentDecision",
+          "recipe": "RecipeProposal",
+          "shadow": "ShadowDecisionSchema"
+        }
+      },
+      "observations": [
+        {
+          "name": "classify",
+          "output": {
+            "intent": "DUPLICATE_PO"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "load_skill",
+          "output": {
+            "skill_name": "duplicate-po"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "shadow_audit",
+          "output": {
+            "verdict": "GREEN",
+            "policy_hits": []
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "execute_recipe",
+          "output": {
+            "recipe_name": "DuplicatePORecipe.py"
+          },
+          "level": "DEFAULT"
+        }
+      ]
+    },
+    {
+      "trace_id": "9744d2ec-a03e-41d7-9a55-52283e5e34e4",
+      "name": "asoe-graph-execution",
+      "event_id": "PO-AMZ-001",
+      "input": {
+        "event_id": "PO-AMZ-001"
+      },
+      "output": {
+        "explanation": "Recipe returned BLOCKED.",
+        "final_status": "BLOCKED"
+      },
+      "metadata": {
+        "rag_chunks": [],
+        "gateway_calls": [
+          "buyer_notification/send:SUCCESS",
+          "dep:fulfillment_status:resolved",
+          "dep:matched_po_details:resolved"
+        ],
+        "constrained_output_schemas": {
+          "intent": "IntentDecision",
+          "recipe": "RecipeProposal",
+          "shadow": "ShadowDecisionSchema"
+        }
+      },
+      "observations": [
+        {
+          "name": "execute_recipe",
+          "output": {
+            "recipe_name": "DuplicatePORecipe.py"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "shadow_audit",
+          "output": {
+            "verdict": "GREEN",
+            "policy_hits": []
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "classify",
+          "output": {
+            "intent": "DUPLICATE_PO"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "load_skill",
+          "output": {
+            "skill_name": "duplicate-po"
+          },
+          "level": "DEFAULT"
+        }
+      ]
+    },
+    {
+      "trace_id": "c4137cee-98d8-41a3-8f38-8bab55260792",
+      "name": "asoe-graph-execution",
+      "event_id": "PO-AMZ-002",
+      "input": {
+        "event_id": "PO-AMZ-002"
+      },
+      "output": {
+        "explanation": "Autonomy level L2: REQUEST_BUYER_CONFIRMATION requires human approval.",
+        "final_status": "MANUAL_REVIEW_REQUIRED"
+      },
+      "metadata": {
+        "rag_chunks": [],
+        "gateway_calls": [
+          "buyer_notification/send:SUCCESS",
+          "dep:fulfillment_status:resolved",
+          "dep:matched_po_details:resolved"
+        ],
+        "constrained_output_schemas": {
+          "intent": "IntentDecision",
+          "recipe": "RecipeProposal",
+          "shadow": "ShadowDecisionSchema"
+        }
+      },
+      "observations": [
+        {
+          "name": "execute_recipe",
+          "output": {
+            "recipe_name": "DuplicatePORecipe.py"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "shadow_audit",
+          "output": {
+            "verdict": "GREEN",
+            "policy_hits": []
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "load_skill",
+          "output": {
+            "skill_name": "duplicate-po"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "classify",
+          "output": {
+            "intent": "DUPLICATE_PO"
+          },
+          "level": "DEFAULT"
+        }
+      ]
+    },
+    {
+      "trace_id": "fa76afab-ef0b-49fb-923d-eb5566b7bcd9",
+      "name": "asoe-graph-execution",
+      "event_id": "PO-AMZ-003",
+      "input": {
+        "event_id": "PO-AMZ-003"
+      },
+      "output": {
+        "explanation": "Deterministic execution completed successfully.",
+        "final_status": "COMPLETE"
+      },
+      "metadata": {
+        "rag_chunks": [],
+        "gateway_calls": [
+          "buyer_notification/send:SUCCESS",
+          "dep:fulfillment_status:resolved",
+          "dep:matched_po_details:resolved"
+        ],
+        "constrained_output_schemas": {
+          "intent": "IntentDecision",
+          "recipe": "RecipeProposal",
+          "shadow": "ShadowDecisionSchema"
+        }
+      },
+      "observations": [
+        {
+          "name": "execute_recipe",
+          "output": {
+            "recipe_name": "DuplicatePORecipe.py"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "shadow_audit",
+          "output": {
+            "verdict": "GREEN",
+            "policy_hits": []
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "load_skill",
+          "output": {
+            "skill_name": "duplicate-po"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "classify",
+          "output": {
+            "intent": "DUPLICATE_PO"
+          },
+          "level": "DEFAULT"
+        }
+      ]
+    },
+    {
+      "trace_id": "f200a2cc-eab6-42b6-849c-bb4684068651",
+      "name": "asoe-graph-execution",
+      "event_id": "SO-1001",
+      "input": {
+        "event_id": "SO-1001"
+      },
+      "output": {
+        "explanation": "Deterministic execution completed successfully.",
+        "final_status": "COMPLETE"
+      },
+      "metadata": {
+        "rag_chunks": [],
+        "gateway_calls": [],
+        "constrained_output_schemas": {
+          "intent": "IntentDecision",
+          "recipe": "RecipeProposal",
+          "shadow": "ShadowDecisionSchema"
+        }
+      },
+      "observations": [
+        {
+          "name": "classify",
+          "output": {
+            "intent": "CONTRACTUAL_CORRECTION"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "load_skill",
+          "output": {
+            "skill_name": "pricing-reconciliation"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "shadow_audit",
+          "output": {
+            "verdict": "GREEN",
+            "policy_hits": []
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "execute_recipe",
+          "output": {
+            "recipe_name": "PriceAdjustmentRecipe.py"
+          },
+          "level": "DEFAULT"
+        }
+      ]
+    },
+    {
+      "trace_id": "69e7f11d-da68-427f-8530-2ca07ff4566b",
+      "name": "asoe-graph-execution",
+      "event_id": "SO-1002",
+      "input": {
+        "event_id": "SO-1002"
+      },
+      "output": {
+        "explanation": "Deterministic execution completed successfully.",
+        "final_status": "COMPLETE"
+      },
+      "metadata": {
+        "rag_chunks": [],
+        "gateway_calls": [],
+        "constrained_output_schemas": {
+          "intent": "IntentDecision",
+          "recipe": "RecipeProposal",
+          "shadow": "ShadowDecisionSchema"
+        }
+      },
+      "observations": [
+        {
+          "name": "classify",
+          "output": {
+            "intent": "CONTRACTUAL_CORRECTION"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "load_skill",
+          "output": {
+            "skill_name": "pricing-reconciliation"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "shadow_audit",
+          "output": {
+            "verdict": "GREEN",
+            "policy_hits": []
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "execute_recipe",
+          "output": {
+            "recipe_name": "PriceAdjustmentRecipe.py"
+          },
+          "level": "DEFAULT"
+        }
+      ]
+    },
+    {
+      "trace_id": "c802bdaf-882c-44a4-a355-c38bbbef0e47",
+      "name": "asoe-graph-execution",
+      "event_id": "SO-1003",
+      "input": {
+        "event_id": "SO-1003"
+      },
+      "output": {
+        "explanation": "Discount 22.00% exceeds 15% threshold.",
+        "final_status": "FAIL_TO_HUMAN"
+      },
+      "metadata": {
+        "rag_chunks": [],
+        "gateway_calls": [],
+        "constrained_output_schemas": {
+          "intent": "IntentDecision",
+          "recipe": "RecipeProposal",
+          "shadow": "ShadowDecisionSchema"
+        }
+      },
+      "observations": [
+        {
+          "name": "classify",
+          "output": {
+            "intent": "CONTRACTUAL_CORRECTION"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "load_skill",
+          "output": {
+            "skill_name": "pricing-reconciliation"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "shadow_audit",
+          "output": {
+            "verdict": "GREEN",
+            "policy_hits": []
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "execute_recipe",
+          "output": {
+            "recipe_name": "PriceAdjustmentRecipe.py"
+          },
+          "level": "DEFAULT"
+        }
+      ]
+    },
+    {
+      "trace_id": "20996fd8-2360-4f6b-a3a4-40747c18e9f9",
+      "name": "asoe-graph-execution",
+      "event_id": "SO-1004",
+      "input": {
+        "event_id": "SO-1004"
+      },
+      "output": {
+        "explanation": "Deterministic execution completed successfully.",
+        "final_status": "COMPLETE"
+      },
+      "metadata": {
+        "rag_chunks": [],
+        "gateway_calls": [],
+        "constrained_output_schemas": {
+          "intent": "IntentDecision",
+          "recipe": "RecipeProposal",
+          "shadow": "ShadowDecisionSchema"
+        }
+      },
+      "observations": [
+        {
+          "name": "classify",
+          "output": {
+            "intent": "CONTRACTUAL_CORRECTION"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "load_skill",
+          "output": {
+            "skill_name": "pricing-reconciliation"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "shadow_audit",
+          "output": {
+            "verdict": "GREEN",
+            "policy_hits": []
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "execute_recipe",
+          "output": {
+            "recipe_name": "PriceAdjustmentRecipe.py"
+          },
+          "level": "DEFAULT"
+        }
+      ]
+    },
+    {
+      "trace_id": "b9f2e2da-bb66-411b-8cb2-ad02fd393f6e",
+      "name": "asoe-graph-execution",
+      "event_id": "SO-1005",
+      "input": {
+        "event_id": "SO-1005"
+      },
+      "output": {
+        "explanation": "Deterministic execution completed successfully.",
+        "final_status": "COMPLETE"
+      },
+      "metadata": {
+        "rag_chunks": [],
+        "gateway_calls": [],
+        "constrained_output_schemas": {
+          "intent": "IntentDecision",
+          "recipe": "RecipeProposal",
+          "shadow": "ShadowDecisionSchema"
+        }
+      },
+      "observations": [
+        {
+          "name": "classify",
+          "output": {
+            "intent": "CONTRACTUAL_CORRECTION"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "load_skill",
+          "output": {
+            "skill_name": "pricing-reconciliation"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "shadow_audit",
+          "output": {
+            "verdict": "GREEN",
+            "policy_hits": []
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "execute_recipe",
+          "output": {
+            "recipe_name": "PriceAdjustmentRecipe.py"
+          },
+          "level": "DEFAULT"
+        }
+      ]
+    },
+    {
+      "trace_id": "34102f93-d995-490c-ba0f-18b24402becb",
+      "name": "asoe-graph-execution",
+      "event_id": "SO-1006",
+      "input": {
+        "event_id": "SO-1006"
+      },
+      "output": {
+        "explanation": "Deterministic execution completed successfully.",
+        "final_status": "COMPLETE"
+      },
+      "metadata": {
+        "rag_chunks": [],
+        "gateway_calls": [],
+        "constrained_output_schemas": {
+          "intent": "IntentDecision",
+          "recipe": "RecipeProposal",
+          "shadow": "ShadowDecisionSchema"
+        }
+      },
+      "observations": [
+        {
+          "name": "classify",
+          "output": {
+            "intent": "CONTRACTUAL_CORRECTION"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "load_skill",
+          "output": {
+            "skill_name": "pricing-reconciliation"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "shadow_audit",
+          "output": {
+            "verdict": "GREEN",
+            "policy_hits": []
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "execute_recipe",
+          "output": {
+            "recipe_name": "PriceAdjustmentRecipe.py"
+          },
+          "level": "DEFAULT"
+        }
+      ]
+    },
+    {
+      "trace_id": "953f3c19-772c-4817-b61f-1dc3f1d64cec",
+      "name": "asoe-graph-execution",
+      "event_id": "SO-1007",
+      "input": {
+        "event_id": "SO-1007"
+      },
+      "output": {
+        "explanation": "Discount 20.00% exceeds 15% threshold.",
+        "final_status": "FAIL_TO_HUMAN"
+      },
+      "metadata": {
+        "rag_chunks": [],
+        "gateway_calls": [],
+        "constrained_output_schemas": {
+          "intent": "IntentDecision",
+          "recipe": "RecipeProposal",
+          "shadow": "ShadowDecisionSchema"
+        }
+      },
+      "observations": [
+        {
+          "name": "classify",
+          "output": {
+            "intent": "CONTRACTUAL_CORRECTION"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "load_skill",
+          "output": {
+            "skill_name": "pricing-reconciliation"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "shadow_audit",
+          "output": {
+            "verdict": "GREEN",
+            "policy_hits": []
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "execute_recipe",
+          "output": {
+            "recipe_name": "PriceAdjustmentRecipe.py"
+          },
+          "level": "DEFAULT"
+        }
+      ]
+    },
+    {
+      "trace_id": "9afbaa58-92af-4d37-a594-658e32c30bbb",
+      "name": "asoe-graph-execution",
+      "event_id": "SO-2001",
+      "input": {
+        "event_id": "SO-2001"
+      },
+      "output": {
+        "explanation": "Compliance Shadow returned YELLOW. Routing to MANUAL_REVIEW_REQUIRED. Credit path requires manual review by policy.",
+        "final_status": "MANUAL_REVIEW_REQUIRED"
+      },
+      "metadata": {
+        "rag_chunks": [],
+        "gateway_calls": [],
+        "constrained_output_schemas": {}
+      },
+      "observations": [
+        {
+          "name": "classify",
+          "output": {
+            "intent": "CREDIT_BLOCK"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "load_skill",
+          "output": {
+            "skill_name": "pricing-reconciliation"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "shadow_audit",
+          "output": {
+            "verdict": "YELLOW",
+            "policy_hits": [
+              "CREDIT_RELEASE_REVIEW"
+            ]
+          },
+          "level": "WARNING"
+        }
+      ]
+    },
+    {
+      "trace_id": "9535247f-3bde-4d58-9200-4ee966d8b186",
+      "name": "asoe-graph-execution",
+      "event_id": "SO-2002",
+      "input": {
+        "event_id": "SO-2002"
+      },
+      "output": {
+        "explanation": "Compliance Shadow returned YELLOW. Routing to MANUAL_REVIEW_REQUIRED. Credit path requires manual review by policy.",
+        "final_status": "MANUAL_REVIEW_REQUIRED"
+      },
+      "metadata": {
+        "rag_chunks": [],
+        "gateway_calls": [],
+        "constrained_output_schemas": {}
+      },
+      "observations": [
+        {
+          "name": "classify",
+          "output": {
+            "intent": "CREDIT_BLOCK"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "load_skill",
+          "output": {
+            "skill_name": "pricing-reconciliation"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "shadow_audit",
+          "output": {
+            "verdict": "YELLOW",
+            "policy_hits": [
+              "CREDIT_RELEASE_REVIEW"
+            ]
+          },
+          "level": "WARNING"
+        }
+      ]
+    },
+    {
+      "trace_id": "4764da37-300c-40c6-8ee3-f07db70bb95a",
+      "name": "asoe-graph-execution",
+      "event_id": "SO-2003",
+      "input": {
+        "event_id": "SO-2003"
+      },
+      "output": {
+        "explanation": "Compliance Shadow returned YELLOW. Routing to MANUAL_REVIEW_REQUIRED. Credit path requires manual review by policy.",
+        "final_status": "MANUAL_REVIEW_REQUIRED"
+      },
+      "metadata": {
+        "rag_chunks": [],
+        "gateway_calls": [],
+        "constrained_output_schemas": {}
+      },
+      "observations": [
+        {
+          "name": "classify",
+          "output": {
+            "intent": "CREDIT_BLOCK"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "load_skill",
+          "output": {
+            "skill_name": "pricing-reconciliation"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "shadow_audit",
+          "output": {
+            "verdict": "YELLOW",
+            "policy_hits": [
+              "CREDIT_RELEASE_REVIEW"
+            ]
+          },
+          "level": "WARNING"
+        }
+      ]
+    },
+    {
+      "trace_id": "a4c531c8-fb02-48ca-ac67-da73b23456af",
+      "name": "asoe-graph-execution",
+      "event_id": "SO-2004",
+      "input": {
+        "event_id": "SO-2004"
+      },
+      "output": {
+        "explanation": "Compliance Shadow returned YELLOW. Routing to MANUAL_REVIEW_REQUIRED. Credit path requires manual review by policy.",
+        "final_status": "MANUAL_REVIEW_REQUIRED"
+      },
+      "metadata": {
+        "rag_chunks": [],
+        "gateway_calls": [],
+        "constrained_output_schemas": {}
+      },
+      "observations": [
+        {
+          "name": "classify",
+          "output": {
+            "intent": "CREDIT_BLOCK"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "load_skill",
+          "output": {
+            "skill_name": "pricing-reconciliation"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "shadow_audit",
+          "output": {
+            "verdict": "YELLOW",
+            "policy_hits": [
+              "CREDIT_RELEASE_REVIEW"
+            ]
+          },
+          "level": "WARNING"
+        }
+      ]
+    },
+    {
+      "trace_id": "509db379-a445-4f4a-b5fc-36386e75ab16",
+      "name": "asoe-graph-execution",
+      "event_id": "SO-3001",
+      "input": {
+        "event_id": "SO-3001"
+      },
+      "output": {
+        "explanation": "Compliance Shadow returned RED. Execution halted. Systemic pricing failure requires human escalation.",
+        "final_status": "BLOCKED"
+      },
+      "metadata": {
+        "rag_chunks": [],
+        "gateway_calls": [],
+        "constrained_output_schemas": {}
+      },
+      "observations": [
+        {
+          "name": "classify",
+          "output": {
+            "intent": "MASS_PRICING_ERROR"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "load_skill",
+          "output": {
+            "skill_name": "pricing-reconciliation"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "shadow_audit",
+          "output": {
+            "verdict": "RED",
+            "policy_hits": [
+              "HITL_REQUIRED_FOR_SYSTEMIC_FAILURE"
+            ]
+          },
+          "level": "WARNING"
+        }
+      ]
+    },
+    {
+      "trace_id": "07e5b3e3-5306-4ed7-80ae-e19c0b1537b0",
+      "name": "asoe-graph-execution",
+      "event_id": "SO-3002",
+      "input": {
+        "event_id": "SO-3002"
+      },
+      "output": {
+        "explanation": "Compliance Shadow returned RED. Execution halted. Systemic pricing failure requires human escalation.",
+        "final_status": "BLOCKED"
+      },
+      "metadata": {
+        "rag_chunks": [],
+        "gateway_calls": [],
+        "constrained_output_schemas": {}
+      },
+      "observations": [
+        {
+          "name": "classify",
+          "output": {
+            "intent": "MASS_PRICING_ERROR"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "load_skill",
+          "output": {
+            "skill_name": "pricing-reconciliation"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "shadow_audit",
+          "output": {
+            "verdict": "RED",
+            "policy_hits": [
+              "HITL_REQUIRED_FOR_SYSTEMIC_FAILURE"
+            ]
+          },
+          "level": "WARNING"
+        }
+      ]
+    },
+    {
+      "trace_id": "d203b655-e860-4b4a-930f-28ec184099dd",
+      "name": "asoe-graph-execution",
+      "event_id": "SO-3003",
+      "input": {
+        "event_id": "SO-3003"
+      },
+      "output": {
+        "explanation": "Compliance Shadow returned RED. Execution halted. Systemic pricing failure requires human escalation.",
+        "final_status": "BLOCKED"
+      },
+      "metadata": {
+        "rag_chunks": [],
+        "gateway_calls": [],
+        "constrained_output_schemas": {}
+      },
+      "observations": [
+        {
+          "name": "classify",
+          "output": {
+            "intent": "MASS_PRICING_ERROR"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "load_skill",
+          "output": {
+            "skill_name": "pricing-reconciliation"
+          },
+          "level": "DEFAULT"
+        },
+        {
+          "name": "shadow_audit",
+          "output": {
+            "verdict": "RED",
+            "policy_hits": [
+              "HITL_REQUIRED_FOR_SYSTEMIC_FAILURE"
+            ]
+          },
+          "level": "WARNING"
+        }
+      ]
+    }
+  ]
+}
