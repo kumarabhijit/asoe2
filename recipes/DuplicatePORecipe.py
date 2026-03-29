@@ -61,6 +61,17 @@ _DEFAULT_ACTIONS: Dict[str, str] = {
     "PASS":             "ALLOW_BOTH",
 }
 
+# Notification template per resolution action (spec §7.3).
+# None means no buyer notification for that action.
+_NOTIFICATION_TEMPLATES: Dict[str, Optional[str]] = {
+    "BLOCK_AND_NOTIFY":           "duplicate_po_blocked",
+    "MERGE":                      "duplicate_po_amended",
+    "SUPERSEDE":                  "duplicate_po_amended",
+    "ALLOW_BOTH":                 None,
+    "ESCALATE":                   None,
+    "REQUEST_BUYER_CONFIRMATION": "duplicate_po_inquiry",
+}
+
 
 def detect_duplicate_po(
     incoming_po_number: str,
@@ -140,6 +151,7 @@ def detect_duplicate_po(
         "classification": classification,
         "recommended_action": recommended_action,
         "autonomy_level": autonomy_level,
+        "notification_template": _NOTIFICATION_TEMPLATES.get(recommended_action),
         "signal_breakdown": breakdown,
         "incoming_po_number": incoming_po_number,
         "customer_id": customer_id,

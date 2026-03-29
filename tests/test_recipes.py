@@ -521,6 +521,65 @@ class TestDuplicatePOAutonomyLevel:
         assert result["autonomy_level"] == "L1"
 
 
+class TestDuplicatePONotificationTemplate:
+    """Tests for notification_template in recipe output (spec §7.3)."""
+
+    _ALL_SIGNALS = {
+        "po_number": 1.0, "customer_id": 1.0, "line_items": 1.0,
+        "amount": 1.0, "timestamp": 1.0, "ship_to": 1.0,
+        "channel": 1.0, "delivery_date": 1.0,
+    }
+
+    def test_block_and_notify_uses_blocked_template(self):
+        result = detect_duplicate_po(
+            "PO-NT01", "cust-1", self._ALL_SIGNALS,
+            original_fulfilled=False, has_revision_indicator=False, line_items_identical=True,
+        )
+        assert result["recommended_action"] == "BLOCK_AND_NOTIFY"
+        assert result["notification_template"] == "duplicate_po_blocked"
+
+    def test_merge_uses_amended_template(self):
+        result = detect_duplicate_po(
+            "PO-NT02", "cust-2", self._ALL_SIGNALS,
+            original_fulfilled=False, has_revision_indicator=False, line_items_identical=False,
+        )
+        assert result["recommended_action"] == "MERGE"
+        assert result["notification_template"] == "duplicate_po_amended"
+
+    def test_supersede_uses_amended_template(self):
+        result = detect_duplicate_po(
+            "PO-NT03", "cust-3", self._ALL_SIGNALS,
+            original_fulfilled=False, has_revision_indicator=True, line_items_identical=False,
+        )
+        assert result["recommended_action"] == "SUPERSEDE"
+        assert result["notification_template"] == "duplicate_po_amended"
+
+    def test_request_buyer_confirmation_uses_inquiry_template(self):
+        signals = {k: 0.0 for k in self._ALL_SIGNALS}
+        signals.update({"po_number": 1.0, "customer_id": 1.0, "line_items": 1.0})  # 0.65 → SOFT_FLAG
+        result = detect_duplicate_po("PO-NT04", "cust-4", signals)
+        assert result["recommended_action"] == "REQUEST_BUYER_CONFIRMATION"
+        assert result["notification_template"] == "duplicate_po_inquiry"
+
+    def test_allow_both_has_no_notification(self):
+        result = detect_duplicate_po(
+            "PO-NT05", "cust-5", self._ALL_SIGNALS,
+            original_fulfilled=True, has_revision_indicator=False, line_items_identical=True,
+        )
+        assert result["recommended_action"] == "ALLOW_BOTH"
+        assert result["notification_template"] is None
+
+    def test_escalate_has_no_notification(self):
+        signals = {k: 0.0 for k in self._ALL_SIGNALS}
+        signals.update({"po_number": 1.0, "customer_id": 1.0, "line_items": 1.0, "amount": 1.0})
+        result = detect_duplicate_po(
+            "PO-NT06", "cust-6", signals,
+            original_fulfilled=False, has_revision_indicator=False, line_items_identical=True,
+        )
+        assert result["recommended_action"] == "ESCALATE"
+        assert result["notification_template"] is None
+
+
 # ---------------------------------------------------------------------------
 # Architectural invariant: recipes must NOT import from contracts.policy
 # ---------------------------------------------------------------------------

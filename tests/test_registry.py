@@ -136,6 +136,16 @@ class TestDuplicatePOSpec:
         for dep in self.spec.dependencies:
             assert dep.gateway_name == "oms"
 
+    def test_gateway_effects_declared(self):
+        assert len(self.spec.effects) == 1
+        assert self.spec.effects[0].gateway_name == "buyer_notification"
+        assert self.spec.effects[0].operation == "send"
+
+    def test_gateway_effect_maps_notification_template(self):
+        effect = self.spec.effects[0]
+        assert "template" in effect.params_from_output
+        assert effect.params_from_output["template"] == "notification_template"
+
 
 # ---------------------------------------------------------------------------
 # get_recipe() — lookup and rejection

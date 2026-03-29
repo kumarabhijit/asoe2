@@ -58,7 +58,7 @@ def _register_oms_stub():
     This stub provides sensible defaults so end-to-end graph tests work without
     real OMS connectivity.
     """
-    stub = StubGateway(
+    oms_stub = StubGateway(
         "oms",
         responses={
             "get_fulfillment_status": GatewayResponse(
@@ -78,7 +78,19 @@ def _register_oms_stub():
             ),
         },
     )
-    register_gateway(stub)
+    notification_stub = StubGateway(
+        "buyer_notification",
+        responses={
+            "send": GatewayResponse(
+                gateway_name="buyer_notification",
+                operation="send",
+                status="SUCCESS",
+                data={"delivered": True},
+            ),
+        },
+    )
+    register_gateway(oms_stub)
+    register_gateway(notification_stub)
     yield
     clear_registry()
 

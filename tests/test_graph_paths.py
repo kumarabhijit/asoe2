@@ -255,6 +255,27 @@ class TestDuplicatePOPath:
         result = run_graph(duplicate_po_event)
         assert result.skill is not None
 
+    def test_duplicate_po_notification_effect_applied(self, duplicate_po_event):
+        """Buyer notification gateway effect is dispatched after recipe execution."""
+        result = run_graph(duplicate_po_event)
+        # BLOCK_AND_NOTIFY → notification_template = "duplicate_po_blocked"
+        assert result.execution_log.outputs.get("notification_template") == "duplicate_po_blocked"
+        # Effect result recorded
+        assert len(result.effect_results) >= 1
+        notif_effect = [e for e in result.effect_results if e.gateway_name == "buyer_notification"]
+        assert len(notif_effect) == 1
+        assert notif_effect[0].status == "SUCCESS"
+
+    def test_duplicate_po_pass_no_notification(self):
+        """PASS → ALLOW_BOTH → no notification template → effect still dispatched but with None template."""
+        state = GraphState(event=OrderEvent(
+            order_id="PO-NTF01", po_price=100.0, sap_base_price=100.0,
+            event_type="EDI_850_DUPLICATE_PO", retailer_id="R-10",
+            metadata={"signal_scores": {}},
+        ))
+        result = run_graph(state)
+        assert result.execution_log.outputs.get("notification_template") is None
+
 
 # ---------------------------------------------------------------------------
 # Loop-safety — graph always terminates (no hidden loops)

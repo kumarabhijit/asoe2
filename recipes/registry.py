@@ -52,6 +52,17 @@ REGISTRY = {
                 result_key="matched_po_details",
             ),
         ),
+        effects=(
+            GatewayEffect(
+                gateway_name="buyer_notification",
+                operation="send",
+                params_from_output={
+                    "template": "notification_template",
+                    "po_number": "incoming_po_number",
+                    "customer_id": "customer_id",
+                },
+            ),
+        ),
     ),
 }
 
