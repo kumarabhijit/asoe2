@@ -102,24 +102,34 @@ Parameter sourcing (where will these values come from at runtime?):
 
 ---
 
-## STEP 3 — UPDATE THE VOCABULARY (all four locations, in this order)
+## STEP 3 — UPDATE THE VOCABULARY (all five sync points, in this order)
 
-Each new intent and recipe name must be added to all four locations.
+Each new intent and recipe name must be added to all locations.
 Drift between them breaks the constrained-generation guarantee.
 
   a. contracts/models.py         — add to Intent enum
   b. constraints/specs.py        — add to AllowedIntent Literal
                                    add to AllowedRecipeName Literal
+                                   if the recipe produces resolution actions,
+                                   add to AllowedResolutionAction Literal
   c. constraints/guidance_backend.py — extend intent_regex() pipe-separated string
                                        extend recipe_name_regex() pipe-separated string
+                                       if resolution actions added, extend
+                                       resolution_action_regex()
   d. recipes/registry.py         — add RecipeSpec entry with:
-                                     name, func, required_params, allowed_intents
+                                     name, func, required_params, allowed_intents,
+                                     dependencies (gateway data needed pre-execution),
+                                     effects (gateway actions post-execution)
+  e. recipes/<Name>Recipe.py     — if the recipe returns a recommended_action,
+                                   its action mapping must use only values from
+                                   AllowedResolutionAction
 
-After updating all four, verify they are in sync:
+After updating, verify sync:
   set(AllowedIntent.__args__) must match the non-UNKNOWN Intent enum values
   set(AllowedRecipeName.__args__) must match set(REGISTRY.keys())
   intent_regex() must fullmatch every AllowedIntent value
   recipe_name_regex() must fullmatch every AllowedRecipeName value
+  resolution_action_regex() must fullmatch every AllowedResolutionAction value
 
 ---
 
@@ -153,7 +163,62 @@ Must NOT contain: weights, thresholds, decision trees, SQL, API specs, UX,
   b. orchestration/nodes.py — validate_types()
      Add an elif branch for the new recipe name.
      Build RecipeInvocation.params from state.event fields and state.event.metadata.
+     If gateway dependencies were declared, inject resolved context from
+     state.resolved_data into recipe params.
+     If autonomy levels apply, inject AUTONOMY_LEVELS from contracts/policy.py.
      Do not compute any business logic here — only extract and map fields.
+
+---
+
+## STEP 5b — GATEWAY DEPENDENCIES AND EFFECTS (if applicable)
+
+If the recipe needs external context to make decisions (e.g., "is the original
+PO fulfilled?"), declare GatewayDependency entries on the RecipeSpec in
+recipes/registry.py.  The resolve_dependencies node will fetch this data via
+gateway adapters before the recipe runs.
+
+If the recipe triggers side effects (e.g., buyer notifications), declare
+GatewayEffect entries on the RecipeSpec.  The apply_effects node will
+dispatch these after recipe execution.
+
+Rules:
+  - Recipes never call gateways directly — they receive resolved data as params
+  - Gateway dependencies resolve FACTS; recipes apply RULES to facts
+  - Register stub gateways in tests/conftest.py for CI (no network calls)
+
+---
+
+## STEP 5c — AUTONOMY-LEVEL ROUTING (if applicable)
+
+If the recipe produces resolution actions with different autonomy tiers
+(L1 observe / L2 recommend / L3 act & inform / L4 full autonomy):
+
+  a. Add an autonomy mapping to contracts/policy.py:
+     <INTENT>_AUTONOMY_LEVELS: dict[str, str] = {
+         "ACTION_NAME": "L2",  # human must approve
+         ...
+     }
+
+  b. Inject the mapping into recipe params via validate_types.
+
+  c. Recipe includes autonomy_level in its output dict.
+
+  d. execute_recipe node checks autonomy_level before status routing:
+     L1/L2 → MANUAL_REVIEW_REQUIRED (human approval required)
+     L3/L4 → normal status routing
+
+---
+
+## STEP 5d — OVERRIDE AUDIT FIELDS (if the recipe supports human overrides)
+
+If humans can override the agent's recommendation for this recipe:
+
+  ExecutionLog already has resolved_by, resolved_action, resolution_notes
+  (Optional[str], default None).  These are populated by the caller
+  (API, UI, workflow runner) when a human overrides — not by the recipe itself.
+
+  TraceRecord extracts these fields automatically via Tracer.build_record().
+  No additional wiring needed.
 
 ---
 

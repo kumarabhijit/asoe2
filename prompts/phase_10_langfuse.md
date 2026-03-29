@@ -86,13 +86,20 @@ Each run_graph() call produces one LangFuse trace:
   trace.input             { event_id }
   trace.output            { final_status, explanation }
   trace.metadata          { constrained_output_schemas,
-                            gateway_calls, rag_chunks }
+                            gateway_calls, rag_chunks,
+                            resolved_by, resolved_action,
+                            resolution_notes }
   span "classify"         intent_selected
   span "load_skill"       skill_name
   span "shadow_audit"     shadow_verdict, shadow_policy_hits
                           (level=WARNING if non-GREEN)
   span "execute_recipe"   recipe_name
   score "terminal_status" 1.0 if COMPLETE, 0.0 otherwise
+
+  Override audit fields (Phase 11.5):
+    resolved_by, resolved_action, resolution_notes are included in
+    trace.metadata when present (non-None).  These capture human
+    overrides of agent recommendations for compliance audit.
 
 terminal_status score values:
 
@@ -199,6 +206,6 @@ DEFINITION OF DONE
 - [ ] k8s secrets wired (secret-provider.yaml)
 - [ ] Sandbox tools show LangFuse status and support --langfuse-flush
 - [ ] Tests cover disabled, mock, and failure paths (network-free)
-- [ ] python -m pytest passes (540+ tests)
+- [ ] python -m pytest passes — all tests pass, zero failures
 - [ ] Docs updated (README, AUDITOR_GUIDE, tasks.md, DESIGN.md)
 ```
