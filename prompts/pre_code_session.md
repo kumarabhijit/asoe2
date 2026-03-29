@@ -47,11 +47,12 @@ In the block, briefly and explicitly answer:
    list every file on both sides that needs coordinated updates.
 
 3. **Constrained vocabulary:** Does this touch a constrained vocabulary?
-   If yes, acknowledge all four sync points:
+   If yes, acknowledge all five sync points:
    - contracts/models.py (Intent enum)
-   - constraints/specs.py (Literal types)
+   - constraints/specs.py (Literal types: AllowedIntent, AllowedRecipeName, AllowedResolutionAction)
    - constraints/guidance_backend.py (regex patterns)
    - constraints/fallback_backend.py (classification branches)
+   - recipes/DuplicatePORecipe.py (resolution action mappings — _DEFAULT_ACTIONS, _NOTIFICATION_TEMPLATES)
 
 4. **Checklist confirmation:** Explicitly state:
    "I confirm all Change Planning Checklist items are met."
