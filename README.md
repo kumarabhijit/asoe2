@@ -8,61 +8,95 @@ ASOE is the Agentic System of Engagement where AI agents and humans collaborate 
 
 ---
 
-## System Context — Where ASOE Fits
+## System Context — The Order Pipeline and Where EMS Fits
 
-Enterprise order-to-cash workflows involve three distinct system layers. ASOE operates as the **exception resolution intelligence** layer — it does not replace or duplicate the other two.
+Enterprise order-to-cash workflows are powered by an **order pipeline** — a chain of statuses and transactions an order goes through from creation to completion. This pipeline is built on three distinct layers, each with a clear responsibility:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        Enterprise Order-to-Cash Flow                        │
-│                                                                             │
-│  ┌───────────────┐     ┌───────────────┐     ┌───────────────────────────┐  │
-│  │               │     │               │     │                           │  │
-│  │   OMS         │     │   EMS         │     │   ASOE                    │  │
-│  │   Order       │     │   ERP         │     │   Exception Resolution    │  │
-│  │   Management  │     │   Management  │     │   Agent                   │  │
-│  │   System      │     │   System      │     │                           │  │
-│  │               │     │               │     │                           │  │
-│  │  • Receives   │────►│  • Prices &   │────►│  • Detects exceptions     │  │
-│  │    purchase   │     │    validates  │     │  • Classifies intent      │  │
-│  │    orders     │     │    orders     │     │  • Audits via compliance  │  │
-│  │  • Manages    │     │  • Manages    │     │    shadow                 │  │
-│  │    order      │     │    SAP/ERP    │     │  • Recommends resolution  │  │
-│  │    lifecycle  │     │    condition  │     │  • Executes deterministic │  │
-│  │  • Tracks     │     │    records   │     │    recipes                │  │
-│  │    fulfillment│     │  • Runs      │     │  • Notifies buyers        │  │
-│  │               │     │    financials│     │  • Routes to humans when  │  │
-│  │               │     │              │     │    policy requires it     │  │
-│  └───────┬───────┘     └──────┬───────┘     └───────────┬───────────────┘  │
-│          │                    │                          │                   │
-│          │         Events (EDI 850, pricing              │                   │
-│          │         mismatches, credit blocks)             │                   │
-│          │                    │                          │                   │
-│          │                    └──────────────────────────┘                   │
-│          │                          ▲         │                              │
-│          │                          │         ▼                              │
-│          │                    Gateway Layer (Hexagonal)                      │
-│          │                    • Reads context from OMS/EMS                   │
-│          │                    • Writes corrections back                      │
-│          └──────────────────────────────────────────────────────────────────│
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph OMS["OMS Layer — System of Action"]
+        direction LR
+        OMS_DESC["Captures orders from EDI 850, API, email, portal<br/>Validates, routes to warehouse, updates shipping<br/>Manages operational lifecycle: what is happening NOW<br/><i>Examples: SAP SD, Oracle OMS, NetSuite, Dynamics</i>"]
+    end
+
+    subgraph EMS["EMS Layer — Control Tower (ASOE)"]
+        direction LR
+        CLASSIFY["Classify<br/>Intent"] --> SHADOW["Shadow<br/>Audit"]
+        SHADOW --> SELECT["Select<br/>Recipe"]
+        SELECT --> EXECUTE["Execute<br/>Recipe"]
+        EXECUTE --> NOTIFY["Notify<br/>Buyer"]
+    end
+
+    subgraph ERP["ERP Layer — System of Record"]
+        direction LR
+        ERP_DESC["Processes clean data: invoicing, general ledger,<br/>condition records, credit, procurement, payroll<br/>Manages financial lifecycle: what HAS happened<br/><i>Examples: SAP S/4HANA, Oracle EBS, NetSuite, Dynamics 365</i>"]
+    end
+
+    OMS -- "Orders flow down<br/>(exceptions detected)" --> EMS
+    EMS -- "Clean data flows down<br/>(corrections applied)" --> ERP
+    EMS -. "Reads context<br/>(gateway deps)" .-> OMS
+    EMS -. "Writes corrections<br/>(gateway effects)" .-> ERP
 ```
 
-### OMS — Order Management System
+### OMS Layer — Order Management System (System of Action)
 
-The **Order Management System** is the system of record for purchase orders. It receives incoming POs (via EDI 850, API, email, or portal), manages the order lifecycle from receipt through fulfillment, and tracks shipment and delivery status. Examples: SAP Sales & Distribution, Oracle Order Management, NetSuite, Microsoft Dynamics.
+The **OMS Layer** is specialized software that manages the full order lifecycle — from entry to fulfillment and returns — across multiple sales channels. It acts as an agile middle layer between customer-facing channels (website, POS, EDI) and the back-office ERP.
 
-**ASOE does not replace OMS.** ASOE queries OMS via gateway dependencies (e.g., "is this PO already fulfilled?") to inform its exception resolution decisions. OMS owns order data; ASOE reads it.
+**What it does:**
+- Pulls orders from Amazon, Shopify, EDI 850, portals, and physical stores into one dashboard
+- Checks real-time stock levels and "available-to-promise" inventory
+- Routes orders to the nearest warehouse for optimal fulfillment
+- Updates customers on shipping status
+- Pushes clean, validated order data to the ERP
 
-### EMS — ERP Management System
+**Also known as:** Order Management Software, Order Fulfillment System, Order Lifecycle Management, Order Orchestration Layer.
 
-The **ERP Management System** is the financial and operational backbone. It manages SAP condition records, pricing master data, credit limits, and financial postings. When ASOE resolves an exception (e.g., a price correction), the corrective action is applied back to the ERP via gateway effects.
+**ASOE reads from the OMS Layer** via gateway dependencies (e.g., "is this PO already fulfilled?", "what are the line items on the matched PO?"). OMS owns order data; ASOE queries it for exception resolution context.
 
-**ASOE does not replace ERP.** ASOE proposes corrections (e.g., "apply condition type YK07 with adjusted price"); the gateway adapter translates this into the appropriate ERP API call (BAPI, OData, RFC).
+### ERP Layer — Enterprise Resource Planning (System of Record)
 
-### ASOE — Agentic System of Exception Resolution
+The **ERP Layer** is the financial and operational backbone of the enterprise. Once orders are "clean" and ready for processing, they flow into the ERP for heavy-duty financial and accounting tasks.
 
-**ASOE is the AI-powered exception resolution agent.** It sits between OMS and ERP, handling the exceptions that fall out of normal order processing:
+**What it does:**
+- Manages SAP condition records, pricing master data, and credit limits
+- Generates invoices and updates the general ledger
+- Tracks total inventory valuation
+- Processes supplier procurement and employee payroll
+- Maintains accounting integrity and compliance
+
+**Also known as:** Back-office System, System of Record, Financial Management System, Enterprise Management System.
+
+**ASOE writes corrections to the ERP Layer** via gateway effects (e.g., "apply condition type YK07 with adjusted price"). The gateway adapter translates this into the appropriate ERP API call (BAPI, OData, RFC).
+
+### Key Differences Between OMS and ERP
+
+| Dimension | OMS Layer | ERP Layer |
+|---|---|---|
+| **Role** | System of Action — *what is happening now* | System of Record — *what has happened* |
+| **Focus** | How to fulfill the order (fast) | How to pay for it (accurate) |
+| **Flexibility** | Agile, designed for changing customer needs | Rigid, focused on accuracy and compliance |
+| **Data** | Real-time operational (inventory, shipping) | Financial and historical (ledger, invoices) |
+
+**Together, OMS and ERP create the order pipeline.** The OMS handles the "messy" start (multi-channel capture, validation, routing), and the ERP handles the structured finish (invoicing, accounting, compliance). But between them, exceptions fall through the cracks.
+
+### EMS Layer — Exception Management System (ASOE)
+
+**This is where ASOE lives.** The EMS Layer is an independent orchestration layer — often called a "Control Tower" — that sits between OMS and ERP as the pipeline's **safety net**.
+
+**Why it must be independent:**
+- **Cross-system visibility** — Many exceptions happen *between* systems (e.g., OMS sent the order but ERP didn't receive it). An internal OMS tool can't see why the ERP failed; the EMS monitors both.
+- **Conflict resolution** — If the OMS thinks an item is in stock but the ERP's warehouse record says it's gone, the EMS identifies the discrepancy and triggers a sync or re-route.
+- **Unified dashboard** — Instead of logging into three systems to find why an order is stuck, the EMS pulls all "red flags" into one view.
+
+**Exception responsibility by type:**
+
+| Exception Type | Where Managed | Goal |
+|---|---|---|
+| Operational (wrong SKU, out of stock) | OMS Layer | Resolve before shipping/billing |
+| Financial (invoice mismatch, credit limit, pricing discrepancy) | ERP Layer / EMS | Maintain accounting integrity |
+| Cross-system (duplicate PO, integration failure, price mismatch between OMS and ERP) | **EMS Layer (ASOE)** | Keep the pipeline moving |
+
+**ASOE handles the exceptions that neither OMS nor ERP can resolve alone:**
 
 - **Pricing discrepancies** — PO price doesn't match SAP base price
 - **Credit blocks** — order held due to credit limit breach
@@ -71,68 +105,50 @@ The **ERP Management System** is the financial and operational backbone. It mana
 
 ASOE classifies the exception, audits the proposed action through a Compliance Shadow, selects a deterministic recipe, and executes it — or routes to a human when policy requires it. Every decision is constrained, traced, and auditable.
 
-```
-Exception Event (from EMS/OMS)
-       │
-       ▼
-   ┌────────┐    ┌──────────┐    ┌────────────┐    ┌─────────┐    ┌─────────┐
-   │Classify│───►│  Shadow  │───►│   Select   │───►│ Execute │───►│ Notify  │
-   │ Intent │    │  Audit   │    │   Recipe   │    │ Recipe  │    │ Buyer   │
-   └────────┘    └──────────┘    └────────────┘    └─────────┘    └─────────┘
-       │           │  │  │            │                 │               │
-   Constrained  GREEN │ RED      Constrained       Pure function   Gateway
-   to 4 intents   │  YELLOW    to 3 recipes       no I/O          effect
-                  │  │  │
-                  │  │  └──► BLOCKED
-                  │  └─────► MANUAL_REVIEW_REQUIRED
-                  ▼
-              PROCEED
-```
-
 ---
 
-## What this system does
+## What ASOE Does (The EMS Pipeline)
 
-When an order exception arrives (e.g. PO price ≠ SAP base price, duplicate PO detected, credit hold triggered), ASOE:
+When an exception event arrives from the OMS or ERP layer (e.g. PO price ≠ SAP base price, duplicate PO detected, credit hold triggered), ASOE:
 
 1. **Classifies intent** — constrained to `CONTRACTUAL_CORRECTION`,
    `CREDIT_BLOCK`, `MASS_PRICING_ERROR`, or `DUPLICATE_PO` (no free-form text enters state transitions)
 2. **Audits via Compliance Shadow** — returns `GREEN` / `YELLOW` / `RED`; halts
    on anything other than `GREEN`
 3. **Selects a deterministic recipe** — constrained to registered names only
-4. **Resolves context** — fetches required data from OMS/ERP via gateway dependencies
+4. **Resolves context** — reads from OMS Layer (fulfillment status, PO details) and ERP Layer (pricing, credit) via gateway dependencies
 5. **Executes the recipe** — immutable business logic, no autonomous reasoning
-6. **Applies effects** — writes corrections and notifications via gateway adapters
+6. **Applies effects** — writes corrections to ERP and notifications to buyers via gateway adapters
 
 No recipe runs unless intent is classified, shadow returns `GREEN`, and all
 parameters are type-validated.
-
-Built on a **Skill–Shadow–Recipe** architecture where every automated action must pass through a Compliance Shadow before execution.
 
 ---
 
 ## Architecture overview
 
-```
-OrderEvent
-    │
-    ▼
- ingest ──► classify ──► load_skill ──► validate_circuit_breaker
-                                                │
-                                          (breach → FAIL_TO_HUMAN)
-                                                │
-                                          shadow_audit
-                                                │
-                                   GREEN ◄──────┤──────► YELLOW → MANUAL_REVIEW_REQUIRED
-                                     │          └──────► RED    → BLOCKED
-                                     ▼
-                              select_recipe ──► validate_types ──► resolve_dependencies
-                                                                         │
-                                                                   (gw fail → FAIL_TO_HUMAN)
-                                                                         │
-                                                                   execute_recipe ──► apply_effects
-                                                                                          │
-                                                                                   COMPLETE / FAIL_TO_HUMAN
+```mermaid
+graph TD
+    EVENT["OrderEvent"] --> INGEST["ingest"]
+    INGEST --> CLASSIFY["classify"]
+    CLASSIFY --> SKILL["load_skill"]
+    SKILL --> CB{"validate_circuit_breaker"}
+
+    CB -- "breach" --> FTH1["FAIL_TO_HUMAN"]
+    CB -- "ok" --> SA{"shadow_audit"}
+
+    SA -- "RED" --> BLOCKED["BLOCKED"]
+    SA -- "YELLOW" --> MRR["MANUAL_REVIEW_REQUIRED"]
+    SA -- "GREEN" --> SR["select_recipe"]
+
+    SR --> VT["validate_types"]
+    VT --> RD{"resolve_dependencies"}
+
+    RD -- "gateway fail" --> FTH2["FAIL_TO_HUMAN"]
+    RD -- "ok" --> ER["execute_recipe"]
+
+    ER --> AE["apply_effects"]
+    AE --> DONE["COMPLETE"]
 ```
 
 **Key invariants:**
