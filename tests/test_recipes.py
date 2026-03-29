@@ -468,6 +468,59 @@ class TestDuplicatePODecisionTree:
         assert result["recommended_action"] == "ESCALATE"
 
 
+class TestDuplicatePOAutonomyLevel:
+    """Tests for autonomy_level field in recipe output."""
+
+    _ALL_SIGNALS = {
+        "po_number": 1.0, "customer_id": 1.0, "line_items": 1.0,
+        "amount": 1.0, "timestamp": 1.0, "ship_to": 1.0,
+        "channel": 1.0, "delivery_date": 1.0,
+    }
+    _AUTONOMY = {
+        "BLOCK_AND_NOTIFY": "L3", "MERGE": "L2", "SUPERSEDE": "L2",
+        "ALLOW_BOTH": "L3", "ESCALATE": "L1", "REQUEST_BUYER_CONFIRMATION": "L2",
+    }
+
+    def test_autonomy_level_present_when_mapping_injected(self):
+        result = detect_duplicate_po(
+            "PO-AL01", "cust-1", self._ALL_SIGNALS, autonomy_levels=self._AUTONOMY,
+        )
+        assert "autonomy_level" in result
+
+    def test_autonomy_level_none_when_no_mapping(self):
+        result = detect_duplicate_po("PO-AL02", "cust-2", self._ALL_SIGNALS)
+        assert result["autonomy_level"] is None
+
+    def test_block_and_notify_is_l3(self):
+        result = detect_duplicate_po(
+            "PO-AL03", "cust-3", self._ALL_SIGNALS,
+            original_fulfilled=False, has_revision_indicator=False,
+            line_items_identical=True, autonomy_levels=self._AUTONOMY,
+        )
+        assert result["recommended_action"] == "BLOCK_AND_NOTIFY"
+        assert result["autonomy_level"] == "L3"
+
+    def test_merge_is_l2(self):
+        result = detect_duplicate_po(
+            "PO-AL04", "cust-4", self._ALL_SIGNALS,
+            original_fulfilled=False, has_revision_indicator=False,
+            line_items_identical=False, autonomy_levels=self._AUTONOMY,
+        )
+        assert result["recommended_action"] == "MERGE"
+        assert result["autonomy_level"] == "L2"
+
+    def test_escalate_is_l1(self):
+        signals = {k: 0.0 for k in self._ALL_SIGNALS}
+        signals.update({"po_number": 1.0, "customer_id": 1.0, "line_items": 1.0, "amount": 1.0})
+        result = detect_duplicate_po(
+            "PO-AL05", "cust-5", signals,
+            original_fulfilled=False, has_revision_indicator=False,
+            line_items_identical=True, autonomy_levels=self._AUTONOMY,
+        )
+        assert result["recommended_action"] == "ESCALATE"
+        assert result["autonomy_level"] == "L1"
+
+
 # ---------------------------------------------------------------------------
 # Architectural invariant: recipes must NOT import from contracts.policy
 # ---------------------------------------------------------------------------

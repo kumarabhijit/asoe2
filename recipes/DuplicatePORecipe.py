@@ -75,6 +75,9 @@ def detect_duplicate_po(
     original_fulfilled: Optional[bool] = None,
     has_revision_indicator: Optional[bool] = None,
     line_items_identical: Optional[bool] = None,
+    # Autonomy level mapping — injected from policy (Phase D).
+    # Maps resolution action → autonomy level string (L1–L4).
+    autonomy_levels: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Score and classify an incoming PO against pre-computed signal scores.
 
@@ -126,11 +129,17 @@ def detect_duplicate_po(
         line_items_identical=line_items_identical,
     )
 
+    # Resolve autonomy level from policy mapping when provided.
+    autonomy_level = None
+    if autonomy_levels:
+        autonomy_level = autonomy_levels.get(recommended_action)
+
     return {
         "status": status,
         "composite_score": composite_score,
         "classification": classification,
         "recommended_action": recommended_action,
+        "autonomy_level": autonomy_level,
         "signal_breakdown": breakdown,
         "incoming_po_number": incoming_po_number,
         "customer_id": customer_id,

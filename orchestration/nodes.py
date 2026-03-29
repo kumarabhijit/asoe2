@@ -38,6 +38,7 @@ from hardening.explain_mode import build_explain_summary
 from contracts.policy import (
     CREDIT_AUTHORIZED_ROLES,
     CREDIT_EXPOSURE_TOLERANCE,
+    DUPLICATE_PO_AUTONOMY_LEVELS,
     DUPLICATE_PO_THRESHOLD_AUTO_BLOCK,
     DUPLICATE_PO_THRESHOLD_REVIEW_REQUIRED,
     DUPLICATE_PO_THRESHOLD_SOFT_FLAG,
@@ -234,6 +235,7 @@ def validate_types(state: GraphState) -> GraphState:
                 "original_fulfilled": fulfillment.get("fulfilled", None),
                 "has_revision_indicator": matched_details.get("has_revision_indicator", None),
                 "line_items_identical": matched_details.get("line_items_identical", None),
+                "autonomy_levels": DUPLICATE_PO_AUTONOMY_LEVELS,
             },
         )
     return state
@@ -375,7 +377,17 @@ def execute_recipe(state: GraphState) -> GraphState:
         return state
 
     recipe_status = log.outputs.get("status")
-    if recipe_status == "FAILED":
+
+    # Autonomy routing takes precedence when present: L1/L2 actions require
+    # human approval regardless of recipe classification status.
+    autonomy = log.outputs.get("autonomy_level")
+    if autonomy in ("L1", "L2"):
+        state.final_status = TerminalStatus.MANUAL_REVIEW_REQUIRED
+        action = log.outputs.get("recommended_action", "")
+        state.explanation = (
+            f"Autonomy level {autonomy}: {action} requires human approval."
+        )
+    elif recipe_status == "FAILED":
         state.final_status = TerminalStatus.FAIL_TO_HUMAN
         state.explanation = log.outputs.get("reason", "Recipe returned FAILED.")
     elif recipe_status == "BLOCKED":
@@ -384,6 +396,9 @@ def execute_recipe(state: GraphState) -> GraphState:
     elif recipe_status == "REJECTED":
         state.final_status = TerminalStatus.REJECTED
         state.explanation = log.outputs.get("reason", "Recipe returned REJECTED.")
+    elif recipe_status == "REVIEW_REQUIRED":
+        state.final_status = TerminalStatus.MANUAL_REVIEW_REQUIRED
+        state.explanation = log.outputs.get("reason", "Recipe returned REVIEW_REQUIRED.")
     else:
         state.final_status = TerminalStatus.COMPLETE
         state.explanation = "Deterministic execution completed successfully."

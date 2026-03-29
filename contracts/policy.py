@@ -42,6 +42,19 @@ DUPLICATE_PO_THRESHOLD_REVIEW_REQUIRED: float = 0.70
 DUPLICATE_PO_THRESHOLD_SOFT_FLAG: float = 0.50
 """Composite score at or above which a PO is soft-flagged."""
 
+# Autonomy level per resolution action (spec §3.3).
+# L4 = full autonomy (auto-execute), L3 = act & inform, L2 = recommend
+# (human must approve), L1 = observe only.
+DUPLICATE_PO_AUTONOMY_LEVELS: dict[str, str] = {
+    "BLOCK_AND_NOTIFY": "L3",
+    "MERGE": "L2",
+    "SUPERSEDE": "L2",
+    "ALLOW_BOTH": "L3",
+    "ESCALATE": "L1",
+    "REQUEST_BUYER_CONFIRMATION": "L2",
+}
+"""Maps resolution action → autonomy level for routing decisions."""
+
 # ---------------------------------------------------------------------------
 # Mass-update / line-count threshold
 # ---------------------------------------------------------------------------
