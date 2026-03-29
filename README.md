@@ -1,21 +1,105 @@
-# ASOE — Agentic Systems of Engagement
-ASOE is the Agentic System of Engagement where AI agents and humans collaborate to take action across enterprise systems. AI agents diagnose root causes, resolve exceptions autonomously, and keep every stakeholder informed. A deterministic (???? - why deterministic only) compliance-first orchestration scaffold for order management related exceptions handling along with customer comminucation management, conversational chat and reporting. Built on a **Skill–Shadow–Recipe** architecture where every automated action must pass through a Compliance Shadow before execution.
+# ASOE — Agentic System of Exception Resolution
+
+## System Context — Where ASOE Fits
+
+Enterprise order-to-cash workflows involve three distinct system layers. ASOE operates as the **exception resolution intelligence** layer — it does not replace or duplicate the other two.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        Enterprise Order-to-Cash Flow                        │
+│                                                                             │
+│  ┌───────────────┐     ┌───────────────┐     ┌───────────────────────────┐  │
+│  │               │     │               │     │                           │  │
+│  │   OMS         │     │   EMS         │     │   ASOE                    │  │
+│  │   Order       │     │   ERP         │     │   Exception Resolution    │  │
+│  │   Management  │     │   Management  │     │   Agent                   │  │
+│  │   System      │     │   System      │     │                           │  │
+│  │               │     │               │     │                           │  │
+│  │  • Receives   │────►│  • Prices &   │────►│  • Detects exceptions     │  │
+│  │    purchase   │     │    validates  │     │  • Classifies intent      │  │
+│  │    orders     │     │    orders     │     │  • Audits via compliance  │  │
+│  │  • Manages    │     │  • Manages    │     │    shadow                 │  │
+│  │    order      │     │    SAP/ERP    │     │  • Recommends resolution  │  │
+│  │    lifecycle  │     │    condition  │     │  • Executes deterministic │  │
+│  │  • Tracks     │     │    records   │     │    recipes                │  │
+│  │    fulfillment│     │  • Runs      │     │  • Notifies buyers        │  │
+│  │               │     │    financials│     │  • Routes to humans when  │  │
+│  │               │     │              │     │    policy requires it     │  │
+│  └───────┬───────┘     └──────┬───────┘     └───────────┬───────────────┘  │
+│          │                    │                          │                   │
+│          │         Events (EDI 850, pricing              │                   │
+│          │         mismatches, credit blocks)             │                   │
+│          │                    │                          │                   │
+│          │                    └──────────────────────────┘                   │
+│          │                          ▲         │                              │
+│          │                          │         ▼                              │
+│          │                    Gateway Layer (Hexagonal)                      │
+│          │                    • Reads context from OMS/EMS                   │
+│          │                    • Writes corrections back                      │
+│          └──────────────────────────────────────────────────────────────────│
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### OMS — Order Management System
+
+The **Order Management System** is the system of record for purchase orders. It receives incoming POs (via EDI 850, API, email, or portal), manages the order lifecycle from receipt through fulfillment, and tracks shipment and delivery status. Examples: SAP Sales & Distribution, Oracle Order Management, NetSuite, Microsoft Dynamics.
+
+**ASOE does not replace OMS.** ASOE queries OMS via gateway dependencies (e.g., "is this PO already fulfilled?") to inform its exception resolution decisions. OMS owns order data; ASOE reads it.
+
+### EMS — ERP Management System
+
+The **ERP Management System** is the financial and operational backbone. It manages SAP condition records, pricing master data, credit limits, and financial postings. When ASOE resolves an exception (e.g., a price correction), the corrective action is applied back to the ERP via gateway effects.
+
+**ASOE does not replace ERP.** ASOE proposes corrections (e.g., "apply condition type YK07 with adjusted price"); the gateway adapter translates this into the appropriate ERP API call (BAPI, OData, RFC).
+
+### ASOE — Agentic System of Exception Resolution
+
+**ASOE is the AI-powered exception resolution agent.** It sits between OMS and ERP, handling the exceptions that fall out of normal order processing:
+
+- **Pricing discrepancies** — PO price doesn't match SAP base price
+- **Credit blocks** — order held due to credit limit breach
+- **Duplicate purchase orders** — same PO arrives via multiple channels
+- **Mass pricing errors** — systemic failures affecting many line items
+
+ASOE classifies the exception, audits the proposed action through a Compliance Shadow, selects a deterministic recipe, and executes it — or routes to a human when policy requires it. Every decision is constrained, traced, and auditable.
+
+```
+Exception Event (from EMS/OMS)
+       │
+       ▼
+   ┌────────┐    ┌──────────┐    ┌────────────┐    ┌─────────┐    ┌─────────┐
+   │Classify│───►│  Shadow  │───►│   Select   │───►│ Execute │───►│ Notify  │
+   │ Intent │    │  Audit   │    │   Recipe   │    │ Recipe  │    │ Buyer   │
+   └────────┘    └──────────┘    └────────────┘    └─────────┘    └─────────┘
+       │           │  │  │            │                 │               │
+   Constrained  GREEN │ RED      Constrained       Pure function   Gateway
+   to 4 intents   │  YELLOW    to 3 recipes       no I/O          effect
+                  │  │  │
+                  │  │  └──► BLOCKED
+                  │  └─────► MANUAL_REVIEW_REQUIRED
+                  ▼
+              PROCEED
+```
+
 ---
 
 ## What this system does
 
-When a retailer order has a price discrepancy (e.g. PO price ≠ SAP base price),
-the system:
+When an order exception arrives (e.g. PO price ≠ SAP base price, duplicate PO detected, credit hold triggered), ASOE:
 
 1. **Classifies intent** — constrained to `CONTRACTUAL_CORRECTION`,
    `CREDIT_BLOCK`, `MASS_PRICING_ERROR`, or `DUPLICATE_PO` (no free-form text enters state transitions)
 2. **Audits via Compliance Shadow** — returns `GREEN` / `YELLOW` / `RED`; halts
    on anything other than `GREEN`
 3. **Selects a deterministic recipe** — constrained to registered names only
-4. **Executes the recipe** — immutable business logic, no autonomous reasoning
+4. **Resolves context** — fetches required data from OMS/ERP via gateway dependencies
+5. **Executes the recipe** — immutable business logic, no autonomous reasoning
+6. **Applies effects** — writes corrections and notifications via gateway adapters
 
 No recipe runs unless intent is classified, shadow returns `GREEN`, and all
 parameters are type-validated.
+
+Built on a **Skill–Shadow–Recipe** architecture where every automated action must pass through a Compliance Shadow before execution.
 
 ---
 
@@ -100,7 +184,7 @@ bash scripts/apply-patches.sh .venv/bin/python   # re-run after any pydantic rei
 python -m pytest
 ```
 
-Expected: **540 passed, 0 failed, 1 warning** (the warning is from `langchain_core` pydantic.v1 deprecation — not a blocker).
+Expected: **584 passed, 0 failed** (a warning from `langchain_core` pydantic.v1 deprecation may appear — not a blocker).
 
 > **Verified on Python 3.14.3 (stable).**
 
@@ -507,11 +591,11 @@ See `architecture_v2.md` §2 for the full Azure infrastructure stack.
 
 ```
 contracts/          Typed Pydantic models — OrderEvent, GraphState, ExecutionLog, …
-  policy.py         Centralised business thresholds (discount limits, circuit breaker bounds, etc.)
+  policy.py         Centralised business thresholds (discount limits, circuit breaker bounds, autonomy levels, etc.)
 skills/             SKILL.md files (loaded verbatim, never rewritten)
 compliance/         Compliance Shadow — audit() + enforce()
 constraints/        Constrained-generation schemas, backends, router
-  specs.py          AllowedIntent / AllowedShadowStatus / AllowedRecipeName Literals
+  specs.py          AllowedIntent / AllowedShadowStatus / AllowedRecipeName / AllowedResolutionAction Literals
   fallback_backend.py  DeterministicFallbackBackend (rule-based, no LLM)
   guidance_backend.py  GuidanceRegexBackend (regex patterns for Guidance / Outlines)
   router.py         get_constrained_backend() — env-driven backend selection
@@ -535,7 +619,7 @@ observability/      Structured tracing with optional LangFuse forwarding
 hardening/          Kill switch + explain mode implementation
 docs/               AUDITOR_GUIDE.md
   specs/            Product-owner reference specs (not runtime code)
-tests/              pytest test suite (540 tests)
+tests/              pytest test suite (584 tests)
   sandbox/          Local execution sandbox (not part of CI test suite)
     cli.py          Headless CLI runner — run events from the terminal (no Streamlit needed)
     seed.py         SQLite seeder — creates sandbox.db with customers, DCs, promotions, SAP / EDI data
@@ -598,6 +682,7 @@ k8s/                Kubernetes manifests for AKS production deployment
 | 8 | Local execution sandbox — SQLite seeder, Streamlit UI, LocalHFBackend (Outlines + HuggingFace) |
 | 9 | Containerized deployment — 3 Dockerfiles (core/ui/inference), docker-compose for local dev, K8s manifests for AKS |
 | Review | Triple-Check Technical Review Board — resolved 10 findings (1 Critical, 1 High, 8 Medium); 7 Low findings debated and accepted (SKIP); test count 490 → 525 → 540 (LangFuse) |
+| 11 | Duplicate PO product spec gap closure — 6 resolution actions, decision tree, autonomy levels (L1–L4), override audit fields, buyer notification gateway effects; test count 540 → 584 |
 
 ---
 
@@ -730,7 +815,7 @@ constrained vocabulary:
 
 | File | What it does |
 |---|---|
-| `constraints/specs.py` | Defines `AllowedIntent`, `AllowedShadowStatus`, `AllowedRecipeName` Pydantic Literals and the output schemas (`IntentDecision`, `ShadowDecisionSchema`, `RecipeProposal`) |
+| `constraints/specs.py` | Defines `AllowedIntent`, `AllowedShadowStatus`, `AllowedRecipeName`, `AllowedResolutionAction` Pydantic Literals and the output schemas (`IntentDecision`, `ShadowDecisionSchema`, `RecipeProposal`) |
 | `constraints/fallback_backend.py` | Rule-based backend used in CI/tests; must return values in the allowed vocabulary |
 | `constraints/guidance_backend.py` | Regex patterns for Guidance / Outlines backends; must match the allowed vocabulary exactly |
 
@@ -955,4 +1040,5 @@ human-facing `explanation` fields.
 | Intent | `AllowedIntent` Literal | `IntentDecision` |
 | Shadow verdict | `AllowedShadowStatus` Literal | `ShadowDecision` |
 | Recipe name | `AllowedRecipeName` Literal + registry `KeyError` | `RecipeProposal` |
+| Resolution action | `AllowedResolutionAction` Literal | Recipe output `recommended_action` |
 | Recipe params | Pydantic `RecipeInvocation` + required-param check | `RecipeInvocation` |
