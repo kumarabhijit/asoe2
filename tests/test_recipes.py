@@ -274,7 +274,7 @@ class TestDuplicatePORecipe:
         signals.update({"po_number": 1.0, "customer_id": 1.0, "line_items": 1.0, "amount": 1.0})
         result = detect_duplicate_po("PO-002", "cust-2", signals)
         assert result["status"] == "REVIEW_REQUIRED"
-        assert result["recommended_action"] == "ESCALATE"
+        assert result["recommended_action"] == "ESCALATE"  # REVIEW_REQUIRED default
 
     # -- SOFT_FLAG path (0.50 <= score < 0.70) -----------------------------
 
@@ -284,14 +284,14 @@ class TestDuplicatePORecipe:
         signals.update({"po_number": 1.0, "customer_id": 1.0, "line_items": 1.0})
         result = detect_duplicate_po("PO-003", "cust-3", signals)
         assert result["status"] == "SOFT_FLAG"
-        assert result["recommended_action"] == "ANNOTATE_AND_PASS"
+        assert result["recommended_action"] == "REQUEST_BUYER_CONFIRMATION"
 
     # -- PASS path (score < 0.50) ------------------------------------------
 
     def test_no_signals_is_pass(self):
         result = detect_duplicate_po("PO-004", "cust-4", self._no_signals())
         assert result["status"] == "PASS"
-        assert result["recommended_action"] == "ALLOW"
+        assert result["recommended_action"] == "ALLOW_BOTH"
 
     def test_composite_score_zero_for_no_signals(self):
         result = detect_duplicate_po("PO-004", "cust-4", self._no_signals())

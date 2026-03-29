@@ -27,7 +27,7 @@ from __future__ import annotations
 #   - MASS_PRICING_ERROR intent routes to FAIL_TO_HUMAN upstream; this recipe
 #     is invoked only for DUPLICATE_PO intent.
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 # ---------------------------------------------------------------------------
 # Signal weights — sourced from the product specification.
@@ -51,11 +51,14 @@ assert abs(sum(_WEIGHTS.values()) - 1.0) < 1e-9, "Signal weights must sum to 1.0
 # Action mapping — one deterministic action per classification
 # ---------------------------------------------------------------------------
 
-_RECOMMENDED_ACTIONS: Dict[str, str] = {
+# Default action per classification — used when no resolution context is
+# available.  When resolution_context is provided (Phase C), the decision
+# tree refines the action within each classification tier.
+_DEFAULT_ACTIONS: Dict[str, str] = {
     "AUTO_BLOCK":       "BLOCK_AND_NOTIFY",
     "REVIEW_REQUIRED":  "ESCALATE",
-    "SOFT_FLAG":        "ANNOTATE_AND_PASS",
-    "PASS":             "ALLOW",
+    "SOFT_FLAG":        "REQUEST_BUYER_CONFIRMATION",
+    "PASS":             "ALLOW_BOTH",
 }
 
 
@@ -112,7 +115,7 @@ def detect_duplicate_po(
         "status": status,
         "composite_score": composite_score,
         "classification": classification,
-        "recommended_action": _RECOMMENDED_ACTIONS[classification],
+        "recommended_action": _DEFAULT_ACTIONS[classification],
         "signal_breakdown": breakdown,
         "incoming_po_number": incoming_po_number,
         "customer_id": customer_id,

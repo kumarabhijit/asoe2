@@ -7,7 +7,7 @@ import pytest
 
 from constraints.fallback_backend import DeterministicFallbackBackend
 from constraints.guidance_backend import GuidanceRegexBackend
-from constraints.specs import AllowedIntent, AllowedRecipeName, AllowedShadowStatus
+from constraints.specs import AllowedIntent, AllowedRecipeName, AllowedResolutionAction, AllowedShadowStatus
 from contracts.models import Intent
 
 
@@ -160,6 +160,19 @@ class TestGuidanceRegexBackend:
         assert not pattern.fullmatch("SomeOtherRecipe.py")
         assert not pattern.fullmatch("")
 
+    def test_resolution_action_regex_matches_all_six_actions(self):
+        pattern = re.compile(GuidanceRegexBackend().resolution_action_regex())
+        for action in (
+            "BLOCK_AND_NOTIFY", "MERGE", "SUPERSEDE",
+            "ALLOW_BOTH", "ESCALATE", "REQUEST_BUYER_CONFIRMATION",
+        ):
+            assert pattern.fullmatch(action), f"Pattern did not match {action}"
+
+    def test_resolution_action_regex_rejects_old_actions(self):
+        pattern = re.compile(GuidanceRegexBackend().resolution_action_regex())
+        assert not pattern.fullmatch("ANNOTATE_AND_PASS")
+        assert not pattern.fullmatch("ALLOW")
+
 
 # ---------------------------------------------------------------------------
 # Vocabulary sync — GuidanceRegexBackend ↔ AllowedIntent / AllowedShadowStatus
@@ -235,4 +248,18 @@ class TestVocabularySyncGuidanceToLiterals:
         for value in get_args(AllowedIntent):
             assert value in intent_values, (
                 f"AllowedIntent value {value!r} is not a member of the Intent enum"
+            )
+
+    def test_resolution_action_regex_covers_all_allowed_values(self):
+        pattern = re.compile(GuidanceRegexBackend().resolution_action_regex())
+        for value in get_args(AllowedResolutionAction):
+            assert pattern.fullmatch(value), (
+                f"resolution_action_regex() does not cover AllowedResolutionAction value: {value!r}"
+            )
+
+    def test_resolution_action_regex_rejects_unknown(self):
+        pattern = re.compile(GuidanceRegexBackend().resolution_action_regex())
+        for unknown in ("ANNOTATE_AND_PASS", "ALLOW", "DENY", ""):
+            assert not pattern.fullmatch(unknown), (
+                f"resolution_action_regex() accepted {unknown!r} which is not a valid resolution action"
             )

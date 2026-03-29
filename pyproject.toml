@@ -2,7 +2,7 @@
 name = "asoe"
 version = "0.3.2"
 description = "Starter scaffold for a deterministic skill-shadow-recipe pricing exception system with constrained generation"
-requires-python = ">=3.14"
+requires-python = ">=3.11"
 dependencies = [
   "langgraph>=0.2.0",
   "pydantic>=2.7.0",
