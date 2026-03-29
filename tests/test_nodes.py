@@ -610,6 +610,26 @@ class TestDuplicatePOValidateTypesNode:
         assert isinstance(scores, dict)
         assert scores.get("po_number") == 1.0
 
+    def test_duplicate_po_resolution_context_from_resolved_data(self, duplicate_po_event):
+        """Gateway-resolved context flows into recipe params."""
+        duplicate_po_event.selected_recipe = "DuplicatePORecipe.py"
+        duplicate_po_event.resolved_data = {
+            "fulfillment_status": {"fulfilled": True},
+            "matched_po_details": {"has_revision_indicator": True, "line_items_identical": False},
+        }
+        result = validate_types(duplicate_po_event)
+        assert result.invocation.params["original_fulfilled"] is True
+        assert result.invocation.params["has_revision_indicator"] is True
+        assert result.invocation.params["line_items_identical"] is False
+
+    def test_duplicate_po_resolution_context_defaults_when_no_gateway_data(self, duplicate_po_event):
+        """Without gateway data, resolution context params are None."""
+        duplicate_po_event.selected_recipe = "DuplicatePORecipe.py"
+        result = validate_types(duplicate_po_event)
+        assert result.invocation.params["original_fulfilled"] is None
+        assert result.invocation.params["has_revision_indicator"] is None
+        assert result.invocation.params["line_items_identical"] is None
+
 
 class TestDuplicatePOExecuteRecipeNode:
     def test_duplicate_po_auto_block(self, duplicate_po_event):

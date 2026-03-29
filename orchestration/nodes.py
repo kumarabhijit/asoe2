@@ -217,6 +217,11 @@ def validate_types(state: GraphState) -> GraphState:
             },
         )
     elif state.selected_recipe == "DuplicatePORecipe.py":
+        # Resolution context — resolved by gateway dependencies (Phase B).
+        # Falls back to None when gateways have not been called (e.g. tests
+        # without gateway setup).
+        fulfillment = state.resolved_data.get("fulfillment_status", {})
+        matched_details = state.resolved_data.get("matched_po_details", {})
         state.invocation = RecipeInvocation(
             recipe_name=state.selected_recipe,
             params={
@@ -226,6 +231,9 @@ def validate_types(state: GraphState) -> GraphState:
                 "threshold_auto_block": DUPLICATE_PO_THRESHOLD_AUTO_BLOCK,
                 "threshold_review_required": DUPLICATE_PO_THRESHOLD_REVIEW_REQUIRED,
                 "threshold_soft_flag": DUPLICATE_PO_THRESHOLD_SOFT_FLAG,
+                "original_fulfilled": fulfillment.get("fulfilled", None),
+                "has_revision_indicator": matched_details.get("has_revision_indicator", None),
+                "line_items_identical": matched_details.get("line_items_identical", None),
             },
         )
     return state

@@ -126,6 +126,16 @@ class TestDuplicatePOSpec:
         with pytest.raises((AttributeError, TypeError)):
             self.spec.name = "tampered"  # type: ignore[misc]
 
+    def test_gateway_dependencies_declared(self):
+        assert len(self.spec.dependencies) == 2
+        dep_ops = {d.operation for d in self.spec.dependencies}
+        assert "get_fulfillment_status" in dep_ops
+        assert "get_matched_po_details" in dep_ops
+
+    def test_gateway_dependencies_target_oms(self):
+        for dep in self.spec.dependencies:
+            assert dep.gateway_name == "oms"
+
 
 # ---------------------------------------------------------------------------
 # get_recipe() — lookup and rejection

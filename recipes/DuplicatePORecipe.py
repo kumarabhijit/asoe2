@@ -69,6 +69,12 @@ def detect_duplicate_po(
     threshold_auto_block: float = 0.90,
     threshold_review_required: float = 0.70,
     threshold_soft_flag: float = 0.50,
+    # Resolution context — resolved by gateway dependencies (Phase B).
+    # When None, the recipe falls back to the default action per classification.
+    # When provided, the decision tree (Phase C) refines the action.
+    original_fulfilled: Optional[bool] = None,
+    has_revision_indicator: Optional[bool] = None,
+    line_items_identical: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Score and classify an incoming PO against pre-computed signal scores.
 
