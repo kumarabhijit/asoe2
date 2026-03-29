@@ -1,4 +1,12 @@
-# ASOE — Agentic System of Exception Resolution
+# ASOE — Agentic Systems of Engagement
+
+## Project Vision
+
+ASOE is the Agentic System of Engagement where AI agents and humans collaborate to take action across enterprise systems. AI agents diagnose root causes, resolve exceptions autonomously, and keep every stakeholder informed. A compliance-first orchestration platform for order management exception handling, customer communication management, conversational chat, and reporting. Built on a **Skill–Shadow–Recipe** architecture where every automated action must pass through a Compliance Shadow before execution.
+
+> **Why deterministic?** In enterprise order-to-cash, predictability is non-negotiable. Every resolution must be auditable, reproducible, and explainable. ASOE uses deterministic recipes for execution while reserving AI reasoning for classification, context understanding, and explanation generation — the best of both worlds.
+
+---
 
 ## System Context — Where ASOE Fits
 
