@@ -274,7 +274,7 @@ class TestDuplicatePORecipe:
         signals.update({"po_number": 1.0, "customer_id": 1.0, "line_items": 1.0, "amount": 1.0})
         result = detect_duplicate_po("PO-002", "cust-2", signals)
         assert result["status"] == "REVIEW_REQUIRED"
-        assert result["recommended_action"] == "ESCALATE"
+        assert result["recommended_action"] == "ESCALATE"  # REVIEW_REQUIRED default
 
     # -- SOFT_FLAG path (0.50 <= score < 0.70) -----------------------------
 
@@ -284,14 +284,14 @@ class TestDuplicatePORecipe:
         signals.update({"po_number": 1.0, "customer_id": 1.0, "line_items": 1.0})
         result = detect_duplicate_po("PO-003", "cust-3", signals)
         assert result["status"] == "SOFT_FLAG"
-        assert result["recommended_action"] == "ANNOTATE_AND_PASS"
+        assert result["recommended_action"] == "REQUEST_BUYER_CONFIRMATION"
 
     # -- PASS path (score < 0.50) ------------------------------------------
 
     def test_no_signals_is_pass(self):
         result = detect_duplicate_po("PO-004", "cust-4", self._no_signals())
         assert result["status"] == "PASS"
-        assert result["recommended_action"] == "ALLOW"
+        assert result["recommended_action"] == "ALLOW_BOTH"
 
     def test_composite_score_zero_for_no_signals(self):
         result = detect_duplicate_po("PO-004", "cust-4", self._no_signals())
@@ -331,6 +331,253 @@ class TestDuplicatePORecipe:
         result = detect_duplicate_po("PO-009", "cust-9", {})
         assert result["status"] == "PASS"
         assert result["composite_score"] == 0.0
+
+
+class TestDuplicatePODecisionTree:
+    """Tests for the resolution decision tree (spec §3.2).
+
+    Each test covers one leaf node of the decision tree, verifying that
+    resolution context (original_fulfilled, has_revision_indicator,
+    line_items_identical) refines the recommended_action within a
+    classification tier.
+    """
+
+    def _perfect_signals(self) -> dict:
+        return {k: 1.0 for k in (
+            "po_number", "customer_id", "line_items", "amount",
+            "timestamp", "ship_to", "channel", "delivery_date",
+        )}
+
+    def _review_signals(self) -> dict:
+        """Composite ~0.75 → REVIEW_REQUIRED."""
+        signals = {k: 0.0 for k in (
+            "po_number", "customer_id", "line_items", "amount",
+            "timestamp", "ship_to", "channel", "delivery_date",
+        )}
+        signals.update({"po_number": 1.0, "customer_id": 1.0, "line_items": 1.0, "amount": 1.0})
+        return signals
+
+    # -- AUTO_BLOCK: identical lines + not fulfilled → BLOCK_AND_NOTIFY ------
+
+    def test_auto_block_identical_not_fulfilled_blocks(self):
+        result = detect_duplicate_po(
+            "PO-DT01", "cust-1", self._perfect_signals(),
+            original_fulfilled=False, has_revision_indicator=False, line_items_identical=True,
+        )
+        assert result["classification"] == "AUTO_BLOCK"
+        assert result["recommended_action"] == "BLOCK_AND_NOTIFY"
+
+    # -- AUTO_BLOCK: identical lines + fulfilled → ALLOW_BOTH ----------------
+
+    def test_auto_block_identical_fulfilled_allows_both(self):
+        result = detect_duplicate_po(
+            "PO-DT02", "cust-2", self._perfect_signals(),
+            original_fulfilled=True, has_revision_indicator=False, line_items_identical=True,
+        )
+        assert result["classification"] == "AUTO_BLOCK"
+        assert result["recommended_action"] == "ALLOW_BOTH"
+
+    # -- AUTO_BLOCK: revision indicator → SUPERSEDE --------------------------
+
+    def test_auto_block_revision_indicator_supersedes(self):
+        result = detect_duplicate_po(
+            "PO-DT03", "cust-3", self._perfect_signals(),
+            original_fulfilled=False, has_revision_indicator=True, line_items_identical=False,
+        )
+        assert result["classification"] == "AUTO_BLOCK"
+        assert result["recommended_action"] == "SUPERSEDE"
+
+    # -- AUTO_BLOCK: lines differ + no revision → MERGE ---------------------
+
+    def test_auto_block_lines_differ_no_revision_merges(self):
+        result = detect_duplicate_po(
+            "PO-DT04", "cust-4", self._perfect_signals(),
+            original_fulfilled=False, has_revision_indicator=False, line_items_identical=False,
+        )
+        assert result["classification"] == "AUTO_BLOCK"
+        assert result["recommended_action"] == "MERGE"
+
+    # -- REVIEW_REQUIRED: revision indicator → SUPERSEDE --------------------
+
+    def test_review_required_revision_indicator_supersedes(self):
+        result = detect_duplicate_po(
+            "PO-DT05", "cust-5", self._review_signals(),
+            original_fulfilled=False, has_revision_indicator=True, line_items_identical=False,
+        )
+        assert result["classification"] == "REVIEW_REQUIRED"
+        assert result["recommended_action"] == "SUPERSEDE"
+
+    # -- REVIEW_REQUIRED: identical lines → ESCALATE -----------------------
+
+    def test_review_required_identical_lines_escalates(self):
+        result = detect_duplicate_po(
+            "PO-DT06", "cust-6", self._review_signals(),
+            original_fulfilled=False, has_revision_indicator=False, line_items_identical=True,
+        )
+        assert result["classification"] == "REVIEW_REQUIRED"
+        assert result["recommended_action"] == "ESCALATE"
+
+    # -- REVIEW_REQUIRED: lines differ → REQUEST_BUYER_CONFIRMATION --------
+
+    def test_review_required_lines_differ_requests_confirmation(self):
+        result = detect_duplicate_po(
+            "PO-DT07", "cust-7", self._review_signals(),
+            original_fulfilled=False, has_revision_indicator=False, line_items_identical=False,
+        )
+        assert result["classification"] == "REVIEW_REQUIRED"
+        assert result["recommended_action"] == "REQUEST_BUYER_CONFIRMATION"
+
+    # -- SOFT_FLAG / PASS: context does not change defaults ----------------
+
+    def test_soft_flag_with_context_uses_default(self):
+        """SOFT_FLAG always returns REQUEST_BUYER_CONFIRMATION regardless of context."""
+        signals = {k: 0.0 for k in (
+            "po_number", "customer_id", "line_items", "amount",
+            "timestamp", "ship_to", "channel", "delivery_date",
+        )}
+        signals.update({"po_number": 1.0, "customer_id": 1.0, "line_items": 1.0})  # 0.65
+        result = detect_duplicate_po(
+            "PO-DT08", "cust-8", signals,
+            original_fulfilled=True, has_revision_indicator=False, line_items_identical=True,
+        )
+        assert result["classification"] == "SOFT_FLAG"
+        assert result["recommended_action"] == "REQUEST_BUYER_CONFIRMATION"
+
+    def test_pass_with_context_uses_default(self):
+        """PASS always returns ALLOW_BOTH regardless of context."""
+        result = detect_duplicate_po(
+            "PO-DT09", "cust-9", {k: 0.0 for k in (
+            "po_number", "customer_id", "line_items", "amount",
+            "timestamp", "ship_to", "channel", "delivery_date",
+        )},
+            original_fulfilled=False, has_revision_indicator=True, line_items_identical=False,
+        )
+        assert result["classification"] == "PASS"
+        assert result["recommended_action"] == "ALLOW_BOTH"
+
+    # -- No context → falls back to default --------------------------------
+
+    def test_auto_block_no_context_uses_default(self):
+        result = detect_duplicate_po("PO-DT10", "cust-10", self._perfect_signals())
+        assert result["classification"] == "AUTO_BLOCK"
+        assert result["recommended_action"] == "BLOCK_AND_NOTIFY"
+
+    def test_review_required_no_context_uses_default(self):
+        result = detect_duplicate_po("PO-DT11", "cust-11", self._review_signals())
+        assert result["classification"] == "REVIEW_REQUIRED"
+        assert result["recommended_action"] == "ESCALATE"
+
+
+class TestDuplicatePOAutonomyLevel:
+    """Tests for autonomy_level field in recipe output."""
+
+    _ALL_SIGNALS = {
+        "po_number": 1.0, "customer_id": 1.0, "line_items": 1.0,
+        "amount": 1.0, "timestamp": 1.0, "ship_to": 1.0,
+        "channel": 1.0, "delivery_date": 1.0,
+    }
+    _AUTONOMY = {
+        "BLOCK_AND_NOTIFY": "L3", "MERGE": "L2", "SUPERSEDE": "L2",
+        "ALLOW_BOTH": "L3", "ESCALATE": "L1", "REQUEST_BUYER_CONFIRMATION": "L2",
+    }
+
+    def test_autonomy_level_present_when_mapping_injected(self):
+        result = detect_duplicate_po(
+            "PO-AL01", "cust-1", self._ALL_SIGNALS, autonomy_levels=self._AUTONOMY,
+        )
+        assert "autonomy_level" in result
+
+    def test_autonomy_level_none_when_no_mapping(self):
+        result = detect_duplicate_po("PO-AL02", "cust-2", self._ALL_SIGNALS)
+        assert result["autonomy_level"] is None
+
+    def test_block_and_notify_is_l3(self):
+        result = detect_duplicate_po(
+            "PO-AL03", "cust-3", self._ALL_SIGNALS,
+            original_fulfilled=False, has_revision_indicator=False,
+            line_items_identical=True, autonomy_levels=self._AUTONOMY,
+        )
+        assert result["recommended_action"] == "BLOCK_AND_NOTIFY"
+        assert result["autonomy_level"] == "L3"
+
+    def test_merge_is_l2(self):
+        result = detect_duplicate_po(
+            "PO-AL04", "cust-4", self._ALL_SIGNALS,
+            original_fulfilled=False, has_revision_indicator=False,
+            line_items_identical=False, autonomy_levels=self._AUTONOMY,
+        )
+        assert result["recommended_action"] == "MERGE"
+        assert result["autonomy_level"] == "L2"
+
+    def test_escalate_is_l1(self):
+        signals = {k: 0.0 for k in self._ALL_SIGNALS}
+        signals.update({"po_number": 1.0, "customer_id": 1.0, "line_items": 1.0, "amount": 1.0})
+        result = detect_duplicate_po(
+            "PO-AL05", "cust-5", signals,
+            original_fulfilled=False, has_revision_indicator=False,
+            line_items_identical=True, autonomy_levels=self._AUTONOMY,
+        )
+        assert result["recommended_action"] == "ESCALATE"
+        assert result["autonomy_level"] == "L1"
+
+
+class TestDuplicatePONotificationTemplate:
+    """Tests for notification_template in recipe output (spec §7.3)."""
+
+    _ALL_SIGNALS = {
+        "po_number": 1.0, "customer_id": 1.0, "line_items": 1.0,
+        "amount": 1.0, "timestamp": 1.0, "ship_to": 1.0,
+        "channel": 1.0, "delivery_date": 1.0,
+    }
+
+    def test_block_and_notify_uses_blocked_template(self):
+        result = detect_duplicate_po(
+            "PO-NT01", "cust-1", self._ALL_SIGNALS,
+            original_fulfilled=False, has_revision_indicator=False, line_items_identical=True,
+        )
+        assert result["recommended_action"] == "BLOCK_AND_NOTIFY"
+        assert result["notification_template"] == "duplicate_po_blocked"
+
+    def test_merge_uses_amended_template(self):
+        result = detect_duplicate_po(
+            "PO-NT02", "cust-2", self._ALL_SIGNALS,
+            original_fulfilled=False, has_revision_indicator=False, line_items_identical=False,
+        )
+        assert result["recommended_action"] == "MERGE"
+        assert result["notification_template"] == "duplicate_po_amended"
+
+    def test_supersede_uses_amended_template(self):
+        result = detect_duplicate_po(
+            "PO-NT03", "cust-3", self._ALL_SIGNALS,
+            original_fulfilled=False, has_revision_indicator=True, line_items_identical=False,
+        )
+        assert result["recommended_action"] == "SUPERSEDE"
+        assert result["notification_template"] == "duplicate_po_amended"
+
+    def test_request_buyer_confirmation_uses_inquiry_template(self):
+        signals = {k: 0.0 for k in self._ALL_SIGNALS}
+        signals.update({"po_number": 1.0, "customer_id": 1.0, "line_items": 1.0})  # 0.65 → SOFT_FLAG
+        result = detect_duplicate_po("PO-NT04", "cust-4", signals)
+        assert result["recommended_action"] == "REQUEST_BUYER_CONFIRMATION"
+        assert result["notification_template"] == "duplicate_po_inquiry"
+
+    def test_allow_both_has_no_notification(self):
+        result = detect_duplicate_po(
+            "PO-NT05", "cust-5", self._ALL_SIGNALS,
+            original_fulfilled=True, has_revision_indicator=False, line_items_identical=True,
+        )
+        assert result["recommended_action"] == "ALLOW_BOTH"
+        assert result["notification_template"] is None
+
+    def test_escalate_has_no_notification(self):
+        signals = {k: 0.0 for k in self._ALL_SIGNALS}
+        signals.update({"po_number": 1.0, "customer_id": 1.0, "line_items": 1.0, "amount": 1.0})
+        result = detect_duplicate_po(
+            "PO-NT06", "cust-6", signals,
+            original_fulfilled=False, has_revision_indicator=False, line_items_identical=True,
+        )
+        assert result["recommended_action"] == "ESCALATE"
+        assert result["notification_template"] is None
 
 
 # ---------------------------------------------------------------------------

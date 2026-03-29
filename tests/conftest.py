@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import pytest
-from contracts.models import GraphState, OrderEvent
+from contracts.models import GatewayResponse, GraphState, OrderEvent
+from gateways.registry import clear_registry, register_gateway
+from gateways.stub import StubGateway
 
 
 @pytest.fixture
@@ -45,6 +47,52 @@ def mass_event() -> GraphState:
             line_count=11,
         )
     )
+
+
+@pytest.fixture(autouse=True)
+def _register_oms_stub():
+    """Register an OMS stub gateway for DuplicatePO resolution context.
+
+    The DuplicatePORecipe declares gateway dependencies (oms/get_fulfillment_status,
+    oms/get_matched_po_details) that are resolved by the resolve_dependencies node.
+    This stub provides sensible defaults so end-to-end graph tests work without
+    real OMS connectivity.
+    """
+    oms_stub = StubGateway(
+        "oms",
+        responses={
+            "get_fulfillment_status": GatewayResponse(
+                gateway_name="oms",
+                operation="get_fulfillment_status",
+                status="SUCCESS",
+                data={"fulfilled": False},
+            ),
+            "get_matched_po_details": GatewayResponse(
+                gateway_name="oms",
+                operation="get_matched_po_details",
+                status="SUCCESS",
+                data={
+                    "has_revision_indicator": False,
+                    "line_items_identical": True,
+                },
+            ),
+        },
+    )
+    notification_stub = StubGateway(
+        "buyer_notification",
+        responses={
+            "send": GatewayResponse(
+                gateway_name="buyer_notification",
+                operation="send",
+                status="SUCCESS",
+                data={"delivered": True},
+            ),
+        },
+    )
+    register_gateway(oms_stub)
+    register_gateway(notification_stub)
+    yield
+    clear_registry()
 
 
 @pytest.fixture

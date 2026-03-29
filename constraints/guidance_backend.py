@@ -13,3 +13,6 @@ class GuidanceRegexBackend:
 
     def recipe_name_regex(self) -> str:
         return r"PriceAdjustmentRecipe\.py|CreditHoldReleaseRecipe\.py|DuplicatePORecipe\.py"
+
+    def resolution_action_regex(self) -> str:
+        return r"BLOCK_AND_NOTIFY|MERGE|SUPERSEDE|ALLOW_BOTH|ESCALATE|REQUEST_BUYER_CONFIRMATION"

@@ -610,6 +610,26 @@ class TestDuplicatePOValidateTypesNode:
         assert isinstance(scores, dict)
         assert scores.get("po_number") == 1.0
 
+    def test_duplicate_po_resolution_context_from_resolved_data(self, duplicate_po_event):
+        """Gateway-resolved context flows into recipe params."""
+        duplicate_po_event.selected_recipe = "DuplicatePORecipe.py"
+        duplicate_po_event.resolved_data = {
+            "fulfillment_status": {"fulfilled": True},
+            "matched_po_details": {"has_revision_indicator": True, "line_items_identical": False},
+        }
+        result = validate_types(duplicate_po_event)
+        assert result.invocation.params["original_fulfilled"] is True
+        assert result.invocation.params["has_revision_indicator"] is True
+        assert result.invocation.params["line_items_identical"] is False
+
+    def test_duplicate_po_resolution_context_defaults_when_no_gateway_data(self, duplicate_po_event):
+        """Without gateway data, resolution context params are None."""
+        duplicate_po_event.selected_recipe = "DuplicatePORecipe.py"
+        result = validate_types(duplicate_po_event)
+        assert result.invocation.params["original_fulfilled"] is None
+        assert result.invocation.params["has_revision_indicator"] is None
+        assert result.invocation.params["line_items_identical"] is None
+
 
 class TestDuplicatePOExecuteRecipeNode:
     def test_duplicate_po_auto_block(self, duplicate_po_event):
@@ -668,3 +688,105 @@ class TestDuplicatePOExecuteRecipeNode:
         assert result.execution_log is not None
         assert result.execution_log.outputs.get("classification") == "PASS"
         assert result.final_status == TerminalStatus.COMPLETE
+
+
+class TestDuplicatePOAutonomyRouting:
+    """Autonomy levels route L1/L2 to MANUAL_REVIEW_REQUIRED, L3/L4 to COMPLETE."""
+
+    def test_l2_action_routes_to_manual_review(self):
+        """MERGE (L2) requires human approval → MANUAL_REVIEW_REQUIRED."""
+        from contracts.policy import DUPLICATE_PO_AUTONOMY_LEVELS
+        state = GraphState(event=OrderEvent(
+            order_id="PO-AUT01", po_price=100.0, sap_base_price=100.0,
+            event_type="EDI_850_DUPLICATE_PO", retailer_id="R-10",
+            metadata={"signal_scores": {
+                "po_number": 1.0, "customer_id": 1.0, "line_items": 1.0,
+                "amount": 1.0, "timestamp": 1.0, "ship_to": 1.0,
+                "channel": 1.0, "delivery_date": 1.0,
+            }},
+        ))
+        state.intent = Intent.DUPLICATE_PO
+        state.shadow = _green_shadow()
+        # AUTO_BLOCK + lines differ + no revision → MERGE (L2)
+        state.invocation = RecipeInvocation(
+            recipe_name="DuplicatePORecipe.py",
+            params={
+                "incoming_po_number": "PO-AUT01",
+                "customer_id": "R-10",
+                "signal_scores": state.event.metadata["signal_scores"],
+                "threshold_auto_block": 0.90,
+                "threshold_review_required": 0.70,
+                "threshold_soft_flag": 0.50,
+                "original_fulfilled": False,
+                "has_revision_indicator": False,
+                "line_items_identical": False,
+                "autonomy_levels": DUPLICATE_PO_AUTONOMY_LEVELS,
+            },
+        )
+        result = execute_recipe(state)
+        assert result.execution_log.outputs["recommended_action"] == "MERGE"
+        assert result.execution_log.outputs["autonomy_level"] == "L2"
+        assert result.final_status == TerminalStatus.MANUAL_REVIEW_REQUIRED
+
+    def test_l3_action_routes_to_complete(self):
+        """BLOCK_AND_NOTIFY (L3) auto-executes → COMPLETE (via BLOCKED status)."""
+        from contracts.policy import DUPLICATE_PO_AUTONOMY_LEVELS
+        state = GraphState(event=OrderEvent(
+            order_id="PO-AUT02", po_price=100.0, sap_base_price=100.0,
+            event_type="EDI_850_DUPLICATE_PO", retailer_id="R-10",
+            metadata={"signal_scores": {
+                "po_number": 1.0, "customer_id": 1.0, "line_items": 1.0,
+                "amount": 1.0, "timestamp": 1.0, "ship_to": 1.0,
+                "channel": 1.0, "delivery_date": 1.0,
+            }},
+        ))
+        state.intent = Intent.DUPLICATE_PO
+        state.shadow = _green_shadow()
+        # AUTO_BLOCK + identical lines + not fulfilled → BLOCK_AND_NOTIFY (L3)
+        state.invocation = RecipeInvocation(
+            recipe_name="DuplicatePORecipe.py",
+            params={
+                "incoming_po_number": "PO-AUT02",
+                "customer_id": "R-10",
+                "signal_scores": state.event.metadata["signal_scores"],
+                "threshold_auto_block": 0.90,
+                "threshold_review_required": 0.70,
+                "threshold_soft_flag": 0.50,
+                "original_fulfilled": False,
+                "has_revision_indicator": False,
+                "line_items_identical": True,
+                "autonomy_levels": DUPLICATE_PO_AUTONOMY_LEVELS,
+            },
+        )
+        result = execute_recipe(state)
+        assert result.execution_log.outputs["recommended_action"] == "BLOCK_AND_NOTIFY"
+        assert result.execution_log.outputs["autonomy_level"] == "L3"
+        # BLOCK_AND_NOTIFY returns status=BLOCKED which maps to TerminalStatus.BLOCKED
+        assert result.final_status == TerminalStatus.BLOCKED
+
+    def test_autonomy_level_in_recipe_output(self):
+        """Autonomy level field is present in recipe output when mapping is injected."""
+        from contracts.policy import DUPLICATE_PO_AUTONOMY_LEVELS
+        state = GraphState(event=OrderEvent(
+            order_id="PO-AUT03", po_price=100.0, sap_base_price=100.0,
+            event_type="EDI_850_DUPLICATE_PO", retailer_id="R-10",
+            metadata={"signal_scores": {}},
+        ))
+        state.intent = Intent.DUPLICATE_PO
+        state.shadow = _green_shadow()
+        state.invocation = RecipeInvocation(
+            recipe_name="DuplicatePORecipe.py",
+            params={
+                "incoming_po_number": "PO-AUT03",
+                "customer_id": "R-10",
+                "signal_scores": {},
+                "threshold_auto_block": 0.90,
+                "threshold_review_required": 0.70,
+                "threshold_soft_flag": 0.50,
+                "autonomy_levels": DUPLICATE_PO_AUTONOMY_LEVELS,
+            },
+        )
+        result = execute_recipe(state)
+        assert "autonomy_level" in result.execution_log.outputs
+        # PASS → ALLOW_BOTH → L3
+        assert result.execution_log.outputs["autonomy_level"] == "L3"

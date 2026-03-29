@@ -18,6 +18,15 @@ AllowedRecipeName = Literal[
     "DuplicatePORecipe.py",
 ]
 
+AllowedResolutionAction = Literal[
+    "BLOCK_AND_NOTIFY",
+    "MERGE",
+    "SUPERSEDE",
+    "ALLOW_BOTH",
+    "ESCALATE",
+    "REQUEST_BUYER_CONFIRMATION",
+]
+
 
 class IntentDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")

@@ -66,6 +66,11 @@ class TraceRecord(BaseModel):
         description="Gateway operations invoked (dependency resolutions + effect applications)",
     )
 
+    # Override audit (Phase E) — populated when a human overrides the agent recommendation
+    resolved_by: Optional[str] = Field(None, description="Identity of human who resolved the exception")
+    resolved_action: Optional[str] = Field(None, description="Actual action taken (may differ from agent recommendation)")
+    resolution_notes: Optional[str] = Field(None, description="Human-provided reason for override")
+
     # Terminal outcome
     final_status: Optional[str] = Field(None, description="TerminalStatus enum value")
     explanation: Optional[str] = Field(None, description="Human-readable explanation of the terminal decision")
@@ -158,6 +163,15 @@ class Tracer:
         for key in getattr(state, "resolved_data", None) or {}:
             gateway_calls.append(f"dep:{key}:resolved")
 
+        # --- override audit ---
+        resolved_by: Optional[str] = None
+        resolved_action: Optional[str] = None
+        resolution_notes: Optional[str] = None
+        if getattr(state, "execution_log", None) is not None:
+            resolved_by = getattr(state.execution_log, "resolved_by", None)
+            resolved_action = getattr(state.execution_log, "resolved_action", None)
+            resolution_notes = getattr(state.execution_log, "resolution_notes", None)
+
         # --- terminal outcome ---
         final_status: Optional[str] = None
         if getattr(state, "final_status", None) is not None:
@@ -177,6 +191,9 @@ class Tracer:
             rag_chunks=rag_chunks,
             constrained_output_schemas=constrained_output_schemas,
             gateway_calls=gateway_calls,
+            resolved_by=resolved_by,
+            resolved_action=resolved_action,
+            resolution_notes=resolution_notes,
             final_status=final_status,
             explanation=explanation,
         )

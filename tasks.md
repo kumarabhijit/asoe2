@@ -291,6 +291,51 @@ Build prompt: `prompts/phase_10_langfuse.md`
 - [x] `tasks.md` — this phase checklist
 ✅ Outcome: docs cover setup, testing, and production deployment
 ---
+## PHASE 11 — Duplicate PO Product Spec Gap Closure
+Build prompt: `docs/specs/duplicate-po-product-spec.md`
+### 11.1 Resolution Actions (Phase A)
+- [x] Extend resolution actions to all 6 spec-defined types: BLOCK_AND_NOTIFY, MERGE, SUPERSEDE, ALLOW_BOTH, ESCALATE, REQUEST_BUYER_CONFIRMATION
+- [x] Add `AllowedResolutionAction` constrained vocabulary in `constraints/specs.py`
+- [x] Sync across guidance_backend.py regex, fallback_backend.py, recipe default mapping
+- [x] Replace ANNOTATE_AND_PASS/ALLOW with spec-aligned actions
+✅ Outcome: all 6 resolution actions from spec §3.1 available and constrained
+
+### 11.2 Gateway Dependencies for Resolution Context (Phase B)
+- [x] Declare OMS gateway dependencies on DuplicatePORecipe (get_fulfillment_status, get_matched_po_details)
+- [x] Inject resolution context (original_fulfilled, has_revision_indicator, line_items_identical) into recipe params via validate_types
+- [x] Recipe signature accepts optional resolution context (defaults to None)
+✅ Outcome: recipes receive pre-resolved context without I/O; gateway layer decouples data access
+
+### 11.3 Resolution Decision Tree (Phase C)
+- [x] Implement `_resolve_action()` decision tree per spec §3.2
+- [x] AUTO_BLOCK tier: BLOCK_AND_NOTIFY / ALLOW_BOTH / SUPERSEDE / MERGE based on context
+- [x] REVIEW_REQUIRED tier: SUPERSEDE / ESCALATE / REQUEST_BUYER_CONFIRMATION based on context
+- [x] SOFT_FLAG / PASS: use default actions (low confidence)
+- [x] Fallback to defaults when no gateway context available
+✅ Outcome: agent recommends specific action based on duplicate type, not just classification
+
+### 11.4 Autonomy-Level Policy Mapping (Phase D)
+- [x] Add DUPLICATE_PO_AUTONOMY_LEVELS to contracts/policy.py (action → L1–L4)
+- [x] Recipe output includes autonomy_level field
+- [x] execute_recipe node routes L1/L2 to MANUAL_REVIEW_REQUIRED, L3/L4 auto-execute
+✅ Outcome: human approval required for MERGE/SUPERSEDE/REQUEST_BUYER_CONFIRMATION; auto-execute for BLOCK_AND_NOTIFY/ALLOW_BOTH
+
+### 11.5 Override Audit Fields (Phase E)
+- [x] Add resolved_by, resolved_action, resolution_notes to ExecutionLog
+- [x] Add corresponding fields to TraceRecord for audit trail
+- [x] Tracer.build_record() extracts override fields from execution log
+✅ Outcome: human overrides captured in compliance audit trail (SOX requirement)
+
+### 11.6 Buyer Notification Gateway Effect (Phase G)
+- [x] Recipe output includes notification_template per action (duplicate_po_blocked, duplicate_po_inquiry, duplicate_po_amended, or None)
+- [x] DuplicatePORecipe registry declares buyer_notification GatewayEffect
+- [x] apply_effects node dispatches notification after recipe execution
+✅ Outcome: buyer communication handled via existing gateway effect pattern
+
+### 11.7 Tests
+- [x] 44 new tests (584 total): decision tree (11), autonomy routing (8), notification templates (6), override audit (7), gateway deps (4), registry (4), constraint vocab (4)
+✅ Outcome: all new code paths covered at recipe, node, graph, and integration levels
+---
 ## REVIEW FINDINGS — Triple-Check Technical Review Board (2026-03-20)
 
 ### Critical

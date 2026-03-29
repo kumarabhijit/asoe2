@@ -27,7 +27,7 @@ from __future__ import annotations
 #   - MASS_PRICING_ERROR intent routes to FAIL_TO_HUMAN upstream; this recipe
 #     is invoked only for DUPLICATE_PO intent.
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 # ---------------------------------------------------------------------------
 # Signal weights — sourced from the product specification.
@@ -51,11 +51,25 @@ assert abs(sum(_WEIGHTS.values()) - 1.0) < 1e-9, "Signal weights must sum to 1.0
 # Action mapping — one deterministic action per classification
 # ---------------------------------------------------------------------------
 
-_RECOMMENDED_ACTIONS: Dict[str, str] = {
+# Default action per classification — used when no resolution context is
+# available.  When resolution_context is provided (Phase C), the decision
+# tree refines the action within each classification tier.
+_DEFAULT_ACTIONS: Dict[str, str] = {
     "AUTO_BLOCK":       "BLOCK_AND_NOTIFY",
     "REVIEW_REQUIRED":  "ESCALATE",
-    "SOFT_FLAG":        "ANNOTATE_AND_PASS",
-    "PASS":             "ALLOW",
+    "SOFT_FLAG":        "REQUEST_BUYER_CONFIRMATION",
+    "PASS":             "ALLOW_BOTH",
+}
+
+# Notification template per resolution action (spec §7.3).
+# None means no buyer notification for that action.
+_NOTIFICATION_TEMPLATES: Dict[str, Optional[str]] = {
+    "BLOCK_AND_NOTIFY":           "duplicate_po_blocked",
+    "MERGE":                      "duplicate_po_amended",
+    "SUPERSEDE":                  "duplicate_po_amended",
+    "ALLOW_BOTH":                 None,
+    "ESCALATE":                   None,
+    "REQUEST_BUYER_CONFIRMATION": "duplicate_po_inquiry",
 }
 
 
@@ -66,6 +80,15 @@ def detect_duplicate_po(
     threshold_auto_block: float = 0.90,
     threshold_review_required: float = 0.70,
     threshold_soft_flag: float = 0.50,
+    # Resolution context — resolved by gateway dependencies (Phase B).
+    # When None, the recipe falls back to the default action per classification.
+    # When provided, the decision tree (Phase C) refines the action.
+    original_fulfilled: Optional[bool] = None,
+    has_revision_indicator: Optional[bool] = None,
+    line_items_identical: Optional[bool] = None,
+    # Autonomy level mapping — injected from policy (Phase D).
+    # Maps resolution action → autonomy level string (L1–L4).
+    autonomy_levels: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Score and classify an incoming PO against pre-computed signal scores.
 
@@ -108,12 +131,78 @@ def detect_duplicate_po(
         classification = "PASS"
         status = "PASS"
 
+    # Determine recommended action via decision tree when resolution
+    # context is available, otherwise fall back to default mapping.
+    recommended_action = _resolve_action(
+        classification,
+        original_fulfilled=original_fulfilled,
+        has_revision_indicator=has_revision_indicator,
+        line_items_identical=line_items_identical,
+    )
+
+    # Resolve autonomy level from policy mapping when provided.
+    autonomy_level = None
+    if autonomy_levels:
+        autonomy_level = autonomy_levels.get(recommended_action)
+
     return {
         "status": status,
         "composite_score": composite_score,
         "classification": classification,
-        "recommended_action": _RECOMMENDED_ACTIONS[classification],
+        "recommended_action": recommended_action,
+        "autonomy_level": autonomy_level,
+        "notification_template": _NOTIFICATION_TEMPLATES.get(recommended_action),
         "signal_breakdown": breakdown,
         "incoming_po_number": incoming_po_number,
         "customer_id": customer_id,
     }
+
+
+def _resolve_action(
+    classification: str,
+    *,
+    original_fulfilled: Optional[bool],
+    has_revision_indicator: Optional[bool],
+    line_items_identical: Optional[bool],
+) -> str:
+    """Decision tree mapping (classification + resolution context) → action.
+
+    When all resolution context fields are None (no gateway data), falls back
+    to the default action for the classification tier.
+
+    Decision tree (spec §3.2):
+      AUTO_BLOCK:
+        identical lines + not fulfilled   → BLOCK_AND_NOTIFY  (true duplicate)
+        identical lines + fulfilled       → ALLOW_BOTH        (likely reorder)
+        revision indicator present        → SUPERSEDE
+        lines differ, no revision         → MERGE
+      REVIEW_REQUIRED:
+        revision indicator present        → SUPERSEDE
+        identical lines                   → ESCALATE
+        lines differ                      → REQUEST_BUYER_CONFIRMATION
+      SOFT_FLAG / PASS: default action (low confidence, context doesn't refine)
+    """
+    has_context = any(v is not None for v in (
+        original_fulfilled, has_revision_indicator, line_items_identical,
+    ))
+
+    if not has_context:
+        return _DEFAULT_ACTIONS[classification]
+
+    if classification == "AUTO_BLOCK":
+        if line_items_identical and not original_fulfilled:
+            return "BLOCK_AND_NOTIFY"
+        if line_items_identical and original_fulfilled:
+            return "ALLOW_BOTH"
+        if has_revision_indicator:
+            return "SUPERSEDE"
+        return "MERGE"
+
+    if classification == "REVIEW_REQUIRED":
+        if has_revision_indicator:
+            return "SUPERSEDE"
+        if line_items_identical:
+            return "ESCALATE"
+        return "REQUEST_BUYER_CONFIRMATION"
+
+    return _DEFAULT_ACTIONS[classification]

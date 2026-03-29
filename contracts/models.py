@@ -95,6 +95,11 @@ class ExecutionLog(BaseModel):
     shadow_policy_hits: List[str] = Field(default_factory=list)
     skill_name: Optional[str] = None
     shadow_verdict: Optional[str] = None
+    # Override audit fields (Phase E) — populated when a human overrides
+    # the agent's recommended action.  None when auto-executed.
+    resolved_by: Optional[str] = None
+    resolved_action: Optional[str] = None
+    resolution_notes: Optional[str] = None
 
 
 class ShadowEnforcement(BaseModel):

@@ -633,3 +633,79 @@ class TestTracerEmitWithLangFuse:
             Tracer().emit(record)  # must not raise
         # stdlib log still emitted
         assert len(caplog.records) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Override audit fields (Phase E)
+# ---------------------------------------------------------------------------
+
+class TestOverrideAuditFields:
+    """Override audit fields on ExecutionLog and TraceRecord."""
+
+    def test_execution_log_override_fields_default_to_none(self):
+        log = ExecutionLog(trace_id="t")
+        assert log.resolved_by is None
+        assert log.resolved_action is None
+        assert log.resolution_notes is None
+
+    def test_execution_log_accepts_override_fields(self):
+        log = ExecutionLog(
+            trace_id="t",
+            resolved_by="analyst@example.com",
+            resolved_action="ALLOW_BOTH",
+            resolution_notes="Confirmed reorder by buyer.",
+        )
+        assert log.resolved_by == "analyst@example.com"
+        assert log.resolved_action == "ALLOW_BOTH"
+        assert log.resolution_notes == "Confirmed reorder by buyer."
+
+    def test_trace_record_override_fields_default_to_none(self):
+        record = TraceRecord(trace_id="t", event_id="e")
+        assert record.resolved_by is None
+        assert record.resolved_action is None
+        assert record.resolution_notes is None
+
+    def test_trace_record_accepts_override_fields(self):
+        record = TraceRecord(
+            trace_id="t", event_id="e",
+            resolved_by="manager@example.com",
+            resolved_action="SUPERSEDE",
+            resolution_notes="Revised PO confirmed by buyer.",
+        )
+        assert record.resolved_by == "manager@example.com"
+        assert record.resolved_action == "SUPERSEDE"
+
+    def test_build_record_extracts_override_from_execution_log(self):
+        state = _minimal_state()
+        shadow = _green_shadow()
+        state.shadow = shadow
+        state.execution_log = ExecutionLog(
+            trace_id=shadow.trace_id,
+            recipe_name="DuplicatePORecipe.py",
+            resolved_by="ops@example.com",
+            resolved_action="MERGE",
+            resolution_notes="Buyer confirmed amendment.",
+        )
+        state.final_status = TerminalStatus.COMPLETE
+        record = Tracer().build_record(state)
+        assert record.resolved_by == "ops@example.com"
+        assert record.resolved_action == "MERGE"
+        assert record.resolution_notes == "Buyer confirmed amendment."
+
+    def test_build_record_override_none_when_no_execution_log(self):
+        state = _minimal_state()
+        record = Tracer().build_record(state)
+        assert record.resolved_by is None
+        assert record.resolved_action is None
+        assert record.resolution_notes is None
+
+    def test_override_fields_in_json_output(self):
+        record = TraceRecord(
+            trace_id="t", event_id="e",
+            resolved_by="user1", resolved_action="BLOCK_AND_NOTIFY",
+            resolution_notes="True duplicate confirmed.",
+        )
+        data = json.loads(record.to_json())
+        assert data["resolved_by"] == "user1"
+        assert data["resolved_action"] == "BLOCK_AND_NOTIFY"
+        assert data["resolution_notes"] == "True duplicate confirmed."
