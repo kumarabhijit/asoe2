@@ -1,14 +1,38 @@
-# ASOE — Agentic Systems of Engagement (Agentic Operating layer)
-
 ## Project Vision
 
-ASOE is the Agentic System of Engagement where AI agents and humans collaborate to take action across enterprise systems. AI agents diagnose root causes, resolve exceptions autonomously, and keep every stakeholder informed. A compliance-first orchestration platform for the entire ERP -order to cash, procurement, Finance, Record to Report, exception handling, customer communication management, supplier communication management, conversational chat, and on-demand reporting. Built on a **Skill–Shadow–Recipe** architecture where every automated action must pass through a Compliance Shadow before execution.
+ASOE (Agentic System of Engagement) is a control tower for enterprise operations where AI agents and humans collaborate to resolve exceptions across systems like SAP and Oracle ERP.
 
-> **Why deterministic?** In enterprise order-to-cash, predictability is non-negotiable. Every resolution must be auditable, reproducible, and explainable. ASOE uses deterministic recipes for execution while reserving AI reasoning for classification, context understanding, and explanation generation — the best of both worlds.
+### What it does
+- Diagnoses root causes of operational and financial exceptions
+- Executes deterministic, auditable resolution workflows
+- Communicates outcomes to customers, suppliers, and internal stakeholders
 
-### Alternate Project Vision 
-An Agentic System of Engagement (ASOE) is a next-generation execution layer where AI agents and humans collaborate to actively run enterprise processes across systems like SAP ERP and Oracle ERP. Unlike traditional systems of record or engagement, ASOE continuously monitors operations, diagnoses root causes, resolves exceptions autonomously, and keeps stakeholders informed in real time. It provides compliance-first orchestration across the full ERP landscape—including Order-to-Cash, Procurement, Finance, Record-to-Report, exception handling, and customer and supplier communications—while enabling conversational interaction and on-demand reporting. At its core is a Skill–Shadow–Recipe architecture: Skills represent atomic system actions, Recipes define goal-oriented workflows that orchestrate those skills, and the Compliance Shadow acts as a governance layer that evaluates every intended action against policies, risk thresholds, and audit requirements before execution. This ensures that all automation is not only efficient but also transparent, controlled, and fully compliant, enabling AI agents to operate safely and reliably within complex enterprise environments.
----
+### Why it matters
+In enterprise environments, automation must be:
+- **Predictable** (deterministic execution)
+- **Auditable** (traceable decisions)
+- **Compliant** (policy-enforced actions)
+
+ASOE ensures all three by combining AI reasoning with strict execution governance.
+
+### Core architecture
+ASOE is built on a **Skill–Shadow–Recipe** model:
+- **Skills** define capabilities
+- **Recipes** define deterministic workflows
+- **Compliance Shadow** enforces policy before execution
+
+### Design Principle: Deterministic Execution
+
+In enterprise workflows, predictability is non-negotiable.
+
+ASOE separates:
+- **AI reasoning** → classification, context understanding, explanation
+- **Execution** → deterministic, reproducible recipes
+
+This ensures every action is:
+- Auditable
+- Repeatable
+- Explainable
 
 ## System Context — The Order Pipeline and Where EMS Fits
 
