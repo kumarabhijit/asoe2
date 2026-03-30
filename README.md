@@ -1,11 +1,13 @@
-# ASOE — Agentic Systems of Engagement
+# ASOE — Agentic Systems of Engagement (Agentic Operating layer)
 
 ## Project Vision
 
-ASOE is the Agentic System of Engagement where AI agents and humans collaborate to take action across enterprise systems. AI agents diagnose root causes, resolve exceptions autonomously, and keep every stakeholder informed. A compliance-first orchestration platform for order management exception handling, customer communication management, conversational chat, and reporting. Built on a **Skill–Shadow–Recipe** architecture where every automated action must pass through a Compliance Shadow before execution.
+ASOE is the Agentic System of Engagement where AI agents and humans collaborate to take action across enterprise systems. AI agents diagnose root causes, resolve exceptions autonomously, and keep every stakeholder informed. A compliance-first orchestration platform for the entire ERP -order to cash, procurement, Finance, Record to Report, exception handling, customer communication management, supplier communication management, conversational chat, and on-demand reporting. Built on a **Skill–Shadow–Recipe** architecture where every automated action must pass through a Compliance Shadow before execution.
 
 > **Why deterministic?** In enterprise order-to-cash, predictability is non-negotiable. Every resolution must be auditable, reproducible, and explainable. ASOE uses deterministic recipes for execution while reserving AI reasoning for classification, context understanding, and explanation generation — the best of both worlds.
 
+### Alternate Project Vision 
+An Agentic System of Engagement (ASOE) is a next-generation execution layer where AI agents and humans collaborate to actively run enterprise processes across systems like SAP ERP and Oracle ERP. Unlike traditional systems of record or engagement, ASOE continuously monitors operations, diagnoses root causes, resolves exceptions autonomously, and keeps stakeholders informed in real time. It provides compliance-first orchestration across the full ERP landscape—including Order-to-Cash, Procurement, Finance, Record-to-Report, exception handling, and customer and supplier communications—while enabling conversational interaction and on-demand reporting. At its core is a Skill–Shadow–Recipe architecture: Skills represent atomic system actions, Recipes define goal-oriented workflows that orchestrate those skills, and the Compliance Shadow acts as a governance layer that evaluates every intended action against policies, risk thresholds, and audit requirements before execution. This ensures that all automation is not only efficient but also transparent, controlled, and fully compliant, enabling AI agents to operate safely and reliably within complex enterprise environments.
 ---
 
 ## System Context — The Order Pipeline and Where EMS Fits
