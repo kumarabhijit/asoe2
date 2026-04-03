@@ -1,12 +1,38 @@
-# ASOE — Agentic Systems of Engagement
-
 ## Project Vision
 
-ASOE is the Agentic System of Engagement where AI agents and humans collaborate to take action across enterprise systems. AI agents diagnose root causes, resolve exceptions autonomously, and keep every stakeholder informed. A compliance-first orchestration platform for order management exception handling, customer communication management, conversational chat, and reporting. Built on a **Skill–Shadow–Recipe** architecture where every automated action must pass through a Compliance Shadow before execution.
+ASOE (Agentic System of Engagement) is a control tower for enterprise operations where AI agents and humans collaborate to resolve exceptions across systems like SAP and Oracle ERP.
 
-> **Why deterministic?** In enterprise order-to-cash, predictability is non-negotiable. Every resolution must be auditable, reproducible, and explainable. ASOE uses deterministic recipes for execution while reserving AI reasoning for classification, context understanding, and explanation generation — the best of both worlds.
+### What it does
+- Diagnoses root causes of operational and financial exceptions
+- Executes deterministic, auditable resolution workflows
+- Communicates outcomes to customers, suppliers, and internal stakeholders
 
----
+### Why it matters
+In enterprise environments, automation must be:
+- **Predictable** (deterministic execution)
+- **Auditable** (traceable decisions)
+- **Compliant** (policy-enforced actions)
+
+ASOE ensures all three by combining AI reasoning with strict execution governance.
+
+### Core architecture
+ASOE is built on a **Skill–Shadow–Recipe** model:
+- **Skills** define capabilities
+- **Recipes** define deterministic workflows
+- **Compliance Shadow** enforces policy before execution
+
+### Design Principle: Deterministic Execution
+
+In enterprise workflows, predictability is non-negotiable.
+
+ASOE separates:
+- **AI reasoning** → classification, context understanding, explanation
+- **Execution** → deterministic, reproducible recipes
+
+This ensures every action is:
+- Auditable
+- Repeatable
+- Explainable
 
 ## System Context — The Order Pipeline and Where EMS Fits
 
