@@ -26,7 +26,7 @@ The platform utilizes a containerized, decoupled architecture optimized for Kube
 ## 4. Component Topology
 ### Development vs. Production
  * **Local Sandbox (Dev):** Uses Docker Compose. Inference is mocked or routed to a lightweight local model. Redis and Postgres run in lightweight containers.
- * **Production Fortress (AKS):** Deployed on Azure Kubernetes Service. Multi-tenant isolation via namespace and DB row-level security. Inference runs on dedicated GPU node pools.
+ * **Production Fortress (AKS):** Deployed on Azure Kubernetes Service. Multi-tenant isolation via Kubernetes namespace per tenant and PostgreSQL Row-Level Security (RLS) policies (see §9 for the two-layer isolation contract). Inference runs on dedicated GPU node pools.
 ## 5. ASOE Core Integration: Skill-Shadow-Recipe
 The asoe2 core is built around an 11-node LangGraph pipeline. The central tension—AI flexibility vs. enterprise determinism—is resolved via the **Skill-Shadow-Recipe** pattern.
 ### 5.1 The 11-Node LangGraph Pipeline (orchestration/nodes.py)
@@ -79,7 +79,7 @@ Full REST + WebSocket endpoint specification.
 | POST | /v1/exceptions/{id}/approve | HITL intervention: resumes a YELLOW-verdict graph. Requires caller JWT with OPERATOR or ADMIN role. |
 | POST | /v1/exceptions/{id}/reject | HITL intervention: terminates a YELLOW-verdict graph with HITL_REJECTED. Requires OPERATOR or ADMIN role. |
 | GET | /v1/traces/{trace_id} | End-to-end LangGraph trace retrieval for audit. |
-| PUT | /v1/policies/{tenant_id} | Update policy_overrides for a specific tenant. Requires ADMIN role. |
+| PUT | /v1/policies/{tenant_id} | Update policy_overrides for a specific tenant. Requires ADMIN role. Every invocation is immutably audit-logged (see §9). |
 ### 6.2 Standard Error Envelope
 ```json
 {
@@ -127,10 +127,13 @@ WebSockets backed by Redis pub/sub are used to push per-node LangGraph execution
 ```
  * **Resilience:** The UI implements automatic reconnection with exponential backoff and falls back to HTTP polling of /v1/exceptions/{id} if WebSockets fail.
 ## 9. Security & Compliance
- * **Authentication:** Dual-flow supporting SSO (SAML/OIDC) for enterprise users and secure Email/Password for sandbox environments.
- * **Multi-Tenancy:** Handled via a tenant_id claim in the JWT. The FastAPI dependency injector automatically scopes all database queries and Redis channels to this ID.
+ * **Authentication:** Dual-flow supporting SSO (SAML/OIDC) for enterprise users and secure Email/Password for sandbox environments. Both flows issue JWTs that include an `env` claim (`production` | `sandbox`). The FastAPI dependency injector validates the `env` claim against the `ASOE_ENV` environment variable at every authenticated request boundary; a `sandbox` token presented to a production service returns 403 immediately, before any business logic executes. The two environments use separate IdP configurations and non-overlapping JWT signing keys so tokens cannot be cross-forged.
+ * **Multi-Tenancy — Two-Layer Isolation:** Tenant data isolation is enforced at two independent layers to provide defense-in-depth:
+   * **Application layer:** The FastAPI dependency injector extracts `tenant_id` from the JWT and injects it as a required parameter into every database query and Redis channel subscription. Invariant #5 (§14) enforces this at the code level; tests verify no query against the `exceptions` or `traces` tables omits the `tenant_id` predicate.
+   * **Database layer:** PostgreSQL Row-Level Security (RLS) policies are active on the `exceptions`, `traces`, and `checkpoints` tables. The connection pool sets the `app.current_tenant_id` session variable before executing any query; the RLS policy `USING (tenant_id = current_setting('app.current_tenant_id')::uuid)` enforces the boundary at the database engine level. A bug that omits the application-layer filter will be blocked by the RLS policy and return an empty result set rather than cross-tenant data.
  * **RBAC — Autonomous (GREEN) Path:** When the graph executes autonomously, there is no in-flight human JWT. The Workflow Runner operates under a system service account holding a permanent OPERATOR-scoped service token. Authorization is enforced at the **ingest boundary** (`POST /v1/exceptions/ingest`) and at service-account provisioning time — not inside the graph. The `apply_effects` node operates under this established service-account context.
  * **RBAC — HITL (YELLOW) Path:** Authorization for human-initiated actions is enforced at the **approve and reject endpoints** (`POST /v1/exceptions/{id}/approve` and `/reject`). The FastAPI dependency verifies the caller's JWT holds OPERATOR or ADMIN role before the graph checkpoint is rehydrated. A stale or missing JWT at this boundary returns 403 and the exception remains in PENDING_APPROVAL.
+ * **Policy Override Controls:** `PUT /v1/policies/{tenant_id}` is restricted to the ADMIN role. Every invocation writes an immutable record to the `policy_audit_log` table before the new value is applied, capturing: caller identity (JWT `sub`), timestamp, `tenant_id`, the full previous value, and the full new value. Policy changes take effect immediately for new exceptions; in-flight exceptions use the `policy_overrides` snapshot captured in their `GraphState` at ingest time and are unaffected.
  * **Trace Propagation:** The X-Trace-ID header is required at the API Gateway, injected into the LangGraph GraphState, logged via Python's standard logging, and persisted in PostgreSQL.
 ## 10. Continual Learning Architecture (V2 Scope)
 ASOE maps LangChain's 3-layer learning model to its own architecture, safely constrained by the Shadow Audit:
@@ -162,6 +165,7 @@ Strict adherence to 45+ CSS variables.
  * **ADR-003 (Vector Search):** *Decision:* Install pgvector but defer active querying to V2. *Rationale:* Reduces V1 cognitive load and latency while laying the schema groundwork for future RAG features.
  * **ADR-004 (Real-time Protocol):** *Decision:* Per-node WebSocket events with a typed envelope. *Rationale:* Essential for the "Control Tower" experience, requiring the UI to reflect backend state in milliseconds.
  * **ADR-005 (HITL Resume):** *Decision:* Use LangGraph `interrupt()` with `PostgresSaver` for HITL pause/resume. *Rationale:* Checkpointing to PostgreSQL ensures the GraphState survives pod restarts and provides an auditable record of the exact state at the moment of human review. The resume path is a single, guarded API endpoint — not an internal graph signal — keeping RBAC enforcement at the system boundary.
+ * **ADR-006 (Environment Isolation):** *Decision:* Embed an `env` claim in every JWT and validate it at the FastAPI dependency boundary. *Rationale:* Separate signing keys and an enforced claim check prevent sandbox credentials from being usable against production endpoints. This is cheaper and more auditable than network-level separation alone.
 ## 14. Appendix: Execution Invariants
 These 11 rules are enforced at the compiler/framework level and validated by core tests:
  1. **Shadow-Mandatory:** No recipe_id can progress to execute_recipe without a preceding shadow_audit node execution yielding a non-RED verdict.
