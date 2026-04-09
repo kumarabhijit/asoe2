@@ -206,7 +206,7 @@ uv python install 3.14.3
 uv venv --python 3.14.3
 
 # 4. Install core + dev dependencies
-uv pip install "langgraph>=0.2.0" "pydantic>=2.7.0" "pytest>=8.0.0" "pytest-cov>=5.0.0"
+uv pip install "langgraph>=0.2.0" "pydantic>=2.7.0" "fastapi>=0.110.0" "uvicorn[standard]>=0.29.0" "pytest>=8.0.0" "pytest-cov>=5.0.0" "httpx>=0.27.0"
 
 # 5. Apply compatibility patch (pydantic 2.12.x + Python 3.14 typing API change)
 bash scripts/apply-patches.sh .venv/bin/python
@@ -234,7 +234,7 @@ bash scripts/apply-patches.sh .venv/bin/python   # re-run after any pydantic rei
 python -m pytest
 ```
 
-Expected: **584 passed, 0 failed** (a warning from `langchain_core` pydantic.v1 deprecation may appear — not a blocker).
+Expected: **718 passed, 0 failed** (a warning from `langchain_core` pydantic.v1 deprecation may appear — not a blocker).
 
 > **Verified on Python 3.14.3 (stable).**
 
@@ -306,6 +306,35 @@ PYTHONPATH=. streamlit run tests/sandbox/ui/app.py
 `LocalHFBackend` uses Outlines constrained-JSON generation — the same
 guarantee as `OutlinesConstrainedBackend` in production.  If the model fails
 to load it falls back silently to `DeterministicFallbackBackend`.
+
+### API server
+
+The FastAPI API server provides REST endpoints for exception resolution,
+CRUD, workflows, policy management, and auth (architecture_v3.md §8).
+
+```bash
+# Start the API server (dev mode with auto-reload)
+PYTHONPATH=. uvicorn api.app:app --host 0.0.0.0 --port 8000 --reload
+
+# → API docs at http://localhost:8000/docs
+# → Health check: curl http://localhost:8000/api/v1/health
+```
+
+**Key endpoints:**
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/v1/health` | public | Health check + dynamic enum serving |
+| `POST` | `/api/v1/exceptions/resolve` | analyst+ | Synchronous exception resolution |
+| `POST` | `/api/v1/exceptions/resolve/explain` | analyst+ | Explain mode dry-run |
+| `GET` | `/api/v1/exceptions` | analyst+ | Paginated exception queue |
+| `PATCH` | `/api/v1/exceptions/{id}/override` | manager+ | Human override |
+| `POST` | `/api/v1/workflows` | manager+ | Multi-step workflow execution |
+| `PUT` | `/api/v1/policies/{tenant_id}` | admin | Policy override update |
+
+All protected endpoints require a JWT Bearer token in the `Authorization`
+header. Set `ASOE_JWT_SECRET` for production; the dev fallback is used when
+unset. See `DESIGN.md` §15 for the full endpoint table and RBAC matrix.
 
 ### LangFuse observability (optional)
 
@@ -667,9 +696,21 @@ observability/      Structured tracing with optional LangFuse forwarding
   tracer.py         TraceRecord builder + stdlib JSON emitter + LangFuse sink call
   langfuse_sink.py  Optional LangFuse forwarder (lazy init, failure-isolated, no-op without keys)
 hardening/          Kill switch + explain mode implementation
-docs/               AUDITOR_GUIDE.md
+api/                FastAPI API layer (architecture_v3.md §8, §11)
+  app.py            Application factory (create_app())
+  deps.py           JWT auth, RBAC (5 roles), tenant extraction, env isolation
+  middleware.py     X-Trace-ID propagation middleware
+  errors.py         Standard error envelope
+  schemas.py        Request/Response Pydantic models
+  store.py          Exception store (in-memory or database-backed via DATABASE_URL)
+  routes/           health, exceptions, workflows, policies, auth endpoints
+db/                 Database layer (architecture_v3.md §9)
+  connection.py     SQLiteAdapter / PostgresAdapter, create_adapter() factory
+  repository.py     ExceptionRepository, TraceRepository, PolicyRepository
+  migrations/       V001__initial_schema.sql (5 tables, RLS, SOX trigger, pgvector)
+docs/               AUDITOR_GUIDE.md, ADR-001, ADR-002
   specs/            Product-owner reference specs (not runtime code)
-tests/              pytest test suite (584 tests)
+tests/              pytest test suite (718 tests)
   sandbox/          Local execution sandbox (not part of CI test suite)
     cli.py          Headless CLI runner — run events from the terminal (no Streamlit needed)
     seed.py         SQLite seeder — creates sandbox.db with customers, DCs, promotions, SAP / EDI data
@@ -703,6 +744,8 @@ k8s/                Kubernetes manifests for AKS production deployment
 | `DESIGN.md` | Implementation reference: module map, class/function names, graph node wiring, env vars, container layout |
 | `docs/AUDITOR_GUIDE.md` | Audit controls: constrained-generation boundaries, kill switch, explain mode, 10 execution invariants |
 | `contracts/policy.py` | Centralised business thresholds — discount limits, circuit breaker bounds, credit exposure tolerance |
+| `docs/adr/ADR-001-core-deployment-model.md` | Library vs. service deployment decision, staged evolution triggers |
+| `docs/adr/ADR-002-database-access-pattern.md` | Raw SQL vs. ORM decision, migration triggers, expert perspectives |
 | `prompts/po-spec-to-asoe.md` | Step-by-step prompt for converting a Product Owner specification into ASOE Skill–Shadow–Recipe components |
 | `prompts/triple_check_review_board.md` | Reusable review prompt — three-persona architecture, security, and test coverage assessment |
 | `prompts/phase_10_langfuse.md` | LangFuse integration prompt — sink design, trace mapping, self-hosted setup, SDK compatibility, test plan |
@@ -733,6 +776,9 @@ k8s/                Kubernetes manifests for AKS production deployment
 | 9 | Containerized deployment — 3 Dockerfiles (core/ui/inference), docker-compose for local dev, K8s manifests for AKS |
 | Review | Triple-Check Technical Review Board — resolved 10 findings (1 Critical, 1 High, 8 Medium); 7 Low findings debated and accepted (SKIP); test count 490 → 525 → 540 (LangFuse) |
 | 11 | Duplicate PO product spec gap closure — 6 resolution actions, decision tree, autonomy levels (L1–L4), override audit fields, buyer notification gateway effects; test count 540 → 584 |
+| 12 | FastAPI API layer — 19 REST endpoints, JWT auth, RBAC (5 roles), tenant isolation, standard error envelope; test count 584 → 659 |
+| 13 | Database layer — PostgreSQL schema (5 tables, RLS, SOX trigger), migration runner, connection adapters, repository layer, docker-compose with PostgreSQL + Redis; test count 659 → 690 |
+| 14 | Auth & security hardening — token expiry (15min/7d), env isolation, X-Trace-ID propagation, partner-role scoping, configurable JWT secret; test count 690 → 718 |
 
 ---
 
@@ -742,6 +788,10 @@ k8s/                Kubernetes manifests for AKS production deployment
 |---|---|---|
 | `ASOE_KILL_SWITCH` | `0` | `1` / `true` / `yes` — halt all automated execution before any node runs |
 | `ASOE_EXPLAIN_MODE` | `0` | `1` / `true` / `yes` — dry-run only; shadow audits but no recipe executes |
+| `ASOE_ENV` | `sandbox` | `sandbox` or `production` — JWT `env` claim must match (§11.6) |
+| `ASOE_JWT_SECRET` | _(dev fallback)_ | JWT signing secret — **required for production** (Key Vault-managed) |
+| `DATABASE_URL` | _(unset)_ | PostgreSQL connection string; when set, API uses database-backed store |
+| `REDIS_URL` | _(unset)_ | Redis connection string for pub/sub, task queue, cache |
 | `USE_OUTLINES_BACKEND` | `0` | `1` — use `OutlinesConstrainedBackend` (requires `pip install -e ".[outlines]"`) |
 | `SANDBOX_DB_PATH` | `tests/sandbox/sandbox.db` | Path to the sandbox SQLite database |
 | `LOCAL_LLM_BACKEND_CLASS` | _(unset)_ | Fully-qualified class to use as the constrained backend (e.g. `tests.sandbox.llm.local_backend.LocalHFBackend`) |
