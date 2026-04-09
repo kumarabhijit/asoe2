@@ -13,6 +13,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from api.errors import ASOEError, asoe_error_handler, unhandled_error_handler
+from api.middleware import TraceIDMiddleware
 from api.routes import auth, exceptions, health, policies, workflows
 
 
@@ -23,6 +24,9 @@ def create_app() -> FastAPI:
         version="0.3.2",
         description="Deterministic, compliance-aware exception management API.",
     )
+
+    # Middleware (§11.4 — X-Trace-ID propagation)
+    application.add_middleware(TraceIDMiddleware)
 
     # Register error handlers
     application.add_exception_handler(ASOEError, asoe_error_handler)  # type: ignore[arg-type]

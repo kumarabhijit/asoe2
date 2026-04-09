@@ -576,10 +576,15 @@ class TestAuthEndpoints:
         assert r.status_code == 200
         assert "access_token" in r.json()
 
-    def test_refresh_token(self, client, analyst_token):
+    def test_refresh_token(self, client):
+        from api.deps import create_refresh_token
+        refresh = create_refresh_token(
+            sub="test-user", email="test@example.com", name="Test",
+            roles=["analyst"], org="tenant-a",
+        )
         r = client.post(
             "/api/auth/refresh",
-            json={"refresh_token": analyst_token},
+            json={"refresh_token": refresh},
         )
         assert r.status_code == 200
         assert r.json()["access_token"] != ""

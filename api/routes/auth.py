@@ -4,7 +4,7 @@ POST /api/auth/login        — Email/password authentication (admin-only, MFA e
 POST /api/auth/sso/init     — SSO initiation (stub)
 GET  /api/auth/sso/callback — SSO callback (stub)
 POST /api/auth/mfa/verify   — MFA verification (stub)
-POST /api/auth/refresh      — Token refresh
+POST /api/auth/refresh      — Token refresh with rotation
 GET  /api/auth/me           — Current authenticated user profile
 
 V1 implements stub auth with dev-signed JWTs. Production requires
@@ -15,7 +15,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from api.deps import AuthenticatedUser, create_test_token, get_current_user
+from api.deps import (
+    AuthenticatedUser,
+    _get_jwt_secret,
+    _jwt_decode,
+    create_access_token,
+    create_refresh_token,
+    create_test_token,
+    get_current_user,
+)
 from api.errors import ASOEError
 from api.schemas import (
     AuthTokenResponse,
@@ -43,8 +51,8 @@ async def login(req: LoginRequest) -> AuthTokenResponse:
             status_code=400,
         )
 
-    # Stub MFA challenge — always require MFA per architecture_v3.md Section 11.1
-    mfa_token = create_test_token(
+    # Stub MFA challenge — always require MFA per §11.1
+    mfa_token = create_access_token(
         sub="mfa-pending",
         email=req.email,
         name="MFA Pending",
@@ -64,8 +72,6 @@ async def login(req: LoginRequest) -> AuthTokenResponse:
 
 @router.post("/sso/init")
 async def sso_init() -> dict:
-    # V1 stub: returns a placeholder redirect URL.
-    # Production: constructs SAML AuthnRequest or OIDC authorization URL.
     return {"redirect_url": "https://idp.example.com/auth?client_id=asoe"}
 
 
@@ -75,9 +81,15 @@ async def sso_init() -> dict:
 
 @router.get("/sso/callback")
 async def sso_callback() -> dict:
-    # V1 stub: returns a test token.
-    # Production: validates SAML assertion / OIDC token, issues JWT.
-    token = create_test_token(
+    access = create_access_token(
+        sub="sso-user",
+        email="sso@example.com",
+        name="SSO User",
+        roles=["analyst"],
+        org="sso-tenant",
+        auth_method="sso",
+    )
+    refresh = create_refresh_token(
         sub="sso-user",
         email="sso@example.com",
         name="SSO User",
@@ -85,8 +97,8 @@ async def sso_callback() -> dict:
         org="sso-tenant",
     )
     return {
-        "access_token": token,
-        "refresh_token": token,
+        "access_token": access,
+        "refresh_token": refresh,
         "token_type": "bearer",
     }
 
@@ -97,8 +109,6 @@ async def sso_callback() -> dict:
 
 @router.post("/mfa/verify", response_model=AuthTokenResponse)
 async def mfa_verify(req: MFAVerifyRequest) -> AuthTokenResponse:
-    # V1 stub: accepts any code, issues tokens.
-    # Production: validates TOTP code against user's MFA secret.
     if not req.code:
         raise ASOEError(
             code="INVALID_MFA",
@@ -106,7 +116,16 @@ async def mfa_verify(req: MFAVerifyRequest) -> AuthTokenResponse:
             status_code=400,
         )
 
-    token = create_test_token(
+    # §11.1: JWT includes auth_method: "password+mfa" for audit differentiation
+    access = create_access_token(
+        sub="admin-user",
+        email="admin@example.com",
+        name="Admin User",
+        roles=["admin"],
+        org="default-tenant",
+        auth_method="password+mfa",
+    )
+    refresh = create_refresh_token(
         sub="admin-user",
         email="admin@example.com",
         name="Admin User",
@@ -114,8 +133,8 @@ async def mfa_verify(req: MFAVerifyRequest) -> AuthTokenResponse:
         org="default-tenant",
     )
     return AuthTokenResponse(
-        access_token=token,
-        refresh_token=token,
+        access_token=access,
+        refresh_token=refresh,
         user=UserProfile(
             sub="admin-user",
             email="admin@example.com",
@@ -130,32 +149,51 @@ async def mfa_verify(req: MFAVerifyRequest) -> AuthTokenResponse:
 
 
 # ---------------------------------------------------------------------------
-# POST /api/auth/refresh — Token refresh
+# POST /api/auth/refresh — Token refresh with rotation (§11.1)
 # ---------------------------------------------------------------------------
 
 @router.post("/refresh", response_model=AuthTokenResponse)
 async def refresh(req: RefreshRequest) -> AuthTokenResponse:
-    # V1 stub: issues a new token from the refresh token claims.
-    # Production: validates refresh token, rotates it, issues new access token.
-    from api.deps import _STUB_SECRET, _jwt_decode
-
     try:
-        payload = _jwt_decode(req.refresh_token, _STUB_SECRET)
-    except (ValueError, KeyError):
+        payload = _jwt_decode(req.refresh_token, _get_jwt_secret())
+    except ValueError:
         raise ASOEError(
             code="INVALID_TOKEN",
-            message="Invalid refresh token.",
+            message="Invalid or expired refresh token.",
             status_code=401,
         )
 
-    new_token = create_test_token(
+    # Verify this is a refresh token, not an access token
+    if payload.get("token_type") != "refresh":
+        raise ASOEError(
+            code="INVALID_TOKEN",
+            message="Expected a refresh token.",
+            status_code=401,
+        )
+
+    # Issue new access token + rotated refresh token
+    new_access = create_access_token(
         sub=payload.get("sub", ""),
         email=payload.get("email", ""),
         name=payload.get("name", ""),
         roles=payload.get("roles", []),
         org=payload.get("org", ""),
+        env=payload.get("env", "sandbox"),
+        retailer_id=payload.get("retailer_id"),
     )
-    return AuthTokenResponse(access_token=new_token)
+    new_refresh = create_refresh_token(
+        sub=payload.get("sub", ""),
+        email=payload.get("email", ""),
+        name=payload.get("name", ""),
+        roles=payload.get("roles", []),
+        org=payload.get("org", ""),
+        env=payload.get("env", "sandbox"),
+        retailer_id=payload.get("retailer_id"),
+    )
+    return AuthTokenResponse(
+        access_token=new_access,
+        refresh_token=new_refresh,
+    )
 
 
 # ---------------------------------------------------------------------------
