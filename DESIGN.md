@@ -593,6 +593,7 @@ All queries include `tenant_id` predicate for application-layer isolation.
 | HITL pause/resume (interrupt + checkpoint) | architecture_v3.md §5.9 | Planned (V1.1) |
 | Environment isolation (JWT env claim) | architecture_v3.md §11.6 | JWT `env` claim present; validation planned (V1.1) |
 | Deployment model rationale | [ADR-001](docs/adr/ADR-001-core-deployment-model.md) | — |
+| Database access pattern rationale | [ADR-002](docs/adr/ADR-002-database-access-pattern.md) | — |
 
 ---
 
