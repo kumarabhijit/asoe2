@@ -234,7 +234,7 @@ bash scripts/apply-patches.sh .venv/bin/python   # re-run after any pydantic rei
 python -m pytest
 ```
 
-Expected: **718 passed, 0 failed** (a warning from `langchain_core` pydantic.v1 deprecation may appear — not a blocker).
+Expected: **739 passed, 0 failed** (a warning from `langchain_core` pydantic.v1 deprecation may appear — not a blocker).
 
 > **Verified on Python 3.14.3 (stable).**
 
@@ -710,7 +710,7 @@ db/                 Database layer (architecture_v3.md §9)
   migrations/       V001__initial_schema.sql (5 tables, RLS, SOX trigger, pgvector)
 docs/               AUDITOR_GUIDE.md, ADR-001, ADR-002
   specs/            Product-owner reference specs (not runtime code)
-tests/              pytest test suite (718 tests)
+tests/              pytest test suite (739 tests)
   sandbox/          Local execution sandbox (not part of CI test suite)
     cli.py          Headless CLI runner — run events from the terminal (no Streamlit needed)
     seed.py         SQLite seeder — creates sandbox.db with customers, DCs, promotions, SAP / EDI data
@@ -752,6 +752,7 @@ k8s/                Kubernetes manifests for AKS production deployment
 | `prompts/phase_12_api_layer.md` | FastAPI API layer prompt — 19 endpoints, auth, RBAC, tenant isolation, error envelope |
 | `prompts/phase_13_database_layer.md` | Database layer prompt — PostgreSQL schema, migrations, repository, RLS, SOX audit |
 | `prompts/phase_14_auth_security.md` | Auth & security hardening prompt — token expiry, env isolation, trace_id, partner scoping |
+| `prompts/phase_15_websocket_redis.md` | WebSocket/Redis prompt — event schemas, pub/sub, WebSocket hub, resolve wiring |
 | `tests/sandbox/seed.py` | Sandbox seeder: customers, DCs, promotions, SAP pricing, retailer contracts, credit profiles, and 18 EDI events covering all four intents |
 | `tests/sandbox/cli.py` | Headless CLI runner — run sandbox events from the terminal without Streamlit |
 | `tests/sandbox/ui/app.py` | Streamlit execution-trace visualiser — select event, run pipeline, inspect trace |
@@ -782,6 +783,7 @@ k8s/                Kubernetes manifests for AKS production deployment
 | 12 | FastAPI API layer — 19 REST endpoints, JWT auth, RBAC (5 roles), tenant isolation, standard error envelope; test count 584 → 659 |
 | 13 | Database layer — PostgreSQL schema (5 tables, RLS, SOX trigger), migration runner, connection adapters, repository layer, docker-compose with PostgreSQL + Redis; test count 659 → 690 |
 | 14 | Auth & security hardening — token expiry (15min/7d), env isolation, X-Trace-ID propagation, partner-role scoping, configurable JWT secret; test count 690 → 718 |
+| 15 | WebSocket / Redis real-time event publishing — event schemas, pub/sub manager (in-memory + Redis), WebSocket hub with JWT auth + tenant scoping, resolve endpoint event wiring; test count 718 → 739 |
 
 ---
 

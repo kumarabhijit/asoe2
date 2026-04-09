@@ -65,12 +65,15 @@ api/
   errors.py          # Standard error envelope (ASOEError, ErrorEnvelope)
   schemas.py         # Request/Response Pydantic models
   store.py           # Exception store: in-memory (default) or DatabaseBackedStore (when DATABASE_URL set)
+  events.py          # WSEvent schema + factory methods (pipeline_progress, task_complete, etc.)
+  pubsub.py          # InMemoryPubSub / RedisPubSub, create_pubsub() factory, event_publisher singleton
   routes/
     health.py        # GET /api/v1/health (public, no auth)
     exceptions.py    # Exception CRUD + resolve endpoints (11 routes)
     workflows.py     # POST /api/v1/workflows
     policies.py      # PUT /api/v1/policies/{tenant_id}
     auth.py          # Auth endpoints: login, SSO, MFA, refresh, me
+    ws.py            # WebSocket hub — ws://host/api/v1/ws (§10)
 
 db/
   connection.py      # SQLiteAdapter / PostgresAdapter, create_adapter() factory
@@ -603,16 +606,59 @@ All queries include `tenant_id` predicate for application-layer isolation.
 
 | Concern | Architecture Reference | Status |
 |---|---|---|
-| WebSocket event publishing | architecture_v3.md §10 | Planned (V1.1) |
-| Redis key structures + write-through cache | architecture_v3.md §9.3 | Planned (V1.1) |
 | HITL pause/resume (interrupt + checkpoint) | architecture_v3.md §5.9 | Planned (V1.1) |
-| Environment isolation (JWT env claim) | architecture_v3.md §11.6 | JWT `env` claim present; validation planned (V1.1) |
 | Deployment model rationale | [ADR-001](docs/adr/ADR-001-core-deployment-model.md) | — |
 | Database access pattern rationale | [ADR-002](docs/adr/ADR-002-database-access-pattern.md) | — |
 
 ---
 
-## 16. Local Execution Sandbox
+## 17. Real-Time Event Publishing (WebSocket / Redis)
+
+Implements architecture_v3.md §10 (Real-Time Event Publishing) and §9.3 (Redis Usage).
+
+### 17.1 Event Schemas (`api/events.py`)
+
+| Event Type | Payload Model | Published When |
+|---|---|---|
+| `pipeline_progress` | `PipelineProgressPayload` (node, status, duration_ms, data) | Each LangGraph node completes |
+| `exception_update` | `ExceptionUpdatePayload` (lifecycle_state, updated_fields) | Lifecycle state transitions |
+| `task_complete` | `TaskCompletePayload` (task_id, final_status, explanation) | Graph execution finishes |
+| `error` | `ErrorPayload` (code, message) | Pipeline errors |
+
+All events share the `WSEvent` envelope: `type`, `trace_id`, `exception_id`, `tenant_id`, `timestamp`, `payload`.
+
+### 17.2 Pub/Sub Backends (`api/pubsub.py`)
+
+| Backend | When | Implementation |
+|---|---|---|
+| `InMemoryPubSub` | `REDIS_URL` unset (testing/dev) | Thread-safe per-tenant lists with timestamp-based replay |
+| `RedisPubSub` | `REDIS_URL` set (production) | Redis Pub/Sub channels + sorted-set replay buffer (60s TTL) |
+
+Factory: `create_pubsub()` auto-detects from `REDIS_URL`. Module-level `event_publisher` singleton.
+
+Channels: `asoe:ws:{tenant_id}`. Replay buffer: `asoe:replay:{tenant_id}` (sorted set, score = timestamp).
+
+Publish failures are logged at WARNING and never block API responses (§9.3 partial failure recovery).
+
+### 17.3 WebSocket Hub (`api/routes/ws.py`)
+
+`ws://host/api/v1/ws` — authenticated, tenant-scoped event streaming.
+
+**Protocol:**
+1. Client sends `{ "type": "auth", "token": "eyJ..." }` — server validates JWT, extracts `tenant_id`
+2. Optional `last_seen` ISO 8601 timestamp triggers replay from the 60s buffer
+3. In-memory mode: client sends `{ "type": "ping" }`, server returns new events + `{ "type": "pong" }`
+4. Redis mode: server subscribes to `asoe:ws:{tenant_id}` channel and forwards events
+
+**Tenant isolation:** Each client receives events only for their `tenant_id` channel.
+
+### 17.4 Resolve Endpoint Integration
+
+All three resolve endpoints (sync, async, explain) publish a `task_complete` event after graph execution via `_publish_task_complete()`. Events include `trace_id`, `exception_id`, `tenant_id`, `final_status`, and `explanation`.
+
+---
+
+## 18. Local Execution Sandbox
 
 | Component | File | Purpose |
 |---|---|---|
@@ -624,12 +670,13 @@ All queries include `tenant_id` predicate for application-layer isolation.
 
 ---
 
-## 17. Test Coverage
+## 19. Test Coverage
 
 | File | Coverage area |
 |---|---|
 | `test_api.py` | FastAPI endpoints, JWT auth, RBAC, tenant isolation, error envelope |
 | `test_security.py` | Token expiry, access/refresh types, env isolation, trace_id, partner scoping, secret config |
+| `test_websocket.py` | Event schemas, InMemoryPubSub, resolve event publishing, WebSocket auth + streaming + tenant isolation |
 | `test_db.py` | Database schema, repositories, tenant isolation, pagination, audit log |
 | `test_constraints.py` | Constrained output schemas and backend chain |
 | `test_contracts.py` | Pydantic model validation |
