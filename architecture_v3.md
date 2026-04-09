@@ -4,7 +4,7 @@
 **Domain:** Consumer Packaged Goods (CPG) Supply Chain (Order-to-Cash)
 **Scope:** V1.0 is strictly constrained to **Pricing & Promotional Exceptions**.
 **Design Reference:** [DESIGN.md](DESIGN.md) — maps these patterns to concrete modules, classes, and wiring.
-**Lineage:** This document unifies `architecture_v2.md` (core engine spec) with the V1-planned ASOE Core items from `consol_arch.md` (unified platform architecture). All content from `architecture_v2.md` is preserved. Sections marked *[NEW]* originate from `consol_arch.md`.
+**Lineage:** This document unifies `architecture_v2.md` (original core engine spec) with the V1-planned ASOE Core items from `consol_arch.md` (unified platform architecture in `asoe-ui`). All content from `architecture_v2.md` is preserved; `architecture_v2.md` is now superseded by this document. Sections marked *[NEW]* originate from `consol_arch.md`.
 
 ---
 

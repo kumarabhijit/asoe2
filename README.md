@@ -633,7 +633,7 @@ kubectl apply -f k8s/ui/
 kubectl apply -f k8s/inference/
 ```
 
-See `architecture_v2.md` §2 for the full Azure infrastructure stack.
+See `architecture_v3.md` §4 for the full Azure infrastructure stack.
 
 ---
 
@@ -699,7 +699,7 @@ k8s/                Kubernetes manifests for AKS production deployment
 |---|---|
 | `CLAUDE.md` | Architecture rules, what must never change, constrained-generation policy |
 | `tasks.md` | Phase-by-phase implementation checklist and acceptance criteria |
-| `architecture_v2.md` | Architecture patterns and principles: Skill–Recipe decoupling, Hexagonal Gateways, Saga workflows, execution invariants |
+| `architecture_v3.md` | Architecture patterns and principles: Skill–Recipe decoupling, Hexagonal Gateways, Saga workflows, execution invariants |
 | `DESIGN.md` | Implementation reference: module map, class/function names, graph node wiring, env vars, container layout |
 | `docs/AUDITOR_GUIDE.md` | Audit controls: constrained-generation boundaries, kill switch, explain mode, 10 execution invariants |
 | `contracts/policy.py` | Centralised business thresholds — discount limits, circuit breaker bounds, credit exposure tolerance |

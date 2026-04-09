@@ -1,6 +1,6 @@
 # Phase 0 — Foundation
 ```text
-Read architecture_v2.md, CLAUDE.md, and tasks.md.
+Read architecture_v3.md, CLAUDE.md, and tasks.md.
 Implement only PHASE 0.
 Constraints:
 - no business logic

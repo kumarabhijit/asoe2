@@ -19,7 +19,7 @@ spec:
         tier: orchestration
       annotations:
         # Azure Workload Identity — no hardcoded API keys in env vars
-        # (per architecture_v2.md §2 Security row)
+        # (per architecture_v3.md §4 Security row)
         azure.workload.identity/use: "true"
     spec:
       serviceAccountName: asoe-core-sa

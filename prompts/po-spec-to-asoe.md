@@ -11,7 +11,7 @@ into the correct architectural components — not to execute it as-is.
 
 Before touching any file, read all of these in full:
 1. CLAUDE.md                          — guardrails and working rules
-2. architecture_v2.md                 — system design
+2. architecture_v3.md                 — system design
 3. contracts/models.py                — current Intent enum and all Pydantic models
 4. constraints/specs.py               — current AllowedIntent, AllowedRecipeName literals
 5. constraints/guidance_backend.py    — current constrained-generation regex patterns

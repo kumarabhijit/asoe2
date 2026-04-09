@@ -25,7 +25,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
-# ── uv: fast, deterministic dep resolution (per architecture_v2.md §2) ───────
+# ── uv: fast, deterministic dep resolution (per architecture_v3.md §4) ───────
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # ── Python deps — core only (no torch, no streamlit) ─────────────────────────
