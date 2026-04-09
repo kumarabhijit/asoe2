@@ -749,6 +749,9 @@ k8s/                Kubernetes manifests for AKS production deployment
 | `prompts/po-spec-to-asoe.md` | Step-by-step prompt for converting a Product Owner specification into ASOE Skill–Shadow–Recipe components |
 | `prompts/triple_check_review_board.md` | Reusable review prompt — three-persona architecture, security, and test coverage assessment |
 | `prompts/phase_10_langfuse.md` | LangFuse integration prompt — sink design, trace mapping, self-hosted setup, SDK compatibility, test plan |
+| `prompts/phase_12_api_layer.md` | FastAPI API layer prompt — 19 endpoints, auth, RBAC, tenant isolation, error envelope |
+| `prompts/phase_13_database_layer.md` | Database layer prompt — PostgreSQL schema, migrations, repository, RLS, SOX audit |
+| `prompts/phase_14_auth_security.md` | Auth & security hardening prompt — token expiry, env isolation, trace_id, partner scoping |
 | `tests/sandbox/seed.py` | Sandbox seeder: customers, DCs, promotions, SAP pricing, retailer contracts, credit profiles, and 18 EDI events covering all four intents |
 | `tests/sandbox/cli.py` | Headless CLI runner — run sandbox events from the terminal without Streamlit |
 | `tests/sandbox/ui/app.py` | Streamlit execution-trace visualiser — select event, run pipeline, inspect trace |

@@ -41,6 +41,8 @@ In the block, briefly and explicitly answer:
    - workflows/      — multi-step workflow runner (Saga pattern)
    - hardening/      — kill switch, explain mode
    - observability/  — structured tracing (TraceRecord)
+   - api/            — FastAPI server, REST endpoints, auth, RBAC, middleware
+   - db/             — database connection, repository, migrations
    - tests/          — pytest suite
 
 2. **Boundary crossing:** Does this change cross a layer boundary? If yes,
