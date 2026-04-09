@@ -443,6 +443,15 @@ def main() -> int:
         os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY")
     )
 
+    # API server availability
+    api_available = False
+    try:
+        from api.app import app as _api_app  # noqa: F401
+        api_available = True
+    except ImportError:
+        pass
+    api_port = os.getenv("ASOE_API_PORT", "8000")
+
     print(f"\n{'=' * 80}")
     print(f"  {_BOLD}ASOE Sandbox — CLI Runner{_RESET}")
     print(f"{'=' * 80}")
@@ -454,6 +463,10 @@ def main() -> int:
         print(f"  LangFuse:      {_GREEN}enabled{_RESET} ({langfuse_host})")
     else:
         print(f"  LangFuse:      {_DIM}disabled (set LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY){_RESET}")
+    if api_available:
+        print(f"  API server:    {_GREEN}available{_RESET} (uvicorn api.app:app --port {api_port})")
+    else:
+        print(f"  API server:    {_DIM}not installed (pip install fastapi uvicorn){_RESET}")
     print(f"  DB path:       {db}")
     print(f"  Events:        {len(events)}")
     print(f"{'=' * 80}")

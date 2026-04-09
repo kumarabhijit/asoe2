@@ -336,6 +336,59 @@ Build prompt: `docs/specs/duplicate-po-product-spec.md`
 - [x] 44 new tests (584 total): decision tree (11), autonomy routing (8), notification templates (6), override audit (7), gateway deps (4), registry (4), constraint vocab (4)
 ✅ Outcome: all new code paths covered at recipe, node, graph, and integration levels
 ---
+## PHASE 12 — FastAPI API Layer
+Build prompt: architecture_v3.md §8, §11.1–11.3
+### 12.1 API Application Structure
+- [x] Create `api/` module with FastAPI application factory (`api/app.py`)
+- [x] Add standard error envelope (`api/errors.py`) per architecture_v3.md §8.3
+- [x] Add request/response Pydantic models (`api/schemas.py`)
+- [x] Add in-memory exception store (`api/store.py`) — V1 persistence (PostgreSQL in V1.1)
+✅ Outcome: structured API module with typed contracts
+
+### 12.2 Authentication & RBAC
+- [x] Implement JWT extraction and validation (`api/deps.py`) — HS256 dev stub, Key Vault in production
+- [x] Implement RBAC dependency factory (`require_role()`) — 5 roles per architecture_v3.md §11.2
+- [x] Implement tenant extraction from JWT `org` claim (`get_tenant_id()`)
+- [x] Application-layer tenant isolation on all queries
+✅ Outcome: JWT auth + RBAC + tenant scoping enforced on all protected endpoints
+
+### 12.3 REST Endpoints (19 routes)
+- [x] `GET /api/v1/health` — public health check with dynamic enum serving (Guardrail #2)
+- [x] `POST /api/v1/exceptions/resolve` — synchronous resolution via `run_graph()`
+- [x] `POST /api/v1/exceptions/resolve/async` — async resolution (V1 stub, runs synchronously)
+- [x] `POST /api/v1/exceptions/resolve/explain` — explain mode dry-run
+- [x] `GET /api/v1/exceptions` — paginated exception queue (filter by status, intent)
+- [x] `GET /api/v1/exceptions/stats` — dashboard metrics
+- [x] `GET /api/v1/exceptions/{id}` — exception detail
+- [x] `GET /api/v1/exceptions/{id}/trace` — full TraceRecord JSON
+- [x] `PATCH /api/v1/exceptions/{id}/override` — human override (manager+)
+- [x] `POST /api/v1/exceptions/{id}/approve` — resume paused exception (manager+)
+- [x] `POST /api/v1/exceptions/{id}/reject` — reject paused exception (manager+)
+- [x] `POST /api/v1/workflows` — multi-step workflow via `WorkflowRunner`
+- [x] `PUT /api/v1/policies/{tenant_id}` — policy override update (admin only)
+- [x] `POST /api/auth/login` — email/password auth (MFA enforced)
+- [x] `POST /api/auth/sso/init` — SSO initiation (stub)
+- [x] `GET /api/auth/sso/callback` — SSO callback (stub)
+- [x] `POST /api/auth/mfa/verify` — MFA verification (stub)
+- [x] `POST /api/auth/refresh` — token refresh
+- [x] `GET /api/auth/me` — current user profile
+✅ Outcome: all architecture_v3.md §8.2 endpoints implemented with auth + tenant isolation
+
+### 12.4 Sandbox Updates
+- [x] CLI runner (`tests/sandbox/cli.py`) — API server availability in environment banner
+- [x] Streamlit UI (`tests/sandbox/ui/app.py`) — API server availability in environment expander
+✅ Outcome: sandbox tools surface API server status
+
+### 12.5 Tests
+- [x] 42 new tests in `tests/test_api.py` (659 total): health (2), auth/JWT (3), RBAC (8), tenant isolation (2), resolve (5), CRUD (6), override (1), approve/reject (3), workflows (2), policies (1), auth endpoints (7), error envelope (2)
+✅ Outcome: full coverage of API endpoints, auth, RBAC, tenant isolation, and error handling
+
+### 12.6 Documentation
+- [x] `DESIGN.md` §15 — API layer module map, endpoint table, auth/RBAC docs
+- [x] `DESIGN.md` §17 — test_api.py added to test coverage table
+- [x] `tasks.md` — this phase checklist
+✅ Outcome: docs cover API structure, endpoints, auth, and testing
+---
 ## REVIEW FINDINGS — Triple-Check Technical Review Board (2026-03-20)
 
 ### Critical
