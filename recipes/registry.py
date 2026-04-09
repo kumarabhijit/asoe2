@@ -18,6 +18,8 @@ class RecipeSpec:
     # Gateway integration — declared, resolved by orchestration (never by recipes)
     dependencies: Tuple[GatewayDependency, ...] = ()
     effects: Tuple[GatewayEffect, ...] = ()
+    # V1 Foundation Guardrail #3: metadata keys this recipe expects on OrderEvent.metadata
+    expected_metadata_keys: tuple[str, ...] = ()
 
 
 REGISTRY = {
@@ -38,6 +40,7 @@ REGISTRY = {
         func=detect_duplicate_po,
         required_params=("incoming_po_number", "customer_id", "signal_scores", "threshold_auto_block", "threshold_review_required", "threshold_soft_flag"),
         allowed_intents=("DUPLICATE_PO",),
+        expected_metadata_keys=("signal_scores", "matched_po_id"),
         dependencies=(
             GatewayDependency(
                 gateway_name="oms",

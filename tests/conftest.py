@@ -117,6 +117,7 @@ def duplicate_po_event() -> GraphState:
                     "channel": 1.0,
                     "delivery_date": 0.80,
                 },
+                "matched_po_id": "PO-4000",
             },
         )
     )

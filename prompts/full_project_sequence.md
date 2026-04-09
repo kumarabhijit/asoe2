@@ -32,4 +32,5 @@ Phase sequence and build prompts:
   13  — Database Layer (PostgreSQL Schema & Migrations) → prompts/phase_13_database_layer.md
   14  — Auth & Security Hardening                      → prompts/phase_14_auth_security.md
   15  — WebSocket / Redis Real-Time Event Publishing   → prompts/phase_15_websocket_redis.md
+  16  — V1 Foundation Guardrail Tests (CI Enforcement) → prompts/phase_16_v1_guardrails.md
 ```

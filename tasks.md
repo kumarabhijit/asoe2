@@ -541,6 +541,66 @@ Build prompt: architecture_v3.md §10, §9.3
 - [x] `tasks.md` — this phase checklist
 ✅ Outcome: real-time event publishing documented and reproducible
 ---
+## PHASE 16 — V1 Foundation Guardrail Tests (CI Enforcement)
+Build prompt: architecture_v3.md §15
+### 16.1 Guardrail #1 — No intent-specific logic in pipeline nodes
+- [x] AST inspection of orchestration/nodes.py: no Compare nodes test against intent string literals
+- [x] Grep check: no quoted intent strings in nodes.py
+- [x] Sanity check: all expected pipeline functions exist
+✅ Outcome: CI fails if anyone adds `if intent == "DUPLICATE_PO"` to a node
+
+### 16.2 Guardrail #2 — Dynamic enum serving
+- [x] Health endpoint serves `allowed_intents` matching `AllowedIntent.__args__`
+- [x] Health endpoint serves `allowed_recipes` matching `AllowedRecipeName.__args__`
+- [x] 11 lifecycle states per architecture_v3.md §9.1
+- [x] Route imports from `constraints/specs.py`, not hardcoded lists
+✅ Outcome: adding a new intent auto-appears in API response without endpoint code changes
+
+### 16.3 Guardrail #3 — Metadata keys documented per RecipeSpec
+- [x] Added `expected_metadata_keys` field to `RecipeSpec` dataclass
+- [x] `DuplicatePORecipe.py` declares `("signal_scores", "matched_po_id")`
+- [x] All RecipeSpecs have the field (even if empty)
+- [x] Test fixtures in `conftest.py` include all declared keys
+✅ Outcome: metadata drift is caught by CI
+
+### 16.4 Guardrail #4 — ERP-agnostic gateway protocol
+- [x] AST-based comment/docstring stripping for accurate code-only scanning
+- [x] `gateways/base.py` code contains no ERP-specific terms (BAPI, RFC, SAP, Oracle, etc.)
+- [x] `GatewayRequest`/`GatewayResponse` field names contain no ERP terms
+- [x] `gateways/executor.py` code contains no ERP-specific terms
+✅ Outcome: gateway protocol stays vendor-neutral for Oracle/Dynamics/WMS adapters
+
+### 16.5 Guardrail #5 — Intent-agnostic exceptions table schema
+- [x] SQLite migration introspection: no intent-specific column names
+- [x] `resolution_data` extensibility column exists
+- [x] PostgreSQL migration SQL: no intent-specific columns in exceptions DDL
+✅ Outcome: adding a new intent requires zero schema changes
+
+### 16.6 Guardrail #6 — Hierarchical policy key format
+- [x] Regex validates `global.*`, `tenant.{id}.*`, `retailer.{id}.*`, `retailer.{id}.category.{cat}.*`
+- [x] Flat keys (no scope prefix) rejected
+- [x] Existing test_api.py policy keys follow the format
+- [x] Database repository writes produce valid keys
+✅ Outcome: V2 hierarchical resolution requires zero data migration
+
+### 16.7 Invariant #11 — Recipes never import from policy
+- [x] AST-based import check on all recipe files (not string matching in docstrings)
+✅ Outcome: recipe-policy decoupling enforced at CI level
+
+### 16.8 Supporting changes
+- [x] `recipes/registry.py` — added `expected_metadata_keys` field to `RecipeSpec`
+- [x] `tests/conftest.py` — added `matched_po_id` to DUPLICATE_PO fixture metadata
+
+### 16.9 Tests
+- [x] 25 new tests in `tests/test_v1_guardrails.py` (764 total)
+✅ Outcome: all 6 guardrails + Invariant #11 enforced as CI gates
+
+### 16.10 Documentation
+- [x] `prompts/phase_16_v1_guardrails.md` — build prompt
+- [x] `DESIGN.md` test coverage table — added test_v1_guardrails.py
+- [x] `tasks.md` — this phase checklist
+✅ Outcome: guardrail tests documented and reproducible
+---
 ## REVIEW FINDINGS — Triple-Check Technical Review Board (2026-03-20)
 
 ### Critical

@@ -234,7 +234,7 @@ bash scripts/apply-patches.sh .venv/bin/python   # re-run after any pydantic rei
 python -m pytest
 ```
 
-Expected: **739 passed, 0 failed** (a warning from `langchain_core` pydantic.v1 deprecation may appear — not a blocker).
+Expected: **764 passed, 0 failed** (a warning from `langchain_core` pydantic.v1 deprecation may appear — not a blocker).
 
 > **Verified on Python 3.14.3 (stable).**
 
@@ -710,7 +710,7 @@ db/                 Database layer (architecture_v3.md §9)
   migrations/       V001__initial_schema.sql (5 tables, RLS, SOX trigger, pgvector)
 docs/               AUDITOR_GUIDE.md, ADR-001, ADR-002
   specs/            Product-owner reference specs (not runtime code)
-tests/              pytest test suite (739 tests)
+tests/              pytest test suite (764 tests)
   sandbox/          Local execution sandbox (not part of CI test suite)
     cli.py          Headless CLI runner — run events from the terminal (no Streamlit needed)
     seed.py         SQLite seeder — creates sandbox.db with customers, DCs, promotions, SAP / EDI data
@@ -784,6 +784,7 @@ k8s/                Kubernetes manifests for AKS production deployment
 | 13 | Database layer — PostgreSQL schema (5 tables, RLS, SOX trigger), migration runner, connection adapters, repository layer, docker-compose with PostgreSQL + Redis; test count 659 → 690 |
 | 14 | Auth & security hardening — token expiry (15min/7d), env isolation, X-Trace-ID propagation, partner-role scoping, configurable JWT secret; test count 690 → 718 |
 | 15 | WebSocket / Redis real-time event publishing — event schemas, pub/sub manager (in-memory + Redis), WebSocket hub with JWT auth + tenant scoping, resolve endpoint event wiring; test count 718 → 739 |
+| 16 | V1 Foundation Guardrail tests — 6 CI-automated guardrails (AST inspection, dynamic enums, metadata contracts, ERP-agnostic gateway, schema agnostic, policy key format) + Invariant #11; test count 739 → 764 |
 
 ---
 
