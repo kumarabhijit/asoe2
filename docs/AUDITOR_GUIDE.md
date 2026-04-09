@@ -1,7 +1,7 @@
 # Auditor Guide — CPG Agentic Pricing Exception System
 
 **Document owner:** Principal AI Systems Architect
-**Scope:** Phase 6 hardening controls, Guidance / Outlines constrained-generation safeguards, and post-review remediation
+**Scope:** Hardening controls, constrained-generation safeguards, API security (JWT, RBAC, tenant isolation), database audit controls, and operational safety
 **Status:** Production-ready (Post-Review, Grade A-)
 
 ---
@@ -409,17 +409,96 @@ tokens).
 
 ---
 
-## 12. Environment Variable Reference
+## 12. API Security Controls
+
+The FastAPI API layer (`api/`) implements defence-in-depth per architecture_v3.md §11.
+
+### 12.1 Authentication (§11.1)
+
+All protected endpoints require a JWT Bearer token in the `Authorization` header.
+
+| Property | Value |
+|---|---|
+| **Algorithm** | HS256 (dev); production uses Key Vault-managed secret via `ASOE_JWT_SECRET` |
+| **Access token lifetime** | 15 minutes (`exp` claim validated on every request) |
+| **Refresh token lifetime** | 7 days (`token_type: "refresh"`) |
+| **Refresh rotation** | Each refresh call issues a new access + new refresh token |
+| **MFA enforcement** | Login flow always returns `mfa_required: true`; MFA code required before tokens are issued |
+| **`auth_method` claim** | `"password+mfa"` for login, `"sso"` for SSO — enables audit differentiation |
+
+**Expired tokens return 401.** Refresh endpoint rejects access tokens (validates `token_type` claim).
+
+### 12.2 RBAC (§11.2)
+
+| Role | Key Permissions | Enforcement |
+|---|---|---|
+| `analyst` | `exceptions:read`, `exceptions:approve` | FastAPI dependency injection |
+| `manager` | analyst + `exceptions:override`, `rules:write` | FastAPI dependency injection |
+| `admin` | manager + `users:manage`, `policy:write`, `audit:read` | FastAPI dependency injection |
+| `viewer` | `exceptions:read`, `dashboard:read` | FastAPI dependency injection |
+| `partner` | `exceptions:read` (scoped to own orders) | FastAPI dependency + `retailer_id` filtering |
+
+### 12.3 Tenant Isolation (§11.3)
+
+**Two-layer enforcement:**
+
+1. **Application layer:** `tenant_id` extracted from JWT `org` claim and injected into every database query. Tests verify no query omits the `tenant_id` predicate.
+2. **Database layer (PostgreSQL):** Row-Level Security policies on `exceptions`, `traces`, `policy_overrides`, `checkpoints`. The connection adapter sets `app.current_tenant_id` session variable. RLS returns zero rows when the variable is unset (misconfiguration guard).
+
+**Partner-role scoping:** Partners with `retailer_id` claim see only their own orders in list endpoints. Partners are blocked from resolve, override, approve, reject, and trace endpoints.
+
+### 12.4 Environment Isolation (§11.6)
+
+JWT `env` claim is validated against `ASOE_ENV` environment variable on every authenticated request. A sandbox token presented to a production server returns **403 with generic "Access denied."** — no internal state, stack traces, or exception metadata leaked in the response.
+
+### 12.5 Trace ID Propagation (§11.4)
+
+Every request/response includes an `X-Trace-ID` header. Client-provided values are propagated unchanged; missing values generate a UUID at the API boundary. The trace ID flows through `ComplianceDecision.trace_id` → `ExecutionLog.trace_id` → `TraceRecord.trace_id` (Execution Invariant #4).
+
+Implementation: `api/middleware.py` → `TraceIDMiddleware`.
+
+---
+
+## 13. Database Audit Controls
+
+### 13.1 Policy Audit Log (SOX Requirement)
+
+Every policy override change is immutably logged in the `policy_audit_log` table **before** the new value takes effect.
+
+| Field | Description |
+|---|---|
+| `previous_value` | Value before the change (NULL for first override) |
+| `new_value` | New value being applied |
+| `changed_by` | JWT `sub` claim of the admin making the change |
+| `change_reason` | Free-text reason for the change |
+
+**Immutability enforcement:** A PostgreSQL trigger (`trg_policy_audit_immutable`) raises an exception on any `UPDATE` or `DELETE` attempt. Additionally, `REVOKE UPDATE, DELETE` is applied for the `asoe_app` and `asoe_worker` roles.
+
+### 13.2 Schema Security
+
+- All tables use `extra="forbid"` equivalent CHECK constraints
+- Intent values constrained to the `AllowedIntent` enum at the database level
+- `context_embedding VECTOR(1536)` column installed but not indexed (V2 readiness)
+- `schema_migrations` table tracks applied versions
+
+Implementation: `db/migrations/V001__initial_schema.sql`.
+
+---
+
+## 14. Environment Variable Reference
 
 | Variable | Default | Description |
 |---|---|---|
 | `ASOE_KILL_SWITCH` | `0` | `1` / `true` / `yes` → halt all execution |
 | `ASOE_EXPLAIN_MODE` | `0` | `1` / `true` / `yes` → dry-run only, no recipe execution |
+| `ASOE_ENV` | `sandbox` | `sandbox` or `production` — JWT `env` claim must match (mismatch → 403) |
+| `ASOE_JWT_SECRET` | _(dev fallback)_ | JWT signing secret — **required for production** |
+| `DATABASE_URL` | _(unset)_ | PostgreSQL connection; when set, API uses database-backed persistence |
 | `USE_OUTLINES_BACKEND` | `0` | `1` → use `OutlinesConstrainedBackend` (requires `outlines` package) |
 
 ---
 
-## 13. Test Coverage Reference
+## 15. Test Coverage Reference
 
 All hardening controls are covered by `tests/test_hardening.py`.
 Golden regression tests for the full pipeline live in `tests/test_golden.py`.
@@ -430,11 +509,11 @@ Run the full suite:
 python -m pytest
 ```
 
-Expected outcome: **525 passed, 0 failed, 0 skipped.**
+Expected outcome: **718 passed, 0 failed, 0 skipped.**
 
 ---
 
-## 14. Local Execution Sandbox
+## 16. Local Execution Sandbox
 
 The sandbox (`tests/sandbox/`) is an interactive tool for auditors and engineers
 to run live pipeline executions without touching production systems.

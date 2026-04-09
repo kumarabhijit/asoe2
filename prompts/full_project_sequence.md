@@ -13,4 +13,22 @@ For the current response:
 8. use Guidance / Outlines for all machine-consumed LLM outputs
 9. stop and escalate when deterministic execution is not possible
 Return a concise execution summary and test summary.
+
+Phase sequence and build prompts:
+  0   — Foundation (contracts, repo structure)         → prompts/phase_0_foundation.md
+  1   — Skill Loading & Reasoning                      → prompts/phase_1_skill_reasoning.md
+  2   — Compliance Shadow                              → prompts/phase_2_compliance_shadow.md
+  3   — Recipe Invocation                              → prompts/phase_3_recipe_invocation.md
+  4   — LangGraph Orchestration                        → prompts/phase_4_langgraph.md
+  5   — Observability & Tests                          → prompts/phase_5_observability_tests.md
+  6   — Hardening (kill switch, explain mode)           → prompts/phase_6_hardening.md
+  7a  — Infrastructure Gateways                        → prompts/phase_7a_gateways.md
+  7b  — Multi-Step Workflows (Saga)                    → prompts/phase_7b_workflows.md
+  8   — Local Execution Sandbox                        → prompts/phase_8_sandbox.md
+  9   — Containerized Deployment                       → prompts/phase_9_containerized_deployment.md
+  10  — LangFuse Observability Integration             → prompts/phase_10_langfuse.md
+  11  — Duplicate PO Product Spec Gap Closure          → prompts/phase_11_duplicate_po_enhancements.md
+  12  — FastAPI API Layer                              → prompts/phase_12_api_layer.md
+  13  — Database Layer (PostgreSQL Schema & Migrations) → prompts/phase_13_database_layer.md
+  14  — Auth & Security Hardening                      → prompts/phase_14_auth_security.md
 ```
