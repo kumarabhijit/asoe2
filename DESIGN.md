@@ -677,6 +677,7 @@ All three resolve endpoints (sync, async, explain) publish a `task_complete` eve
 | `test_api.py` | FastAPI endpoints, JWT auth, RBAC, tenant isolation, error envelope |
 | `test_security.py` | Token expiry, access/refresh types, env isolation, trace_id, partner scoping, secret config |
 | `test_websocket.py` | Event schemas, InMemoryPubSub, resolve event publishing, WebSocket auth + streaming + tenant isolation |
+| `test_v1_guardrails.py` | 6 V1 Foundation Guardrails (AST inspection, dynamic enums, metadata contracts, ERP-agnostic gateway, schema agnostic, policy key format) + Invariant #11 |
 | `test_db.py` | Database schema, repositories, tenant isolation, pagination, audit log |
 | `test_constraints.py` | Constrained output schemas and backend chain |
 | `test_contracts.py` | Pydantic model validation |
