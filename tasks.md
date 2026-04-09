@@ -497,6 +497,50 @@ Build prompt: architecture_v3.md §11.1–11.6
 - [x] `tasks.md` — this phase checklist
 ✅ Outcome: security docs match implementation
 ---
+## PHASE 15 — WebSocket / Redis Real-Time Event Publishing
+Build prompt: architecture_v3.md §10, §9.3
+### 15.1 Event Schemas (`api/events.py`)
+- [x] `WSEvent` envelope: type, trace_id, exception_id, tenant_id, timestamp, payload
+- [x] 4 event types: `pipeline_progress`, `exception_update`, `task_complete`, `error`
+- [x] Typed payload models: `PipelineProgressPayload`, `ExceptionUpdatePayload`, `TaskCompletePayload`, `ErrorPayload`
+- [x] Factory class methods: `WSEvent.pipeline_progress()`, `.exception_update()`, `.task_complete()`, `.error()`
+- [x] `to_json()` for Redis serialization
+✅ Outcome: typed event contract matching architecture_v3.md §10.2
+
+### 15.2 Pub/Sub Manager (`api/pubsub.py`)
+- [x] `InMemoryPubSub`: publish, get_recent, get_replay (timestamp-based), clear — for testing/dev
+- [x] `RedisPubSub`: publish to `asoe:ws:{tenant_id}`, sorted-set replay buffer (60s TTL), subscribe
+- [x] `create_pubsub()` factory: `REDIS_URL` set → Redis, unset → in-memory
+- [x] Publish failures logged at WARNING, never block (§9.3 partial failure recovery)
+- [x] Module-level `event_publisher` singleton
+✅ Outcome: dual-backend pub/sub with graceful degradation
+
+### 15.3 WebSocket Hub (`api/routes/ws.py`)
+- [x] `ws://host/api/v1/ws` endpoint mounted in `api/app.py`
+- [x] Auth protocol: first message `{ "type": "auth", "token": "eyJ..." }` — JWT validated, tenant extracted
+- [x] Replay: `last_seen` timestamp triggers 60s buffer replay
+- [x] In-memory mode: ping/pong polling for new events
+- [x] Redis mode: subscribe to `asoe:ws:{tenant_id}` channel, forward events
+- [x] Tenant isolation: client receives events only for their tenant
+- [x] Auth failure: returns error message, closes with code 4001
+✅ Outcome: authenticated, tenant-scoped real-time event streaming
+
+### 15.4 Resolve Endpoint Integration
+- [x] All 3 resolve endpoints (sync, async, explain) publish `task_complete` event
+- [x] `_publish_task_complete()` helper publishes to `event_publisher`
+- [x] Events include trace_id, exception_id, tenant_id, final_status, explanation
+✅ Outcome: every graph execution is observable in real-time
+
+### 15.5 Tests
+- [x] 21 new tests in `tests/test_websocket.py` (739 total): event schemas (6), InMemoryPubSub (6), resolve publishing (3), WebSocket auth/streaming (6)
+✅ Outcome: full coverage of event schemas, pub/sub, resolve integration, and WebSocket protocol
+
+### 15.6 Documentation
+- [x] `DESIGN.md` §17 — WebSocket/Redis event publishing docs
+- [x] `prompts/phase_15_websocket_redis.md` — build prompt
+- [x] `tasks.md` — this phase checklist
+✅ Outcome: real-time event publishing documented and reproducible
+---
 ## REVIEW FINDINGS — Triple-Check Technical Review Board (2026-03-20)
 
 ### Critical

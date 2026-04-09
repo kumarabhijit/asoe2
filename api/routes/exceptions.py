@@ -39,6 +39,8 @@ from api.schemas import (
     StatsResponse,
     TraceResponse,
 )
+from api.events import WSEvent
+from api.pubsub import event_publisher
 from api.store import exception_store
 from contracts.models import GraphState, OrderEvent
 
@@ -142,6 +144,26 @@ def _persist_exception(
     return record.id
 
 
+def _publish_task_complete(
+    tenant_id: str,
+    exception_id: str,
+    trace_id: str,
+    state: GraphState,
+    task_id: Optional[str] = None,
+) -> None:
+    """Publish a task_complete event to the pub/sub channel (§10)."""
+    final = state.final_status.value if state.final_status else "UNKNOWN"
+    event = WSEvent.task_complete(
+        trace_id=trace_id,
+        exception_id=exception_id,
+        tenant_id=tenant_id,
+        task_id=task_id or exception_id,
+        final_status=final,
+        explanation=state.explanation,
+    )
+    event_publisher.publish(tenant_id, event)
+
+
 def _check_partner_access(user: AuthenticatedUser, record) -> None:
     """Enforce partner-role scoping: partners see only their own orders.
 
@@ -194,6 +216,7 @@ async def resolve(
 
     graph_trace_id = final_state.shadow.trace_id if final_state.shadow else trace_id
     exception_id = _persist_exception(tenant_id, final_state, graph_trace_id)
+    _publish_task_complete(tenant_id, exception_id, graph_trace_id, final_state)
     return _state_to_resolve_response(exception_id, final_state)
 
 
@@ -227,7 +250,8 @@ async def resolve_async(
         )
 
     trace_id = final_state.shadow.trace_id if final_state.shadow else None
-    _persist_exception(tenant_id, final_state, trace_id)
+    exc_id = _persist_exception(tenant_id, final_state, trace_id)
+    _publish_task_complete(tenant_id, exc_id, trace_id or "", final_state, task_id=task_id)
     return AsyncResolveResponse(task_id=task_id, status="complete")
 
 
@@ -268,6 +292,7 @@ async def resolve_explain(
 
     trace_id = final_state.shadow.trace_id if final_state.shadow else None
     exception_id = _persist_exception(tenant_id, final_state, trace_id)
+    _publish_task_complete(tenant_id, exception_id, trace_id or "", final_state)
     return _state_to_resolve_response(exception_id, final_state)
 
 
