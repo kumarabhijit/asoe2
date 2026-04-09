@@ -24,6 +24,10 @@ x-core-env: &core-env
   PYTHONUNBUFFERED: "1"
   ASOE_KILL_SWITCH: "${ASOE_KILL_SWITCH:-0}"
   ASOE_EXPLAIN_MODE: "${ASOE_EXPLAIN_MODE:-0}"
+  # Database (PostgreSQL — architecture_v3.md §9.2)
+  DATABASE_URL: "postgresql://${POSTGRES_USER:-asoe}:${POSTGRES_PASSWORD:-asoe_dev}@postgres:5432/${POSTGRES_DB:-asoe}"
+  # Redis (pub/sub, task queue, cache — architecture_v3.md §9.3)
+  REDIS_URL: "redis://redis:6379/0"
   # LangFuse observability (optional — set in .env or via Key Vault)
   LANGFUSE_PUBLIC_KEY: "${LANGFUSE_PUBLIC_KEY:-}"
   LANGFUSE_SECRET_KEY: "${LANGFUSE_SECRET_KEY:-}"
@@ -50,6 +54,11 @@ services:
     environment:
       <<: *core-env
       USE_OUTLINES_BACKEND: "0"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       # Source-mount for hot-reload during development.
       # Remove volume in production (image already contains source).
@@ -134,7 +143,48 @@ services:
       - hf-model-cache:/cache/huggingface
     restart: on-failure
 
+  # ── PostgreSQL 16 ────────────────────────────────────────────────────────
+  # Exception state, audit trail, policy overrides (architecture_v3.md §9.2).
+  # Data persisted in pgdata volume. pgvector extension installed for V2.
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-asoe}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-asoe_dev}"
+      POSTGRES_DB: "${POSTGRES_DB:-asoe}"
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-asoe}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # ── Redis 7+ ───────────────────────────────────────────────────────────
+  # Pub/sub for WebSocket fanout, task queue, session cache, circuit breaker
+  # state (architecture_v3.md §9.3).
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
 volumes:
+  # PostgreSQL data (exception state, audit trail, policy overrides)
+  pgdata:
+  # Redis data (persistence for pub/sub replay buffer)
+  redisdata:
   # SQLite DB for sandbox seed data (pricing, contracts, EDI events)
   sandbox-db:
   # HuggingFace model weight cache (can be several GB)

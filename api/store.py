@@ -1,9 +1,12 @@
-"""In-memory exception store for V1 API.
+"""Exception store for the ASOE API.
 
-Provides persistence for exception records created during graph execution.
-This will be replaced by PostgreSQL (architecture_v3.md Section 9.2) when
-the database layer is built. The interface is intentionally simple so the
-migration is straightforward.
+Provides two backends:
+  - ``ExceptionStore`` — in-memory (default when DATABASE_URL is unset)
+  - ``DatabaseBackedStore`` — SQLite or PostgreSQL via ``db/repository.py``
+
+The module-level ``exception_store`` singleton is created at import time
+based on the ``DATABASE_URL`` environment variable. API routes import and
+use this singleton without knowing which backend is active.
 """
 
 from __future__ import annotations
@@ -218,5 +221,146 @@ class ExceptionStore:
         }
 
 
-# Module-level singleton — replaced by DI when PostgreSQL is available.
-exception_store = ExceptionStore()
+class DatabaseBackedStore:
+    """Exception store backed by SQLite or PostgreSQL via db/repository.py.
+
+    Same public interface as ExceptionStore so API routes work unchanged.
+    """
+
+    def __init__(self, database_url: str) -> None:
+        from db.connection import create_adapter
+        from db.repository import ExceptionRepository, TraceRepository
+
+        self._adapter = create_adapter(database_url)
+        self._adapter.apply_schema()
+        self._exceptions = ExceptionRepository(self._adapter)
+        self._traces = TraceRepository(self._adapter)
+
+    def clear(self) -> None:
+        # For testing: delete all records
+        with self._adapter.cursor() as cur:
+            cur.execute("DELETE FROM traces")
+            cur.execute("DELETE FROM exceptions")
+
+    def create(
+        self,
+        tenant_id: str,
+        order_id: str,
+        event_type: str,
+        trace_id: str,
+        intent: Optional[str] = None,
+        shadow_verdict: Optional[str] = None,
+        selected_recipe: Optional[str] = None,
+        final_status: Optional[str] = None,
+        resolution_data: Optional[Dict[str, Any]] = None,
+    ) -> ExceptionRecord:
+        row = self._exceptions.create(
+            tenant_id=tenant_id,
+            order_id=order_id,
+            event_type=event_type,
+            trace_id=trace_id,
+            intent=intent,
+            shadow_verdict=shadow_verdict,
+            selected_recipe=selected_recipe,
+            final_status=final_status,
+            resolution_data=resolution_data,
+        )
+        return self._dict_to_record(row)
+
+    def get(self, exception_id: str, tenant_id: str) -> Optional[ExceptionRecord]:
+        row = self._exceptions.get(exception_id, tenant_id)
+        if not row:
+            return None
+        return self._dict_to_record(row)
+
+    def list(
+        self,
+        tenant_id: str,
+        status: Optional[str] = None,
+        intent: Optional[str] = None,
+        limit: int = 50,
+        cursor: Optional[str] = None,
+    ) -> tuple[List[ExceptionRecord], Optional[str], bool]:
+        rows, next_cursor, has_more = self._exceptions.list(
+            tenant_id=tenant_id, status=status, intent=intent,
+            limit=limit, cursor=cursor,
+        )
+        records = [self._dict_to_record(r) for r in rows]
+        return records, next_cursor, has_more
+
+    def update(self, exception_id: str, tenant_id: str, **fields) -> Optional[ExceptionRecord]:
+        row = self._exceptions.update(exception_id, tenant_id, **fields)
+        if not row:
+            return None
+        return self._dict_to_record(row)
+
+    def store_trace(self, exception_id: str, trace_data: Dict[str, Any]) -> None:
+        # Retrieve the exception to get tenant_id and trace_id
+        # Search across all stored records (we don't have tenant_id here)
+        with self._adapter.cursor() as cur:
+            cur.execute(
+                "SELECT tenant_id, trace_id FROM exceptions WHERE id = ?",
+                (exception_id,),
+            )
+            row = cur.fetchone()
+        if row:
+            tenant_id = row[0] if not hasattr(row, "keys") else row["tenant_id"]
+            trace_id = row[1] if not hasattr(row, "keys") else row["trace_id"]
+            self._traces.create(
+                exception_id=exception_id,
+                trace_id=trace_id,
+                tenant_id=tenant_id,
+                trace_record=trace_data,
+            )
+
+    def get_trace(self, exception_id: str) -> Optional[Dict[str, Any]]:
+        # Look up tenant_id from exception
+        with self._adapter.cursor() as cur:
+            cur.execute(
+                "SELECT tenant_id FROM exceptions WHERE id = ?",
+                (exception_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        tenant_id = row[0] if not hasattr(row, "keys") else row["tenant_id"]
+        trace_row = self._traces.get_by_exception(exception_id, tenant_id)
+        if not trace_row:
+            return None
+        return trace_row["trace_record"]
+
+    def stats(self, tenant_id: str) -> Dict[str, int]:
+        return self._exceptions.stats(tenant_id)
+
+    def _dict_to_record(self, d: Dict[str, Any]) -> ExceptionRecord:
+        record = ExceptionRecord.__new__(ExceptionRecord)
+        record.id = d["id"]
+        record.tenant_id = d["tenant_id"]
+        record.order_id = d["order_id"]
+        record.event_type = d["event_type"]
+        record.trace_id = d["trace_id"]
+        record.intent = d.get("intent")
+        record.lifecycle_state = d.get("lifecycle_state", "INGESTED")
+        record.shadow_verdict = d.get("shadow_verdict")
+        record.selected_recipe = d.get("selected_recipe")
+        record.final_status = d.get("final_status")
+        record.resolution_data = d.get("resolution_data") or {}
+        record.resolved_by = d.get("resolved_by")
+        record.resolved_action = d.get("resolved_action")
+        record.resolution_notes = d.get("resolution_notes")
+        record.created_at = d.get("created_at", "")
+        record.updated_at = d.get("updated_at", "")
+        return record
+
+
+def _create_store():
+    """Create the appropriate store based on DATABASE_URL."""
+    import os
+    database_url = os.getenv("DATABASE_URL", "")
+    if database_url:
+        return DatabaseBackedStore(database_url)
+    return ExceptionStore()
+
+
+# Module-level singleton — uses DATABASE_URL when set, else in-memory.
+exception_store = _create_store()
