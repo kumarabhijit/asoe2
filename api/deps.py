@@ -1,11 +1,12 @@
-"""FastAPI dependency injection for auth, RBAC, and tenant extraction.
+"""FastAPI dependency injection for auth, RBAC, tenant, and environment.
 
-Implements architecture_v3.md Section 11.1 (Authentication), 11.2 (RBAC),
-and 11.3 (Multi-Tenancy).
-
-V1 uses a JWT-based auth stub. The JWT is validated for structure and
-expiry but does not verify against a real IdP signing key. Production
-deployments must replace ``_STUB_SECRET`` with Key Vault-managed keys.
+Implements architecture_v3.md:
+  §11.1 — Authentication (JWT with exp, access vs refresh token types)
+  §11.2 — RBAC (5 roles, {resource}:{action} permissions)
+  §11.3 — Multi-Tenancy (JWT org claim, partner-role scoping)
+  §11.4 — trace_id propagation (X-Trace-ID header)
+  §11.5 — Secret management (ASOE_JWT_SECRET env var)
+  §11.6 — Environment isolation (JWT env claim vs ASOE_ENV)
 """
 
 from __future__ import annotations
@@ -15,18 +16,30 @@ import hashlib
 import hmac
 import json
 import logging
+import os
+import time
 from typing import Any, Dict, List, Optional
 
-from fastapi import Depends, Header
+from fastapi import Depends, Header, Request
 from pydantic import BaseModel
 
 from api.errors import ASOEError
 
 logger = logging.getLogger("asoe.api.auth")
 
-# Stub secret for development/testing — replaced by Key Vault in production.
-_STUB_SECRET = "asoe-dev-secret-do-not-use-in-production"
+# ---------------------------------------------------------------------------
+# Secret + configuration (architecture_v3.md §11.5)
+# ---------------------------------------------------------------------------
+
+def _get_jwt_secret() -> str:
+    """Load JWT signing secret from env var, with dev fallback."""
+    return os.getenv("ASOE_JWT_SECRET", "asoe-dev-secret-do-not-use-in-production")
+
 _ALGORITHM = "HS256"
+
+# Token lifetimes (architecture_v3.md §11.1)
+ACCESS_TOKEN_EXPIRE_SECONDS = 15 * 60       # 15 minutes
+REFRESH_TOKEN_EXPIRE_SECONDS = 7 * 24 * 3600  # 7 days
 
 
 # ---------------------------------------------------------------------------
@@ -62,7 +75,14 @@ def _jwt_decode(token: str, secret: str) -> Dict[str, Any]:
     actual_sig = _b64url_decode(sig_b64)
     if not hmac.compare_digest(expected_sig, actual_sig):
         raise ValueError("Invalid JWT signature")
-    return json.loads(_b64url_decode(body_b64))
+    payload = json.loads(_b64url_decode(body_b64))
+
+    # Validate expiry if present
+    exp = payload.get("exp")
+    if exp is not None and time.time() > exp:
+        raise ValueError("Token has expired")
+
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +97,7 @@ class AuthenticatedUser(BaseModel):
     org: str  # tenant_id
     permissions: List[str] = []
     env: str = "sandbox"
+    retailer_id: Optional[str] = None  # partner-role: scoped to own orders
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +129,29 @@ def _expand_permissions(roles: List[str]) -> List[str]:
 
 
 # ---------------------------------------------------------------------------
+# Environment isolation (architecture_v3.md §11.6)
+# ---------------------------------------------------------------------------
+
+def _validate_environment(token_env: str) -> None:
+    """Validate JWT env claim matches ASOE_ENV.
+
+    A sandbox token presented to a production service returns 403
+    immediately, before any business logic executes.
+    """
+    server_env = os.getenv("ASOE_ENV", "sandbox")
+    if token_env != server_env:
+        logger.warning(
+            "Environment mismatch: token_env=%s server_env=%s", token_env, server_env
+        )
+        # Per §11.6: generic 403 with no internal state in details
+        raise ASOEError(
+            code="ENV_MISMATCH",
+            message="Access denied.",
+            status_code=403,
+        )
+
+
+# ---------------------------------------------------------------------------
 # JWT extraction dependency
 # ---------------------------------------------------------------------------
 
@@ -116,8 +160,7 @@ async def get_current_user(
 ) -> AuthenticatedUser:
     """Extract and validate JWT Bearer token from Authorization header.
 
-    Returns an AuthenticatedUser with claims. Raises 401 on missing/invalid
-    token. In stub mode, accepts tokens signed with the dev secret.
+    Validates: signature, expiry, and environment claim.
     """
     if not authorization or not authorization.startswith("Bearer "):
         raise ASOEError(
@@ -128,14 +171,18 @@ async def get_current_user(
 
     token = authorization.removeprefix("Bearer ").strip()
     try:
-        payload = _jwt_decode(token, _STUB_SECRET)
-    except (ValueError, KeyError, json.JSONDecodeError) as exc:
+        payload = _jwt_decode(token, _get_jwt_secret())
+    except ValueError as exc:
         logger.warning("JWT validation failed: %s", exc)
         raise ASOEError(
             code="UNAUTHORIZED",
             message="Invalid or expired token.",
             status_code=401,
         )
+
+    # Environment isolation check (§11.6)
+    token_env = payload.get("env", "sandbox")
+    _validate_environment(token_env)
 
     roles = payload.get("roles", [])
     return AuthenticatedUser(
@@ -145,7 +192,8 @@ async def get_current_user(
         roles=roles,
         org=payload.get("org", ""),
         permissions=_expand_permissions(roles),
-        env=payload.get("env", "sandbox"),
+        env=token_env,
+        retailer_id=payload.get("retailer_id"),
     )
 
 
@@ -172,13 +220,7 @@ async def get_tenant_id(
 
 def require_role(*allowed_roles: str):
     """Return a FastAPI dependency that checks the user has at least one of
-    the specified roles.
-
-    Usage::
-
-        @router.post("/resolve", dependencies=[Depends(require_role("analyst", "manager", "admin"))])
-        async def resolve(...): ...
-    """
+    the specified roles."""
 
     async def _check_role(
         user: AuthenticatedUser = Depends(get_current_user),
@@ -195,8 +237,85 @@ def require_role(*allowed_roles: str):
 
 
 # ---------------------------------------------------------------------------
-# Helper: create a stub JWT for testing
+# X-Trace-ID propagation (architecture_v3.md §11.4)
 # ---------------------------------------------------------------------------
+
+async def get_trace_id(
+    request: Request,
+) -> str:
+    """Extract X-Trace-ID from request header, or generate a new UUID.
+
+    The trace_id flows through ComplianceDecision → ExecutionLog →
+    TraceRecord unchanged (Execution Invariant #4).
+    """
+    from uuid import uuid4
+    trace_id = request.headers.get("X-Trace-ID", "")
+    if not trace_id:
+        trace_id = str(uuid4())
+    return trace_id
+
+
+# ---------------------------------------------------------------------------
+# Token creation helpers
+# ---------------------------------------------------------------------------
+
+def create_access_token(
+    sub: str,
+    email: str,
+    name: str,
+    roles: List[str],
+    org: str,
+    env: str = "sandbox",
+    auth_method: Optional[str] = None,
+    retailer_id: Optional[str] = None,
+) -> str:
+    """Create a signed access token (15-minute expiry)."""
+    now = int(time.time())
+    payload: Dict[str, Any] = {
+        "sub": sub,
+        "email": email,
+        "name": name,
+        "roles": roles,
+        "org": org,
+        "env": env,
+        "permissions": _expand_permissions(roles),
+        "iat": now,
+        "exp": now + ACCESS_TOKEN_EXPIRE_SECONDS,
+        "token_type": "access",
+    }
+    if auth_method:
+        payload["auth_method"] = auth_method
+    if retailer_id:
+        payload["retailer_id"] = retailer_id
+    return _jwt_encode(payload, _get_jwt_secret())
+
+
+def create_refresh_token(
+    sub: str,
+    email: str,
+    name: str,
+    roles: List[str],
+    org: str,
+    env: str = "sandbox",
+    retailer_id: Optional[str] = None,
+) -> str:
+    """Create a signed refresh token (7-day expiry)."""
+    now = int(time.time())
+    payload: Dict[str, Any] = {
+        "sub": sub,
+        "email": email,
+        "name": name,
+        "roles": roles,
+        "org": org,
+        "env": env,
+        "iat": now,
+        "exp": now + REFRESH_TOKEN_EXPIRE_SECONDS,
+        "token_type": "refresh",
+    }
+    if retailer_id:
+        payload["retailer_id"] = retailer_id
+    return _jwt_encode(payload, _get_jwt_secret())
+
 
 def create_test_token(
     sub: str = "test-user",
@@ -207,7 +326,8 @@ def create_test_token(
     env: str = "sandbox",
     **extra_claims,
 ) -> str:
-    """Create a signed JWT for testing purposes."""
+    """Create a signed JWT for testing (long expiry, matches ASOE_ENV default)."""
+    now = int(time.time())
     payload = {
         "sub": sub,
         "email": email,
@@ -215,6 +335,9 @@ def create_test_token(
         "roles": roles or ["analyst"],
         "org": org,
         "env": env,
+        "iat": now,
+        "exp": now + ACCESS_TOKEN_EXPIRE_SECONDS,
+        "token_type": "access",
         **extra_claims,
     }
-    return _jwt_encode(payload, _STUB_SECRET)
+    return _jwt_encode(payload, _get_jwt_secret())

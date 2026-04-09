@@ -503,7 +503,16 @@ Implements architecture_v3.md §8 (API Contract), §11.1 (Authentication), §11.
 
 ### 15.2 Authentication & RBAC
 
-**JWT validation** (`api/deps.py`): Extracts Bearer token from `Authorization` header. V1 uses HS256 with a dev secret. Production uses Key Vault-managed signing keys.
+**JWT validation** (`api/deps.py`): Extracts Bearer token from `Authorization` header. Validates signature (HS256), expiry (`exp` claim), and environment (`env` claim vs `ASOE_ENV`). Secret loaded from `ASOE_JWT_SECRET` env var (dev fallback when unset).
+
+**Token types** (architecture_v3.md §11.1):
+
+| Type | Lifetime | `token_type` claim | Created by |
+|---|---|---|---|
+| Access | 15 minutes | `access` | `create_access_token()` |
+| Refresh | 7 days | `refresh` | `create_refresh_token()` |
+
+Refresh endpoint validates `token_type == "refresh"` and issues rotated tokens. `auth_method` claim (`"sso"`, `"password+mfa"`) set for audit differentiation.
 
 **Role → Permission mapping** (5 roles from architecture_v3.md §11.2):
 
@@ -513,9 +522,15 @@ Implements architecture_v3.md §8 (API Contract), §11.1 (Authentication), §11.
 | `manager` | analyst + `exceptions:override`, `rules:write` |
 | `admin` | manager + `users:manage`, `policy:write`, `audit:read` |
 | `viewer` | `exceptions:read`, `dashboard:read` |
-| `partner` | `exceptions:read` (scoped to own orders) |
+| `partner` | `exceptions:read` (scoped to own orders via `retailer_id`) |
 
-**Tenant isolation** (`api/deps.py::get_tenant_id()`): Extracts `tenant_id` from JWT `org` claim. All queries are scoped by `tenant_id`. V1 uses application-layer filtering; V1.1 adds PostgreSQL RLS.
+**Tenant isolation** (`api/deps.py::get_tenant_id()`): Extracts `tenant_id` from JWT `org` claim. All queries scoped by `tenant_id`. Partner-role filtering by `retailer_id` claim (§11.3). PostgreSQL RLS provides defense-in-depth.
+
+**Environment isolation** (§11.6): JWT `env` claim validated against `ASOE_ENV` env var. Mismatch → 403 with generic "Access denied." (no internal state leaked).
+
+### 15.3 Middleware
+
+**X-Trace-ID** (`api/middleware.py::TraceIDMiddleware`): Propagates client `X-Trace-ID` header or generates UUID at the API boundary. Stored in `request.state.trace_id` and returned in every response header. Implements §11.4.
 
 ### 15.3 Error Envelope
 
@@ -614,6 +629,7 @@ All queries include `tenant_id` predicate for application-layer isolation.
 | File | Coverage area |
 |---|---|
 | `test_api.py` | FastAPI endpoints, JWT auth, RBAC, tenant isolation, error envelope |
+| `test_security.py` | Token expiry, access/refresh types, env isolation, trace_id, partner scoping, secret config |
 | `test_db.py` | Database schema, repositories, tenant isolation, pagination, audit log |
 | `test_constraints.py` | Constrained output schemas and backend chain |
 | `test_contracts.py` | Pydantic model validation |

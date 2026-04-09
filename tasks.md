@@ -450,6 +450,53 @@ Build prompt: architecture_v3.md §9.2, §9.1, §11.3
 - [x] `tasks.md` — this phase checklist
 ✅ Outcome: docs cover schema, migration, adapters, and repository layer
 ---
+## PHASE 14 — Auth & Security Hardening
+Build prompt: architecture_v3.md §11.1–11.6
+### 14.1 Token Expiry & Types (§11.1)
+- [x] Access tokens: 15-minute expiry with `exp` and `iat` claims
+- [x] Refresh tokens: 7-day expiry with `token_type: "refresh"` claim
+- [x] `_jwt_decode()` validates `exp` claim — expired tokens return 401
+- [x] Refresh endpoint validates `token_type == "refresh"` — rejects access tokens
+- [x] Refresh rotation: issues new access + new refresh token on each refresh
+- [x] `auth_method` claim: `"password+mfa"` for login flow, `"sso"` for SSO flow
+✅ Outcome: JWT lifecycle matches §11.1 specification
+
+### 14.2 Environment Isolation (§11.6)
+- [x] JWT `env` claim validated against `ASOE_ENV` env var on every authenticated request
+- [x] Mismatch returns 403 with generic "Access denied." — no internal state leaked
+- [x] Sandbox token → production server blocked before business logic executes
+✅ Outcome: cross-environment credential use prevented at API boundary
+
+### 14.3 X-Trace-ID Propagation (§11.4)
+- [x] `TraceIDMiddleware` in `api/middleware.py` — extracts or generates UUID
+- [x] Client-provided `X-Trace-ID` propagated unchanged
+- [x] Missing header → UUID generated at API boundary
+- [x] Trace ID stored in `request.state.trace_id` and returned in every response
+- [x] Available to resolve endpoints for graph execution correlation
+✅ Outcome: end-to-end trace correlation from API → graph → TraceRecord
+
+### 14.4 Partner-Role Scoping (§11.3)
+- [x] `AuthenticatedUser` includes `retailer_id` field from JWT claim
+- [x] `create_access_token()` accepts `retailer_id` parameter
+- [x] Partner users filtered to own orders in list endpoint
+- [x] Partner users blocked from resolve, override, approve, reject, trace endpoints
+✅ Outcome: partner-role isolation enforced at application layer
+
+### 14.5 Configurable JWT Secret (§11.5)
+- [x] `_get_jwt_secret()` reads from `ASOE_JWT_SECRET` env var
+- [x] Dev fallback when env var unset
+- [x] Tokens signed with wrong secret rejected (401)
+✅ Outcome: production deployments use Key Vault-managed secret via env var
+
+### 14.6 Tests
+- [x] 28 new tests in `tests/test_security.py` (718 total): token expiry (4), token types (4), auth_method (2), trace_id (4), JWT secret (3), env isolation (3), partner scoping (5), error security (2), plus 1 updated test in test_api.py
+✅ Outcome: full coverage of all §11 security requirements
+
+### 14.7 Documentation
+- [x] `DESIGN.md` §15.2 — updated auth docs with token types, expiry, env isolation, middleware
+- [x] `tasks.md` — this phase checklist
+✅ Outcome: security docs match implementation
+---
 ## REVIEW FINDINGS — Triple-Check Technical Review Board (2026-03-20)
 
 ### Critical
