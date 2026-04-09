@@ -389,6 +389,67 @@ Build prompt: architecture_v3.md §8, §11.1–11.3
 - [x] `tasks.md` — this phase checklist
 ✅ Outcome: docs cover API structure, endpoints, auth, and testing
 ---
+## PHASE 13 — Database Layer (PostgreSQL Schema & Migrations)
+Build prompt: architecture_v3.md §9.2, §9.1, §11.3
+### 13.1 PostgreSQL Migration SQL
+- [x] `db/migrations/V001__initial_schema.sql` — full PostgreSQL schema per architecture_v3.md §9.2
+- [x] 5 tables: `exceptions`, `traces`, `policy_overrides`, `policy_audit_log`, `checkpoints`
+- [x] Indexes: tenant+state, trace_id, tenant+order, audit tenant, pending checkpoints
+- [x] `context_embedding VECTOR(1536)` column (pgvector V2 readiness, not indexed)
+- [x] Intent CHECK constraint matching `AllowedIntent` enum
+- [x] SOX immutability trigger on `policy_audit_log` (prevents UPDATE/DELETE)
+- [x] Row-Level Security policies on `exceptions`, `traces`, `policy_overrides`, `checkpoints`
+- [x] RLS misconfiguration guard: `current_setting('app.current_tenant_id', true) IS NOT NULL`
+- [x] `schema_migrations` version tracking table
+✅ Outcome: production-ready PostgreSQL schema with RLS, SOX triggers, and pgvector
+
+### 13.2 Migration Runner
+- [x] `db/migrations/runner.py` — auto-detects PostgreSQL vs SQLite
+- [x] SQLite-compatible subset schema for CI testing (no extensions, RLS, triggers, or VECTOR)
+- [x] Idempotent execution (tracks applied versions in `schema_migrations`)
+- [x] CLI entrypoint: `DATABASE_URL=... python -m db.migrations.runner`
+✅ Outcome: one command applies schema to any supported backend
+
+### 13.3 Connection Adapters
+- [x] `db/connection.py` — `SQLiteAdapter` (stdlib) + `PostgresAdapter` (psycopg2/psycopg)
+- [x] `create_adapter()` factory auto-detects from DATABASE_URL
+- [x] PostgresAdapter sets `app.current_tenant_id` session var for RLS enforcement
+- [x] Thread-local connections for SQLite, per-request for PostgreSQL
+✅ Outcome: single interface for both backends; RLS tenant context propagated
+
+### 13.4 Repository Layer
+- [x] `ExceptionRepository` — create, get, list (paginated + filtered), update, stats
+- [x] `TraceRepository` — create, get_by_exception
+- [x] `PolicyRepository` — create_override (with automatic audit log), get_override, list_audit_log
+- [x] All queries include `tenant_id` predicate (application-layer isolation)
+- [x] JSON serialization/deserialization for `resolution_data`, `trace_record`, `value` fields
+✅ Outcome: typed repository layer with tenant isolation and SOX audit trail
+
+### 13.5 API Integration
+- [x] `DatabaseBackedStore` in `api/store.py` — same interface as `ExceptionStore`
+- [x] Module-level singleton auto-selects backend: `DATABASE_URL` set → DB, unset → in-memory
+- [x] API routes work unchanged regardless of backend
+✅ Outcome: zero-change API upgrade path from in-memory to PostgreSQL
+
+### 13.6 Docker Compose
+- [x] Added `postgres` service (pgvector/pgvector:pg16) with healthcheck
+- [x] Added `redis` service (redis:7-alpine) with healthcheck
+- [x] Core service depends on postgres + redis health
+- [x] `DATABASE_URL` and `REDIS_URL` in shared `x-core-env` block
+- [x] `pgdata` and `redisdata` volumes for persistence
+- [x] `.env.example` updated with database/redis variables
+✅ Outcome: `docker compose up` provisions full stack including PostgreSQL + Redis
+
+### 13.7 Tests
+- [x] 31 new tests in `tests/test_db.py` (690 total): schema (5), exception CRUD (13), trace (2), policy+audit (4), DatabaseBackedStore (7)
+✅ Outcome: full repository coverage using SQLite in-memory; no PostgreSQL required for CI
+
+### 13.8 Documentation
+- [x] `DESIGN.md` §16 — database layer docs (schema, RLS, adapters, repositories)
+- [x] `DESIGN.md` §1 — db/ module added to module structure
+- [x] `tasks.md` — this phase checklist
+✅ Outcome: docs cover schema, migration, adapters, and repository layer
+---
 ## REVIEW FINDINGS — Triple-Check Technical Review Board (2026-03-20)
 
 ### Critical

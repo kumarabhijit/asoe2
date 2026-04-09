@@ -64,13 +64,20 @@ api/
   deps.py            # Auth dependencies: JWT validation, RBAC, tenant extraction
   errors.py          # Standard error envelope (ASOEError, ErrorEnvelope)
   schemas.py         # Request/Response Pydantic models
-  store.py           # In-memory exception store (V1; replaced by PostgreSQL in V1.1)
+  store.py           # Exception store: in-memory (default) or DatabaseBackedStore (when DATABASE_URL set)
   routes/
     health.py        # GET /api/v1/health (public, no auth)
     exceptions.py    # Exception CRUD + resolve endpoints (11 routes)
     workflows.py     # POST /api/v1/workflows
     policies.py      # PUT /api/v1/policies/{tenant_id}
     auth.py          # Auth endpoints: login, SSO, MFA, refresh, me
+
+db/
+  connection.py      # SQLiteAdapter / PostgresAdapter, create_adapter() factory
+  repository.py      # ExceptionRepository, TraceRepository, PolicyRepository
+  migrations/
+    runner.py        # apply_migrations() — SQLite or PostgreSQL
+    V001__initial_schema.sql  # PostgreSQL schema (5 tables, indexes, RLS, triggers)
 
 tests/
   conftest.py        # Shared fixtures (StubGateway, sample events, backend setup)
@@ -525,16 +532,63 @@ All errors use the standard envelope from architecture_v3.md §8.3:
 }
 ```
 
-### 15.4 Persistence (V1)
+### 15.4 Persistence
 
-V1 uses an in-memory `ExceptionStore` (`api/store.py`). Records are created during `resolve()` and queryable via list/detail/trace endpoints. Replaced by PostgreSQL (architecture_v3.md §9.2) when the database layer is built.
+Two backends available, selected by `DATABASE_URL` env var:
 
-### 15.5 Remaining Design References
+| Backend | When | Store Class |
+|---|---|---|
+| In-memory | `DATABASE_URL` unset (default) | `ExceptionStore` |
+| Database | `DATABASE_URL` set (SQLite or PostgreSQL) | `DatabaseBackedStore` |
+
+Both backends expose the same interface — API routes work unchanged regardless of backend.
+
+---
+
+## 16. Database Layer
+
+Implements architecture_v3.md §9.2 (PostgreSQL schema), §9.1 (lifecycle states), §11.3 (tenant isolation).
+
+### 16.1 Schema (V001)
+
+5 tables defined in `db/migrations/V001__initial_schema.sql`:
+
+| Table | Purpose | Key Fields |
+|---|---|---|
+| `exceptions` | Exception state + audit trail | `id`, `tenant_id`, `order_id`, `intent`, `lifecycle_state`, `trace_id`, `resolution_data` (JSONB) |
+| `traces` | Full TraceRecord per execution | `exception_id` (FK), `trace_record` (JSONB) |
+| `policy_overrides` | Per-tenant policy values | `tenant_id`, `policy_key`, `value` (JSONB), `effective_from` |
+| `policy_audit_log` | Immutable SOX audit trail | `previous_value`, `new_value`, `changed_by` — immutability enforced by trigger |
+| `checkpoints` | HITL pause/resume state (V1.1) | `trace_id` (PK), `graph_state` (JSONB), `status` |
+
+### 16.2 Row-Level Security (PostgreSQL only)
+
+RLS policies on `exceptions`, `traces`, `policy_overrides`, `checkpoints` enforce tenant isolation at the database layer. The connection adapter sets `app.current_tenant_id` session variable; RLS policy returns zero rows when the variable is unset (defense-in-depth).
+
+### 16.3 Connection Adapters
+
+| Adapter | Backend | Usage |
+|---|---|---|
+| `SQLiteAdapter` | SQLite (stdlib) | Testing, local dev |
+| `PostgresAdapter` | PostgreSQL (psycopg2/psycopg) | Production |
+
+Factory: `create_adapter(database_url)` auto-detects from URL scheme.
+
+### 16.4 Repository Layer
+
+| Repository | Table | Operations |
+|---|---|---|
+| `ExceptionRepository` | `exceptions` | create, get, list (paginated), update, stats |
+| `TraceRepository` | `traces` | create, get_by_exception |
+| `PolicyRepository` | `policy_overrides` + `policy_audit_log` | create_override (with audit), get_override, list_audit_log |
+
+All queries include `tenant_id` predicate for application-layer isolation.
+
+### 16.5 Remaining Design References
 
 | Concern | Architecture Reference | Status |
 |---|---|---|
 | WebSocket event publishing | architecture_v3.md §10 | Planned (V1.1) |
-| PostgreSQL schema (5 tables + RLS) | architecture_v3.md §9.2 | Planned (V1.1) |
 | Redis key structures + write-through cache | architecture_v3.md §9.3 | Planned (V1.1) |
 | HITL pause/resume (interrupt + checkpoint) | architecture_v3.md §5.9 | Planned (V1.1) |
 | Environment isolation (JWT env claim) | architecture_v3.md §11.6 | JWT `env` claim present; validation planned (V1.1) |
@@ -559,6 +613,7 @@ V1 uses an in-memory `ExceptionStore` (`api/store.py`). Records are created duri
 | File | Coverage area |
 |---|---|
 | `test_api.py` | FastAPI endpoints, JWT auth, RBAC, tenant isolation, error envelope |
+| `test_db.py` | Database schema, repositories, tenant isolation, pagination, audit log |
 | `test_constraints.py` | Constrained output schemas and backend chain |
 | `test_contracts.py` | Pydantic model validation |
 | `test_executor.py` | RecipeExecutor dispatch and error handling |

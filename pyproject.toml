@@ -16,6 +16,9 @@ outlines = [
   "transformers>=4.48.0",
   "torch>=2.3.0",
 ]
+postgres = [
+  "psycopg2-binary>=2.9.0",
+]
 langfuse = [
   "langfuse>=2.0.0",
 ]
@@ -44,6 +47,7 @@ packages = [
   "llm",
   "prompts",
   "api",
+  "db",
 ]
 
 [tool.pytest.ini_options]
