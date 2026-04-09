@@ -31,11 +31,9 @@ In this model, non-deterministic Large Language Model (LLM) reasoning is tightly
 
 2. **Compliance Before Execution.** Every proposed action is audited by a Compliance Shadow before any recipe runs. Verdicts are constrained to GREEN (proceed), YELLOW (human review required), or RED (halt). There are no overrides and no bypasses.
 
-3. **Agent-First, Not Dashboard-First.** The UI is a control tower where the system is the primary actor. Agents classify, audit, and resolve exceptions autonomously. Humans intervene at decision points — approvals, overrides, escalations — not at every step.
+3. **Decoupled Reasoning and Execution.** Skills guide reasoning (the "Brain"). Recipes execute deterministic logic (the "Muscle"). The orchestration layer routes between them. These three concerns never cross boundaries.
 
-4. **Decoupled Reasoning and Execution.** Skills guide reasoning (the "Brain"). Recipes execute deterministic logic (the "Muscle"). The orchestration layer routes between them. These three concerns never cross boundaries.
-
-5. **Observability as a First-Class Product.** Every graph execution emits a structured TraceRecord. Every decision — intent, shadow verdict, recipe, gateway call, terminal status — is logged, correlated via trace_id, and auditable.
+4. **Observability as a First-Class Product.** Every graph execution emits a structured TraceRecord. Every decision — intent, shadow verdict, recipe, gateway call, terminal status — is logged, correlated via trace_id, and auditable.
 
 ---
 
@@ -59,8 +57,8 @@ In this model, non-deterministic Large Language Model (LLM) reasoning is tightly
 
 | Requirement | Target | Notes |
 |---|---|---|
-| **Concurrent users** | 500 | WebSocket connections + REST API |
-| **Real-time UI updates** | 3–10 seconds | Per-node pipeline progress via WebSocket |
+| **Concurrent API clients** | 500 | WebSocket + REST connections served by FastAPI |
+| **Event publish latency** | 3–10 seconds | Per-node pipeline progress events published to Redis pub/sub |
 | **Resolution SLA** | 8 min (p50), 12 min (p95), 15 min (p99) | End-to-end from event ingestion to effects applied. HITL wait time excluded from SLA measurement. |
 | **Availability** | 99.9% | AKS multi-replica + topology spread |
 | **Audit retention** | 7 years | TraceRecords + policy audit log (SOX requirement) |
@@ -118,13 +116,13 @@ ASOE **does not own:** order lifecycle, inventory, shipping, invoicing, or gener
 
 ### Human Actors
 
-| Role | Description | Access Level |
+| Role | Description | API Permissions |
 |---|---|---|
-| `analyst` | Order Management Analyst | Queue view, approve/override individual exceptions, view agent reasoning |
-| `manager` | Trade/Pricing Manager | All analyst access + bulk actions, rule config, escalation targets |
-| `admin` | System Administrator | All access + user management, SSO config, agent settings, audit logs |
-| `viewer` | Read-Only Stakeholder | View queues and dashboards, no action buttons |
-| `partner` | External Partner | Scoped view of their own orders only |
+| `analyst` | Order Management Analyst | Read exceptions, approve/override individual exceptions |
+| `manager` | Trade/Pricing Manager | All analyst permissions + bulk actions, rule config, escalation targets |
+| `admin` | System Administrator | All permissions + user management, SSO config, policy writes, audit log access |
+| `viewer` | Read-Only Stakeholder | Read exceptions and dashboard metrics only |
+| `partner` | External Partner | Read exceptions scoped to own orders only (RLS-enforced) |
 
 ### External System Integration
 
@@ -152,7 +150,7 @@ The application is deployed as a suite of containerized microservices on Microso
 
 | Component | Technology | Rationale / Description |
 | :--- | :--- | :--- |
-| **Cloud Provider** | Azure Kubernetes Service (AKS) | Hosts the LangGraph runner, MCP servers, and UI in isolated, scalable pods. |
+| **Cloud Provider** | Azure Kubernetes Service (AKS) | Hosts the LangGraph runner, MCP servers, API server, and workers in isolated, scalable pods. |
 | **Inference Hardware** | Intel Xeon Sapphire Rapids | Dedicated AKS node pools using Advanced Matrix Extensions (AMX) for low-latency, localized shadow inferencing. |
 | **Event Ingestion** | Azure Event Hubs | Captures high-throughput exception events (e.g., EDI 850) from SAP gateways. |
 | **API Gateway** | Azure API Management (APIM) | Enforces the "Circuit Breaker" pattern, rate-limiting, and payload buffering. |
@@ -181,11 +179,6 @@ The application is deployed as a suite of containerized microservices on Microso
 
 ```mermaid
 graph TD
-    subgraph "Client Edge"
-        UI["Next.js 14 UI<br/>(Agent-First Control Tower)"]
-        FD["Azure Front Door<br/>(CDN + WAF)"]
-    end
-
     subgraph "Azure VNet — Production Fortress"
         subgraph "Application Tier"
             API["FastAPI API Server<br/>(REST + WebSocket Hub)<br/>imports asoe-core"]
@@ -199,11 +192,10 @@ graph TD
         end
     end
 
-    UI -->|"HTTPS / WebSocket"| FD
-    FD -->|"Routed traffic"| API
+    CLIENTS["API Clients<br/>(UI, CLI, Event Hubs)"] -->|"HTTPS / WebSocket"| API
 
     API -->|"Read/Write"| PG
-    API <-->|"Pub/Sub for real-time UI updates"| REDIS
+    API <-->|"Pub/Sub for event fanout"| REDIS
     API -->|"Enqueue long-running tasks"| REDIS
 
     REDIS -->|"Dequeue task"| WORKER
@@ -213,28 +205,21 @@ graph TD
     WORKER -->|"Publish node-complete events"| REDIS
 ```
 
-### Consolidated Platform View
+### Consolidated Core View
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                          ASOE PLATFORM                              │
+│                     ASOE CORE (asoe2 repo)                          │
 │                                                                     │
-│  ┌────────────┐   ┌───────────────┐    ┌───────────────────────┐   │
-│  │ Azure Front │   │               │    │                       │   │
-│  │ Door (CDN + │──►│   NEXT.JS UI  │    │    POSTGRESQL 16      │   │
-│  │ WAF + SSL)  │   │  (Agent-First │◄──►│  (State, Audit,       │   │
-│  └────────────┘   │   Design Sys) │    │   Lifecycle, RLS,     │   │
+│  API Clients ──►  ┌───────────────┐    ┌───────────────────────┐   │
+│  (UI, CLI,        │   FASTAPI     │    │    POSTGRESQL 16      │   │
+│   Event Hubs)     │  (REST + WS   │──►│  (State, Audit,       │   │
+│                    │   + RBAC)     │    │   Lifecycle, RLS,     │   │
 │                    └───────┬───────┘    │   Checkpoints)        │   │
 │                            │            └───────────────────────┘   │
 │                    ┌───────▼───────┐              ▲                 │
-│                    │   FASTAPI     │              │                 │
-│                    │  (REST + WS   │──────────────┘                 │
-│                    │   + RBAC)     │                                │
-│                    └───────┬───────┘                                │
-│                            │                                       │
-│                    ┌───────▼───────┐                                │
-│                    │   REDIS 7+    │                                │
-│                    │  (Pub/Sub +   │                                │
+│                    │   REDIS 7+    │              │                 │
+│                    │  (Pub/Sub +   │──────────────┘                 │
 │                    │   Task Queue  │                                │
 │                    │   + Cache)    │                                │
 │                    └───────┬───────┘                                │
@@ -293,17 +278,17 @@ In V1.0, the `DeterministicFallbackBackend` handles all decision points without 
 | `asoe-core` | `asoe2/Dockerfile.core` | FastAPI dev server + asoe-core library (LangGraph, recipes, Compliance Shadow) | Yes |
 | `asoe-ui-sandbox` | `asoe2/Dockerfile.ui` | Streamlit sandbox UI (for core-only development) | Yes |
 | `asoe-inference` | `asoe2/Dockerfile.inference` | Outlines + torch + transformers (local LLM) | Optional (`--profile inference`) |
-| `asoe-ui` | `asoe-ui/` (npm dev) | Next.js 14 dev server (runs outside Docker for hot reload) | Manual |
 | `postgres` | Official image | PostgreSQL 16 + pgvector | Yes |
 | `redis` | Official image | Redis 7+ | Yes |
 
 All images use non-root user (`asoe`, UID 1000) and `uv` for deterministic Python dependency resolution.
 
+> **Frontend:** The Next.js UI (`asoe-ui` repo) runs as a separate dev server outside this Docker Compose stack. See `asoe-ui` documentation for frontend topology.
+
 #### Production (Azure Kubernetes Service)
 
 | Deployment | Replicas | Node Pool | Source | Key Config |
 |---|---|---|---|---|
-| `asoe-ui` | 2 | Standard | `asoe-ui/` (standalone build) | `output: 'standalone'` in next.config |
 | `asoe-api` | 2 | Standard | `asoe2/` + FastAPI layer | Topology spread, Workload Identity |
 | `asoe-worker` | 2 | Standard | `asoe2/` + Celery/ARQ layer | Event Hubs consumer, graph executor |
 | `asoe-inference` | 1 | Intel AMX (Xeon Sapphire Rapids) | `asoe2/Dockerfile.inference` | 20Gi memory, AMX nodeSelector |
@@ -312,11 +297,10 @@ All images use non-root user (`asoe`, UID 1000) and `uv` for deterministic Pytho
 
 **Security posture:** Azure Managed Identities for passwordless auth between containers and data services. Private Endpoints for PostgreSQL and Redis — no public network access. Secrets mounted via Key Vault CSI driver (`k8s/core/secret-provider.yaml`). No credentials in source code, Dockerfiles, or environment variable defaults.
 
-### 4.5 Five Runtime Domains *[NEW]*
+### 4.5 Runtime Domains (asoe2 scope) *[NEW]*
 
 | Domain | Technology | Responsibility |
 |---|---|---|
-| **ASOE UI** | Next.js 14 (App Router, TypeScript) | Agent-first frontend, WebSocket consumer, RBAC-enforced views |
 | **API Server** | FastAPI (async, Uvicorn) | REST endpoints, WebSocket hub, synchronous graph invocations, auth |
 | **Async Worker** | Celery / ARQ + asoe-core | Long-running graph executions (8-min SLA), Event Hubs consumer. **Back-pressure:** max concurrency per worker is capped at 4 concurrent `run_graph()` tasks via Celery `worker_concurrency` / ARQ `max_jobs`. When queue depth exceeds 100 pending tasks, new `POST /resolve/async` requests receive HTTP 429 with `Retry-After` header. Queue depth is exposed via `asoe_task_queue_depth` Prometheus metric. |
 | **Inference Sidecar** | Outlines + vLLM on Intel Xeon AMX | Constrained generation, Compliance Shadow model serving |
@@ -578,7 +562,7 @@ Each recipe declares its spec in `recipes/registry.py`. The orchestration layer 
 | Email | SMTP / SendGrid API | Default fallback for all buyers | Stubbed (V1) |
 | EDI 824 (Application Advice) | AS2 / Azure Event Hubs | Large retailers (Walmart, Kroger, etc.) requiring EDI acknowledgments | Stubbed (V1) |
 | Buyer Portal | REST API webhook to partner portal | Partners with API-enabled portals | Stubbed (V1) |
-| In-App | WebSocket event to `partner`-role users | Partners logged into ASOE UI | Live (V1) |
+| In-App | WebSocket event to `partner`-role users | Partners with active WebSocket connections | Live (V1) |
 
 The notification gateway resolves the preferred channel(s) per `retailer_id` from the `policy_overrides` table (`policy_key = "NOTIFICATION_CHANNELS"`). If no preference is configured, the system defaults to email. Multiple channels can be configured simultaneously (e.g., EDI 824 + email). Notification delivery status is recorded in `effect_results` on the `GraphState`.
 
@@ -588,7 +572,7 @@ Autonomy levels govern whether the `execute_recipe` node auto-executes or routes
 
 | Level | Label | Agent Behavior | Routing in `execute_recipe` |
 |---|---|---|---|
-| **L1** | Observe | Agent flags the exception in the dashboard; takes no action | → `MANUAL_REVIEW_REQUIRED` |
+| **L1** | Observe | Agent flags the exception; takes no action | → `MANUAL_REVIEW_REQUIRED` |
 | **L2** | Recommend | Agent recommends a resolution; human must approve to execute | → `MANUAL_REVIEW_REQUIRED` |
 | **L3** | Act & Inform | Agent executes the resolution; notifies human post-action | → `COMPLETE` (auto-execute) |
 | **L4** | Full Autonomy | Agent executes the resolution silently; logs for audit | → `COMPLETE` (auto-execute) |
@@ -612,7 +596,7 @@ When the `shadow_audit` node returns a **YELLOW** verdict, the current codebase 
 1. `shadow_audit` calls `interrupt()` — the graph suspends before advancing to `select_recipe`.
 2. The full `GraphState` is checkpointed to PostgreSQL via LangGraph's `PostgresSaver`, keyed by `trace_id`.
 3. The exception transitions to the `PENDING_REVIEW` lifecycle state.
-4. A WebSocket event notifies the UI: `{ node: "shadow_audit", status: "interrupted", detail: { shadow_verdict: "YELLOW" } }`.
+4. A `pipeline_progress` event with `status: "interrupted"` is published to the Redis pub/sub channel `asoe:ws:{tenant_id}`.
 
 **Resume (approve):** `POST /api/v1/exceptions/{id}/approve` is the exclusive resume entry point:
 1. Validates the caller's JWT holds `manager` or `admin` role.
@@ -663,7 +647,7 @@ graph TD
 
     %% Guardrails & Audit
     H --> CB{Circuit Breaker Check}
-    CB -- tripped --> HITL[Human-in-the-Loop UI]
+    CB -- tripped --> HITL[Human-in-the-Loop Approval]
     CB -- ok --> I{Compliance Shadow Audit}
     I -- RED --> BLK[BLOCKED]
     I -- YELLOW --> ESC[MANUAL_REVIEW_REQUIRED]
@@ -727,7 +711,7 @@ RAG becomes justified in V2 if the system needs to:
 Until then, the gateway layer provides the same data-fetching capability with typed contracts, timeout enforcement, and full trace correlation — without the non-determinism of similarity search.
 
 ### D. The Circuit Breaker & HITL Fallback
-Deployed at the API Gateway level. If the automated state machine attempts to execute more than the configured maximum pricing updates in a time window, or if the total dollar variance of an execution batch exceeds the configured threshold, the Circuit Breaker trips. Execution halts, and the state transitions to a Human-in-the-Loop (HITL) approval UI, preventing runaway systemic errors.
+Deployed at the API Gateway level. If the automated state machine attempts to execute more than the configured maximum pricing updates in a time window, or if the total dollar variance of an execution batch exceeds the configured threshold, the Circuit Breaker trips. Execution halts, and the state transitions to a Human-in-the-Loop (HITL) approval state, preventing runaway systemic errors.
 
 ### E. Structured Observability (LangFuse-Aligned)
 Every graph execution emits a trace record as structured JSON via stdlib logging. Fields are aligned to the LangFuse trace schema (trace_id, intent, shadow verdict, recipe, gateway calls, terminal status) so a future LangFuse handler can forward records with minimal adaptation. No LangFuse package dependency exists today — stdlib logging is the single emit point, keeping the system self-host friendly and auditable from day one.
@@ -803,10 +787,7 @@ The FastAPI server exposes REST endpoints for CRUD operations and a WebSocket en
 
 ### 8.1 Authentication
 
-All endpoints except `/api/auth/*` and `/api/v1/health` require a valid JWT Bearer token. Tokens contain `sub`, `email`, `name`, `roles[]`, `org` (tenant), `permissions[]`, and `exp` claims.
-
-- **Access token:** 15-minute expiry, stored in httpOnly cookie
-- **Refresh token:** 7-day expiry, httpOnly cookie, rotated on use
+All endpoints except `/api/auth/*` and `/api/v1/health` require a valid JWT Bearer token. See Section 11.1 for the full authentication architecture.
 
 ### 8.2 REST Endpoints
 
@@ -824,7 +805,7 @@ All endpoints except `/api/auth/*` and `/api/v1/health` require a valid JWT Bear
 | `PUT` | `/api/v1/policies/{tenant_id}` | admin | Update tenant-specific policy overrides |
 | `POST` | `/api/auth/login` | public | Email/password authentication → `{ accessToken, refreshToken, user }` |
 | `POST` | `/api/auth/sso/init` | public | SSO initiation → `{ redirectUrl }` for IdP redirect |
-| `GET` | `/api/auth/sso/callback` | public | SSO callback — validates SAML assertion / OIDC token, issues JWT, redirects to UI |
+| `GET` | `/api/auth/sso/callback` | public | SSO callback — validates SAML assertion / OIDC token, issues JWT, redirects to configured client URL |
 | `POST` | `/api/auth/mfa/verify` | public | MFA verification — `{ mfaToken, code }` → `{ accessToken, refreshToken, user }` |
 | `POST` | `/api/auth/refresh` | public | Token refresh → `{ accessToken }` |
 | `GET` | `/api/auth/me` | any | Current authenticated user profile |
@@ -859,7 +840,7 @@ Cursor-based pagination on all list endpoints:
 
 ### 8.5 WebSocket Endpoint
 
-`ws://host/api/v1/ws` — detailed in Section 10.
+`ws://host/api/v1/ws` — server-side event publishing detailed in Section 10.
 
 ---
 
@@ -867,7 +848,7 @@ Cursor-based pagination on all list endpoints:
 
 ### 9.1 Exception Lifecycle State Machine
 
-Exceptions have a persistence-level lifecycle that extends beyond the `TerminalStatus` enum in GraphState. The UI exception queue is driven by this state.
+Exceptions have a persistence-level lifecycle that extends beyond the `TerminalStatus` enum in GraphState. API consumers query exceptions by this lifecycle state.
 
 ```mermaid
 stateDiagram-v2
@@ -1024,13 +1005,13 @@ CREATE INDEX idx_checkpoints_pending ON checkpoints (status, interrupted_at)
 | Purpose | Key Structure | TTL | Details |
 |---|---|---|---|
 | Task queue | `asoe:tasks` (stream) | N/A | Celery/ARQ task broker for async resolution |
-| WebSocket fanout | `asoe:ws:{tenant_id}` (pub/sub channel) | N/A | Per-tenant channel for real-time UI updates |
+| WebSocket fanout | `asoe:ws:{tenant_id}` (pub/sub channel) | N/A | Per-tenant channel for pipeline progress events |
 | Session cache | `asoe:session:{session_id}` (hash) | 15 min | JWT validation cache |
 | Circuit breaker state | `asoe:cb:{window_id}` (key) | 5 min | Update count + variance for current window. **Fail-closed on Redis unavailability:** if Redis is unreachable, the circuit breaker defaults to `FAIL_TO_HUMAN` (safe but blocking) rather than allowing unbounded updates through. This is enforced by a `try/except` in `orchestration/utils.py` that treats connection errors as a breaker trip. |
 | Rate limiting | `asoe:ratelimit:{client_id}` (sorted set) | 1 min | Per-client request rate |
-| Exception state cache | `asoe:exception:{id}` (hash) | 5 min | Current lifecycle_state + shadow_verdict for fast UI reads |
+| Exception state cache | `asoe:exception:{id}` (hash) | 5 min | Current lifecycle_state + shadow_verdict for fast API reads |
 
-**Write-Through Cache Strategy:** When an async worker resolves an exception, it must write to PostgreSQL **and** update the Redis cache simultaneously **before** publishing the WebSocket event. This ensures the UI never fetches stale data during the 3–10 second update window. The sequence is:
+**Write-Through Cache Strategy:** When an async worker resolves an exception, it must write to PostgreSQL **and** update the Redis cache simultaneously **before** publishing the WebSocket event. This ensures API clients never receive stale data during the event publish window. The sequence is:
 
 ```
 Worker completes graph execution
@@ -1046,8 +1027,8 @@ Worker completes graph execution
 | Failure Point | Recovery Behavior | Consistency Impact |
 |---|---|---|
 | PostgreSQL write fails | Transaction aborts. No Redis update, no WebSocket event. Exception retried via Celery/ARQ retry policy (3 attempts, exponential backoff). | None — no state changed. |
-| Redis cache update fails | PostgreSQL COMMIT proceeds. WebSocket event is still published. UI falls back to reading directly from PostgreSQL via the REST API. Redis cache self-heals on next read (cache-aside on miss, 5-min TTL). | Transient — UI may show stale cache for up to 5 min. |
-| WebSocket publish fails | PostgreSQL and Redis are already committed. The failure is logged with `trace_id`. The UI's polling fallback (`GET /api/v1/exceptions/{id}` every 3 seconds) ensures the user sees the update within one poll cycle. A dead-letter metric (`asoe_ws_publish_failures_total`) triggers an alert if the failure rate exceeds 1% over a 5-minute window. | Transient — UI update delayed by up to 3 seconds (poll interval). |
+| Redis cache update fails | PostgreSQL COMMIT proceeds. WebSocket event is still published. API clients fall back to reading directly from PostgreSQL. Redis cache self-heals on next read (cache-aside on miss, 5-min TTL). | Transient — cached reads may be stale for up to 5 min. |
+| WebSocket publish fails | PostgreSQL and Redis are already committed. The failure is logged with `trace_id`. A dead-letter metric (`asoe_ws_publish_failures_total`) triggers an alert if the failure rate exceeds 1% over a 5-minute window. Clients can poll `GET /api/v1/exceptions/{id}` as a fallback. | Transient — event delivery delayed until client polls. |
 
 ### 9.4 pgvector Deferral
 
@@ -1083,85 +1064,48 @@ The 7-year SOX retention requirement for `traces`, `policy_audit_log`, and `exce
 
 ---
 
-## 10. Real-Time Communication Protocol *[NEW]*
+## 10. Real-Time Event Publishing *[NEW]*
 
-WebSockets backed by Redis Pub/Sub push per-node LangGraph execution updates to the UI. This powers the `WaterfallStepper` component — the real-time pipeline progress visualization.
+The async worker publishes per-node pipeline progress events to Redis Pub/Sub as each LangGraph node completes. The FastAPI WebSocket hub (`ws://host/api/v1/ws`) forwards these events to authenticated, tenant-scoped clients.
 
-### 10.1 Connection Lifecycle
+### 10.1 Server-Side Event Flow
 
-1. **Connect:** Client opens `ws://host/api/v1/ws`
-2. **Authenticate:** Client sends JWT token in the first message: `{ "type": "auth", "token": "eyJ..." }`
-3. **Subscribe:** Server extracts `tenant_id` from JWT, subscribes to Redis channel `asoe:ws:{tenant_id}`
-4. **Receive:** Server forwards events from Redis to the client
-5. **Disconnect:** Server unsubscribes from Redis channel
+1. LangGraph node completes in the async worker.
+2. Worker publishes a structured JSON event to Redis channel `asoe:ws:{tenant_id}`.
+3. FastAPI WebSocket hub (subscribed to the tenant channel) forwards the event to connected clients.
 
-### 10.2 Event Envelope
+### 10.2 Event Schema (Server-Side Contract)
 
-```typescript
-interface WSEvent {
-  type: "pipeline_progress" | "exception_update" | "task_complete" | "error";
-  trace_id: string;
-  exception_id: string;
-  tenant_id: string;
-  timestamp: string;  // ISO 8601
-  payload: PipelineProgressPayload | ExceptionUpdatePayload | TaskCompletePayload;
-}
+Events published to Redis follow this JSON schema. API clients (UI, CLI, monitoring) consume this contract.
 
-interface PipelineProgressPayload {
-  node: "ingest" | "classify" | "load_skill" | "validate_circuit_breaker"
-      | "shadow_audit" | "select_recipe" | "validate_types"
-      | "resolve_dependencies" | "execute_recipe" | "apply_effects";
-  status: "started" | "completed" | "failed";
-  duration_ms?: number;
-  data?: {
-    intent?: string;
-    confidence?: number;
-    shadow_verdict?: string;
-    shadow_reasons?: string[];
-    selected_recipe?: string;
-    final_status?: string;
-    explanation?: string;
-  };
-}
+| Field | Type | Description |
+|---|---|---|
+| `type` | `"pipeline_progress" \| "exception_update" \| "task_complete" \| "error"` | Event category |
+| `trace_id` | `string` (UUID) | Correlates to `TraceRecord.trace_id` |
+| `exception_id` | `string` (UUID) | Exception being processed |
+| `tenant_id` | `string` | Tenant scope |
+| `timestamp` | `string` (ISO 8601) | Server-side event time |
 
-interface ExceptionUpdatePayload {
-  lifecycle_state: string;
-  updated_fields: Record<string, unknown>;
-}
+**`pipeline_progress` payload:**
 
-interface TaskCompletePayload {
-  task_id: string;
-  final_status: string;
-  explanation: string;
-}
-```
+| Field | Type | Description |
+|---|---|---|
+| `node` | `string` | One of the 11 pipeline node names (e.g., `"classify"`, `"shadow_audit"`, `"execute_recipe"`) |
+| `status` | `"started" \| "completed" \| "failed"` | Node execution status |
+| `duration_ms` | `number` (optional) | Node execution time |
+| `data` | `object` (optional) | Node-specific output: `intent`, `confidence`, `shadow_verdict`, `shadow_reasons`, `selected_recipe`, `final_status`, `explanation` |
 
-### 10.3 Event Flow
+**`exception_update` payload:** `{ lifecycle_state, updated_fields }` — published on lifecycle state transitions.
 
-As each LangGraph node completes, the async worker:
-1. Publishes a `pipeline_progress` event to Redis channel `asoe:ws:{tenant_id}`
-2. The FastAPI WebSocket hub receives the event from Redis
-3. The hub forwards it to all connected clients for that tenant
-4. The UI's `WaterfallStepper` component renders the node as complete and advances to the next
+**`task_complete` payload:** `{ task_id, final_status, explanation }` — published when an async task finishes.
 
-Example event sequence for a successful resolution:
-```
-→ { node: "ingest", status: "completed" }
-→ { node: "classify", status: "completed", data: { intent: "DUPLICATE_PO", confidence: 0.95 } }
-→ { node: "load_skill", status: "completed" }
-→ { node: "validate_circuit_breaker", status: "completed" }
-→ { node: "shadow_audit", status: "completed", data: { shadow_verdict: "GREEN" } }
-→ { node: "select_recipe", status: "completed", data: { selected_recipe: "DuplicatePORecipe.py" } }
-→ { node: "validate_types", status: "completed" }
-→ { node: "resolve_dependencies", status: "completed" }
-→ { node: "execute_recipe", status: "completed" }
-→ { node: "apply_effects", status: "completed", data: { final_status: "COMPLETE" } }
-```
+### 10.3 WebSocket Hub (FastAPI)
 
-### 10.4 Resilience
+- **Authentication:** First client message must be `{ "type": "auth", "token": "eyJ..." }`. Server extracts `tenant_id` from JWT and subscribes to the corresponding Redis channel.
+- **Replay buffer:** Server maintains a 60-second Redis stream buffer per tenant. On client reconnect with `last_seen_timestamp`, missed events are replayed.
+- **Tenant isolation:** Each client receives events only for their `tenant_id` channel.
 
-- **Reconnection:** Client reconnects with exponential backoff (1s, 2s, 4s, 8s, max 30s). Sends `last_seen_timestamp` on reconnect; server replays missed events from a short-lived Redis stream buffer (60-second retention).
-- **Fallback:** If WebSocket connection fails entirely, the UI falls back to polling `GET /api/v1/exceptions/{id}` every 3 seconds.
+> **Client-side behavior** (reconnection logic, polling fallback, UI rendering) is specified in the `asoe-ui` repository documentation.
 
 ---
 
@@ -1171,27 +1115,26 @@ Example event sequence for a successful resolution:
 
 **Primary (Enterprise SSO):**
 ```
-User clicks "Sign in with SSO"
-  → Next.js calls FastAPI POST /api/auth/sso/init
+Client calls POST /api/auth/sso/init
   → FastAPI returns IdP redirect URL (SAML 2.0 / OIDC)
   → User authenticates at corporate IdP (Okta, Azure AD, Ping)
-  → IdP redirects to /api/auth/sso/callback on FastAPI
+  → IdP redirects to GET /api/auth/sso/callback
   → FastAPI validates assertion, issues JWT (access + refresh tokens)
-  → Next.js stores session via NextAuth.js
-  → User lands on exception queue
 ```
+
+- **Access token:** 15-minute expiry. Contains `sub`, `email`, `name`, `roles[]`, `org` (tenant), `permissions[]`, `env`, and `exp` claims.
+- **Refresh token:** 7-day expiry, rotated on use.
 
 **Fallback (Email/Password — Admin-Only, MFA-Enforced):**
 
-> **Security constraint:** The email/password fallback is restricted to `admin`-role users only and **MFA is mandatory** (not optional). This prevents the fallback from undermining the SSO mandate for general users. The `POST /api/auth/login` endpoint validates that the email belongs to a user with `admin` role before processing credentials — non-admin users receive a 403 directing them to SSO. The login UI conditionally shows the email/password form only when SSO is unavailable (IdP outage detection via a health-check ping to the configured IdP metadata URL).
+> **Security constraint:** The email/password fallback is restricted to `admin`-role users only and **MFA is mandatory** (not optional). This prevents the fallback from undermining the SSO mandate for general users. The `POST /api/auth/login` endpoint validates that the email belongs to a user with `admin` role before processing credentials — non-admin users receive a 403 directing them to SSO.
 
 ```
-Admin enters email + password
-  → Next.js calls FastAPI POST /api/auth/login
+POST /api/auth/login (email + password)
   → FastAPI validates credentials AND confirms user.role == "admin"
   → MFA is ALWAYS required (no bypass): returns { mfaRequired: true, mfaToken }
-  → Admin enters TOTP code → POST /api/auth/mfa/verify
-  → FastAPI issues JWT tokens → session established
+  → POST /api/auth/mfa/verify (TOTP code)
+  → FastAPI issues JWT tokens
   → JWT includes auth_method: "password+mfa" claim for audit differentiation
 ```
 
@@ -1207,7 +1150,7 @@ Roles are assigned in the backend and included in the JWT payload. Permissions f
 | `viewer` | `exceptions:read`, `dashboard:read` | View queues and dashboards, no action buttons |
 | `partner` | `exceptions:read` (scoped to own orders) | Scoped view of their own orders only |
 
-**Enforcement:** Next.js middleware protects routes server-side. FastAPI dependency injection validates JWT roles on every endpoint.
+**Enforcement:** FastAPI dependency injection validates JWT roles on every endpoint. Frontend route protection is the responsibility of the `asoe-ui` layer.
 
 **RBAC Split by Execution Path:**
 
@@ -1248,7 +1191,7 @@ Tenant data isolation is enforced at **two independent layers** for defense-in-d
 ### 11.4 trace_id End-to-End Propagation
 
 ```
-Next.js UI                     FastAPI API                   Async Worker + ASOE Core
+API Client                     FastAPI API                   Async Worker + ASOE Core
     |                               |                               |
     |-- X-Trace-ID: {uuid} ------->|                               |
     |   (or API generates one)      |                               |
@@ -1388,13 +1331,13 @@ Adding a new intent (e.g., `SHORT_SHIP`, `SUBSTITUTION`, `EDI_MAPPING_ERROR`) re
 | 3. Register recipe spec | `recipes/registry.py` | Add `RecipeSpec` with allowed intents, required params, dependencies, effects |
 | 4. Write skill definition | `skills/SHORT_SHIP.md` | Structured reasoning guidance for the new exception type |
 
-Optional: add `AllowedRecipeName` value, update `DeterministicFallbackBackend` classification rules, and add test cases. The pipeline itself (`orchestration/nodes.py`), the Compliance Shadow, the gateway layer, and the UI require **zero changes** — they operate on typed abstractions, not hardcoded intent lists.
+Optional: add `AllowedRecipeName` value, update `DeterministicFallbackBackend` classification rules, and add test cases. The pipeline itself (`orchestration/nodes.py`), the Compliance Shadow, the gateway layer, and the API require **zero changes** — they operate on typed abstractions, not hardcoded intent lists.
 
 **Candidate V1.5 intents** (next tier by volume in CPG O2C): `SHORT_SHIP` (partial fulfillment discrepancies), `SUBSTITUTION` (product substitution without buyer authorization), `EDI_MAPPING_ERROR` (field mapping failures between EDI 850/810 and ERP).
 
 **Extensibility proof: adding `SHORT_SHIP` end-to-end.**
 
-The following demonstrates that the 4-step path works with no pipeline, shadow, gateway layer, or UI changes.
+The following demonstrates that the 4-step path works with no pipeline, shadow, gateway layer, or API changes.
 
 **Step 1 — Add intent enum value** (`constraints/specs.py`):
 ```python
@@ -1449,7 +1392,7 @@ Compare ordered vs. received quantities. Check if partial shipment was pre-autho
 - Accept variance below review threshold
 ```
 
-**What required zero changes:** `orchestration/nodes.py` (all 11 nodes), `ComplianceShadow`, `GatewayExecutor`, `RecipeExecutor`, `GraphState` schema, the FastAPI API, the Next.js UI, WebSocket events, Redis pub/sub, the lifecycle state machine. The new gateway operations (`get_receiving_details`, `issue_credit_memo`) are registered as new entries in `gateways/registry.py` with stubbed adapters — the executor already dispatches by name.
+**What required zero changes:** `orchestration/nodes.py` (all 11 nodes), `ComplianceShadow`, `GatewayExecutor`, `RecipeExecutor`, `GraphState` schema, the FastAPI API, WebSocket event publishing, Redis pub/sub, the lifecycle state machine. The new gateway operations (`get_receiving_details`, `issue_credit_memo`) are registered as new entries in `gateways/registry.py` with stubbed adapters — the executor already dispatches by name.
 
 **What also needed changes (acknowledged):** The `DeterministicFallbackBackend` needs a classification rule for `SHORT_SHIP` (a 5th `if event_type` branch). The `AllowedRecipeName` literal needs `"ShortShipReconciliationRecipe.py"` added. Two new policy constants need entries in `contracts/policy.py`. These are mechanical additions, not architectural changes. Total: ~6 files touched, ~40 lines added, zero lines modified in the pipeline.
 
@@ -1461,7 +1404,7 @@ V1 requires zero schema changes to support V2/V3 expansion. But the following **
 
 1. **No intent-specific logic in pipeline nodes.** The `ingest`, `shadow_audit`, `select_recipe`, `execute_recipe`, and `apply_effects` nodes must operate on typed abstractions (`AllowedIntent`, `RecipeSpec`, `GatewayRequest`), never on `if intent == "DUPLICATE_PO"` branches. Intent-specific logic belongs exclusively in recipes and skill documents.
 
-2. **No hardcoded intent or lifecycle state values in the UI.** The frontend must render queue filters, status badges, and intent labels from API-provided enums or config, not from hardcoded TypeScript switch statements. Adding a new intent or lifecycle state must not require a UI code change.
+2. **API responses must provide intent and lifecycle enums dynamically.** The API must serve intent values, lifecycle states, and recipe names from the backend schema — not require consumers to hardcode them. Adding a new intent or lifecycle state must not require an API-consumer code change.
 
 3. **`metadata` dict is a typed-extension bridge, not a junk drawer.** Each intent must document its expected `metadata` keys in the `RecipeSpec` (e.g., DUPLICATE_PO expects `signal_scores`, `matched_po_id`). V1 test coverage must assert that required metadata keys are present for each intent. This prevents `metadata` from drifting into an unvalidated bag as new intents are added.
 
@@ -1478,7 +1421,7 @@ These guardrails are enforced in CI — they are not optional code review sugges
 | Guardrail | Enforcement Mechanism | CI Gate? |
 |---|---|---|
 | #1 No intent-specific logic in nodes | `grep -rn "intent ==" orchestration/nodes.py` in CI. Any match on a string literal intent value (e.g., `"DUPLICATE_PO"`) fails the build. Additionally, an architectural fitness test (`test_node_intent_agnostic.py`) uses AST inspection to verify no node function contains `if/elif` branches on `state.intent` against literal values. | Yes — build fails |
-| #2 No hardcoded values in UI | ESLint custom rule (`no-hardcoded-enums`) that flags string literals matching known intent or lifecycle state patterns in `.tsx` files. Intent and state values must come from API response types or a shared `enums.ts` generated from the backend schema. | Yes — lint fails |
+| #2 Dynamic enum serving | API endpoints (`/api/v1/health`, `/api/v1/exceptions/stats`) include current `allowed_intents`, `lifecycle_states`, and `allowed_recipes` in response metadata. A test (`test_api_enum_serving.py`) verifies that adding a new `AllowedIntent` value automatically appears in the API response without endpoint code changes. | Yes — test fails |
 | #3 Metadata keys documented | Each `RecipeSpec` in `recipes/registry.py` declares `expected_metadata_keys: list[str]`. A test (`test_metadata_contracts.py`) verifies that every intent's test fixtures include all declared keys and that `ingest` validates their presence when the corresponding `event_type` is used. | Yes — test fails |
 | #4 ERP-agnostic gateway protocol | A test (`test_gateway_protocol_agnostic.py`) imports `gateways/base.py` and asserts no SAP/Oracle/Dynamics-specific strings appear in the `InfrastructureGateway` protocol, `GatewayRequest`, or `GatewayResponse` type definitions. | Yes — test fails |
 | #5 Intent-agnostic exceptions table | A migration guard (`test_schema_agnostic.py`) introspects the `exceptions` table columns and asserts no column name matches a known intent-specific pattern (e.g., `*_similarity*`, `*damage*`, `*deduction*`). `resolution_data JSONB` is the only permitted extensibility column. | Yes — test fails |
@@ -1566,7 +1509,7 @@ ALTER TABLE exceptions ADD COLUMN dispute_source VARCHAR(50);  -- e.g., 'WALMART
 ```
 
 The `ingest` node populates `dispute_deadline` from retailer-specific rules stored in `policy_overrides` (e.g., `retailer.walmart.DISPUTE_WINDOW_DAYS = 30`). A background scheduler monitors approaching deadlines:
-- **7 days before deadline:** Warning alert to assigned analyst + manager. Exception badge changes in UI.
+- **7 days before deadline:** Warning alert to assigned analyst + manager. Exception metadata updated with `deadline_warning: true`.
 - **48 hours before deadline:** Escalation to manager. If exception is still `PENDING_REVIEW`, auto-escalate per the HITL escalation protocol (Section 5.9).
 - **Deadline passed:** Exception flagged `DISPUTE_EXPIRED` (new terminal status). TraceRecord records the revenue impact for reporting.
 
@@ -1612,10 +1555,10 @@ CREATE TABLE attachments (
 
 **Sub-state semantics — two distinct roles, clearly separated:**
 
-- **Rendering role (advisory):** Sub-states drive UI labels, dashboard filtering, and reporting. The `WaterfallStepper` and exception queue render sub-state labels from API responses. The pipeline **never** branches on `sub_state`. The core 11 lifecycle states remain the only routing states in `orchestration/nodes.py`.
+- **Rendering role (advisory):** Sub-states are exposed in API responses for client-side filtering, labeling, and reporting. The pipeline **never** branches on `sub_state`. The core 11 lifecycle states remain the only routing states in `orchestration/nodes.py`.
 - **Gate role (control flow at the API boundary, not the pipeline):** Multi-party review gates (see §16.3.3 below) are enforced in the `approve` REST endpoint, not inside the pipeline graph. The `approve` endpoint checks `review_parties` before calling `graph.invoke()` to resume. This is API-level validation — identical in nature to checking JWT roles before allowing approval. The pipeline itself sees a simple resume signal; it does not know or care about multi-party state.
 
-This distinction matters: the pipeline routes on parent states only. The API layer may enforce additional pre-conditions (role checks, multi-party quorum) before triggering a state transition. Sub-states are metadata that the API layer and UI consume — they do not participate in graph routing decisions.
+This distinction matters: the pipeline routes on parent states only. The API layer may enforce additional pre-conditions (role checks, multi-party quorum) before triggering a state transition. Sub-states are metadata that the API layer exposes to consumers — they do not participate in graph routing decisions.
 
 **3. Multi-party review workflows.** Damage claims require input from the carrier, the warehouse, and the claims analyst. V3 extends the HITL model with a `review_parties` field on the `checkpoints` table:
 
@@ -1650,7 +1593,7 @@ Each V2/V3 capability maps to an existing V1 seam. No V1 architectural redesign 
 | Compound exceptions | `WorkflowRunner` saga pattern | Add `parent_exception_id` FK, spawn children from `apply_effects` |
 | New gateway adapters (TPM, WMS, TMS, retailer portals) | Hexagonal gateway layer + adapter registry | Implement new adapters behind the existing `InfrastructureGateway` protocol |
 | Binary evidence | `resolution_data JSONB` + `metadata` dict | Add `attachments` table + `blob_storage` gateway adapter |
-| Lifecycle sub-states | `lifecycle_state` enum + `resolution_data JSONB` | Add `sub_state` column; UI renders from API, not hardcoded |
+| Lifecycle sub-states | `lifecycle_state` enum + `resolution_data JSONB` | Add `sub_state` column; exposed in API responses |
 | Multi-party review | HITL pause/resume + `checkpoints` table | Add `review_parties` JSONB to `checkpoints`; multi-approval gate in `approve` endpoint |
 | Priority SLA routing | Celery/ARQ task queue + `event_type` field | Add priority queues; route by `event_type` at ingestion |
 | Per-retailer compliance profiles | `policy_overrides` table + `retailer_id` on `exceptions` | Use `retailer.{id}.{key}` policy keys; resolve in `validate_types` |
@@ -1714,6 +1657,7 @@ Every `run_graph()` call emits a `TraceRecord` to the `asoe.observability` Pytho
 | `LANGFUSE_PUBLIC_KEY` | _(unset)_ | Enables LangFuse trace forwarding when set |
 | `LANGFUSE_SECRET_KEY` | _(unset)_ | Required alongside public key |
 | `LANGFUSE_HOST` | _(unset)_ | Omit for LangFuse Cloud; set for self-hosted |
-| `NEXTAUTH_SECRET` | _(required)_ | NextAuth.js session encryption key |
-| `FASTAPI_URL` | `http://localhost:8000` | FastAPI backend URL for Next.js |
+| `ASOE_ENV` | `sandbox` | `production` or `sandbox` — validated against JWT `env` claim (see §11.6) |
+| `DATABASE_URL` | _(required)_ | PostgreSQL connection string |
+| `REDIS_URL` | _(required)_ | Redis connection string |
 | `ASOE_ENV` | `sandbox` | `production` or `sandbox` — validated against JWT `env` claim |
