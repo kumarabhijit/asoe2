@@ -4,7 +4,7 @@
 **Domain:** Consumer Packaged Goods (CPG) Supply Chain (Order-to-Cash)
 **Scope:** V1.0 is strictly constrained to **Pricing & Promotional Exceptions**.
 **Design Reference:** [DESIGN.md](DESIGN.md) — maps these patterns to concrete modules, classes, and wiring.
-**Lineage:** This document unifies `architecture_v2.md` (core engine spec) with the V1-planned ASOE Core items from `consol_arch.md` (unified platform architecture). All content from `architecture_v2.md` is preserved. Sections marked *[NEW]* originate from `consol_arch.md`.
+**Lineage:** This document unifies `architecture_v2.md` (original core engine spec) with the V1-planned ASOE Core items from `consol_arch.md` (unified platform architecture in `asoe-ui`). All content from `architecture_v2.md` is preserved; `architecture_v2.md` is now superseded by this document. Sections marked *[NEW]* originate from `consol_arch.md`.
 
 ---
 
@@ -49,7 +49,7 @@ In this model, non-deterministic Large Language Model (LLM) reasoning is tightly
 | **Terminal statuses** | `COMPLETE`, `COMPLETE_WITH_CHILDREN`, `FAIL_TO_HUMAN`, `MANUAL_REVIEW_REQUIRED`, `BLOCKED`, `REJECTED` |
 | **Pipeline** | 11-node LangGraph state machine |
 | **Lifecycle** | 11-state exception lifecycle (INGESTED through CLOSED, including ESCALATED) |
-| **Tests** | 584 passing (16 test files) |
+| **Tests** | Full suite must pass (`python -m pytest`) |
 | **RAG** | Deferred to V2 — all context is structured and resolved via typed gateways |
 | **Continual learning** | V2 design blueprint included; not a V1 deliverable |
 
@@ -144,7 +144,7 @@ ASOE **does not own:** order lifecycle, inventory, shipping, invoicing, or gener
 
 The application is deployed as a suite of containerized microservices on Microsoft Azure. ASOE Core is a **Python library**, not a standalone service — both the FastAPI API server and the async worker import it directly. The inference sidecar is a separate optional container that serves constrained-generation models. Image builds use fast, deterministic Python dependency resolution on Ubuntu 24.04 base images.
 
-> **Scaling evolution path:** The library model is a pragmatic V1 choice that eliminates network overhead and simplifies deployment. When the inference sidecar or async workers need to scale independently of the API server (expected at ~1,000+ concurrent exceptions/hour), the migration path is: (1) extract `asoe-core` into a gRPC service behind an internal load balancer, (2) define a `CoreServiceClient` that implements the same `run_graph()` interface, and (3) swap the import-based invocation for the client. The hexagonal gateway layer already enforces this boundary — no recipe or node function calls infrastructure directly.
+> **Scaling evolution path:** The library model is a deliberate V1 choice — see [ADR-001: Core Deployment Model](docs/adr/ADR-001-core-deployment-model.md) for the full rationale, alternatives considered (in-process library vs. versioned package vs. standalone service), and staged evolution triggers. In summary: the library model does not block horizontal scaling (multiple worker pods import `asoe-core` independently), the extraction seam already exists (`run_graph()` typed interface + hexagonal gateway layer), and premature service extraction would add operational complexity with no proportional benefit at V1 scale. The migration path from library → versioned package → gRPC service requires zero changes to recipes, gateways, or the compliance shadow.
 
 ### 4.1 Infrastructure & Deployment Stack
 
@@ -1258,7 +1258,7 @@ graph TD
     L2 --> |"Proposed PRs"| PR["Code Review<br/>(human architect)"]
     L3 --> |"Staged overrides"| PO["policy_overrides table<br/>(human-reviewed)"]
 
-    INF --> |"Must pass"| GOLDEN["Golden Test Suite<br/>(584 tests)"]
+    INF --> |"Must pass"| GOLDEN["Golden Test Suite"]
     PR --> |"Must pass"| GOLDEN
 ```
 
@@ -1284,7 +1284,7 @@ graph TD
 - Proposes PRs to `skills/*.md` (new reasoning patterns), `contracts/policy.py` (threshold adjustments), or new `RecipeSpec` entries
 - This is analogous to OpenClaw's "dreaming" — offline batch analysis that updates the system's "soul"
 
-**Guardrail:** Proposed changes are pull requests, never auto-merged. The existing test suite (584 tests) gates all changes. A human architect reviews every PR.
+**Guardrail:** Proposed changes are pull requests, never auto-merged. The full test suite gates all changes. A human architect reviews every PR.
 
 ### Layer 3: Learning Context (Per-Tenant Memory)
 
@@ -1302,7 +1302,7 @@ graph TD
 
 ## 13. Execution Invariants (Non-Negotiable)
 
-The following 11 invariants are enforced by code, not configuration. Violating any requires modifying and re-reviewing source code. They are validated by 584 tests across 16 test files.
+The following 11 invariants are enforced by code, not configuration. Violating any requires modifying and re-reviewing source code. They are validated by the full test suite (run `python -m pytest` to verify).
 
 | # | Invariant | Enforced By | Tested By |
 |---|---|---|---|

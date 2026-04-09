@@ -13,7 +13,7 @@ and test additions.
 Read these documents in full before touching any source file:
 
 1. CLAUDE.md                   — architecture guardrails, engineering rules, definition of done
-2. architecture_v2.md          — Skill-Shadow-Recipe design, execution invariants, technology stack
+2. architecture_v3.md          — Skill-Shadow-Recipe design, execution invariants, technology stack
 3. DESIGN.md                   — module map, class/function names, graph node wiring, env vars
 4. tasks.md                    — phase checklist, current status, open items
 

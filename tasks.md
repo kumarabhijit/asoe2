@@ -11,7 +11,7 @@
   - `orchestration/`
   - `compliance/`
   - `constraints/`
-  - ~~`mcp/`~~ (deferred — MCP integration is stubbed per architecture_v2.md §2; directory not created)
+  - ~~`mcp/`~~ (deferred — MCP integration is stubbed per architecture_v3.md §4; directory not created)
   - `tests/`
   - `prompts/`
   - `llm/` (added during Phase 9 — Outlines model loader for `OutlinesConstrainedBackend`)
@@ -222,7 +222,7 @@ States:
 - [x] `Dockerfile.inference` — local LLM inference (Outlines + torch + transformers for Compliance Shadow)
 - [x] `.dockerignore` — excludes .git, __pycache__, sandbox.db, k8s/
 - [x] Non-root user (`asoe`, UID 1000) in all images
-- [x] `uv` for fast, deterministic dependency resolution (per architecture_v2.md §2)
+- [x] `uv` for fast, deterministic dependency resolution (per architecture_v3.md §4)
 ✅ Outcome: each container installs only its required dependency group
 
 ### 9.2 Docker Compose (Local Development)
@@ -241,7 +241,7 @@ States:
 - [x] `k8s/inference/` — Deployment (1 replica, Intel AMX nodeSelector, 20 Gi memory), Service (ClusterIP)
 - [x] Azure Workload Identity annotations on all pod templates
 - [x] Non-root security context on all pods
-✅ Outcome: deployment manifests align with architecture_v2.md §2 infrastructure stack
+✅ Outcome: deployment manifests align with architecture_v3.md §4 infrastructure stack
 ---
 ## PHASE 10 — LangFuse Observability Integration
 Build prompt: `prompts/phase_10_langfuse.md`

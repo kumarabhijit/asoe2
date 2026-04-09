@@ -1,7 +1,7 @@
 # Documentation Update Prompt
 
 ```text
-Read architecture_v2.md, DESIGN.md, CLAUDE.md, and tasks.md in full before making any changes.
+Read architecture_v3.md, DESIGN.md, CLAUDE.md, and tasks.md in full before making any changes.
 
 Also read each document you are about to update so you understand its current state.
 

@@ -8,7 +8,7 @@ metadata:
 spec:
   selector:
     app: asoe-core
-  # ClusterIP only — external traffic enters via Azure APIM (architecture_v2.md §2)
+  # ClusterIP only — external traffic enters via Azure APIM (architecture_v3.md §4)
   type: ClusterIP
   ports:
     - name: http

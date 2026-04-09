@@ -25,7 +25,7 @@ spec:
         runAsNonRoot: true
         runAsUser: 1000
       # ── Intel Sapphire Rapids (AMX) node pool ────────────────────────────────
-      # Matches the dedicated AKS node pool in architecture_v2.md §2
+      # Matches the dedicated AKS node pool in architecture_v3.md §4
       # "Intel Xeon Sapphire Rapids … Advanced Matrix Extensions (AMX)"
       # For CUDA GPU nodes: replace nodeSelector + tolerations with:
       #   nodeSelector: { accelerator: nvidia-gpu }

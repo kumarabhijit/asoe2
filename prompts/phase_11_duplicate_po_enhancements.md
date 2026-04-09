@@ -1,7 +1,7 @@
 # Phase 11 — Duplicate PO Product Spec Gap Closure
 
 ```text
-Read architecture_v2.md, DESIGN.md, CLAUDE.md, tasks.md (Phase 11), and
+Read architecture_v3.md, DESIGN.md, CLAUDE.md, tasks.md (Phase 11), and
 docs/specs/duplicate-po-product-spec.md in full before making any changes.
 
 This phase closes the gaps between the Duplicate PO product specification
@@ -231,5 +231,5 @@ After Phase 11, there are 5 constrained vocabularies that must stay in sync:
   - Autonomy routing uses existing terminal statuses, no new abstractions
   - Notifications use existing GatewayEffect pattern
   - Override audit is additive (Optional fields, no breaking changes)
-  - All 11 execution invariants from architecture_v2.md §5 remain intact
+  - All 11 execution invariants from architecture_v3.md §13 remain intact
 ```

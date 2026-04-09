@@ -1,7 +1,7 @@
 # Phase 10 — LangFuse Observability Integration
 
 ```text
-Read architecture_v2.md, CLAUDE.md, DESIGN.md, and tasks.md (Phase 10)
+Read architecture_v3.md, CLAUDE.md, DESIGN.md, and tasks.md (Phase 10)
 before making any changes.  Also read observability/tracer.py and
 observability/langfuse_sink.py in full.
 

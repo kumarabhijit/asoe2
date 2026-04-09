@@ -8,7 +8,7 @@ configuration. You do not modify orchestration, recipe, or compliance logic.
 
 Before starting, read:
 - CLAUDE.md (engineering rules and guardrails)
-- architecture_v2.md §2 (deployment architecture: 3-container split, AKS target)
+- architecture_v3.md §4 (deployment architecture: 3-container split, AKS target)
 - DESIGN.md §13 (container architecture)
 - tasks.md (current phase and open deployment items)
 - Dockerfile.core, Dockerfile.ui, Dockerfile.inference
@@ -130,7 +130,7 @@ driver, mounted at /mnt/secrets-store/.
 
 ### C. Kubernetes Manifests
 
-> **Note:** This section contains Azure-specific references (AKS, ACR, Azure Workload Identity, Key Vault CSI, Azure APIM). When targeting a different cloud or on-prem cluster, replace these with the equivalent platform primitives and update `architecture_v2.md` first.
+> **Note:** This section contains Azure-specific references (AKS, ACR, Azure Workload Identity, Key Vault CSI, Azure APIM). When targeting a different cloud or on-prem cluster, replace these with the equivalent platform primitives and update `architecture_v3.md` first.
 
 1. Lint all manifests (use kubeval or kube-score if available):
    ```
@@ -232,7 +232,7 @@ driver, mounted at /mnt/secrets-store/.
 
 ### F. Production Handoff Checklist
 
-> **Note:** This section contains Azure-specific references (ACR, Azure Workload Identity, Key Vault CSI, Azure APIM, Azure Monitor). When targeting a different cloud or on-prem cluster, replace these with the equivalent platform primitives and update `architecture_v2.md` first.
+> **Note:** This section contains Azure-specific references (ACR, Azure Workload Identity, Key Vault CSI, Azure APIM, Azure Monitor). When targeting a different cloud or on-prem cluster, replace these with the equivalent platform primitives and update `architecture_v3.md` first.
 
 Before declaring the deployment production-ready, confirm:
 
