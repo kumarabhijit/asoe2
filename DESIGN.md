@@ -59,6 +59,19 @@ hardening/
 observability/
   tracer.py          # TraceRecord (Pydantic, LangFuse-aligned), emit via stdlib logging
 
+api/
+  app.py             # FastAPI application factory (create_app())
+  deps.py            # Auth dependencies: JWT validation, RBAC, tenant extraction
+  errors.py          # Standard error envelope (ASOEError, ErrorEnvelope)
+  schemas.py         # Request/Response Pydantic models
+  store.py           # In-memory exception store (V1; replaced by PostgreSQL in V1.1)
+  routes/
+    health.py        # GET /api/v1/health (public, no auth)
+    exceptions.py    # Exception CRUD + resolve endpoints (11 routes)
+    workflows.py     # POST /api/v1/workflows
+    policies.py      # PUT /api/v1/policies/{tenant_id}
+    auth.py          # Auth endpoints: login, SSO, MFA, refresh, me
+
 tests/
   conftest.py        # Shared fixtures (StubGateway, sample events, backend setup)
   test_*.py          # Unit and integration tests (run `python -m pytest` to verify)
@@ -453,23 +466,79 @@ The following are defined in architecture_v3.md and will be implemented as the F
 
 ---
 
-## 15. API, Database, and Security Design References
+## 15. API Layer (FastAPI)
 
-These components are part of the `asoe2` codebase (FastAPI server + async worker import `asoe-core`) and are fully specified in architecture_v3.md:
+Implements architecture_v3.md §8 (API Contract), §11.1 (Authentication), §11.2 (RBAC), §11.3 (Multi-Tenancy).
 
-| Concern | Architecture Reference | Implementation Scope |
+### 15.1 REST Endpoints
+
+| Method | Path | Auth | Handler |
+|---|---|---|---|
+| `GET` | `/api/v1/health` | public | `api/routes/health.py::health()` |
+| `POST` | `/api/v1/exceptions/resolve` | analyst+ | `api/routes/exceptions.py::resolve()` |
+| `POST` | `/api/v1/exceptions/resolve/async` | analyst+ | `api/routes/exceptions.py::resolve_async()` |
+| `POST` | `/api/v1/exceptions/resolve/explain` | analyst+ | `api/routes/exceptions.py::resolve_explain()` |
+| `GET` | `/api/v1/exceptions` | analyst+ | `api/routes/exceptions.py::list_exceptions()` |
+| `GET` | `/api/v1/exceptions/stats` | analyst+ | `api/routes/exceptions.py::stats()` |
+| `GET` | `/api/v1/exceptions/{id}` | analyst+ | `api/routes/exceptions.py::get_exception()` |
+| `GET` | `/api/v1/exceptions/{id}/trace` | analyst+ | `api/routes/exceptions.py::get_trace()` |
+| `PATCH` | `/api/v1/exceptions/{id}/override` | manager+ | `api/routes/exceptions.py::override_exception()` |
+| `POST` | `/api/v1/exceptions/{id}/approve` | manager+ | `api/routes/exceptions.py::approve_exception()` |
+| `POST` | `/api/v1/exceptions/{id}/reject` | manager+ | `api/routes/exceptions.py::reject_exception()` |
+| `POST` | `/api/v1/workflows` | manager+ | `api/routes/workflows.py::run_workflow()` |
+| `PUT` | `/api/v1/policies/{tenant_id}` | admin | `api/routes/policies.py::update_policy()` |
+| `POST` | `/api/auth/login` | public | `api/routes/auth.py::login()` |
+| `POST` | `/api/auth/sso/init` | public | `api/routes/auth.py::sso_init()` |
+| `GET` | `/api/auth/sso/callback` | public | `api/routes/auth.py::sso_callback()` |
+| `POST` | `/api/auth/mfa/verify` | public | `api/routes/auth.py::mfa_verify()` |
+| `POST` | `/api/auth/refresh` | public | `api/routes/auth.py::refresh()` |
+| `GET` | `/api/auth/me` | any | `api/routes/auth.py::me()` |
+
+### 15.2 Authentication & RBAC
+
+**JWT validation** (`api/deps.py`): Extracts Bearer token from `Authorization` header. V1 uses HS256 with a dev secret. Production uses Key Vault-managed signing keys.
+
+**Role → Permission mapping** (5 roles from architecture_v3.md §11.2):
+
+| Role | Key Permissions |
+|---|---|
+| `analyst` | `exceptions:read`, `exceptions:approve` |
+| `manager` | analyst + `exceptions:override`, `rules:write` |
+| `admin` | manager + `users:manage`, `policy:write`, `audit:read` |
+| `viewer` | `exceptions:read`, `dashboard:read` |
+| `partner` | `exceptions:read` (scoped to own orders) |
+
+**Tenant isolation** (`api/deps.py::get_tenant_id()`): Extracts `tenant_id` from JWT `org` claim. All queries are scoped by `tenant_id`. V1 uses application-layer filtering; V1.1 adds PostgreSQL RLS.
+
+### 15.3 Error Envelope
+
+All errors use the standard envelope from architecture_v3.md §8.3:
+
+```json
+{
+  "error": {
+    "code": "SHADOW_BLOCKED",
+    "message": "...",
+    "trace_id": "...",
+    "details": { ... }
+  }
+}
+```
+
+### 15.4 Persistence (V1)
+
+V1 uses an in-memory `ExceptionStore` (`api/store.py`). Records are created during `resolve()` and queryable via list/detail/trace endpoints. Replaced by PostgreSQL (architecture_v3.md §9.2) when the database layer is built.
+
+### 15.5 Remaining Design References
+
+| Concern | Architecture Reference | Status |
 |---|---|---|
-| REST endpoints (15+ routes) | architecture_v3.md §8 | `api/` module (FastAPI) |
-| WebSocket event publishing | architecture_v3.md §10 | `api/ws.py` + Redis pub/sub |
-| PostgreSQL schema (5 tables + RLS) | architecture_v3.md §9.2 | `migrations/` + `db/` module |
-| Redis key structures + write-through cache | architecture_v3.md §9.3 | `cache/` module |
-| Authentication (SSO + MFA) | architecture_v3.md §11.1 | `api/auth/` module |
-| RBAC (5 roles, `{resource}:{action}`) | architecture_v3.md §11.2 | FastAPI dependency injection |
-| Multi-tenancy (app layer + PostgreSQL RLS) | architecture_v3.md §11.3 | FastAPI deps + RLS policies |
-| Environment isolation | architecture_v3.md §11.6 | JWT `env` claim validation |
+| WebSocket event publishing | architecture_v3.md §10 | Planned (V1.1) |
+| PostgreSQL schema (5 tables + RLS) | architecture_v3.md §9.2 | Planned (V1.1) |
+| Redis key structures + write-through cache | architecture_v3.md §9.3 | Planned (V1.1) |
+| HITL pause/resume (interrupt + checkpoint) | architecture_v3.md §5.9 | Planned (V1.1) |
+| Environment isolation (JWT env claim) | architecture_v3.md §11.6 | JWT `env` claim present; validation planned (V1.1) |
 | Deployment model rationale | [ADR-001](docs/adr/ADR-001-core-deployment-model.md) | — |
-
-These sections will be expanded with concrete module/class/function mappings as implementation proceeds.
 
 ---
 
@@ -489,6 +558,7 @@ These sections will be expanded with concrete module/class/function mappings as 
 
 | File | Coverage area |
 |---|---|
+| `test_api.py` | FastAPI endpoints, JWT auth, RBAC, tenant isolation, error envelope |
 | `test_constraints.py` | Constrained output schemas and backend chain |
 | `test_contracts.py` | Pydantic model validation |
 | `test_executor.py` | RecipeExecutor dispatch and error handling |

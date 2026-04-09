@@ -497,6 +497,15 @@ def main() -> None:
         os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY")
     )
 
+    # API server availability
+    api_available = False
+    try:
+        from api.app import app as _api_app  # noqa: F401
+        api_available = True
+    except ImportError:
+        pass
+    api_port = os.getenv("ASOE_API_PORT", "8000")
+
     with st.expander("ℹ️  Environment"):
         st.write(f"**LLM backend:** `{backend_cls}`")
         st.write(f"**Explain mode:** {'ON (dry-run)' if explain_mode else 'OFF'}")
@@ -506,6 +515,10 @@ def main() -> None:
             st.write(f"**LangFuse:** ✅ enabled ({langfuse_host})")
         else:
             st.write("**LangFuse:** disabled (set `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`)")
+        if api_available:
+            st.write(f"**API server:** ✅ available (`uvicorn api.app:app --port {api_port}`)")
+        else:
+            st.write("**API server:** not installed (`pip install fastapi uvicorn`)")
         st.write(f"**DB path:** `{_db_path()}`")
 
     event = _render_sidebar()
