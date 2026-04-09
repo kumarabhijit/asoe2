@@ -49,7 +49,7 @@ In this model, non-deterministic Large Language Model (LLM) reasoning is tightly
 | **Terminal statuses** | `COMPLETE`, `COMPLETE_WITH_CHILDREN`, `FAIL_TO_HUMAN`, `MANUAL_REVIEW_REQUIRED`, `BLOCKED`, `REJECTED` |
 | **Pipeline** | 11-node LangGraph state machine |
 | **Lifecycle** | 11-state exception lifecycle (INGESTED through CLOSED, including ESCALATED) |
-| **Tests** | 584 passing (16 test files) |
+| **Tests** | Full suite must pass (`python -m pytest`) |
 | **RAG** | Deferred to V2 — all context is structured and resolved via typed gateways |
 | **Continual learning** | V2 design blueprint included; not a V1 deliverable |
 
@@ -1258,7 +1258,7 @@ graph TD
     L2 --> |"Proposed PRs"| PR["Code Review<br/>(human architect)"]
     L3 --> |"Staged overrides"| PO["policy_overrides table<br/>(human-reviewed)"]
 
-    INF --> |"Must pass"| GOLDEN["Golden Test Suite<br/>(584 tests)"]
+    INF --> |"Must pass"| GOLDEN["Golden Test Suite"]
     PR --> |"Must pass"| GOLDEN
 ```
 
@@ -1284,7 +1284,7 @@ graph TD
 - Proposes PRs to `skills/*.md` (new reasoning patterns), `contracts/policy.py` (threshold adjustments), or new `RecipeSpec` entries
 - This is analogous to OpenClaw's "dreaming" — offline batch analysis that updates the system's "soul"
 
-**Guardrail:** Proposed changes are pull requests, never auto-merged. The existing test suite (584 tests) gates all changes. A human architect reviews every PR.
+**Guardrail:** Proposed changes are pull requests, never auto-merged. The full test suite gates all changes. A human architect reviews every PR.
 
 ### Layer 3: Learning Context (Per-Tenant Memory)
 
@@ -1302,7 +1302,7 @@ graph TD
 
 ## 13. Execution Invariants (Non-Negotiable)
 
-The following 11 invariants are enforced by code, not configuration. Violating any requires modifying and re-reviewing source code. They are validated by 584 tests across 16 test files.
+The following 11 invariants are enforced by code, not configuration. Violating any requires modifying and re-reviewing source code. They are validated by the full test suite (run `python -m pytest` to verify).
 
 | # | Invariant | Enforced By | Tested By |
 |---|---|---|---|

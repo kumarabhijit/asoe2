@@ -1,6 +1,6 @@
 # Design Reference — CPG Agentic Pricing Exception System
 
-**Implements:** [architecture_v2.md](architecture_v2.md) (patterns, principles, technology choices)
+**Implements:** [architecture_v3.md](architecture_v3.md) (patterns, principles, technology choices)
 **Audience:** Active developers working in this codebase
 **Purpose:** Maps architectural patterns to concrete modules, classes, functions, and wiring
 
@@ -61,9 +61,56 @@ observability/
 
 tests/
   conftest.py        # Shared fixtures (StubGateway, sample events, backend setup)
-  test_*.py          # Unit and integration tests (16 files, 540 tests)
-  sandbox/           # Interactive exploration tools (see §10)
+  test_*.py          # Unit and integration tests (run `python -m pytest` to verify)
+  sandbox/           # Interactive exploration tools (see §16)
 ```
+
+### Key Schemas (`contracts/models.py`)
+
+**`GraphState`** (`extra="forbid"` — no untyped fields allowed):
+
+| Field | Type | Populated By |
+|---|---|---|
+| `event` | `OrderEvent` | Caller |
+| `discrepancy` | `Optional[PricingDiscrepancy]` | `classify` |
+| `rag_context` | `RagContext` | Reserved for V2 |
+| `skill` | `Optional[SkillDocument]` | `load_skill` |
+| `intent` | `Intent` | `classify` |
+| `confidence` | `float` | `classify` |
+| `shadow` | `Optional[ComplianceDecision]` | `shadow_audit` |
+| `selected_recipe` | `Optional[str]` | `select_recipe` |
+| `invocation` | `Optional[RecipeInvocation]` | `validate_types` |
+| `execution_log` | `Optional[ExecutionLog]` | `execute_recipe` |
+| `final_status` | `Optional[TerminalStatus]` | Any node (on halt/completion) |
+| `explanation` | `Optional[str]` | Auto-populated at terminal state |
+| `update_count` | `int` | `ingest` |
+| `batch_total_variance` | `float` | `ingest` |
+| `resolved_data` | `Dict[str, Any]` | `resolve_dependencies` |
+| `effect_results` | `List[GatewayResponse]` | `apply_effects` |
+
+See architecture_v3.md §5.2 for `OrderEvent` and `ExecutionLog` field-level schemas.
+
+### Recipe Specs (`recipes/registry.py`)
+
+Each recipe declares a `RecipeSpec` that the orchestration layer uses to validate params, resolve gateway dependencies, and apply effects.
+
+**PriceAdjustmentRecipe.py:**
+- Allowed intents: `CONTRACTUAL_CORRECTION`, `MASS_PRICING_ERROR`
+- Required params: `order_id`, `line_item`, `po_price`, `sap_base_price`, `max_discount_allowed`, `price_condition_type`
+- Dependencies: _(none in V1 — pricing data arrives in OrderEvent)_
+- Effects: _(none in V1 — SAP write-back stubbed)_
+
+**CreditHoldReleaseRecipe.py:**
+- Allowed intents: `CREDIT_BLOCK`
+- Required params: `order_id`, `requester_role`, `credit_limit`, `current_exposure`, `authorized_roles`, `exposure_tolerance`
+- Dependencies / Effects: _(none in V1)_
+
+**DuplicatePORecipe.py:**
+- Allowed intents: `DUPLICATE_PO`
+- Required params: `order_id`, `po_number`, `customer_id`, `signal_scores`, `threshold_auto_block`, `threshold_review_required`, `threshold_soft_flag`, `autonomy_levels`
+- Dependencies: `get_fulfillment_status` (OMS gateway), `get_matched_po_details` (OMS gateway)
+- Effects: `buyer_notification` (notification gateway)
+- Resolution actions: `BLOCK_AND_NOTIFY`, `MERGE`, `SUPERSEDE`, `ALLOW_BOTH`, `ESCALATE`, `REQUEST_BUYER_CONFIRMATION`
 
 ---
 
@@ -81,6 +128,13 @@ Each backend implements three methods:
 - `shadow_decision(proposal)` → `ShadowDecision`
 
 If `OutlinesConstrainedBackend` fails to initialise (missing `outlines` package), the router degrades to `DeterministicFallbackBackend` with a `logger.warning()`.
+
+**Fallback observability:** Every backend invocation records which tier actually served the request. Fallback activations are surfaced as:
+- A `backend_fallback` field in the `TraceRecord` (value: `"custom"`, `"outlines"`, or `"deterministic_fallback"`)
+- The `ExecutionLog.constrained_outputs` map includes the backend tier used (e.g., `"intent" → "IntentDecision:DeterministicFallbackBackend"`)
+- A `logger.warning()` on every degradation event, including the reason
+- A Prometheus counter `asoe_backend_fallback_total{tier="deterministic_fallback"}` for alerting on sustained degradation
+- TraceRecords where `backend_fallback == "deterministic_fallback"` are flagged with `is_fallback_generated: true` and **excluded from V2 fine-tuning datasets**
 
 **Constrained output types** (`constraints/specs.py`):
 
@@ -122,6 +176,19 @@ Same pipeline, but `execute_recipe` is replaced by `explain_only`:
 
 Node functions live in `orchestration/nodes.py`. Each reads current `GraphState` and returns a partial state update.
 
+### Autonomy-Level Routing in `execute_recipe`
+
+The `execute_recipe` node reads the `autonomy_level` from the recipe result and branches:
+
+| Autonomy Level | Routing |
+|---|---|
+| **L1** (Observe) | → `MANUAL_REVIEW_REQUIRED` — agent flags the exception, takes no action |
+| **L2** (Recommend) | → `MANUAL_REVIEW_REQUIRED` — agent recommends resolution, human must approve |
+| **L3** (Act & Inform) | → `COMPLETE` — agent auto-executes, notifies human post-action |
+| **L4** (Full Autonomy) | → `COMPLETE` — agent auto-executes silently, logs for audit |
+
+Default autonomy per resolution action is defined in `policy.DUPLICATE_PO_AUTONOMY_LEVELS`. See architecture_v3.md §5.8 for the full mapping.
+
 ---
 
 ## 4. Compliance Shadow Implementation
@@ -147,7 +214,7 @@ Enforcement log level: `INFO` for `GREEN`, `WARNING` for `YELLOW` / `RED`.
 
 ## 5. Gateway Layer (Hexagonal Architecture)
 
-Implements the Hexagonal Gateway pattern from architecture_v2.md §4G.
+Implements the Hexagonal Gateway pattern from architecture_v3.md §7G.
 
 | Component | File | Role |
 |---|---|---|
@@ -177,7 +244,7 @@ All gateway calls are logged to `asoe.gateways` with `trace_id` correlation.
 
 `workflows/runner.py` → `WorkflowRunner`
 
-Implements the Saga pattern from architecture_v2.md §3.
+Implements the Saga pattern from architecture_v3.md §6.
 
 **Typed contracts** (`contracts/models.py`):
 - `WorkflowDefinition`, `WorkflowStep`, `WorkflowStepResult`, `WorkflowResult`
@@ -228,7 +295,7 @@ No process restart required for either switch — checked at each `run_graph()` 
 | Constant | Value | Consumed by |
 |---|---|---|
 | `MAX_DISCOUNT_ALLOWED` | `0.15` (15%) | `orchestration/nodes.py` → injected into `PriceAdjustmentRecipe` via `erp_context` |
-| `PRICE_CONDITION_TYPE` | `"YK07"` | `orchestration/nodes.py` → injected into `PriceAdjustmentRecipe` via `erp_context` |
+| `PRICE_CONDITION_TYPE` | `"YK07"` (default; **per-tenant override required**) | `orchestration/nodes.py` → injected into `PriceAdjustmentRecipe` via `erp_context`. Condition types vary by SAP client configuration (e.g., `YK07`, `ZK07`, `PR00`). Must be overridable per tenant via the `policy_overrides` table. The `validate_types` node resolves the tenant-specific value before injection. |
 | `CREDIT_AUTHORIZED_ROLES` | `("ORDER_MANAGER", "FINANCE_DIRECTOR")` | `orchestration/nodes.py` → injected into `CreditHoldReleaseRecipe` as param |
 | `CREDIT_EXPOSURE_TOLERANCE` | `5_000.0` | `orchestration/nodes.py` → injected into `CreditHoldReleaseRecipe` as param |
 | `DUPLICATE_PO_THRESHOLD_AUTO_BLOCK` | `0.90` | `orchestration/nodes.py` → injected into `DuplicatePORecipe` as param |
@@ -242,7 +309,19 @@ No process restart required for either switch — checked at each `run_graph()` 
 
 **Design principle:** Recipes never import from `policy.py`. All thresholds are injected by the orchestration layer (`validate_types` node) so the same recipe logic can serve different customer / vendor threshold sets.
 
-Evolution path: module constants → env vars → K8s ConfigMap → per-customer policy service.
+Evolution path: module constants → env vars → K8s ConfigMap → per-customer policy service. The `policy_overrides` table (see architecture_v3.md §9.2) supports per-tenant overrides using dot-delimited hierarchical keys (e.g., `global.MAX_DISCOUNT_ALLOWED`, `tenant.acme.MAX_DISCOUNT_ALLOWED`). The `validate_types` node resolves from `policy_overrides` first, falling back to `contracts/policy.py` constants when no override exists.
+
+### Duplicate PO Similarity Algorithm
+
+The `signal_scores` composite score consumed by the `DUPLICATE_PO_THRESHOLD_*` thresholds is a weighted average of three deterministic signals:
+
+| Signal | Weight | Method | Description |
+|---|---|---|---|
+| `po_number_similarity` | 0.40 | Normalized Levenshtein distance | Character-level similarity between candidate and matched PO numbers |
+| `line_item_overlap` | 0.35 | Jaccard index on `(SKU, quantity)` tuples | Shared line items between the two POs |
+| `temporal_proximity` | 0.25 | Exponential decay over hours since `matched_po.created_at` | POs submitted within minutes of each other score higher |
+
+Composite score `= 0.40 × po_number_similarity + 0.35 × line_item_overlap + 0.25 × temporal_proximity`. All signals are computed deterministically by `DuplicatePORecipe` — no embedding or ML model. Weights are V1 constants; per-tenant overrides via `policy_overrides` are the evolution path.
 
 ---
 
@@ -264,7 +343,9 @@ Emitted via stdlib logging to the `asoe.observability` logger. Fields:
 | `rag_chunks` | Reserved for V2 RAG integration — always empty in V1.0 (forward-compatible field) |
 | `constrained_output_schemas` | Map of layer → schema name (e.g. `intent → IntentDecision`) |
 | `gateway_calls` | Gateway operations invoked (dependency resolutions + effect applications) |
-| `final_status` | `COMPLETE`, `FAIL_TO_HUMAN`, `BLOCKED`, `MANUAL_REVIEW_REQUIRED`, `REJECTED` |
+| `backend_fallback` | Which backend tier served this request: `"custom"`, `"outlines"`, or `"deterministic_fallback"` |
+| `is_fallback_generated` | `true` if `backend_fallback == "deterministic_fallback"` — excluded from V2 fine-tuning datasets (see architecture_v3.md §12) |
+| `final_status` | `COMPLETE`, `COMPLETE_WITH_CHILDREN`, `FAIL_TO_HUMAN`, `BLOCKED`, `MANUAL_REVIEW_REQUIRED`, `REJECTED` |
 | `explanation` | Human-readable reason for the terminal decision |
 
 JSON-serialisable. Field-compatible with LangFuse trace schema.
@@ -293,6 +374,7 @@ When `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are set and the `langfuse` 
 | `final_status` | Score `value` | Meaning |
 |---|---|---|
 | `COMPLETE` | **1.0** | Recipe executed successfully |
+| `COMPLETE_WITH_CHILDREN` | **1.0** | Recipe executed; child exceptions spawned for secondary intents |
 | `FAIL_TO_HUMAN` | 0.0 | Escalated to human (circuit breaker, missing params, gateway failure) |
 | `MANUAL_REVIEW_REQUIRED` | 0.0 | Shadow returned YELLOW — requires review |
 | `BLOCKED` | 0.0 | Shadow returned RED — halted by policy |
@@ -359,7 +441,39 @@ Production: Kubernetes manifests in `k8s/` (namespace, deployments, services, se
 
 ---
 
-## 14. Local Execution Sandbox
+## 14. Exception Lifecycle & HITL Protocol (Target State)
+
+The following are defined in architecture_v3.md and will be implemented as the FastAPI layer is built:
+
+- **11-state exception lifecycle** (INGESTED → CLOSED, including ESCALATED) — architecture_v3.md §9.1
+- **HITL pause/resume** via LangGraph `interrupt()` + `PostgresSaver` checkpoints — architecture_v3.md §5.9
+- **Two-tier timeout escalation** (48h default + 24h escalation window) — architecture_v3.md §5.9
+
+> **Current V1 behavior:** The graph terminates on YELLOW verdict (`final_status = MANUAL_REVIEW_REQUIRED`). The full interrupt/checkpoint/resume mechanism is a V1.1 target.
+
+---
+
+## 15. API, Database, and Security Design References
+
+These components are part of the `asoe2` codebase (FastAPI server + async worker import `asoe-core`) and are fully specified in architecture_v3.md:
+
+| Concern | Architecture Reference | Implementation Scope |
+|---|---|---|
+| REST endpoints (15+ routes) | architecture_v3.md §8 | `api/` module (FastAPI) |
+| WebSocket event publishing | architecture_v3.md §10 | `api/ws.py` + Redis pub/sub |
+| PostgreSQL schema (5 tables + RLS) | architecture_v3.md §9.2 | `migrations/` + `db/` module |
+| Redis key structures + write-through cache | architecture_v3.md §9.3 | `cache/` module |
+| Authentication (SSO + MFA) | architecture_v3.md §11.1 | `api/auth/` module |
+| RBAC (5 roles, `{resource}:{action}`) | architecture_v3.md §11.2 | FastAPI dependency injection |
+| Multi-tenancy (app layer + PostgreSQL RLS) | architecture_v3.md §11.3 | FastAPI deps + RLS policies |
+| Environment isolation | architecture_v3.md §11.6 | JWT `env` claim validation |
+| Deployment model rationale | [ADR-001](docs/adr/ADR-001-core-deployment-model.md) | — |
+
+These sections will be expanded with concrete module/class/function mappings as implementation proceeds.
+
+---
+
+## 16. Local Execution Sandbox
 
 | Component | File | Purpose |
 |---|---|---|
@@ -371,7 +485,7 @@ Production: Kubernetes manifests in `k8s/` (namespace, deployments, services, se
 
 ---
 
-## 15. Test Coverage
+## 17. Test Coverage
 
 | File | Coverage area |
 |---|---|
@@ -393,5 +507,5 @@ Production: Kubernetes manifests in `k8s/` (namespace, deployments, services, se
 | `test_workflows.py` | WorkflowRunner Saga execution and compensation |
 
 ```bash
-python -m pytest   # Expected: 584 passed
+python -m pytest   # All tests must pass
 ```
