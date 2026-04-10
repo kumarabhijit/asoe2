@@ -721,7 +721,7 @@ tests/              pytest test suite (764 tests)
 Dockerfile.core     Core orchestration container (LangGraph + recipes + shadow)
 Dockerfile.ui       Streamlit sandbox UI container (core + streamlit)
 Dockerfile.inference  Local LLM inference container (Outlines + torch + transformers)
-docker-compose.yml      Local dev stack — core + ui + optional inference profile (local build)
+docker-compose.yml      Local dev stack — core + ui + postgres + redis + optional inference profile (local build)
 docker-compose.hub.yml  Pull-and-run from Docker Hub (no local build required)
 .dockerignore           Excludes .git, __pycache__, sandbox.db, k8s/ from images
 .env.example            Documents all runtime env vars for Docker (incl. proxy)
@@ -753,6 +753,7 @@ k8s/                Kubernetes manifests for AKS production deployment
 | `prompts/phase_13_database_layer.md` | Database layer prompt — PostgreSQL schema, migrations, repository, RLS, SOX audit |
 | `prompts/phase_14_auth_security.md` | Auth & security hardening prompt — token expiry, env isolation, trace_id, partner scoping |
 | `prompts/phase_15_websocket_redis.md` | WebSocket/Redis prompt — event schemas, pub/sub, WebSocket hub, resolve wiring |
+| `prompts/phase_16_v1_guardrails.md` | V1 Foundation Guardrail tests — 6 CI-automated guardrails (AST inspection, metadata contracts, ERP-agnostic gateway, schema agnostic) |
 | `tests/sandbox/seed.py` | Sandbox seeder: customers, DCs, promotions, SAP pricing, retailer contracts, credit profiles, and 18 EDI events covering all four intents |
 | `tests/sandbox/cli.py` | Headless CLI runner — run sandbox events from the terminal without Streamlit |
 | `tests/sandbox/ui/app.py` | Streamlit execution-trace visualiser — select event, run pipeline, inspect trace |
@@ -1126,12 +1127,12 @@ the state machine.  Every new field must be explicitly declared.
 ## Adding a new recipe (checklist)
 
 1. Implement the recipe function in `recipes/` (pure function, deterministic, no side effects beyond SAP writes)
-2. Register it in `recipes/registry.py` — `REGISTRY` dict + required params
+2. Register it in `recipes/registry.py` — `REGISTRY` dict + required params + `expected_metadata_keys` (Guardrail #3)
 3. Add the new name to `AllowedRecipeName` Literal in `constraints/specs.py`
 4. Update `GuidanceRegexBackend.recipe_name_regex()` in `constraints/guidance_backend.py`
 5. Add intent → recipe mapping in `constraints/fallback_backend.py`
 6. Update `orchestration/nodes.py` `validate_types()` to build the `RecipeInvocation`
-7. Run `python -m pytest` — the vocabulary sync tests will catch any mismatch between `AllowedRecipeName`, `REGISTRY`, and the regex
+7. Run `python -m pytest` — the vocabulary sync tests and V1 Guardrail tests will catch any mismatch
 
 ---
 
