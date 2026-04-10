@@ -1,5 +1,18 @@
 """ASOE Sandbox — Streamlit execution trace visualiser.
 
+Supports two execution modes (matching sandbox CLI):
+  1. **Direct mode** (default): Calls ``run_graph()`` directly.
+  2. **API mode**: Authenticates via ``/api/auth/login`` multi-step flow,
+     then uses the 19 REST endpoints from architecture_v3.md Section 8.2.
+
+Additional panels (matching sandbox CLI test cases):
+  - Auth flow validation (multi-step login, SSO, token refresh)
+  - Compliance Shadow simulation (force BLOCKED / MANUAL_REVIEW_REQUIRED)
+  - DB persistence verification (exception + trace storage)
+  - WebSocket event monitor (pub/sub events after resolve)
+  - Dashboard stats (aggregate metrics from /api/v1/exceptions/stats)
+  - Lily personality toggle for conversational output
+
 Launch
 ------
     cd /path/to/asoe
@@ -8,9 +21,11 @@ Launch
 Optional env vars
 -----------------
     SANDBOX_DB_PATH           Path to sandbox.db (default: tests/sandbox/sandbox.db)
+    ASOE_API_BASE_URL         Base URL for API mode (default: TestClient in-process)
     LOCAL_LLM_BACKEND_CLASS   e.g. tests.sandbox.llm.local_backend.LocalHFBackend
     LOCAL_LLM_MODEL           HuggingFace model id (default: Qwen/Qwen2.5-0.5B-Instruct)
     ASOE_EXPLAIN_MODE         1 = dry-run mode (no recipe side effects)
+    ASOE_KILL_SWITCH          1 = kill switch active (halts all execution)
     LANGFUSE_PUBLIC_KEY       LangFuse public key (enables trace forwarding)
     LANGFUSE_SECRET_KEY       LangFuse secret key (required alongside public key)
     LANGFUSE_HOST             LangFuse host URL (omit for LangFuse Cloud)
@@ -21,8 +36,9 @@ import json
 import os
 import sqlite3
 import sys
+import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 # ------------------------------------------------------------------
 # Ensure repo root is on sys.path regardless of how streamlit is run.
@@ -46,6 +62,18 @@ from tests.sandbox.seed import (
     lookup_credit_profile,
     DB_DEFAULT,
 )
+
+# ---- API / Auth imports (for API mode) --------------------------------
+try:
+    from fastapi.testclient import TestClient
+    from api.app import create_app
+    from api.deps import create_test_token, create_refresh_token
+    from api.events import WSEvent
+    from api.pubsub import InMemoryPubSub, event_publisher
+    from api.store import exception_store
+    _API_AVAILABLE = True
+except ImportError:
+    _API_AVAILABLE = False
 
 
 def _register_sandbox_gateways() -> None:
@@ -84,6 +112,117 @@ def _register_sandbox_gateways() -> None:
     )
     register_gateway(oms_stub)
     register_gateway(notification_stub)
+
+# ------------------------------------------------------------------
+# API Client (architecture_v3.md Section 8.2 — same as sandbox CLI)
+# ------------------------------------------------------------------
+
+class SandboxAPIClient:
+    """HTTP client for REST endpoints. Uses TestClient in-process."""
+
+    def __init__(self) -> None:
+        self._token: Optional[str] = None
+        self._client: Any = None
+        self._auth_log: List[Dict[str, Any]] = []
+
+    def _get_client(self) -> Any:
+        if self._client is not None:
+            return self._client
+        base_url = os.getenv("ASOE_API_BASE_URL", "")
+        if base_url:
+            import httpx
+            self._client = httpx.Client(base_url=base_url, timeout=30)
+        elif _API_AVAILABLE:
+            self._client = TestClient(create_app(), raise_server_exceptions=False)
+        else:
+            raise RuntimeError("FastAPI not available. Install fastapi + uvicorn.")
+        return self._client
+
+    def _headers(self) -> Dict[str, str]:
+        if self._token:
+            return {"Authorization": f"Bearer {self._token}"}
+        return {}
+
+    @property
+    def auth_log(self) -> List[Dict[str, Any]]:
+        return self._auth_log
+
+    @property
+    def token(self) -> Optional[str]:
+        return self._token
+
+    def authenticate(self, email: str = "admin@asoe.test",
+                     password: str = "test-password") -> bool:
+        """Multi-step auth: login -> MFA -> access_token."""
+        self._auth_log = []
+        client = self._get_client()
+
+        # Step 1: Login
+        resp = client.post("/api/auth/login",
+                           json={"email": email, "password": password})
+        self._auth_log.append({
+            "step": "1. Login", "endpoint": "POST /api/auth/login",
+            "status": resp.status_code,
+            "mfa_required": resp.json().get("mfa_required", False),
+            "result": "MFA challenge" if resp.status_code == 200 else "FAILED",
+        })
+        if resp.status_code != 200:
+            return False
+        login_data = resp.json()
+        if not login_data.get("mfa_required"):
+            self._token = login_data.get("access_token")
+            return bool(self._token)
+
+        # Step 2: MFA
+        mfa_resp = client.post("/api/auth/mfa/verify",
+                               json={"mfa_token": login_data["mfa_token"],
+                                     "code": "123456"})
+        self._auth_log.append({
+            "step": "2. MFA Verify", "endpoint": "POST /api/auth/mfa/verify",
+            "status": mfa_resp.status_code,
+            "has_token": bool(mfa_resp.json().get("access_token")),
+            "result": "JWT issued" if mfa_resp.status_code == 200 else "FAILED",
+        })
+        if mfa_resp.status_code != 200:
+            return False
+        self._token = mfa_resp.json().get("access_token")
+        return bool(self._token)
+
+    def resolve(self, event_data: Dict[str, Any],
+                explain: bool = False) -> Dict[str, Any]:
+        endpoint = "/api/v1/exceptions/resolve"
+        if explain:
+            endpoint += "/explain"
+        resp = self._get_client().post(endpoint, json=event_data,
+                                       headers=self._headers())
+        if resp.status_code != 200:
+            raise RuntimeError(f"Resolve failed ({resp.status_code}): {resp.json()}")
+        return resp.json()
+
+    def get_exception(self, exception_id: str) -> Dict[str, Any]:
+        resp = self._get_client().get(f"/api/v1/exceptions/{exception_id}",
+                                      headers=self._headers())
+        return resp.json()
+
+    def get_trace(self, exception_id: str) -> Dict[str, Any]:
+        resp = self._get_client().get(f"/api/v1/exceptions/{exception_id}/trace",
+                                      headers=self._headers())
+        return resp.json()
+
+    def get_stats(self) -> Dict[str, Any]:
+        resp = self._get_client().get("/api/v1/exceptions/stats",
+                                      headers=self._headers())
+        return resp.json()
+
+    def list_exceptions(self, limit: int = 20) -> Dict[str, Any]:
+        resp = self._get_client().get(f"/api/v1/exceptions?limit={limit}",
+                                      headers=self._headers())
+        return resp.json()
+
+    def health(self) -> Dict[str, Any]:
+        resp = self._get_client().get("/api/v1/health")
+        return resp.json()
+
 
 # ------------------------------------------------------------------
 # Page config
@@ -182,8 +321,39 @@ def _intent_label(row: Dict[str, Any]) -> str:
 # ------------------------------------------------------------------
 
 def _render_sidebar() -> Optional[OrderEvent]:
-    st.sidebar.header("⚙️  ASOE Sandbox")
+    st.sidebar.header("ASOE Sandbox")
 
+    # ── Execution mode ──
+    exec_mode = st.sidebar.radio(
+        "Execution mode",
+        ["Direct (run_graph)", "API (REST endpoints)"],
+        index=0,
+        help="Direct calls run_graph() in-process. API authenticates via "
+             "/api/auth/login and uses the 19 REST endpoints.",
+    )
+    st.session_state["exec_mode"] = exec_mode
+
+    # ── Simulation controls ──
+    st.sidebar.subheader("Simulation controls")
+    force_blocked = st.sidebar.checkbox(
+        "Force BLOCKED (RED shadow)",
+        help="Override line_count to trigger RED Compliance Shadow verdict",
+    )
+    force_review = st.sidebar.checkbox(
+        "Force MANUAL_REVIEW (explain mode)",
+        help="Run in explain mode — full pipeline, no recipe execution",
+    )
+    lily_mode = st.sidebar.checkbox(
+        "Lily personality",
+        help="Conversational output from the Lily agentic persona",
+    )
+    st.session_state["force_blocked"] = force_blocked
+    st.session_state["force_review"] = force_review
+    st.session_state["lily_mode"] = lily_mode
+
+    st.sidebar.divider()
+
+    # ── Event source ──
     db = _db_path()
     use_db = db.exists()
 
@@ -475,6 +645,245 @@ def _render_data_browser(db: Path) -> None:
 
 
 # ------------------------------------------------------------------
+# Auth flow validation panel
+# ------------------------------------------------------------------
+
+def _render_auth_panel(api: SandboxAPIClient) -> None:
+    """Show multi-step auth flow results (matching test_auth_flow.py)."""
+    with st.expander("Auth flow validation", expanded=False):
+        st.markdown("**Multi-step login flow** (architecture_v3.md Section 11.1)")
+
+        if api.auth_log:
+            for entry in api.auth_log:
+                icon = "PASS" if entry["status"] == 200 else "FAIL"
+                st.markdown(
+                    f"- **{entry['step']}** — `{entry['endpoint']}` "
+                    f"-> {entry['status']} ({entry['result']}) {icon}"
+                )
+            if api.token:
+                st.success("JWT acquired. Bearer token is active.")
+            else:
+                st.error("Authentication failed.")
+        else:
+            st.info("Run an event in API mode to see the auth flow.")
+
+        # SSO stub check
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Test SSO init"):
+                try:
+                    client = api._get_client()
+                    resp = client.post("/api/auth/sso/init")
+                    data = resp.json()
+                    if resp.status_code == 200 and "redirect_url" in data:
+                        st.success(f"SSO redirect URL: `{data['redirect_url']}`")
+                    else:
+                        st.error(f"SSO init failed: {data}")
+                except Exception as exc:
+                    st.error(f"SSO init error: {exc}")
+
+        with col2:
+            if st.button("Test token refresh"):
+                if not _API_AVAILABLE:
+                    st.error("FastAPI not available.")
+                    return
+                try:
+                    refresh = create_refresh_token(
+                        sub="test-user", email="test@asoe.test",
+                        name="Test", roles=["analyst"], org="sandbox-tenant",
+                    )
+                    client = api._get_client()
+                    resp = client.post("/api/auth/refresh",
+                                       json={"refresh_token": refresh})
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        st.success(
+                            f"Refresh OK. New access token: "
+                            f"`{data['access_token'][:40]}...`"
+                        )
+                    else:
+                        st.error(f"Refresh failed: {resp.json()}")
+                except Exception as exc:
+                    st.error(f"Refresh error: {exc}")
+
+
+# ------------------------------------------------------------------
+# DB persistence panel
+# ------------------------------------------------------------------
+
+def _render_db_panel(api: SandboxAPIClient, exception_id: Optional[str]) -> None:
+    """Verify exception + trace persisted after resolve (matching test_db_persistence.py)."""
+    with st.expander("DB persistence verification", expanded=False):
+        st.markdown("**Verify state committed to repository layer** (architecture_v3.md Section 9)")
+
+        if not exception_id:
+            st.info("Run an event in API mode to verify persistence.")
+            return
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("**Exception record**")
+            try:
+                detail = api.get_exception(exception_id)
+                if "id" in detail:
+                    st.json(detail)
+                    st.success(f"Exception `{exception_id}` persisted.")
+                else:
+                    st.error(f"Exception not found: {detail}")
+            except Exception as exc:
+                st.error(f"Fetch failed: {exc}")
+
+        with col2:
+            st.markdown("**Trace record**")
+            try:
+                trace = api.get_trace(exception_id)
+                if "trace_id" in trace:
+                    st.json(trace)
+                    st.success("Trace record persisted.")
+                else:
+                    st.warning(f"Trace not found: {trace}")
+            except Exception as exc:
+                st.error(f"Trace fetch failed: {exc}")
+
+
+# ------------------------------------------------------------------
+# WebSocket / pub/sub event panel
+# ------------------------------------------------------------------
+
+def _render_ws_panel() -> None:
+    """Show pub/sub events published during resolve (matching test_websocket_events.py)."""
+    with st.expander("WebSocket / pub/sub events", expanded=False):
+        st.markdown(
+            "**Real-time events** published to Redis pub/sub "
+            "(architecture_v3.md Section 10)"
+        )
+
+        if not _API_AVAILABLE:
+            st.warning("API not available. Cannot inspect events.")
+            return
+
+        tenant = "sandbox-tenant"
+        if hasattr(event_publisher, "get_recent"):
+            recent = event_publisher.get_recent(tenant, limit=20)
+            if recent:
+                st.write(f"**{len(recent)} event(s)** in tenant `{tenant}` buffer:")
+                for i, event_json in enumerate(recent):
+                    parsed = json.loads(event_json)
+                    event_type = parsed.get("type", "?")
+                    status = parsed.get("payload", {}).get("final_status", "")
+                    ts = parsed.get("timestamp", "")[:19]
+                    with st.container():
+                        st.markdown(
+                            f"**{i+1}.** `{event_type}` — status: `{status}` — {ts}"
+                        )
+                        st.json(parsed)
+            else:
+                st.info("No events in buffer. Run an event in API mode to generate.")
+        else:
+            st.info("In-memory pub/sub not active.")
+
+
+# ------------------------------------------------------------------
+# Dashboard stats panel
+# ------------------------------------------------------------------
+
+def _render_stats_panel(api: SandboxAPIClient) -> None:
+    """Dashboard metrics from GET /api/v1/exceptions/stats."""
+    with st.expander("Dashboard stats", expanded=False):
+        st.markdown("**Aggregate metrics** (`GET /api/v1/exceptions/stats`)")
+        try:
+            stats = api.get_stats()
+            c1, c2, c3, c4, c5, c6 = st.columns(6)
+            c1.metric("Total", stats.get("total", 0))
+            c2.metric("Open", stats.get("open", 0))
+            c3.metric("Auto-resolved", stats.get("auto_resolved", 0))
+            c4.metric("Manual review", stats.get("manual_review", 0))
+            c5.metric("Blocked", stats.get("blocked", 0))
+            c6.metric("Failed", stats.get("failed", 0))
+        except Exception as exc:
+            st.error(f"Stats fetch failed: {exc}")
+
+
+# ------------------------------------------------------------------
+# Exception list panel
+# ------------------------------------------------------------------
+
+def _render_exception_list_panel(api: SandboxAPIClient) -> None:
+    """Paginated exception queue from GET /api/v1/exceptions."""
+    with st.expander("Exception queue (inbox)", expanded=False):
+        st.markdown("**Paginated exception list** (`GET /api/v1/exceptions`)")
+        try:
+            data = api.list_exceptions(limit=20)
+            items = data.get("data", [])
+            if items:
+                import pandas as _pd
+                df = _pd.DataFrame(items)
+                display_cols = [c for c in [
+                    "id", "order_id", "intent", "lifecycle_state",
+                    "shadow_verdict", "final_status", "created_at",
+                ] if c in df.columns]
+                st.dataframe(df[display_cols], use_container_width=True)
+                st.caption(
+                    f"{len(items)} shown. has_more={data.get('has_more', False)}"
+                )
+            else:
+                st.info("No exceptions in the queue.")
+        except Exception as exc:
+            st.error(f"List fetch failed: {exc}")
+
+
+# ------------------------------------------------------------------
+# API-mode trace rendering (Lily personality support)
+# ------------------------------------------------------------------
+
+def _render_api_trace(resp: Dict[str, Any], lily: bool = False) -> None:
+    """Render a resolve response from the API (matching CLI _print_api_trace)."""
+    intent_val = resp.get("intent", "UNKNOWN")
+    shadow_val = resp.get("shadow_verdict", "N/A")
+    status_val = resp.get("final_status", "N/A")
+    recipe_name = resp.get("selected_recipe") or "---"
+
+    shadow_icon = _VERDICT_COLOUR.get(shadow_val, "")
+    status_icon = _STATUS_COLOUR.get(status_val, "")
+
+    if lily:
+        st.markdown("---")
+        st.markdown(f"**Lily:** I've analyzed this exception.")
+        st.markdown(f"The intent is **{intent_val}**.")
+        st.markdown(f"Compliance Shadow says: {shadow_icon} **{shadow_val}**.")
+        if recipe_name and recipe_name != "---":
+            st.markdown(f"I'm recommending **{recipe_name}**.")
+        st.markdown(f"Final status: {status_icon} **{status_val}**.")
+        if resp.get("explanation"):
+            st.info(f"**Lily's explanation:** {resp['explanation']}")
+    else:
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Intent", intent_val)
+        col2.metric("Shadow Verdict", f"{shadow_icon} {shadow_val}")
+        col3.metric("Recipe", recipe_name)
+        col4.metric("Final Status", f"{status_icon} {status_val}")
+
+        if resp.get("explanation"):
+            st.subheader("Explanation")
+            st.info(resp["explanation"])
+
+    # Execution log
+    if resp.get("execution_log"):
+        with st.expander("Execution log"):
+            st.json(resp["execution_log"])
+
+    # Effect results
+    if resp.get("effect_results"):
+        with st.expander("Effect results"):
+            st.json(resp["effect_results"])
+
+    # Full response
+    with st.expander("Full API response"):
+        st.json(resp)
+
+
+# ------------------------------------------------------------------
 # Main
 # ------------------------------------------------------------------
 
@@ -482,10 +891,11 @@ def main() -> None:
     # Register stub gateways for DuplicatePO dependencies
     _register_sandbox_gateways()
 
-    st.title("⚙️  ASOE Execution Sandbox")
+    st.title("ASOE Execution Sandbox")
     st.caption(
         "Select a seeded EDI event (or enter a custom one) and run it "
-        "through the full Skill–Shadow–Recipe pipeline."
+        "through the full Skill-Shadow-Recipe pipeline. "
+        "Supports Direct and API execution modes."
     )
 
     # Environment info banner
@@ -497,31 +907,39 @@ def main() -> None:
         os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY")
     )
 
-    # API server availability
-    api_available = False
-    try:
-        from api.app import app as _api_app  # noqa: F401
-        api_available = True
-    except ImportError:
-        pass
     api_port = os.getenv("ASOE_API_PORT", "8000")
 
-    with st.expander("ℹ️  Environment"):
-        st.write(f"**LLM backend:** `{backend_cls}`")
-        st.write(f"**Explain mode:** {'ON (dry-run)' if explain_mode else 'OFF'}")
-        st.write(f"**Kill switch:**  {'🔴 ACTIVE' if kill_switch else '✅ inactive'}")
-        langfuse_host = os.getenv("LANGFUSE_HOST", "cloud")
-        if langfuse_configured:
-            st.write(f"**LangFuse:** ✅ enabled ({langfuse_host})")
-        else:
-            st.write("**LangFuse:** disabled (set `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`)")
-        if api_available:
-            st.write(f"**API server:** ✅ available (`uvicorn api.app:app --port {api_port}`)")
-        else:
-            st.write("**API server:** not installed (`pip install fastapi uvicorn`)")
-        st.write(f"**DB path:** `{_db_path()}`")
+    with st.expander("Environment"):
+        ecol1, ecol2 = st.columns(2)
+        with ecol1:
+            st.write(f"**LLM backend:** `{backend_cls}`")
+            st.write(f"**Explain mode:** {'ON (dry-run)' if explain_mode else 'OFF'}")
+            st.write(f"**Kill switch:**  {'ACTIVE' if kill_switch else 'inactive'}")
+        with ecol2:
+            langfuse_host = os.getenv("LANGFUSE_HOST", "cloud")
+            if langfuse_configured:
+                st.write(f"**LangFuse:** enabled ({langfuse_host})")
+            else:
+                st.write("**LangFuse:** disabled")
+            if _API_AVAILABLE:
+                st.write(f"**API server:** available (`uvicorn api.app:app --port {api_port}`)")
+            else:
+                st.write("**API server:** not installed")
+            st.write(f"**DB path:** `{_db_path()}`")
 
     event = _render_sidebar()
+
+    # Retrieve simulation flags
+    exec_mode = st.session_state.get("exec_mode", "Direct (run_graph)")
+    force_blocked = st.session_state.get("force_blocked", False)
+    force_review = st.session_state.get("force_review", False)
+    lily_mode = st.session_state.get("lily_mode", False)
+    use_api = exec_mode == "API (REST endpoints)"
+
+    # Initialize API client (persistent across reruns)
+    if "api_client" not in st.session_state:
+        st.session_state["api_client"] = SandboxAPIClient() if _API_AVAILABLE else None
+    api_client: Optional[SandboxAPIClient] = st.session_state["api_client"]
 
     # Data browser (always visible)
     db = _db_path()
@@ -529,20 +947,103 @@ def main() -> None:
         _render_data_browser(db)
 
     if event is None:
-        st.info("Select an event in the sidebar and click **▶ Run event** to begin.")
+        st.info("Select an event in the sidebar and click **Run event** to begin.")
+
+        # Show API panels even without a run (for auth testing)
+        if use_api and api_client and _API_AVAILABLE:
+            _render_auth_panel(api_client)
+            _render_stats_panel(api_client)
+            _render_exception_list_panel(api_client)
+            _render_ws_panel()
         return
 
-    initial_state = GraphState(event=event)
+    # ── Apply simulation flags ──
+    if force_blocked:
+        event = OrderEvent(**{**event.model_dump(), "line_count": 50})
+    if force_review:
+        os.environ["ASOE_EXPLAIN_MODE"] = "1"
 
-    with st.spinner("Running pipeline…"):
-        try:
-            final_state = run_graph(initial_state)
-        except Exception as exc:
-            st.error(f"Pipeline error: {exc}")
-            st.exception(exc)
-            return
+    exception_id: Optional[str] = None
 
-    _render_trace(final_state)
+    if use_api and api_client:
+        # ── API mode ──
+        with st.spinner("Authenticating and running via REST API..."):
+            try:
+                if not api_client.token:
+                    api_client.authenticate()
+
+                event_payload = {
+                    "order_id": event.order_id,
+                    "event_type": event.event_type,
+                    "sku": event.sku,
+                    "po_price": event.po_price,
+                    "sap_base_price": event.sap_base_price,
+                    "retailer_id": event.retailer_id,
+                    "requester_role": event.requester_role,
+                    "credit_limit": event.credit_limit,
+                    "current_exposure": event.current_exposure,
+                    "line_count": event.line_count,
+                    "metadata": event.metadata or {},
+                }
+                resp_data = api_client.resolve(event_payload,
+                                                explain=force_review)
+                exception_id = resp_data.get("exception_id")
+
+            except Exception as exc:
+                st.error(f"API execution error: {exc}")
+                if force_review:
+                    os.environ.pop("ASOE_EXPLAIN_MODE", None)
+                return
+
+        if force_review:
+            os.environ.pop("ASOE_EXPLAIN_MODE", None)
+
+        _render_api_trace(resp_data, lily=lily_mode)
+
+        # Show API-specific panels
+        st.divider()
+        _render_auth_panel(api_client)
+        _render_db_panel(api_client, exception_id)
+        _render_stats_panel(api_client)
+        _render_exception_list_panel(api_client)
+        _render_ws_panel()
+
+    else:
+        # ── Direct mode ──
+        initial_state = GraphState(event=event)
+
+        with st.spinner("Running pipeline..."):
+            try:
+                final_state = run_graph(initial_state)
+            except Exception as exc:
+                st.error(f"Pipeline error: {exc}")
+                st.exception(exc)
+                if force_review:
+                    os.environ.pop("ASOE_EXPLAIN_MODE", None)
+                return
+
+        if force_review:
+            os.environ.pop("ASOE_EXPLAIN_MODE", None)
+
+        if lily_mode:
+            intent_val = final_state.intent.value if final_state.intent else "UNKNOWN"
+            shadow_val = final_state.shadow.status.value if final_state.shadow else "N/A"
+            status_val = final_state.final_status.value if final_state.final_status else "N/A"
+            recipe_name = final_state.selected_recipe or "---"
+            shadow_icon = _VERDICT_COLOUR.get(shadow_val, "")
+            status_icon = _STATUS_COLOUR.get(status_val, "")
+
+            st.markdown("---")
+            st.markdown(f"**Lily:** I've analyzed this exception.")
+            st.markdown(f"The intent is **{intent_val}**.")
+            st.markdown(f"Compliance Shadow says: {shadow_icon} **{shadow_val}**.")
+            if recipe_name and recipe_name != "---":
+                st.markdown(f"I'm recommending **{recipe_name}**.")
+            st.markdown(f"Final status: {status_icon} **{status_val}**.")
+            if final_state.explanation:
+                st.info(f"**Lily's explanation:** {final_state.explanation}")
+        else:
+            _render_trace(final_state)
 
 
 if __name__ == "__main__":
