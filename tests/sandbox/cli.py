@@ -3,16 +3,30 @@
 Runs sandbox scenarios through the full Skill-Shadow-Recipe pipeline and
 prints results and detailed execution traces to the terminal.
 
+Supports two execution modes:
+  1. **Direct mode** (default): Calls ``run_graph()`` directly via Python imports.
+  2. **API mode** (``--api``): Authenticates via ``/api/auth/login``, then uses
+     the 19 REST endpoints defined in architecture_v3.md Section 8.2.
+
 Usage
 -----
-    # Run all seeded events
+    # Run all seeded events (direct mode)
     PYTHONPATH=. python tests/sandbox/cli.py
+
+    # Run via REST API endpoints (api mode)
+    PYTHONPATH=. python tests/sandbox/cli.py --api
 
     # Run a single event by event_id
     PYTHONPATH=. python tests/sandbox/cli.py --event EVT-CC-001
 
     # Run events matching an intent prefix
     PYTHONPATH=. python tests/sandbox/cli.py --intent CONTRACTUAL_CORRECTION
+
+    # Force BLOCKED shadow verdict (deterministic simulation)
+    PYTHONPATH=. python tests/sandbox/cli.py --force-blocked
+
+    # Force MANUAL_REVIEW_REQUIRED state
+    PYTHONPATH=. python tests/sandbox/cli.py --force-manual-review
 
     # Show full JSON trace for each event
     PYTHONPATH=. python tests/sandbox/cli.py --json
@@ -24,11 +38,14 @@ Usage
     PYTHONPATH=. python tests/sandbox/cli.py --db /tmp/test.db
 
     # Combine flags
-    PYTHONPATH=. python tests/sandbox/cli.py --event EVT-CC-001 --json --prompts
+    PYTHONPATH=. python tests/sandbox/cli.py --event EVT-CC-001 --json --prompts --api
 
 Optional env vars
 -----------------
     SANDBOX_DB_PATH           Path to sandbox.db (default: tests/sandbox/sandbox.db)
+    ASOE_API_BASE_URL         Base URL for API mode (default: TestClient in-process)
+    ASOE_API_EMAIL             Login email for API mode (default: admin@asoe.test)
+    ASOE_API_PASSWORD          Login password for API mode (default: test-password)
     LOCAL_LLM_BACKEND_CLASS   e.g. tests.sandbox.llm.local_backend.LocalHFBackend
     ASOE_EXPLAIN_MODE         1 = dry-run mode (no recipe side effects)
     ASOE_KILL_SWITCH          1 = kill switch active
@@ -58,6 +75,115 @@ from gateways.stub import StubGateway
 from orchestration.graph import run_graph
 from tests.sandbox.seed import load_events, DB_DEFAULT
 from tests.sandbox.llm.prompts import intent_prompt, recipe_prompt, shadow_prompt
+
+
+# ── API Client (architecture_v3.md §8.2 REST endpoints) ──────────────────
+
+class SandboxAPIClient:
+    """HTTP client for the 19 REST endpoints defined in architecture_v3.md.
+
+    Uses FastAPI TestClient (in-process) by default. When ASOE_API_BASE_URL
+    is set, uses httpx to hit an external server.
+    """
+
+    def __init__(self) -> None:
+        self._base_url = os.getenv("ASOE_API_BASE_URL", "")
+        self._token: Optional[str] = None
+        self._client: Any = None
+
+    def _get_client(self) -> Any:
+        if self._client is not None:
+            return self._client
+        if self._base_url:
+            import httpx
+            self._client = httpx.Client(base_url=self._base_url, timeout=30)
+        else:
+            from fastapi.testclient import TestClient
+            from api.app import create_app
+            self._client = TestClient(create_app(), raise_server_exceptions=False)
+        return self._client
+
+    def _headers(self) -> Dict[str, str]:
+        if self._token:
+            return {"Authorization": f"Bearer {self._token}"}
+        return {}
+
+    def authenticate(self) -> bool:
+        """Multi-step auth: login → MFA → access_token."""
+        client = self._get_client()
+        email = os.getenv("ASOE_API_EMAIL", "admin@asoe.test")
+        password = os.getenv("ASOE_API_PASSWORD", "test-password")
+
+        # Step 1: Login → MFA challenge
+        resp = client.post(
+            "/api/auth/login",
+            json={"email": email, "password": password},
+        )
+        if resp.status_code != 200:
+            return False
+        login_data = resp.json()
+        if not login_data.get("mfa_required"):
+            self._token = login_data.get("access_token")
+            return bool(self._token)
+
+        # Step 2: MFA verification
+        mfa_resp = client.post(
+            "/api/auth/mfa/verify",
+            json={"mfa_token": login_data["mfa_token"], "code": "123456"},
+        )
+        if mfa_resp.status_code != 200:
+            return False
+        self._token = mfa_resp.json().get("access_token")
+        return bool(self._token)
+
+    def resolve(self, event_data: Dict[str, Any],
+                explain: bool = False) -> Dict[str, Any]:
+        """POST /api/v1/exceptions/resolve[/explain]."""
+        client = self._get_client()
+        endpoint = "/api/v1/exceptions/resolve"
+        if explain:
+            endpoint += "/explain"
+        resp = client.post(endpoint, json=event_data, headers=self._headers())
+        resp_data = resp.json()
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"API resolve failed ({resp.status_code}): "
+                f"{resp_data.get('message', resp_data)}"
+            )
+        return resp_data
+
+    def get_exception(self, exception_id: str) -> Dict[str, Any]:
+        """GET /api/v1/exceptions/{id}."""
+        client = self._get_client()
+        resp = client.get(
+            f"/api/v1/exceptions/{exception_id}",
+            headers=self._headers(),
+        )
+        return resp.json()
+
+    def get_trace(self, exception_id: str) -> Dict[str, Any]:
+        """GET /api/v1/exceptions/{id}/trace."""
+        client = self._get_client()
+        resp = client.get(
+            f"/api/v1/exceptions/{exception_id}/trace",
+            headers=self._headers(),
+        )
+        return resp.json()
+
+    def get_stats(self) -> Dict[str, Any]:
+        """GET /api/v1/exceptions/stats."""
+        client = self._get_client()
+        resp = client.get(
+            "/api/v1/exceptions/stats",
+            headers=self._headers(),
+        )
+        return resp.json()
+
+    def health(self) -> Dict[str, Any]:
+        """GET /api/v1/health."""
+        client = self._get_client()
+        resp = client.get("/api/v1/health")
+        return resp.json()
 
 
 def _register_sandbox_gateways() -> None:
@@ -174,6 +300,70 @@ def _edi_row_to_order_event(row: Dict[str, Any]) -> OrderEvent:
         current_exposure=metadata.get("current_exposure"),
         metadata=metadata,
     )
+
+
+def _edi_row_to_api_payload(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert an EDI event row to a REST API resolve request payload."""
+    metadata: Dict[str, Any] = {}
+    raw_meta = row.get("metadata", "{}")
+    if isinstance(raw_meta, str):
+        try:
+            metadata = json.loads(raw_meta)
+        except Exception:
+            pass
+    else:
+        metadata = raw_meta
+
+    return {
+        "order_id": row["order_id"],
+        "event_type": row["event_type"],
+        "sku": row.get("sku"),
+        "po_price": float(row.get("po_price") or 0.0),
+        "sap_base_price": float(row.get("sap_price") or 0.0),
+        "retailer_id": row.get("retailer_id"),
+        "requester_role": metadata.get("requester_role"),
+        "credit_limit": metadata.get("credit_limit"),
+        "current_exposure": metadata.get("current_exposure"),
+        "line_count": int(row.get("line_count") or 1),
+        "metadata": metadata,
+    }
+
+
+def _print_api_trace(resp: Dict[str, Any], *, show_json: bool = False,
+                     lily: bool = False) -> None:
+    """Print trace output from an API resolve response."""
+    intent_val = resp.get("intent", "UNKNOWN")
+    shadow_val = resp.get("shadow_verdict", "N/A")
+    status_val = resp.get("final_status", "N/A")
+    recipe_name = resp.get("selected_recipe", "—")
+
+    shadow_styled = _VERDICT_STYLE.get(shadow_val, shadow_val)
+    status_styled = _STATUS_STYLE.get(status_val, status_val)
+
+    if lily:
+        # Lily personality: conversational output
+        print(f"\n  {_CYAN}Lily:{_RESET} I've analyzed this exception.")
+        print(f"  The intent is {_BOLD}{intent_val}{_RESET}.")
+        print(f"  Compliance Shadow says: {shadow_styled}.")
+        if recipe_name and recipe_name != "—":
+            print(f"  I'm recommending {_BOLD}{recipe_name}{_RESET}.")
+        print(f"  Final status: {status_styled}.")
+        if resp.get("explanation"):
+            print(f"\n  {_CYAN}Lily's explanation:{_RESET}")
+            print(f"  {resp['explanation']}")
+    else:
+        print(f"\n  {_BOLD}Intent:{_RESET}          {intent_val}")
+        print(f"  {_BOLD}Shadow Verdict:{_RESET}  {shadow_styled}")
+        print(f"  {_BOLD}Recipe:{_RESET}          {recipe_name}")
+        print(f"  {_BOLD}Final Status:{_RESET}    {status_styled}")
+
+        if resp.get("explanation"):
+            print(f"\n  {_BOLD}Explanation{_RESET}")
+            print(f"  {resp['explanation']}")
+
+    if show_json:
+        print(f"\n  {_BOLD}Full API Response{_RESET}")
+        print(json.dumps(resp, indent=2, default=str))
 
 
 def _hr(char: str = "─", width: int = 72) -> str:
@@ -397,6 +587,20 @@ def main() -> int:
                         dest="langfuse_flush",
                         help="Flush LangFuse traces before exit (requires "
                              "LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY)")
+    # ── Architecture V3 additions ──
+    parser.add_argument("--api", action="store_true",
+                        help="Use REST API endpoints instead of direct "
+                             "Python imports (architecture_v3.md §8.2)")
+    parser.add_argument("--force-blocked", action="store_true",
+                        dest="force_blocked",
+                        help="Force BLOCKED state (RED shadow) for all events "
+                             "(deterministic simulation)")
+    parser.add_argument("--force-manual-review", action="store_true",
+                        dest="force_manual_review",
+                        help="Force MANUAL_REVIEW_REQUIRED state (explain mode) "
+                             "for all events")
+    parser.add_argument("--lily", action="store_true",
+                        help="Enable Lily personality for conversational output")
 
     args = parser.parse_args()
 
@@ -440,6 +644,13 @@ def main() -> int:
             print(f"{_YELLOW}WARN:{_RESET} No events match intent {args.intent}")
             return 1
 
+    # Apply force flags via environment variables
+    if args.force_manual_review:
+        os.environ["ASOE_EXPLAIN_MODE"] = "1"
+    if args.force_blocked:
+        # Force-blocked is simulated by overriding line_count to trigger RED shadow
+        pass  # Applied per-event below
+
     # Environment banner
     backend_cls = os.getenv("LOCAL_LLM_BACKEND_CLASS",
                             "DeterministicFallbackBackend (default)")
@@ -448,6 +659,14 @@ def main() -> int:
     langfuse_configured = bool(
         os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY")
     )
+
+    # API client initialization
+    api_client: Optional[SandboxAPIClient] = None
+    if args.api:
+        api_client = SandboxAPIClient()
+        if not api_client.authenticate():
+            print(f"{_RED}ERROR:{_RESET} API authentication failed.")
+            return 1
 
     # API server availability
     api_available = False
@@ -458,12 +677,21 @@ def main() -> int:
         pass
     api_port = os.getenv("ASOE_API_PORT", "8000")
 
+    execution_mode = "API (REST endpoints)" if args.api else "Direct (run_graph)"
+    lily_mode = "ON" if args.lily else "OFF"
+
     print(f"\n{'=' * 80}")
     print(f"  {_BOLD}ASOE Sandbox — CLI Runner{_RESET}")
     print(f"{'=' * 80}")
+    print(f"  Exec mode:     {execution_mode}")
     print(f"  LLM backend:   {backend_cls}")
     print(f"  Explain mode:  {'ON (dry-run)' if explain_mode else 'OFF'}")
     print(f"  Kill switch:   {f'{_RED}ACTIVE{_RESET}' if kill_switch else 'inactive'}")
+    if args.force_blocked:
+        print(f"  Force BLOCKED: {_RED}ACTIVE{_RESET}")
+    if args.force_manual_review:
+        print(f"  Force Review:  {_YELLOW}ACTIVE{_RESET}")
+    print(f"  Lily:          {lily_mode}")
     langfuse_host = os.getenv("LANGFUSE_HOST", "cloud")
     if langfuse_configured:
         print(f"  LangFuse:      {_GREEN}enabled{_RESET} ({langfuse_host})")
@@ -491,27 +719,61 @@ def main() -> int:
             print(f"{'─' * 80}")
 
         try:
-            event = _edi_row_to_order_event(row)
-            initial_state = GraphState(event=event)
-            final_state = run_graph(initial_state)
+            if api_client is not None:
+                # ── API mode: use REST endpoints ──
+                event_data = _edi_row_to_api_payload(row)
+                # Force BLOCKED: override line_count to trigger RED shadow
+                if args.force_blocked:
+                    event_data["line_count"] = 50
 
-            intent_val = final_state.intent.value if final_state.intent else "UNKNOWN"
-            shadow_val = (final_state.shadow.status.value
-                          if final_state.shadow else "N/A")
-            status_val = (final_state.final_status.value
-                          if final_state.final_status else "N/A")
+                use_explain = args.force_manual_review
+                resp_data = api_client.resolve(event_data, explain=use_explain)
 
-            results.append({
-                "event_id": event_id,
-                "intent": intent_val,
-                "shadow": shadow_val,
-                "status": status_val,
-            })
+                intent_val = resp_data.get("intent", "UNKNOWN")
+                shadow_val = resp_data.get("shadow_verdict", "N/A")
+                status_val = resp_data.get("final_status", "N/A")
 
-            if not args.quiet:
-                _print_trace(final_state,
-                             show_json=args.show_json,
-                             show_prompts=args.prompts)
+                results.append({
+                    "event_id": event_id,
+                    "intent": intent_val,
+                    "shadow": shadow_val,
+                    "status": status_val,
+                })
+
+                if not args.quiet:
+                    _print_api_trace(resp_data, show_json=args.show_json,
+                                     lily=args.lily)
+
+            else:
+                # ── Direct mode: call run_graph() ──
+                event = _edi_row_to_order_event(row)
+
+                # Force BLOCKED: override line_count to trigger RED shadow
+                if args.force_blocked:
+                    event = OrderEvent(
+                        **{**event.model_dump(), "line_count": 50}
+                    )
+
+                initial_state = GraphState(event=event)
+                final_state = run_graph(initial_state)
+
+                intent_val = final_state.intent.value if final_state.intent else "UNKNOWN"
+                shadow_val = (final_state.shadow.status.value
+                              if final_state.shadow else "N/A")
+                status_val = (final_state.final_status.value
+                              if final_state.final_status else "N/A")
+
+                results.append({
+                    "event_id": event_id,
+                    "intent": intent_val,
+                    "shadow": shadow_val,
+                    "status": status_val,
+                })
+
+                if not args.quiet:
+                    _print_trace(final_state,
+                                 show_json=args.show_json,
+                                 show_prompts=args.prompts)
 
         except Exception as exc:
             results.append({
