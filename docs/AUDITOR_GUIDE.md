@@ -391,6 +391,26 @@ block execution.  LangFuse keys are managed via Azure Key Vault CSI in productio
 Implementation: `observability/langfuse_sink.py`.
 Full integration specification: `prompts/phase_10_langfuse.md`.
 
+### Real-Time Event Publishing (WebSocket)
+
+In addition to the audit trail, every graph execution publishes a `task_complete`
+event to a per-tenant Redis Pub/Sub channel (`asoe:ws:{tenant_id}`). Authenticated
+WebSocket clients connected to `ws://host/api/v1/ws` receive these events in
+real time. Events include `trace_id`, `exception_id`, `final_status`, and
+`explanation` — enabling live dashboards and monitoring without polling.
+
+**Tenant isolation:** Each WebSocket client subscribes only to their tenant's
+channel. Authentication is via JWT (first message must be `{ "type": "auth",
+"token": "eyJ..." }`). A 60-second replay buffer allows reconnecting clients to
+catch up on missed events.
+
+**Failure isolation:** Redis publish failures are logged at WARNING and never
+block graph execution or API responses. Clients can poll
+`GET /api/v1/exceptions/{id}` as a fallback.
+
+Implementation: `api/events.py` (event schemas), `api/pubsub.py` (pub/sub manager),
+`api/routes/ws.py` (WebSocket hub).
+
 ---
 
 ## 11. Secret Management (Kubernetes)
@@ -485,7 +505,29 @@ Implementation: `db/migrations/V001__initial_schema.sql`.
 
 ---
 
-## 14. Environment Variable Reference
+## 14. V1 Foundation Guardrails (CI-Enforced)
+
+Six guardrails are enforced by automated tests in CI (architecture_v3.md §15).
+Violating any guardrail fails the build. These preserve the V2/V3 expansion
+path by preventing V1 code from accumulating technical debt.
+
+| # | Guardrail | Enforcement | Test File |
+|---|---|---|---|
+| 1 | **No intent-specific logic in pipeline nodes** | AST inspection of `orchestration/nodes.py` — no `if/elif` branches on intent string literals | `test_v1_guardrails.py` |
+| 2 | **Dynamic enum serving** | Health endpoint serves `allowed_intents` and `allowed_recipes` from schema, not hardcoded lists | `test_v1_guardrails.py` |
+| 3 | **Metadata keys documented per RecipeSpec** | Each recipe declares `expected_metadata_keys`; test fixtures include all declared keys | `test_v1_guardrails.py` |
+| 4 | **ERP-agnostic gateway protocol** | Code-only scan (docstrings excluded) for BAPI/RFC/SAP/Oracle/Dynamics terms in `gateways/` | `test_v1_guardrails.py` |
+| 5 | **Intent-agnostic exceptions table** | Column introspection: no similarity/damage/deduction columns; `resolution_data` is the only extensibility point | `test_v1_guardrails.py` |
+| 6 | **Hierarchical policy key format** | Regex validation: `global.*`, `tenant.{id}.*`, `retailer.{id}.*` — flat keys rejected | `test_v1_guardrails.py` |
+
+**Why this matters for auditors:** These guardrails ensure that adding a new
+intent (e.g., `SHORT_SHIP` in V1.5) requires zero changes to the pipeline,
+API, gateway protocol, or database schema. All intent-specific logic lives
+exclusively in recipes and skill documents.
+
+---
+
+## 15. Environment Variable Reference
 
 | Variable | Default | Description |
 |---|---|---|
@@ -498,7 +540,7 @@ Implementation: `db/migrations/V001__initial_schema.sql`.
 
 ---
 
-## 15. Test Coverage Reference
+## 16. Test Coverage Reference
 
 All hardening controls are covered by `tests/test_hardening.py`.
 Golden regression tests for the full pipeline live in `tests/test_golden.py`.
@@ -509,11 +551,11 @@ Run the full suite:
 python -m pytest
 ```
 
-Expected outcome: **718 passed, 0 failed, 0 skipped.**
+Expected outcome: **764 passed, 0 failed, 0 skipped.**
 
 ---
 
-## 16. Local Execution Sandbox
+## 17. Local Execution Sandbox
 
 The sandbox (`tests/sandbox/`) is an interactive tool for auditors and engineers
 to run live pipeline executions without touching production systems.
