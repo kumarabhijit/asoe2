@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 import traceback
@@ -362,6 +363,11 @@ def _print_summary(results: List[Dict[str, Any]]) -> None:
 # ── Main ─────────────────────────────────────────────────────────────────
 
 def main() -> int:
+    # Suppress internal ASOE log messages from cluttering CLI output.
+    # Structured logs (shadow_enforce, tracer) go to stdlib logging —
+    # we only want the CLI's own formatted output on stdout.
+    logging.getLogger("asoe").setLevel(logging.ERROR)
+
     parser = argparse.ArgumentParser(
         description="ASOE Sandbox — headless CLI test runner",
         formatter_class=argparse.RawDescriptionHelpFormatter,
