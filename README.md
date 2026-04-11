@@ -427,7 +427,7 @@ LangFuse as a trace with spans — no code changes needed.
 
 ```bash
 # Optional — only if you want LangFuse forwarding
-uv pip install "langfuse>=2.0.0"
+pip install "langfuse>=2.0.0"
 ```
 
 **Configure (env vars or `.env`):**
@@ -711,7 +711,7 @@ HTTP_PROXY=http://proxy:8080 HTTPS_PROXY=http://proxy:8080 \
 
 1. `docker compose -f docker-compose.hub.yml up` — starts core + sandbox UI
 2. Open `http://localhost:8501` in your browser
-3. Select an EDI event from the sidebar (18 sample events covering all 4 intents)
+3. Select an EDI event from the sidebar (22 sample events covering all 4 intents)
 4. Click **Run** — the event runs through the full pipeline: classify → shadow → recipe → effects
 5. Inspect the execution trace: intent, shadow verdict, recipe, gateway activity, full JSON state
 6. Toggle `ASOE_EXPLAIN_MODE=1` in `.env` for dry-run mode (no recipe side effects)
@@ -849,7 +849,7 @@ k8s/                Kubernetes manifests for AKS production deployment
 | `prompts/phase_14_auth_security.md` | Auth & security hardening prompt — token expiry, env isolation, trace_id, partner scoping |
 | `prompts/phase_15_websocket_redis.md` | WebSocket/Redis prompt — event schemas, pub/sub, WebSocket hub, resolve wiring |
 | `prompts/phase_16_v1_guardrails.md` | V1 Foundation Guardrail tests — 6 CI-automated guardrails (AST inspection, metadata contracts, ERP-agnostic gateway, schema agnostic) |
-| `tests/sandbox/seed.py` | Sandbox seeder: customers, DCs, promotions, SAP pricing, retailer contracts, credit profiles, and 18 EDI events covering all four intents |
+| `tests/sandbox/seed.py` | Sandbox seeder: customers, DCs, promotions, SAP pricing, retailer contracts, credit profiles, and 22 EDI events covering all four intents |
 | `tests/sandbox/cli.py` | Headless CLI runner — direct + API modes, simulation flags, Lily personality |
 | `tests/sandbox/ui/app.py` | Streamlit UI — API mode, auth panel, DB verification, WebSocket monitor, stats |
 | `tests/sandbox/conftest.py` | Shared test fixtures — JWT tokens for all 5 RBAC roles, event payloads |

@@ -141,10 +141,10 @@ fi
 header "Step 3: Installing dependencies"
 
 step "Installing core + dev dependencies..."
-pip install -e ".[dev]" --quiet 2>&1 | tail -1 || pip install -e ".[dev]"
+pip install -e ".[dev]" --quiet || pip install -e ".[dev]"
 
 step "Installing streamlit (sandbox UI)..."
-pip install streamlit --quiet 2>&1 | tail -1 || pip install streamlit
+pip install streamlit --quiet || pip install streamlit
 
 # Apply pydantic patch if needed (Python 3.14+)
 if [ "$PY_MINOR" -ge 14 ] && [ -f "scripts/apply-patches.sh" ]; then
@@ -169,15 +169,12 @@ step "Sandbox database ready at tests/sandbox/sandbox.db"
 
 header "Step 5: Running test suite"
 
-PYTHONPATH=. python -m pytest --tb=short 2>&1 | tail -5
-TEST_EXIT=${PIPESTATUS[0]:-0}
-
-if [ "$TEST_EXIT" -ne 0 ]; then
+if PYTHONPATH=. python -m pytest --tb=short; then
+    step "All tests passed."
+else
     error "Some tests failed. Run 'python -m pytest -v' for details."
     exit 1
 fi
-
-step "All tests passed."
 
 # ═══════════════════════════════════════════════════════════════════════
 # Step 6 (--prod only): Start PostgreSQL + Redis
