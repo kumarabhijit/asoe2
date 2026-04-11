@@ -1,18 +1,32 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from typing import get_args
+
+from constraints.specs import (
+    AllowedIntent,
+    AllowedRecipeName,
+    AllowedResolutionAction,
+    AllowedShadowStatus,
+)
+
+
+def _literal_to_regex(literal_type) -> str:
+    """Generate a regex alternation from a Literal type's allowed values."""
+    return "|".join(re.escape(v) for v in get_args(literal_type))
 
 
 @dataclass
 class GuidanceRegexBackend:
     def intent_regex(self) -> str:
-        return r"CONTRACTUAL_CORRECTION|CREDIT_BLOCK|MASS_PRICING_ERROR|DUPLICATE_PO"
+        return _literal_to_regex(AllowedIntent)
 
     def shadow_verdict_regex(self) -> str:
-        return r"GREEN|YELLOW|RED"
+        return _literal_to_regex(AllowedShadowStatus)
 
     def recipe_name_regex(self) -> str:
-        return r"PriceAdjustmentRecipe\.py|CreditHoldReleaseRecipe\.py|DuplicatePORecipe\.py"
+        return _literal_to_regex(AllowedRecipeName)
 
     def resolution_action_regex(self) -> str:
-        return r"BLOCK_AND_NOTIFY|MERGE|SUPERSEDE|ALLOW_BOTH|ESCALATE|REQUEST_BUYER_CONFIRMATION"
+        return _literal_to_regex(AllowedResolutionAction)

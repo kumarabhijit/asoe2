@@ -11,6 +11,7 @@ from fastapi import APIRouter
 
 from api.schemas import HealthResponse
 from constraints.specs import AllowedIntent, AllowedRecipeName
+from contracts.models import LIFECYCLE_STATES
 from hardening.explain_mode import is_explain_mode_active
 from hardening.kill_switch import is_kill_switch_active
 
@@ -19,12 +20,6 @@ router = APIRouter()
 # Dynamic enum extraction from Pydantic Literal types
 _ALLOWED_INTENTS = list(AllowedIntent.__args__)  # type: ignore[attr-defined]
 _ALLOWED_RECIPES = list(AllowedRecipeName.__args__)  # type: ignore[attr-defined]
-
-# 11-state exception lifecycle (architecture_v3.md Section 9.1)
-_LIFECYCLE_STATES = [
-    "INGESTED", "CLASSIFYING", "AUDITING", "PENDING_REVIEW", "ESCALATED",
-    "EXECUTING", "RESOLVED", "FAILED", "BLOCKED", "REJECTED", "CLOSED",
-]
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -35,6 +30,6 @@ async def health() -> HealthResponse:
         kill_switch=is_kill_switch_active(),
         explain_mode=is_explain_mode_active(),
         allowed_intents=_ALLOWED_INTENTS,
-        lifecycle_states=_LIFECYCLE_STATES,
+        lifecycle_states=LIFECYCLE_STATES,
         allowed_recipes=_ALLOWED_RECIPES,
     )

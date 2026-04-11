@@ -78,47 +78,48 @@ def _is_v2(client: Any) -> bool:
     return hasattr(client, "trace") and not hasattr(client, "start_observation")
 
 
-def _forward_v2(client: Any, record: Any) -> bool:
-    """Forward using langfuse v2 API: client.trace() → trace.span() / trace.score()."""
-    trace = client.trace(
-        id=record.trace_id or None,
-        name="asoe-graph-execution",
-        input={"event_id": record.event_id},
-        output={"final_status": record.final_status, "explanation": record.explanation},
-        metadata={
+def _root_payload(record: Any) -> dict:
+    """Build the common root trace/observation payload from a TraceRecord."""
+    return {
+        "name": "asoe-graph-execution",
+        "input": {"event_id": record.event_id},
+        "output": {"final_status": record.final_status, "explanation": record.explanation},
+        "metadata": {
             "constrained_output_schemas": record.constrained_output_schemas,
             "gateway_calls": record.gateway_calls,
             "rag_chunks": record.rag_chunks,
         },
-    )
+    }
 
+
+def _span_entries(record: Any) -> list[dict]:
+    """Build the list of child span kwargs from a TraceRecord.
+
+    Each entry is a dict with keys: name, output, and optionally level.
+    Only spans whose guard field is non-None are included.
+    """
+    spans: list[dict] = []
     if record.intent_selected:
-        trace.span(
-            name="classify",
-            output={"intent": record.intent_selected},
-        )
-
+        spans.append({"name": "classify", "output": {"intent": record.intent_selected}})
     if record.skill_name:
-        trace.span(
-            name="load_skill",
-            output={"skill_name": record.skill_name},
-        )
-
+        spans.append({"name": "load_skill", "output": {"skill_name": record.skill_name}})
     if record.shadow_verdict:
-        trace.span(
-            name="shadow_audit",
-            output={
-                "verdict": record.shadow_verdict,
-                "policy_hits": record.shadow_policy_hits,
-            },
-            level="WARNING" if record.shadow_verdict != "GREEN" else "DEFAULT",
-        )
-
+        spans.append({
+            "name": "shadow_audit",
+            "output": {"verdict": record.shadow_verdict, "policy_hits": record.shadow_policy_hits},
+            "level": "WARNING" if record.shadow_verdict != "GREEN" else "DEFAULT",
+        })
     if record.recipe_name:
-        trace.span(
-            name="execute_recipe",
-            output={"recipe_name": record.recipe_name},
-        )
+        spans.append({"name": "execute_recipe", "output": {"recipe_name": record.recipe_name}})
+    return spans
+
+
+def _forward_v2(client: Any, record: Any) -> bool:
+    """Forward using langfuse v2 API: client.trace() → trace.span() / trace.score()."""
+    trace = client.trace(id=record.trace_id or None, **_root_payload(record))
+
+    for span_kwargs in _span_entries(record):
+        trace.span(**span_kwargs)
 
     if record.final_status:
         trace.score(
@@ -132,53 +133,14 @@ def _forward_v2(client: Any, record: Any) -> bool:
 
 def _forward_v4(client: Any, record: Any) -> bool:
     """Forward using langfuse v4+ API: start_observation / create_score."""
-    # v4 requires 32 lowercase hex chars (no dashes) for trace IDs.
     raw_id = record.trace_id or ""
     trace_id = raw_id.replace("-", "").lower() if raw_id else None
     trace_ctx = {"trace_id": trace_id} if trace_id else None
 
-    root = client.start_observation(
-        trace_context=trace_ctx,
-        name="asoe-graph-execution",
-        input={"event_id": record.event_id},
-        output={"final_status": record.final_status, "explanation": record.explanation},
-        metadata={
-            "constrained_output_schemas": record.constrained_output_schemas,
-            "gateway_calls": record.gateway_calls,
-            "rag_chunks": record.rag_chunks,
-        },
-    )
+    root = client.start_observation(trace_context=trace_ctx, **_root_payload(record))
 
-    if record.intent_selected:
-        child = root.start_observation(
-            name="classify",
-            output={"intent": record.intent_selected},
-        )
-        child.end()
-
-    if record.skill_name:
-        child = root.start_observation(
-            name="load_skill",
-            output={"skill_name": record.skill_name},
-        )
-        child.end()
-
-    if record.shadow_verdict:
-        child = root.start_observation(
-            name="shadow_audit",
-            output={
-                "verdict": record.shadow_verdict,
-                "policy_hits": record.shadow_policy_hits,
-            },
-            level="WARNING" if record.shadow_verdict != "GREEN" else "DEFAULT",
-        )
-        child.end()
-
-    if record.recipe_name:
-        child = root.start_observation(
-            name="execute_recipe",
-            output={"recipe_name": record.recipe_name},
-        )
+    for span_kwargs in _span_entries(record):
+        child = root.start_observation(**span_kwargs)
         child.end()
 
     root.end()

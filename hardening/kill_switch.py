@@ -24,12 +24,10 @@ from __future__ import annotations
 #     the observability scaffold (final_status=FAIL_TO_HUMAN,
 #     explanation references ASOE_KILL_SWITCH).
 
-import os
-
 from contracts.models import GraphState, TerminalStatus
+from hardening import is_env_truthy
 
 _KILL_SWITCH_ENV = "ASOE_KILL_SWITCH"
-_TRUTHY = {"1", "true", "yes"}
 
 KILL_SWITCH_EXPLANATION = (
     "Automated execution halted: ASOE_KILL_SWITCH is active. "
@@ -40,7 +38,7 @@ KILL_SWITCH_EXPLANATION = (
 
 def is_kill_switch_active() -> bool:
     """Return True if the kill switch env var is set to a truthy value."""
-    return os.getenv(_KILL_SWITCH_ENV, "0").strip().lower() in _TRUTHY
+    return is_env_truthy(_KILL_SWITCH_ENV)
 
 
 def apply_kill_switch(state: GraphState) -> GraphState:
@@ -49,10 +47,7 @@ def apply_kill_switch(state: GraphState) -> GraphState:
     Called by run_graph() when is_kill_switch_active() is True.  The original
     state object is not mutated; a new GraphState is returned.
     """
-    return GraphState.model_validate(
-        state.model_dump()
-        | {
-            "final_status": TerminalStatus.FAIL_TO_HUMAN,
-            "explanation": KILL_SWITCH_EXPLANATION,
-        }
-    )
+    return state.model_copy(update={
+        "final_status": TerminalStatus.FAIL_TO_HUMAN,
+        "explanation": KILL_SWITCH_EXPLANATION,
+    })

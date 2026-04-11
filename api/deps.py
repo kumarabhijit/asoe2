@@ -237,27 +237,55 @@ def require_role(*allowed_roles: str):
 
 
 # ---------------------------------------------------------------------------
-# X-Trace-ID propagation (architecture_v3.md §11.4)
+# WebSocket token validation (public API for ws.py)
 # ---------------------------------------------------------------------------
 
-async def get_trace_id(
-    request: Request,
-) -> str:
-    """Extract X-Trace-ID from request header, or generate a new UUID.
+def validate_ws_token(token: str) -> Dict[str, Any]:
+    """Validate a JWT token and return its payload.
 
-    The trace_id flows through ComplianceDecision → ExecutionLog →
-    TraceRecord unchanged (Execution Invariant #4).
+    Public entry point for WebSocket authentication — avoids importing
+    private helpers (_jwt_decode, _get_jwt_secret) across module boundaries.
     """
-    from uuid import uuid4
-    trace_id = request.headers.get("X-Trace-ID", "")
-    if not trace_id:
-        trace_id = str(uuid4())
-    return trace_id
+    return _jwt_decode(token, _get_jwt_secret())
 
 
 # ---------------------------------------------------------------------------
 # Token creation helpers
 # ---------------------------------------------------------------------------
+
+def _create_token(
+    token_type: str,
+    expire_seconds: int,
+    sub: str,
+    email: str,
+    name: str,
+    roles: List[str],
+    org: str,
+    env: str = "sandbox",
+    auth_method: Optional[str] = None,
+    retailer_id: Optional[str] = None,
+) -> str:
+    """Create a signed JWT with the given type and expiry."""
+    now = int(time.time())
+    payload: Dict[str, Any] = {
+        "sub": sub,
+        "email": email,
+        "name": name,
+        "roles": roles,
+        "org": org,
+        "env": env,
+        "iat": now,
+        "exp": now + expire_seconds,
+        "token_type": token_type,
+    }
+    if token_type == "access":
+        payload["permissions"] = _expand_permissions(roles)
+    if auth_method:
+        payload["auth_method"] = auth_method
+    if retailer_id:
+        payload["retailer_id"] = retailer_id
+    return _jwt_encode(payload, _get_jwt_secret())
+
 
 def create_access_token(
     sub: str,
@@ -270,24 +298,11 @@ def create_access_token(
     retailer_id: Optional[str] = None,
 ) -> str:
     """Create a signed access token (15-minute expiry)."""
-    now = int(time.time())
-    payload: Dict[str, Any] = {
-        "sub": sub,
-        "email": email,
-        "name": name,
-        "roles": roles,
-        "org": org,
-        "env": env,
-        "permissions": _expand_permissions(roles),
-        "iat": now,
-        "exp": now + ACCESS_TOKEN_EXPIRE_SECONDS,
-        "token_type": "access",
-    }
-    if auth_method:
-        payload["auth_method"] = auth_method
-    if retailer_id:
-        payload["retailer_id"] = retailer_id
-    return _jwt_encode(payload, _get_jwt_secret())
+    return _create_token(
+        "access", ACCESS_TOKEN_EXPIRE_SECONDS,
+        sub=sub, email=email, name=name, roles=roles, org=org,
+        env=env, auth_method=auth_method, retailer_id=retailer_id,
+    )
 
 
 def create_refresh_token(
@@ -300,21 +315,11 @@ def create_refresh_token(
     retailer_id: Optional[str] = None,
 ) -> str:
     """Create a signed refresh token (7-day expiry)."""
-    now = int(time.time())
-    payload: Dict[str, Any] = {
-        "sub": sub,
-        "email": email,
-        "name": name,
-        "roles": roles,
-        "org": org,
-        "env": env,
-        "iat": now,
-        "exp": now + REFRESH_TOKEN_EXPIRE_SECONDS,
-        "token_type": "refresh",
-    }
-    if retailer_id:
-        payload["retailer_id"] = retailer_id
-    return _jwt_encode(payload, _get_jwt_secret())
+    return _create_token(
+        "refresh", REFRESH_TOKEN_EXPIRE_SECONDS,
+        sub=sub, email=email, name=name, roles=roles, org=org,
+        env=env, retailer_id=retailer_id,
+    )
 
 
 def create_test_token(

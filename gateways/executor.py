@@ -7,10 +7,6 @@ import time
 from contracts.models import GatewayRequest, GatewayResponse
 from gateways.registry import get_gateway
 
-
-class _GatewayTimeout(Exception):
-    """Raised when a gateway call exceeds its timeout_ms budget."""
-
 logger = logging.getLogger("asoe.gateways")
 
 
@@ -19,7 +15,12 @@ class GatewayExecutor:
 
     Every call — success or failure — is logged to ``asoe.gateways`` so
     the observability layer can forward it to LangFuse or any aggregator.
+
+    A shared thread pool is reused across calls to avoid OS-level
+    thread create/destroy overhead per gateway invocation.
     """
+
+    _pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
     def run(self, request: GatewayRequest) -> GatewayResponse:
         start = time.monotonic()
@@ -38,28 +39,27 @@ class GatewayExecutor:
         # --- execute with timeout enforcement (SEC-4) ---
         timeout_sec = request.timeout_ms / 1000.0
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(gateway.execute, request)
-                try:
-                    response = future.result(timeout=timeout_sec)
-                except concurrent.futures.TimeoutError:
-                    elapsed_ms = int((time.monotonic() - start) * 1000)
-                    logger.error(
-                        "gateway_timeout",
-                        extra={
-                            "gateway": request.gateway_name,
-                            "operation": request.operation,
-                            "timeout_ms": request.timeout_ms,
-                            "trace_id": request.trace_id,
-                        },
-                    )
-                    return GatewayResponse(
-                        gateway_name=request.gateway_name,
-                        operation=request.operation,
-                        status="TIMEOUT",
-                        error=f"Gateway call exceeded {request.timeout_ms}ms timeout",
-                        duration_ms=elapsed_ms,
-                    )
+            future = self._pool.submit(gateway.execute, request)
+            try:
+                response = future.result(timeout=timeout_sec)
+            except concurrent.futures.TimeoutError:
+                elapsed_ms = int((time.monotonic() - start) * 1000)
+                logger.error(
+                    "gateway_timeout",
+                    extra={
+                        "gateway": request.gateway_name,
+                        "operation": request.operation,
+                        "timeout_ms": request.timeout_ms,
+                        "trace_id": request.trace_id,
+                    },
+                )
+                return GatewayResponse(
+                    gateway_name=request.gateway_name,
+                    operation=request.operation,
+                    status="TIMEOUT",
+                    error=f"Gateway call exceeded {request.timeout_ms}ms timeout",
+                    duration_ms=elapsed_ms,
+                )
             elapsed_ms = int((time.monotonic() - start) * 1000)
             response = response.model_copy(update={"duration_ms": elapsed_ms})
             logger.info(

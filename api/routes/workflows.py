@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends
 
 from api.deps import get_tenant_id, require_role
 from api.errors import ASOEError
-from api.schemas import ResolveRequest, WorkflowRequest
+from api.schemas import WorkflowRequest
 from contracts.models import (
     Intent,
     OrderEvent,
@@ -31,23 +31,8 @@ async def run_workflow(
 ) -> dict:
     from workflows.runner import WorkflowRunner
 
-    # Build base event
-    base = req.base_event
-    event = OrderEvent(
-        order_id=base.order_id,
-        line_item=base.line_item,
-        sku=base.sku,
-        event_type=base.event_type,
-        po_price=base.po_price,
-        sap_base_price=base.sap_base_price,
-        retailer_id=base.retailer_id,
-        event_ts=base.event_ts,
-        requester_role=base.requester_role,
-        credit_limit=base.credit_limit,
-        current_exposure=base.current_exposure,
-        line_count=base.line_count,
-        metadata=base.metadata,
-    )
+    # Build base event from request (ResolveRequest inherits from OrderEvent)
+    event = OrderEvent.model_validate(req.base_event.model_dump())
 
     # Build workflow definition
     steps = []

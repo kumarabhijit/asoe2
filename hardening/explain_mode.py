@@ -26,16 +26,16 @@ from __future__ import annotations
 #   - TraceRecord is emitted as normal; final_status = MANUAL_REVIEW_REQUIRED.
 #   - Intended for: auditor dry-runs, operator review, CI smoke-tests.
 
-import os
 from typing import Optional
 
+from hardening import is_env_truthy
+
 _EXPLAIN_MODE_ENV = "ASOE_EXPLAIN_MODE"
-_TRUTHY = {"1", "true", "yes"}
 
 
 def is_explain_mode_active() -> bool:
     """Return True if explain mode env var is set to a truthy value."""
-    return os.getenv(_EXPLAIN_MODE_ENV, "0").strip().lower() in _TRUTHY
+    return is_env_truthy(_EXPLAIN_MODE_ENV)
 
 
 def build_explain_summary(

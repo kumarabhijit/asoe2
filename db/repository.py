@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
+from contracts.models import STATUS_TO_LIFECYCLE
 from db.connection import SQLiteAdapter, create_adapter
 
 logger = logging.getLogger("asoe.db.repository")
@@ -43,14 +44,15 @@ def _json_loads(s: Optional[str]) -> Any:
         return s
 
 
-# Maps final_status to lifecycle_state
-_STATUS_TO_LIFECYCLE = {
-    "COMPLETE": "RESOLVED",
-    "FAIL_TO_HUMAN": "FAILED",
-    "MANUAL_REVIEW_REQUIRED": "PENDING_REVIEW",
-    "BLOCKED": "BLOCKED",
-    "REJECTED": "REJECTED",
-}
+def _row_to_dict(row, columns: tuple[str, ...]) -> Dict[str, Any]:
+    """Convert a database row to a dict using column names.
+
+    Works with both dict-like rows (psycopg2 RealDictCursor, sqlite3.Row)
+    and plain tuples (positional indexing fallback).
+    """
+    if hasattr(row, "keys"):
+        return dict(row)
+    return {col: row[i] for i, col in enumerate(columns)}
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +81,7 @@ class ExceptionRepository:
         record_id = _uuid()
         now = _now()
         if not lifecycle_state:
-            lifecycle_state = _STATUS_TO_LIFECYCLE.get(final_status or "", "INGESTED")
+            lifecycle_state = STATUS_TO_LIFECYCLE.get(final_status or "", "INGESTED")
         res_data = _json_dumps(resolution_data or {})
 
         with self._adapter.cursor(tenant_id) as cur:
@@ -130,7 +132,7 @@ class ExceptionRepository:
             row = cur.fetchone()
         if not row:
             return None
-        return self._row_to_dict(row)
+        return self._to_dict(row)
 
     def list(
         self,
@@ -174,7 +176,7 @@ class ExceptionRepository:
             cur.execute(query, tuple(params))
             rows = cur.fetchall()
 
-        records = [self._row_to_dict(r) for r in rows[:limit]]
+        records = [self._to_dict(r) for r in rows[:limit]]
         has_more = len(rows) > limit
         next_cursor = records[-1]["id"] if has_more and records else None
         return records, next_cursor, has_more
@@ -226,17 +228,15 @@ class ExceptionRepository:
             "failed": row[5] or 0,
         }
 
-    def _row_to_dict(self, row) -> Dict[str, Any]:
-        r = dict(row) if hasattr(row, "keys") else {
-            "id": row[0], "tenant_id": row[1], "order_id": row[2],
-            "event_type": row[3], "intent": row[4], "lifecycle_state": row[5],
-            "shadow_verdict": row[6], "selected_recipe": row[7],
-            "final_status": row[8], "trace_id": row[9],
-            "resolution_data": row[10], "resolved_by": row[11],
-            "resolved_action": row[12], "resolution_notes": row[13],
-            "created_at": row[14], "updated_at": row[15],
-        }
-        # Deserialize JSON fields
+    _COLUMNS = (
+        "id", "tenant_id", "order_id", "event_type", "intent",
+        "lifecycle_state", "shadow_verdict", "selected_recipe",
+        "final_status", "trace_id", "resolution_data", "resolved_by",
+        "resolved_action", "resolution_notes", "created_at", "updated_at",
+    )
+
+    def _to_dict(self, row) -> Dict[str, Any]:
+        r = _row_to_dict(row, self._COLUMNS)
         if isinstance(r.get("resolution_data"), str):
             r["resolution_data"] = _json_loads(r["resolution_data"])
         return r
@@ -295,10 +295,8 @@ class TraceRepository:
             row = cur.fetchone()
         if not row:
             return None
-        r = dict(row) if hasattr(row, "keys") else {
-            "id": row[0], "exception_id": row[1], "trace_id": row[2],
-            "tenant_id": row[3], "trace_record": row[4], "created_at": row[5],
-        }
+        _TRACE_COLS = ("id", "exception_id", "trace_id", "tenant_id", "trace_record", "created_at")
+        r = _row_to_dict(row, _TRACE_COLS)
         if isinstance(r.get("trace_record"), str):
             r["trace_record"] = _json_loads(r["trace_record"])
         return r
@@ -376,12 +374,11 @@ class PolicyRepository:
             row = cur.fetchone()
         if not row:
             return None
-        r = dict(row) if hasattr(row, "keys") else {
-            "id": row[0], "tenant_id": row[1], "policy_key": row[2],
-            "value": row[3], "effective_from": row[4],
-            "effective_until": row[5], "created_by": row[6],
-            "created_at": row[7],
-        }
+        _OVERRIDE_COLS = (
+            "id", "tenant_id", "policy_key", "value",
+            "effective_from", "effective_until", "created_by", "created_at",
+        )
+        r = _row_to_dict(row, _OVERRIDE_COLS)
         if isinstance(r.get("value"), str):
             r["value"] = _json_loads(r["value"])
         return r
@@ -399,14 +396,13 @@ class PolicyRepository:
                 (tenant_id, limit),
             )
             rows = cur.fetchall()
+        _AUDIT_COLS = (
+            "id", "tenant_id", "policy_key", "previous_value",
+            "new_value", "changed_by", "change_reason", "created_at",
+        )
         results = []
         for row in rows:
-            r = dict(row) if hasattr(row, "keys") else {
-                "id": row[0], "tenant_id": row[1], "policy_key": row[2],
-                "previous_value": row[3], "new_value": row[4],
-                "changed_by": row[5], "change_reason": row[6],
-                "created_at": row[7],
-            }
+            r = _row_to_dict(row, _AUDIT_COLS)
             if isinstance(r.get("previous_value"), str):
                 r["previous_value"] = _json_loads(r["previous_value"])
             if isinstance(r.get("new_value"), str):

@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from api.schemas import ExceptionDetailResponse, ExceptionSummary
+from contracts.models import STATUS_TO_LIFECYCLE
 
 
 class ExceptionRecord:
@@ -92,16 +93,6 @@ class ExceptionRecord:
         )
 
 
-# Maps final_status to lifecycle_state
-_STATUS_TO_LIFECYCLE = {
-    "COMPLETE": "RESOLVED",
-    "FAIL_TO_HUMAN": "FAILED",
-    "MANUAL_REVIEW_REQUIRED": "PENDING_REVIEW",
-    "BLOCKED": "BLOCKED",
-    "REJECTED": "REJECTED",
-}
-
-
 class ExceptionStore:
     """Thread-safe in-memory exception store."""
 
@@ -127,7 +118,7 @@ class ExceptionStore:
         final_status: Optional[str] = None,
         resolution_data: Optional[Dict[str, Any]] = None,
     ) -> ExceptionRecord:
-        lifecycle = _STATUS_TO_LIFECYCLE.get(final_status or "", "INGESTED")
+        lifecycle = STATUS_TO_LIFECYCLE.get(final_status or "", "INGESTED")
         record = ExceptionRecord(
             tenant_id=tenant_id,
             order_id=order_id,
@@ -211,13 +202,27 @@ class ExceptionStore:
                 r for r in self._records.values()
                 if r.tenant_id == tenant_id
             ]
+        _OPEN_STATES = {"INGESTED", "CLASSIFYING", "AUDITING", "EXECUTING"}
+        open_count = auto_resolved = manual_review = blocked = failed = 0
+        for r in records:
+            s = r.lifecycle_state
+            if s in _OPEN_STATES:
+                open_count += 1
+            elif s == "RESOLVED":
+                auto_resolved += 1
+            elif s == "PENDING_REVIEW":
+                manual_review += 1
+            elif s == "BLOCKED":
+                blocked += 1
+            elif s == "FAILED":
+                failed += 1
         return {
             "total": len(records),
-            "open": sum(1 for r in records if r.lifecycle_state in ("INGESTED", "CLASSIFYING", "AUDITING", "EXECUTING")),
-            "auto_resolved": sum(1 for r in records if r.lifecycle_state == "RESOLVED"),
-            "manual_review": sum(1 for r in records if r.lifecycle_state == "PENDING_REVIEW"),
-            "blocked": sum(1 for r in records if r.lifecycle_state == "BLOCKED"),
-            "failed": sum(1 for r in records if r.lifecycle_state == "FAILED"),
+            "open": open_count,
+            "auto_resolved": auto_resolved,
+            "manual_review": manual_review,
+            "blocked": blocked,
+            "failed": failed,
         }
 
 

@@ -96,16 +96,21 @@ class SQLiteAdapter:
 # ---------------------------------------------------------------------------
 
 class PostgresAdapter:
-    """PostgreSQL connection wrapper.
+    """PostgreSQL connection wrapper with thread-local connection reuse.
 
     Uses psycopg2 or psycopg for database access. Sets the
     ``app.current_tenant_id`` session variable on each connection
     for RLS enforcement (architecture_v3.md Section 11.3).
+
+    Connections are stored per-thread and reused across calls (same
+    pattern as SQLiteAdapter). On error, the stale connection is
+    discarded and a fresh one is created on the next call.
     """
 
     def __init__(self, database_url: str) -> None:
         self._database_url = database_url
         self._connect_fn = self._resolve_driver()
+        self._local = threading.local()
 
     def _resolve_driver(self):
         """Resolve the PostgreSQL driver (psycopg2 or psycopg)."""
@@ -122,10 +127,25 @@ class PostgresAdapter:
                 "No PostgreSQL driver found. Install psycopg2-binary or psycopg."
             )
 
+    def _get_conn(self) -> Any:
+        """Return a thread-local connection, creating one if needed."""
+        if not hasattr(self._local, "conn") or self._local.conn is None:
+            self._local.conn = self._connect_fn()
+        return self._local.conn
+
+    def _discard_conn(self) -> None:
+        """Close and discard the current thread-local connection."""
+        if hasattr(self._local, "conn") and self._local.conn is not None:
+            try:
+                self._local.conn.close()
+            except Exception:
+                pass
+            self._local.conn = None
+
     @contextmanager
     def connection(self, tenant_id: Optional[str] = None) -> Generator[Any, None, None]:
         """Yield a PostgreSQL connection with tenant_id set for RLS."""
-        conn = self._connect_fn()
+        conn = self._get_conn()
         try:
             if tenant_id:
                 cur = conn.cursor()
@@ -136,9 +156,8 @@ class PostgresAdapter:
             yield conn
         except Exception:
             conn.rollback()
+            self._discard_conn()
             raise
-        finally:
-            conn.close()
 
     @contextmanager
     def cursor(self, tenant_id: Optional[str] = None) -> Generator[Any, None, None]:
@@ -154,7 +173,8 @@ class PostgresAdapter:
                 cur.close()
 
     def close(self) -> None:
-        pass  # Connections are closed per-request
+        """Close the thread-local connection."""
+        self._discard_conn()
 
     def apply_schema(self) -> None:
         """Apply PostgreSQL schema from migration runner."""

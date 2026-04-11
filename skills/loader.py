@@ -13,13 +13,19 @@ RECIPES_RE = re.compile(r"^\s*recipes:\s*\[(.*?)\]", re.MULTILINE)
 
 
 class SkillLoader:
+    # Class-level cache keyed by resolved path — skills are static .md files
+    # that don't change during process lifetime.  Shared across instances.
+    _cache: dict[str, SkillDocument] = {}
+
     def __init__(self, root: str | Path = "skills") -> None:
         self.root = Path(root)
 
     def load_by_name(self, name: str) -> SkillDocument:
-        path = self.root / name
-        text = path.read_text(encoding="utf-8")
-        return self._parse(text)
+        key = str(self.root / name)
+        if key not in self._cache:
+            text = (self.root / name).read_text(encoding="utf-8")
+            self._cache[key] = self._parse(text)
+        return self._cache[key]
 
     def discover(self) -> List[SkillDocument]:
         docs = []

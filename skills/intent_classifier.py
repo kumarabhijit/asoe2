@@ -41,12 +41,8 @@ class IntentClassifier:
     def classify(self, state: GraphState) -> IntentDecision:
         """Return IntentDecision (intent + confidence) for *state*.
 
-        The skill is loaded here so the backend receives full context.
         No recipe is proposed; no shadow is called.
         """
-        # Load skill verbatim — only for context, not summarised
-        _ = self.load_skill(state.event.event_type)
-
         # Constrained classification: backend enforces allowed vocabulary
         if hasattr(self._backend, "intent_prompt"):
             # Outlines path: backend expects a prompt string

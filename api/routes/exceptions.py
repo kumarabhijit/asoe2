@@ -19,7 +19,6 @@ Security:
 from __future__ import annotations
 
 import logging
-import os
 from typing import Optional
 from uuid import uuid4
 
@@ -53,6 +52,28 @@ router = APIRouter()
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _get_or_404(exception_id: str, tenant_id: str):
+    """Fetch an exception record or raise a 404 ASOEError."""
+    record = exception_store.get(exception_id, tenant_id)
+    if not record:
+        raise ASOEError(
+            code="NOT_FOUND",
+            message=f"Exception {exception_id} not found.",
+            status_code=404,
+        )
+    return record
+
+
+def _require_pending_review(record) -> None:
+    """Raise 409 if the exception is not in PENDING_REVIEW state."""
+    if record.lifecycle_state != "PENDING_REVIEW":
+        raise ASOEError(
+            code="INVALID_STATE",
+            message=f"Exception is in state '{record.lifecycle_state}', not PENDING_REVIEW.",
+            status_code=409,
+        )
+
+
 def _get_trace_id(request: Request) -> str:
     """Extract trace_id from middleware state (§11.4)."""
     return getattr(request.state, "trace_id", str(uuid4()))
@@ -60,27 +81,13 @@ def _get_trace_id(request: Request) -> str:
 
 def _build_order_event(req: ResolveRequest) -> OrderEvent:
     """Construct an OrderEvent from the API request body."""
-    return OrderEvent(
-        order_id=req.order_id,
-        line_item=req.line_item,
-        sku=req.sku,
-        event_type=req.event_type,
-        po_price=req.po_price,
-        sap_base_price=req.sap_base_price,
-        retailer_id=req.retailer_id,
-        event_ts=req.event_ts,
-        requester_role=req.requester_role,
-        credit_limit=req.credit_limit,
-        current_exposure=req.current_exposure,
-        line_count=req.line_count,
-        metadata=req.metadata,
-    )
+    return OrderEvent.model_validate(req.model_dump())
 
 
-def _run_graph_safe(state: GraphState) -> GraphState:
+def _run_graph_safe(state: GraphState, *, explain_mode: bool | None = None) -> GraphState:
     """Run the graph with proper error handling."""
     from orchestration.graph import run_graph
-    return run_graph(state)
+    return run_graph(state, explain_mode=explain_mode)
 
 
 def _state_to_resolve_response(
@@ -162,27 +169,6 @@ def _publish_task_complete(
         explanation=state.explanation,
     )
     event_publisher.publish(tenant_id, event)
-
-
-def _check_partner_access(user: AuthenticatedUser, record) -> None:
-    """Enforce partner-role scoping: partners see only their own orders.
-
-    Architecture_v3.md §11.3: partner role is restricted to own orders
-    via retailer_id matching. This is the application-layer enforcement;
-    PostgreSQL RLS provides the defense-in-depth layer.
-    """
-    if "partner" not in user.roles:
-        return
-    # Partner must have a retailer_id claim that matches the record
-    record_retailer = getattr(record, "resolution_data", {})
-    # Check against the event's retailer_id stored in the record
-    # For in-memory store, we check a simpler path
-    if user.retailer_id and hasattr(record, "order_id"):
-        # In the full DB implementation, this would be an RLS policy.
-        # At the application layer, we verify the partner's retailer_id
-        # is associated with this exception. For now, partners with no
-        # retailer_id claim are blocked from individual record access.
-        pass  # RLS provides the defense-in-depth; app-layer filtering is in list()
 
 
 # ---------------------------------------------------------------------------
@@ -272,10 +258,8 @@ async def resolve_explain(
     event = _build_order_event(req)
     state = GraphState(event=event)
 
-    prev = os.environ.get("ASOE_EXPLAIN_MODE")
-    os.environ["ASOE_EXPLAIN_MODE"] = "1"
     try:
-        final_state = _run_graph_safe(state)
+        final_state = _run_graph_safe(state, explain_mode=True)
     except Exception as exc:
         logger.error("Explain graph execution failed: %s", exc)
         raise ASOEError(
@@ -284,11 +268,6 @@ async def resolve_explain(
             status_code=500,
             trace_id=_get_trace_id(request),
         )
-    finally:
-        if prev is None:
-            os.environ.pop("ASOE_EXPLAIN_MODE", None)
-        else:
-            os.environ["ASOE_EXPLAIN_MODE"] = prev
 
     trace_id = final_state.shadow.trace_id if final_state.shadow else None
     exception_id = _persist_exception(tenant_id, final_state, trace_id)
@@ -359,14 +338,7 @@ async def get_exception(
     exception_id: str,
     tenant_id: str = Depends(get_tenant_id),
 ) -> ExceptionDetailResponse:
-    record = exception_store.get(exception_id, tenant_id)
-    if not record:
-        raise ASOEError(
-            code="NOT_FOUND",
-            message=f"Exception {exception_id} not found.",
-            status_code=404,
-        )
-    return record.to_detail()
+    return _get_or_404(exception_id, tenant_id).to_detail()
 
 
 # ---------------------------------------------------------------------------
@@ -382,14 +354,7 @@ async def get_trace(
     exception_id: str,
     tenant_id: str = Depends(get_tenant_id),
 ) -> TraceResponse:
-    record = exception_store.get(exception_id, tenant_id)
-    if not record:
-        raise ASOEError(
-            code="NOT_FOUND",
-            message=f"Exception {exception_id} not found.",
-            status_code=404,
-        )
-
+    _get_or_404(exception_id, tenant_id)
     trace_data = exception_store.get_trace(exception_id)
     if not trace_data:
         raise ASOEError(
@@ -414,14 +379,7 @@ async def override_exception(
     req: OverrideRequest,
     tenant_id: str = Depends(get_tenant_id),
 ) -> ExceptionDetailResponse:
-    record = exception_store.get(exception_id, tenant_id)
-    if not record:
-        raise ASOEError(
-            code="NOT_FOUND",
-            message=f"Exception {exception_id} not found.",
-            status_code=404,
-        )
-
+    _get_or_404(exception_id, tenant_id)
     updated = exception_store.update(
         exception_id,
         tenant_id,
@@ -455,21 +413,8 @@ async def approve_exception(
     tenant_id: str = Depends(get_tenant_id),
     user: AuthenticatedUser = Depends(get_current_user),
 ) -> ExceptionDetailResponse:
-    record = exception_store.get(exception_id, tenant_id)
-    if not record:
-        raise ASOEError(
-            code="NOT_FOUND",
-            message=f"Exception {exception_id} not found.",
-            status_code=404,
-        )
-
-    if record.lifecycle_state != "PENDING_REVIEW":
-        raise ASOEError(
-            code="INVALID_STATE",
-            message=f"Exception is in state '{record.lifecycle_state}', not PENDING_REVIEW.",
-            status_code=409,
-        )
-
+    record = _get_or_404(exception_id, tenant_id)
+    _require_pending_review(record)
     updated = exception_store.update(
         exception_id,
         tenant_id,
@@ -497,21 +442,8 @@ async def reject_exception(
     tenant_id: str = Depends(get_tenant_id),
     user: AuthenticatedUser = Depends(get_current_user),
 ) -> ExceptionDetailResponse:
-    record = exception_store.get(exception_id, tenant_id)
-    if not record:
-        raise ASOEError(
-            code="NOT_FOUND",
-            message=f"Exception {exception_id} not found.",
-            status_code=404,
-        )
-
-    if record.lifecycle_state != "PENDING_REVIEW":
-        raise ASOEError(
-            code="INVALID_STATE",
-            message=f"Exception is in state '{record.lifecycle_state}', not PENDING_REVIEW.",
-            status_code=409,
-        )
-
+    record = _get_or_404(exception_id, tenant_id)
+    _require_pending_review(record)
     updated = exception_store.update(
         exception_id,
         tenant_id,
