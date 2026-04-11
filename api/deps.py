@@ -253,6 +253,40 @@ def validate_ws_token(token: str) -> Dict[str, Any]:
 # Token creation helpers
 # ---------------------------------------------------------------------------
 
+def _create_token(
+    token_type: str,
+    expire_seconds: int,
+    sub: str,
+    email: str,
+    name: str,
+    roles: List[str],
+    org: str,
+    env: str = "sandbox",
+    auth_method: Optional[str] = None,
+    retailer_id: Optional[str] = None,
+) -> str:
+    """Create a signed JWT with the given type and expiry."""
+    now = int(time.time())
+    payload: Dict[str, Any] = {
+        "sub": sub,
+        "email": email,
+        "name": name,
+        "roles": roles,
+        "org": org,
+        "env": env,
+        "iat": now,
+        "exp": now + expire_seconds,
+        "token_type": token_type,
+    }
+    if token_type == "access":
+        payload["permissions"] = _expand_permissions(roles)
+    if auth_method:
+        payload["auth_method"] = auth_method
+    if retailer_id:
+        payload["retailer_id"] = retailer_id
+    return _jwt_encode(payload, _get_jwt_secret())
+
+
 def create_access_token(
     sub: str,
     email: str,
@@ -264,24 +298,11 @@ def create_access_token(
     retailer_id: Optional[str] = None,
 ) -> str:
     """Create a signed access token (15-minute expiry)."""
-    now = int(time.time())
-    payload: Dict[str, Any] = {
-        "sub": sub,
-        "email": email,
-        "name": name,
-        "roles": roles,
-        "org": org,
-        "env": env,
-        "permissions": _expand_permissions(roles),
-        "iat": now,
-        "exp": now + ACCESS_TOKEN_EXPIRE_SECONDS,
-        "token_type": "access",
-    }
-    if auth_method:
-        payload["auth_method"] = auth_method
-    if retailer_id:
-        payload["retailer_id"] = retailer_id
-    return _jwt_encode(payload, _get_jwt_secret())
+    return _create_token(
+        "access", ACCESS_TOKEN_EXPIRE_SECONDS,
+        sub=sub, email=email, name=name, roles=roles, org=org,
+        env=env, auth_method=auth_method, retailer_id=retailer_id,
+    )
 
 
 def create_refresh_token(
@@ -294,21 +315,11 @@ def create_refresh_token(
     retailer_id: Optional[str] = None,
 ) -> str:
     """Create a signed refresh token (7-day expiry)."""
-    now = int(time.time())
-    payload: Dict[str, Any] = {
-        "sub": sub,
-        "email": email,
-        "name": name,
-        "roles": roles,
-        "org": org,
-        "env": env,
-        "iat": now,
-        "exp": now + REFRESH_TOKEN_EXPIRE_SECONDS,
-        "token_type": "refresh",
-    }
-    if retailer_id:
-        payload["retailer_id"] = retailer_id
-    return _jwt_encode(payload, _get_jwt_secret())
+    return _create_token(
+        "refresh", REFRESH_TOKEN_EXPIRE_SECONDS,
+        sub=sub, email=email, name=name, roles=roles, org=org,
+        env=env, retailer_id=retailer_id,
+    )
 
 
 def create_test_token(

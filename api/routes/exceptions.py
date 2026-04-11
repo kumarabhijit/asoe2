@@ -52,6 +52,28 @@ router = APIRouter()
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _get_or_404(exception_id: str, tenant_id: str):
+    """Fetch an exception record or raise a 404 ASOEError."""
+    record = exception_store.get(exception_id, tenant_id)
+    if not record:
+        raise ASOEError(
+            code="NOT_FOUND",
+            message=f"Exception {exception_id} not found.",
+            status_code=404,
+        )
+    return record
+
+
+def _require_pending_review(record) -> None:
+    """Raise 409 if the exception is not in PENDING_REVIEW state."""
+    if record.lifecycle_state != "PENDING_REVIEW":
+        raise ASOEError(
+            code="INVALID_STATE",
+            message=f"Exception is in state '{record.lifecycle_state}', not PENDING_REVIEW.",
+            status_code=409,
+        )
+
+
 def _get_trace_id(request: Request) -> str:
     """Extract trace_id from middleware state (§11.4)."""
     return getattr(request.state, "trace_id", str(uuid4()))
@@ -316,14 +338,7 @@ async def get_exception(
     exception_id: str,
     tenant_id: str = Depends(get_tenant_id),
 ) -> ExceptionDetailResponse:
-    record = exception_store.get(exception_id, tenant_id)
-    if not record:
-        raise ASOEError(
-            code="NOT_FOUND",
-            message=f"Exception {exception_id} not found.",
-            status_code=404,
-        )
-    return record.to_detail()
+    return _get_or_404(exception_id, tenant_id).to_detail()
 
 
 # ---------------------------------------------------------------------------
@@ -339,14 +354,7 @@ async def get_trace(
     exception_id: str,
     tenant_id: str = Depends(get_tenant_id),
 ) -> TraceResponse:
-    record = exception_store.get(exception_id, tenant_id)
-    if not record:
-        raise ASOEError(
-            code="NOT_FOUND",
-            message=f"Exception {exception_id} not found.",
-            status_code=404,
-        )
-
+    _get_or_404(exception_id, tenant_id)
     trace_data = exception_store.get_trace(exception_id)
     if not trace_data:
         raise ASOEError(
@@ -371,14 +379,7 @@ async def override_exception(
     req: OverrideRequest,
     tenant_id: str = Depends(get_tenant_id),
 ) -> ExceptionDetailResponse:
-    record = exception_store.get(exception_id, tenant_id)
-    if not record:
-        raise ASOEError(
-            code="NOT_FOUND",
-            message=f"Exception {exception_id} not found.",
-            status_code=404,
-        )
-
+    _get_or_404(exception_id, tenant_id)
     updated = exception_store.update(
         exception_id,
         tenant_id,
@@ -412,21 +413,8 @@ async def approve_exception(
     tenant_id: str = Depends(get_tenant_id),
     user: AuthenticatedUser = Depends(get_current_user),
 ) -> ExceptionDetailResponse:
-    record = exception_store.get(exception_id, tenant_id)
-    if not record:
-        raise ASOEError(
-            code="NOT_FOUND",
-            message=f"Exception {exception_id} not found.",
-            status_code=404,
-        )
-
-    if record.lifecycle_state != "PENDING_REVIEW":
-        raise ASOEError(
-            code="INVALID_STATE",
-            message=f"Exception is in state '{record.lifecycle_state}', not PENDING_REVIEW.",
-            status_code=409,
-        )
-
+    record = _get_or_404(exception_id, tenant_id)
+    _require_pending_review(record)
     updated = exception_store.update(
         exception_id,
         tenant_id,
@@ -454,21 +442,8 @@ async def reject_exception(
     tenant_id: str = Depends(get_tenant_id),
     user: AuthenticatedUser = Depends(get_current_user),
 ) -> ExceptionDetailResponse:
-    record = exception_store.get(exception_id, tenant_id)
-    if not record:
-        raise ASOEError(
-            code="NOT_FOUND",
-            message=f"Exception {exception_id} not found.",
-            status_code=404,
-        )
-
-    if record.lifecycle_state != "PENDING_REVIEW":
-        raise ASOEError(
-            code="INVALID_STATE",
-            message=f"Exception is in state '{record.lifecycle_state}', not PENDING_REVIEW.",
-            status_code=409,
-        )
-
+    record = _get_or_404(exception_id, tenant_id)
+    _require_pending_review(record)
     updated = exception_store.update(
         exception_id,
         tenant_id,
