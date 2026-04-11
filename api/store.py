@@ -202,13 +202,27 @@ class ExceptionStore:
                 r for r in self._records.values()
                 if r.tenant_id == tenant_id
             ]
+        _OPEN_STATES = {"INGESTED", "CLASSIFYING", "AUDITING", "EXECUTING"}
+        open_count = auto_resolved = manual_review = blocked = failed = 0
+        for r in records:
+            s = r.lifecycle_state
+            if s in _OPEN_STATES:
+                open_count += 1
+            elif s == "RESOLVED":
+                auto_resolved += 1
+            elif s == "PENDING_REVIEW":
+                manual_review += 1
+            elif s == "BLOCKED":
+                blocked += 1
+            elif s == "FAILED":
+                failed += 1
         return {
             "total": len(records),
-            "open": sum(1 for r in records if r.lifecycle_state in ("INGESTED", "CLASSIFYING", "AUDITING", "EXECUTING")),
-            "auto_resolved": sum(1 for r in records if r.lifecycle_state == "RESOLVED"),
-            "manual_review": sum(1 for r in records if r.lifecycle_state == "PENDING_REVIEW"),
-            "blocked": sum(1 for r in records if r.lifecycle_state == "BLOCKED"),
-            "failed": sum(1 for r in records if r.lifecycle_state == "FAILED"),
+            "open": open_count,
+            "auto_resolved": auto_resolved,
+            "manual_review": manual_review,
+            "blocked": blocked,
+            "failed": failed,
         }
 
 

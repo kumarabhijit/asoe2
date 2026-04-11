@@ -208,7 +208,7 @@ class Tracer:
         record is also forwarded to LangFuse.  Forwarding failures are
         logged but never block execution.
         """
-        payload = {"trace": json.loads(record.to_json())}
+        payload = {"trace": record.model_dump(mode="json")}
         logger.info(json.dumps(payload))
 
         # Optional LangFuse forwarding — additive, never blocks.
