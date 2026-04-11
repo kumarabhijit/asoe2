@@ -9,10 +9,12 @@ Target documents (update only the ones relevant to what has changed):
 - README.md              — engineer cookbook; audience: new feature developers
 - docs/AUDITOR_GUIDE.md  — audit controls reference; audience: auditors and operators
 - docs/adr/*.md          — architecture decision records; audience: architects and senior engineers
-- docs/specs/*.md        — product specs; audience: product and engineering leads
 - tasks.md               — phase checklist; mark completed items with [x]
 - prompts/phase_*.md     — phase-specific build prompts; add new phases as needed
 - (any other *.md added in future)
+
+Excluded from doc updates (owned by product, not engineering):
+- docs/specs/*.md        — PO product specs; do not modify during code changes
 
 Rules:
 1. Update only what has actually changed in the codebase since the last doc update.
