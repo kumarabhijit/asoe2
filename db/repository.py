@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
+from contracts.models import STATUS_TO_LIFECYCLE
 from db.connection import SQLiteAdapter, create_adapter
 
 logger = logging.getLogger("asoe.db.repository")
@@ -41,16 +42,6 @@ def _json_loads(s: Optional[str]) -> Any:
         return json.loads(s)
     except (json.JSONDecodeError, TypeError):
         return s
-
-
-# Maps final_status to lifecycle_state
-_STATUS_TO_LIFECYCLE = {
-    "COMPLETE": "RESOLVED",
-    "FAIL_TO_HUMAN": "FAILED",
-    "MANUAL_REVIEW_REQUIRED": "PENDING_REVIEW",
-    "BLOCKED": "BLOCKED",
-    "REJECTED": "REJECTED",
-}
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +70,7 @@ class ExceptionRepository:
         record_id = _uuid()
         now = _now()
         if not lifecycle_state:
-            lifecycle_state = _STATUS_TO_LIFECYCLE.get(final_status or "", "INGESTED")
+            lifecycle_state = STATUS_TO_LIFECYCLE.get(final_status or "", "INGESTED")
         res_data = _json_dumps(resolution_data or {})
 
         with self._adapter.cursor(tenant_id) as cur:

@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from api.schemas import ExceptionDetailResponse, ExceptionSummary
+from contracts.models import STATUS_TO_LIFECYCLE
 
 
 class ExceptionRecord:
@@ -92,16 +93,6 @@ class ExceptionRecord:
         )
 
 
-# Maps final_status to lifecycle_state
-_STATUS_TO_LIFECYCLE = {
-    "COMPLETE": "RESOLVED",
-    "FAIL_TO_HUMAN": "FAILED",
-    "MANUAL_REVIEW_REQUIRED": "PENDING_REVIEW",
-    "BLOCKED": "BLOCKED",
-    "REJECTED": "REJECTED",
-}
-
-
 class ExceptionStore:
     """Thread-safe in-memory exception store."""
 
@@ -127,7 +118,7 @@ class ExceptionStore:
         final_status: Optional[str] = None,
         resolution_data: Optional[Dict[str, Any]] = None,
     ) -> ExceptionRecord:
-        lifecycle = _STATUS_TO_LIFECYCLE.get(final_status or "", "INGESTED")
+        lifecycle = STATUS_TO_LIFECYCLE.get(final_status or "", "INGESTED")
         record = ExceptionRecord(
             tenant_id=tenant_id,
             order_id=order_id,

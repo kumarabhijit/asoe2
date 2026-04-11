@@ -29,6 +29,24 @@ class TerminalStatus(str, Enum):
     REJECTED = "REJECTED"
 
 
+# Single source of truth: maps TerminalStatus to exception lifecycle state.
+# Consumed by api/store.py (in-memory) and db/repository.py (database).
+STATUS_TO_LIFECYCLE: Dict[str, str] = {
+    "COMPLETE": "RESOLVED",
+    "FAIL_TO_HUMAN": "FAILED",
+    "MANUAL_REVIEW_REQUIRED": "PENDING_REVIEW",
+    "BLOCKED": "BLOCKED",
+    "REJECTED": "REJECTED",
+}
+
+# 11-state exception lifecycle (architecture_v3.md §9.1).
+# Consumed by api/routes/health.py and stats queries.
+LIFECYCLE_STATES: List[str] = [
+    "INGESTED", "CLASSIFYING", "AUDITING", "PENDING_REVIEW", "ESCALATED",
+    "EXECUTING", "RESOLVED", "FAILED", "BLOCKED", "REJECTED", "CLOSED",
+]
+
+
 class OrderEvent(BaseModel):
     model_config = ConfigDict(extra="forbid")
     order_id: str
