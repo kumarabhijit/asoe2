@@ -1,4 +1,4 @@
-# ADR-001: ASOE Core Deployment Model — Library vs. Service
+# ADR-021: ASOE Core Deployment Model — Library vs. Service
 
 **Status:** Accepted
 **Date:** 2026-04-09

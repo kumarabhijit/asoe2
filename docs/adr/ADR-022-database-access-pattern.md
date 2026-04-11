@@ -1,4 +1,4 @@
-# ADR-002: Database Access — Raw SQL Repository vs. ORM
+# ADR-022: Database Access — Raw SQL Repository vs. ORM
 
 **Status:** Accepted
 **Date:** 2026-04-09
@@ -140,3 +140,4 @@ Re-evaluate this decision (→ Option B: SQLAlchemy Core) when **any** of the fo
 This decision is referenced in:
 - `DESIGN.md` §16 (Database Layer)
 - `architecture_v3.md` §9.2 (PostgreSQL Schema)
+- `consol_arch.md` §7 (Data Architecture) and §13 (ADR-022) in the `asoe-ui` repository

@@ -779,6 +779,8 @@ V1.0's four intents, three recipes, and structured EDI inputs do not require fro
 
 Until those conditions are met, the deterministic fallback and small local models provide equivalent accuracy at a fraction of the cost.
 
+> **Additional ADRs:** Standalone ADR documents with full rationale, alternatives considered, expert perspectives, and review triggers are maintained in `docs/adr/`. These supplement the design decisions above with detailed records for decisions that warrant independent review (e.g., ADR-021: Core Deployment Model, ADR-022: Database Access Pattern).
+
 ---
 
 ## 8. API Contract *[NEW]*
@@ -800,6 +802,10 @@ All endpoints except `/api/auth/*` and `/api/v1/health` require a valid JWT Bear
 | `GET` | `/api/v1/exceptions/{id}` | analyst+ | Exception detail including lifecycle state and GraphState |
 | `PATCH` | `/api/v1/exceptions/{id}/override` | manager+ | Human override: `{ action, notes, resolved_by }` |
 | `GET` | `/api/v1/exceptions/{id}/trace` | analyst+ | Full `TraceRecord` JSON for audit |
+| `GET` | `/api/v1/exceptions/{id}/line-items` | analyst+ | Line-item detail for exception queue expansion and detail panel |
+| `GET` | `/api/v1/exceptions/{id}/analysis` | analyst+ | Agent analysis with per-line diagnosis and pricing waterfall data |
+| `POST` | `/api/v1/exceptions/{id}/approve` | manager+ | Resume paused HITL exception — rehydrates checkpoint, transitions PENDING_REVIEW → EXECUTING |
+| `POST` | `/api/v1/exceptions/{id}/reject` | manager+ | Reject paused HITL exception — transitions to REJECTED with reason HITL_REJECTED |
 | `POST` | `/api/v1/workflows` | manager+ | Multi-step workflow: `WorkflowDefinition` + events → `WorkflowResult` |
 | `GET` | `/api/v1/exceptions/stats` | analyst+ | Dashboard metrics (open count, auto-resolved, avg resolution time) |
 | `PUT` | `/api/v1/policies/{tenant_id}` | admin | Update tenant-specific policy overrides |
@@ -1660,4 +1666,3 @@ Every `run_graph()` call emits a `TraceRecord` to the `asoe.observability` Pytho
 | `ASOE_ENV` | `sandbox` | `production` or `sandbox` — validated against JWT `env` claim (see §11.6) |
 | `DATABASE_URL` | _(required)_ | PostgreSQL connection string |
 | `REDIS_URL` | _(required)_ | Redis connection string |
-| `ASOE_ENV` | `sandbox` | `production` or `sandbox` — validated against JWT `env` claim |

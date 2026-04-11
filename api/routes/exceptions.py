@@ -27,10 +27,14 @@ from fastapi import APIRouter, Depends, Query, Request
 from api.deps import AuthenticatedUser, get_current_user, get_tenant_id, require_role
 from api.errors import ASOEError
 from api.schemas import (
+    AnalysisResponse,
     ApproveRequest,
     AsyncResolveResponse,
     ExceptionDetailResponse,
     ExceptionListResponse,
+    LineAnalysis,
+    LineItem,
+    LineItemsResponse,
     OverrideRequest,
     RejectRequest,
     ResolveRequest,
@@ -455,3 +459,104 @@ async def reject_exception(
     if not updated:
         raise ASOEError(code="UPDATE_FAILED", message="Failed to update.", status_code=500)
     return updated.to_detail()
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/exceptions/{id}/line-items — Line items for an exception
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/exceptions/{exception_id}/line-items",
+    response_model=LineItemsResponse,
+    dependencies=[Depends(require_role("analyst", "manager", "admin"))],
+)
+async def get_line_items(
+    exception_id: str,
+    tenant_id: str = Depends(get_tenant_id),
+) -> LineItemsResponse:
+    record = _get_or_404(exception_id, tenant_id)
+    items: list[LineItem] = []
+
+    # Extract line items from resolution_data or event metadata
+    raw_items = record.resolution_data.get("line_items", [])
+    for li in raw_items:
+        items.append(
+            LineItem(
+                line_id=li.get("line_id", ""),
+                sku=li.get("sku", ""),
+                description=li.get("description", ""),
+                uom=li.get("uom", "EA"),
+                quantity=li.get("quantity", 0),
+                erp_price=li.get("erp_price", 0.0),
+                po_price=li.get("po_price", 0.0),
+                root_cause=li.get("root_cause"),
+            )
+        )
+
+    return LineItemsResponse(data=items)
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/exceptions/{id}/analysis — Analysis for an exception
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/exceptions/{exception_id}/analysis",
+    response_model=AnalysisResponse,
+    dependencies=[Depends(require_role("analyst", "manager", "admin"))],
+)
+async def get_analysis(
+    exception_id: str,
+    tenant_id: str = Depends(get_tenant_id),
+) -> AnalysisResponse:
+    record = _get_or_404(exception_id, tenant_id)
+
+    # Try to extract analysis from trace data
+    trace_data = exception_store.get_trace(exception_id)
+
+    # Build analysis from trace_data if available, else from record fields
+    diagnosis = "No analysis available"
+    confidence = 0
+    risk = "unknown"
+    resolution = "pending"
+    lines: list[LineAnalysis] = []
+
+    if trace_data:
+        diagnosis = trace_data.get("explanation") or diagnosis
+        risk = "low" if trace_data.get("shadow_verdict") == "GREEN" else (
+            "medium" if trace_data.get("shadow_verdict") == "YELLOW" else "high"
+        )
+        confidence = 80 if trace_data.get("intent_selected") else 0
+        resolution = trace_data.get("final_status") or resolution
+
+        # Extract per-line analysis if present
+        raw_lines = trace_data.get("line_analysis", [])
+        for la in raw_lines:
+            lines.append(
+                LineAnalysis(
+                    line_id=la.get("line_id", ""),
+                    diagnosis=la.get("diagnosis", ""),
+                    resolution=la.get("resolution", ""),
+                    risk=la.get("risk", "unknown"),
+                    waterfall=la.get("waterfall", []),
+                )
+            )
+    else:
+        # Construct basic response from record fields
+        if record.intent:
+            diagnosis = f"Intent classified as {record.intent}"
+            confidence = 70
+        if record.shadow_verdict:
+            risk = "low" if record.shadow_verdict == "GREEN" else (
+                "medium" if record.shadow_verdict == "YELLOW" else "high"
+            )
+        if record.final_status:
+            resolution = record.final_status
+
+    return AnalysisResponse(
+        diagnosis=diagnosis,
+        confidence=confidence,
+        risk=risk,
+        resolution=resolution,
+        lines=lines,
+    )

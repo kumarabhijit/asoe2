@@ -40,6 +40,7 @@ class TestEnums:
             TerminalStatus.MANUAL_REVIEW_REQUIRED,
             TerminalStatus.BLOCKED,
             TerminalStatus.REJECTED,
+            TerminalStatus.COMPLETE_WITH_CHILDREN,
         }
 
 
