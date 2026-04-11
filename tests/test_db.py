@@ -250,7 +250,7 @@ class TestExceptionRepository:
             trace_id="s3", final_status="MANUAL_REVIEW_REQUIRED",
         )
         stats = exception_repo.stats("t1")
-        assert stats["total"] == 3
+        assert stats["total_exceptions"] == 3
         assert stats["auto_resolved"] == 1
         assert stats["blocked"] == 1
         assert stats["manual_review"] == 1
@@ -467,7 +467,7 @@ class TestDatabaseBackedStore:
             trace_id="s2", final_status="BLOCKED",
         )
         stats = store.stats("t1")
-        assert stats["total"] == 2
+        assert stats["total_exceptions"] == 2
         assert stats["auto_resolved"] == 1
         assert stats["blocked"] == 1
 

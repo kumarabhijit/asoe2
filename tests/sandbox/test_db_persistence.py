@@ -327,7 +327,7 @@ class TestDatabaseBackedStore:
             event_type="TEST", trace_id="t-s2", final_status="BLOCKED",
         )
         stats = db_store.stats(SANDBOX_TENANT)
-        assert stats["total"] >= 2
+        assert stats["total_exceptions"] >= 2
         assert stats["auto_resolved"] >= 1
         assert stats["blocked"] >= 1
 

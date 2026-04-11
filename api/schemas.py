@@ -189,12 +189,16 @@ class TraceResponse(BaseModel):
 class StatsResponse(BaseModel):
     """GET /api/v1/exceptions/stats — dashboard metrics."""
 
-    total: int = 0
-    open: int = 0
+    total_exceptions: int = 0
+    open_exceptions: int = 0
     auto_resolved: int = 0
     manual_review: int = 0
     blocked: int = 0
     failed: int = 0
+    avg_resolution_time_seconds: Optional[float] = None
+    by_intent: Dict[str, int] = Field(default_factory=dict)
+    by_lifecycle_state: Dict[str, int] = Field(default_factory=dict)
+    by_shadow_verdict: Dict[str, int] = Field(default_factory=dict)
 
 
 class AsyncResolveResponse(BaseModel):
@@ -239,3 +243,59 @@ class PolicyOverrideResponse(BaseModel):
     value: Any
     effective_from: str
     created_by: str
+
+
+# ---------------------------------------------------------------------------
+# D3/D4 — Line-item and analysis response models
+# ---------------------------------------------------------------------------
+
+
+class LineItem(BaseModel):
+    """Single line item in an exception."""
+
+    line_id: str
+    sku: str
+    description: str
+    uom: str
+    quantity: int
+    erp_price: float
+    po_price: float
+    root_cause: Optional[str] = None
+
+
+class LineItemsResponse(BaseModel):
+    """GET /api/v1/exceptions/{id}/line-items"""
+
+    data: List[LineItem]
+
+
+class PricingWaterfallStep(BaseModel):
+    """A single step in the pricing waterfall analysis."""
+
+    type: str
+    label: str
+    record: Optional[str] = None
+    value: Optional[float] = None
+    running: Optional[float] = None
+    detail: Optional[str] = None
+    error: Optional[str] = None
+
+
+class LineAnalysis(BaseModel):
+    """Analysis details for a single line item."""
+
+    line_id: str
+    diagnosis: str
+    resolution: str
+    risk: str
+    waterfall: List[PricingWaterfallStep] = Field(default_factory=list)
+
+
+class AnalysisResponse(BaseModel):
+    """GET /api/v1/exceptions/{id}/analysis"""
+
+    diagnosis: str
+    confidence: int
+    risk: str
+    resolution: str
+    lines: List[LineAnalysis] = Field(default_factory=list)

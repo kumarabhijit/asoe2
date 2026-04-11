@@ -204,12 +204,12 @@ class ExceptionRepository:
 
         return self.get(exception_id, tenant_id)
 
-    def stats(self, tenant_id: str) -> Dict[str, int]:
+    def stats(self, tenant_id: str) -> Dict[str, Any]:
         with self._adapter.cursor(tenant_id) as cur:
             cur.execute(
                 """SELECT
                        COUNT(*) as total,
-                       SUM(CASE WHEN lifecycle_state IN ('INGESTED','CLASSIFYING','AUDITING','EXECUTING') THEN 1 ELSE 0 END) as open,
+                       SUM(CASE WHEN lifecycle_state IN ('INGESTED','CLASSIFYING','AUDITING','EXECUTING') THEN 1 ELSE 0 END) as open_exc,
                        SUM(CASE WHEN lifecycle_state = 'RESOLVED' THEN 1 ELSE 0 END) as auto_resolved,
                        SUM(CASE WHEN lifecycle_state = 'PENDING_REVIEW' THEN 1 ELSE 0 END) as manual_review,
                        SUM(CASE WHEN lifecycle_state = 'BLOCKED' THEN 1 ELSE 0 END) as blocked,
@@ -219,13 +219,54 @@ class ExceptionRepository:
                 (tenant_id,),
             )
             row = cur.fetchone()
+
+        # Aggregate by intent
+        by_intent: Dict[str, int] = {}
+        with self._adapter.cursor(tenant_id) as cur:
+            cur.execute(
+                "SELECT COALESCE(intent, 'UNKNOWN') as intent_key, COUNT(*) as cnt FROM exceptions WHERE tenant_id = ? GROUP BY intent_key",
+                (tenant_id,),
+            )
+            for r in cur.fetchall():
+                k = r[0] if not hasattr(r, "keys") else r["intent_key"]
+                v = r[1] if not hasattr(r, "keys") else r["cnt"]
+                by_intent[k] = v
+
+        # Aggregate by lifecycle_state
+        by_lifecycle_state: Dict[str, int] = {}
+        with self._adapter.cursor(tenant_id) as cur:
+            cur.execute(
+                "SELECT lifecycle_state, COUNT(*) as cnt FROM exceptions WHERE tenant_id = ? GROUP BY lifecycle_state",
+                (tenant_id,),
+            )
+            for r in cur.fetchall():
+                k = r[0] if not hasattr(r, "keys") else r["lifecycle_state"]
+                v = r[1] if not hasattr(r, "keys") else r["cnt"]
+                by_lifecycle_state[k] = v
+
+        # Aggregate by shadow_verdict
+        by_shadow_verdict: Dict[str, int] = {}
+        with self._adapter.cursor(tenant_id) as cur:
+            cur.execute(
+                "SELECT shadow_verdict, COUNT(*) as cnt FROM exceptions WHERE tenant_id = ? AND shadow_verdict IS NOT NULL GROUP BY shadow_verdict",
+                (tenant_id,),
+            )
+            for r in cur.fetchall():
+                k = r[0] if not hasattr(r, "keys") else r["shadow_verdict"]
+                v = r[1] if not hasattr(r, "keys") else r["cnt"]
+                by_shadow_verdict[k] = v
+
         return {
-            "total": row[0] or 0,
-            "open": row[1] or 0,
+            "total_exceptions": row[0] or 0,
+            "open_exceptions": row[1] or 0,
             "auto_resolved": row[2] or 0,
             "manual_review": row[3] or 0,
             "blocked": row[4] or 0,
             "failed": row[5] or 0,
+            "avg_resolution_time_seconds": None,
+            "by_intent": by_intent,
+            "by_lifecycle_state": by_lifecycle_state,
+            "by_shadow_verdict": by_shadow_verdict,
         }
 
     _COLUMNS = (

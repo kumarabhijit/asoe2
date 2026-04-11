@@ -27,6 +27,7 @@ class TerminalStatus(str, Enum):
     MANUAL_REVIEW_REQUIRED = "MANUAL_REVIEW_REQUIRED"
     BLOCKED = "BLOCKED"
     REJECTED = "REJECTED"
+    COMPLETE_WITH_CHILDREN = "COMPLETE_WITH_CHILDREN"
 
 
 # Single source of truth: maps TerminalStatus to exception lifecycle state.
@@ -37,6 +38,7 @@ STATUS_TO_LIFECYCLE: Dict[str, str] = {
     "MANUAL_REVIEW_REQUIRED": "PENDING_REVIEW",
     "BLOCKED": "BLOCKED",
     "REJECTED": "REJECTED",
+    "COMPLETE_WITH_CHILDREN": "RESOLVED",
 }
 
 # 11-state exception lifecycle (architecture_v3.md §9.1).

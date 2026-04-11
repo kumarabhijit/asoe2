@@ -376,9 +376,18 @@ class TestExceptionCRUD:
         r = client.get("/api/v1/exceptions/stats", headers=_auth(analyst_token))
         assert r.status_code == 200
         data = r.json()
-        assert data["total"] == 1
+        assert data["total_exceptions"] == 1
+        assert "open_exceptions" in data
         assert "auto_resolved" in data
         assert "manual_review" in data
+        assert "by_intent" in data
+        assert isinstance(data["by_intent"], dict)
+        assert "by_lifecycle_state" in data
+        assert isinstance(data["by_lifecycle_state"], dict)
+        assert "by_shadow_verdict" in data
+        assert isinstance(data["by_shadow_verdict"], dict)
+        # avg_resolution_time_seconds may be None or a float
+        assert "avg_resolution_time_seconds" in data
 
 
 # ---------------------------------------------------------------------------
@@ -625,3 +634,95 @@ class TestErrorEnvelope:
         )
         assert r.status_code == 404
         assert r.json()["error"]["code"] == "NOT_FOUND"
+
+
+# ---------------------------------------------------------------------------
+# Line Items endpoint
+# ---------------------------------------------------------------------------
+
+class TestLineItems:
+    def _create_exception(self, client, token) -> str:
+        r = client.post(
+            "/api/v1/exceptions/resolve",
+            json=_sample_event(),
+            headers=_auth(token),
+        )
+        return r.json()["exception_id"]
+
+    def test_line_items_happy_path(self, client, analyst_token):
+        exc_id = self._create_exception(client, analyst_token)
+        r = client.get(
+            f"/api/v1/exceptions/{exc_id}/line-items",
+            headers=_auth(analyst_token),
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert "data" in data
+        assert isinstance(data["data"], list)
+
+    def test_line_items_not_found(self, client, analyst_token):
+        r = client.get(
+            "/api/v1/exceptions/nonexistent/line-items",
+            headers=_auth(analyst_token),
+        )
+        assert r.status_code == 404
+        assert r.json()["error"]["code"] == "NOT_FOUND"
+
+    def test_line_items_unauthenticated(self, client):
+        r = client.get("/api/v1/exceptions/some-id/line-items")
+        assert r.status_code == 401
+
+    def test_line_items_viewer_forbidden(self, client, viewer_token):
+        r = client.get(
+            "/api/v1/exceptions/some-id/line-items",
+            headers=_auth(viewer_token),
+        )
+        assert r.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Analysis endpoint
+# ---------------------------------------------------------------------------
+
+class TestAnalysis:
+    def _create_exception(self, client, token) -> str:
+        r = client.post(
+            "/api/v1/exceptions/resolve",
+            json=_sample_event(),
+            headers=_auth(token),
+        )
+        return r.json()["exception_id"]
+
+    def test_analysis_happy_path(self, client, analyst_token):
+        exc_id = self._create_exception(client, analyst_token)
+        r = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert "diagnosis" in data
+        assert "confidence" in data
+        assert "risk" in data
+        assert "resolution" in data
+        assert "lines" in data
+        assert isinstance(data["lines"], list)
+
+    def test_analysis_not_found(self, client, analyst_token):
+        r = client.get(
+            "/api/v1/exceptions/nonexistent/analysis",
+            headers=_auth(analyst_token),
+        )
+        assert r.status_code == 404
+        assert r.json()["error"]["code"] == "NOT_FOUND"
+
+    def test_analysis_unauthenticated(self, client):
+        r = client.get("/api/v1/exceptions/some-id/analysis")
+        assert r.status_code == 401
+
+    def test_analysis_viewer_forbidden(self, client, viewer_token):
+        r = client.get(
+            "/api/v1/exceptions/some-id/analysis",
+            headers=_auth(viewer_token),
+        )
+        assert r.status_code == 403

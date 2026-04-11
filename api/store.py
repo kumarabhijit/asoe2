@@ -196,7 +196,7 @@ class ExceptionStore:
         with self._lock:
             return self._traces.get(exception_id)
 
-    def stats(self, tenant_id: str) -> Dict[str, int]:
+    def stats(self, tenant_id: str) -> Dict[str, Any]:
         with self._lock:
             records = [
                 r for r in self._records.values()
@@ -204,25 +204,56 @@ class ExceptionStore:
             ]
         _OPEN_STATES = {"INGESTED", "CLASSIFYING", "AUDITING", "EXECUTING"}
         open_count = auto_resolved = manual_review = blocked = failed = 0
+        by_intent: Dict[str, int] = {}
+        by_lifecycle_state: Dict[str, int] = {}
+        by_shadow_verdict: Dict[str, int] = {}
+        resolved_times: list[float] = []
         for r in records:
             s = r.lifecycle_state
             if s in _OPEN_STATES:
                 open_count += 1
             elif s == "RESOLVED":
                 auto_resolved += 1
+                # Compute resolution time for resolved exceptions
+                try:
+                    created = datetime.fromisoformat(r.created_at)
+                    updated = datetime.fromisoformat(r.updated_at)
+                    resolved_times.append((updated - created).total_seconds())
+                except (ValueError, TypeError):
+                    pass
             elif s == "PENDING_REVIEW":
                 manual_review += 1
             elif s == "BLOCKED":
                 blocked += 1
             elif s == "FAILED":
                 failed += 1
+
+            # Aggregate by intent
+            intent_key = r.intent or "UNKNOWN"
+            by_intent[intent_key] = by_intent.get(intent_key, 0) + 1
+
+            # Aggregate by lifecycle state
+            by_lifecycle_state[s] = by_lifecycle_state.get(s, 0) + 1
+
+            # Aggregate by shadow verdict
+            if r.shadow_verdict:
+                by_shadow_verdict[r.shadow_verdict] = by_shadow_verdict.get(r.shadow_verdict, 0) + 1
+
+        avg_resolution: Optional[float] = None
+        if resolved_times:
+            avg_resolution = sum(resolved_times) / len(resolved_times)
+
         return {
-            "total": len(records),
-            "open": open_count,
+            "total_exceptions": len(records),
+            "open_exceptions": open_count,
             "auto_resolved": auto_resolved,
             "manual_review": manual_review,
             "blocked": blocked,
             "failed": failed,
+            "avg_resolution_time_seconds": avg_resolution,
+            "by_intent": by_intent,
+            "by_lifecycle_state": by_lifecycle_state,
+            "by_shadow_verdict": by_shadow_verdict,
         }
 
 

@@ -296,7 +296,7 @@ class TestDashboardStats:
         )
         assert resp.status_code == 200
         stats = resp.json()
-        assert stats["total"] >= 2
+        assert stats["total_exceptions"] >= 2
         assert stats["auto_resolved"] >= 1  # pricing → COMPLETE → RESOLVED
         assert stats["blocked"] >= 1  # mass pricing → BLOCKED
 
@@ -405,7 +405,7 @@ class TestTenantIsolation:
             "/api/v1/exceptions/stats",
             headers=auth_header(token_b),
         )
-        assert resp.json()["total"] == 0
+        assert resp.json()["total_exceptions"] == 0
 
 
 # ═══════════════════════════════════════════════════════════════════════════
