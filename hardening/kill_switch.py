@@ -47,10 +47,7 @@ def apply_kill_switch(state: GraphState) -> GraphState:
     Called by run_graph() when is_kill_switch_active() is True.  The original
     state object is not mutated; a new GraphState is returned.
     """
-    return GraphState.model_validate(
-        state.model_dump()
-        | {
-            "final_status": TerminalStatus.FAIL_TO_HUMAN,
-            "explanation": KILL_SWITCH_EXPLANATION,
-        }
-    )
+    return state.model_copy(update={
+        "final_status": TerminalStatus.FAIL_TO_HUMAN,
+        "explanation": KILL_SWITCH_EXPLANATION,
+    })
