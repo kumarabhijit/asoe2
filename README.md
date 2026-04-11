@@ -216,48 +216,68 @@ environment:
 #### Prerequisites
 
 - **Python 3.11+** (3.11, 3.12, 3.13, or 3.14 — pinned in `.python-version`)
-- **pip** (included with Python)
+- **uv** (recommended) — fast Python package manager ([install](https://docs.astral.sh/uv/getting-started/installation/))
 - **Docker** (optional — only needed for `--prod` mode or `docker compose`)
 
 No GPU, cloud keys, or optional packages required for development or testing.
 
-#### Install
+#### Install (uv — recommended)
 
 ```bash
 # 1. Clone the repository
 git clone https://github.com/kumarabhijit/asoe2.git
 cd asoe2
 
-# 2. Create virtual environment
-python3 -m venv .venv
+# 2. Install uv (if not already present)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 3. Create virtual environment
+uv venv --python 3.11
+
+# 4. Activate the environment
 source .venv/bin/activate    # Linux/macOS
 # .venv\Scripts\activate     # Windows
 
-# 3. Install core + dev dependencies
-pip install -e ".[dev]"
+# 5. Install core + dev dependencies
+uv pip install -e ".[dev]"
 
-# 4. Install Streamlit for the sandbox UI
-pip install streamlit
+# 6. Install Streamlit for the sandbox UI
+uv pip install streamlit
 
-# 5. Seed the sandbox database
+# 7. Seed the sandbox database
 PYTHONPATH=. python tests/sandbox/seed.py
 ```
 
-> **Python 3.14 users:** If you're on Python 3.14+, run the pydantic
-> compatibility patch after installing: `bash scripts/apply-patches.sh .venv/bin/python`.
-> This is not needed on Python 3.11–3.13.
+> **Python 3.14 users:** Run the pydantic compatibility patch after
+> installing: `bash scripts/apply-patches.sh .venv/bin/python`.
+> Not needed on Python 3.11–3.13.
+
+<details>
+<summary><b>Alternative: Install with pip (if uv is not available)</b></summary>
+
+```bash
+git clone https://github.com/kumarabhijit/asoe2.git
+cd asoe2
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+pip install streamlit
+PYTHONPATH=. python tests/sandbox/seed.py
+```
+
+</details>
 
 **Optional extras:**
 
 ```bash
 # Outlines constrained-generation backend (GPU-heavy, not needed for CI)
-pip install -e ".[outlines]"
+uv pip install -e ".[outlines]"
 
 # PostgreSQL driver (for production-like database testing)
-pip install -e ".[postgres]"
+uv pip install -e ".[postgres]"
 
 # LangFuse observability (trace forwarding)
-pip install -e ".[langfuse]"
+uv pip install -e ".[langfuse]"
 ```
 
 #### Run the tests
@@ -343,7 +363,7 @@ WebSocket events, and dashboard stats.
 
 ```bash
 # 1. Install sandbox dependencies (streamlit only; outlines/transformers optional)
-pip install streamlit
+uv pip install streamlit
 
 # 2. Seed the SQLite database with sample SAP pricing, contracts, and EDI events
 PYTHONPATH=. python tests/sandbox/seed.py
@@ -427,7 +447,7 @@ LangFuse as a trace with spans — no code changes needed.
 
 ```bash
 # Optional — only if you want LangFuse forwarding
-pip install "langfuse>=2.0.0"
+uv pip install "langfuse>=2.0.0"
 ```
 
 **Configure (env vars or `.env`):**

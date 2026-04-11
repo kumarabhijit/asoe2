@@ -100,12 +100,18 @@ if [ "$PY_MAJOR" -lt 3 ] || ([ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 11 ]); t
 fi
 step "Python $PY_VERSION OK"
 
-# pip
-if ! $PYTHON -m pip --version &>/dev/null; then
-    error "pip not found. Run: $PYTHON -m ensurepip --upgrade"
+# uv (preferred) or pip (fallback)
+USE_UV=false
+if command -v uv &>/dev/null; then
+    USE_UV=true
+    step "uv $(uv --version 2>/dev/null || echo '?') OK (preferred)"
+elif $PYTHON -m pip --version &>/dev/null; then
+    step "pip OK (uv not found — using pip as fallback)"
+    warn "For faster installs, install uv: curl -LsSf https://astral.sh/uv/install.sh | sh"
+else
+    error "Neither uv nor pip found. Install uv: curl -LsSf https://astral.sh/uv/install.sh | sh"
     exit 1
 fi
-step "pip OK"
 
 # Docker (only required for --prod)
 if [ "$MODE" = "prod" ]; then
@@ -125,7 +131,11 @@ header "Step 2: Setting up virtual environment"
 if [ -z "${VIRTUAL_ENV:-}" ]; then
     if [ ! -d ".venv" ]; then
         step "Creating .venv..."
-        $PYTHON -m venv .venv
+        if $USE_UV; then
+            uv venv --python "$PY_VERSION"
+        else
+            $PYTHON -m venv .venv
+        fi
     fi
     step "Activating .venv..."
     source .venv/bin/activate
@@ -140,11 +150,19 @@ fi
 
 header "Step 3: Installing dependencies"
 
-step "Installing core + dev dependencies..."
-pip install -e ".[dev]" --quiet || pip install -e ".[dev]"
+if $USE_UV; then
+    step "Installing core + dev dependencies (uv)..."
+    uv pip install -e ".[dev]"
 
-step "Installing streamlit (sandbox UI)..."
-pip install streamlit --quiet || pip install streamlit
+    step "Installing streamlit (sandbox UI)..."
+    uv pip install streamlit
+else
+    step "Installing core + dev dependencies (pip)..."
+    pip install -e ".[dev]" --quiet || pip install -e ".[dev]"
+
+    step "Installing streamlit (sandbox UI)..."
+    pip install streamlit --quiet || pip install streamlit
+fi
 
 # Apply pydantic patch if needed (Python 3.14+)
 if [ "$PY_MINOR" -ge 14 ] && [ -f "scripts/apply-patches.sh" ]; then
