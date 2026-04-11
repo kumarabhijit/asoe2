@@ -104,14 +104,20 @@ def build_explain_graph():
     return graph.compile()
 
 
-def run_graph(state: GraphState) -> GraphState:
+def run_graph(state: GraphState, *, explain_mode: bool | None = None) -> GraphState:
     """Invoke the graph and return a typed GraphState.
+
+    Args:
+        state: The initial GraphState.
+        explain_mode: If True, force explain-mode graph. If None (default),
+            check the ASOE_EXPLAIN_MODE env var. Passing the flag explicitly
+            avoids mutating os.environ (thread-safe for concurrent requests).
 
     Phase 6 hardening checks (evaluated in order):
       1. Kill switch  — if ASOE_KILL_SWITCH=1, return FAIL_TO_HUMAN immediately
                         without running any node.
-      2. Explain mode — if ASOE_EXPLAIN_MODE=1, use build_explain_graph()
-                        so execute_recipe is replaced by explain_only.
+      2. Explain mode — use build_explain_graph() so execute_recipe is replaced
+                        by explain_only.
 
     LangGraph 0.2+ serialises state to a plain dict at the invoke() boundary.
     This wrapper reconstructs the Pydantic model so callers always receive a
@@ -125,7 +131,8 @@ def run_graph(state: GraphState) -> GraphState:
         return apply_kill_switch(state)
 
     # --- Phase 6: explain mode selects alternate graph ---
-    compiled_graph = build_explain_graph() if is_explain_mode_active() else build_graph()
+    use_explain = explain_mode if explain_mode is not None else is_explain_mode_active()
+    compiled_graph = build_explain_graph() if use_explain else build_graph()
 
     result = compiled_graph.invoke(state)
     if isinstance(result, GraphState):

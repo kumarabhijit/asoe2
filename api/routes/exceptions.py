@@ -19,7 +19,6 @@ Security:
 from __future__ import annotations
 
 import logging
-import os
 from typing import Optional
 from uuid import uuid4
 
@@ -63,10 +62,10 @@ def _build_order_event(req: ResolveRequest) -> OrderEvent:
     return OrderEvent.model_validate(req.model_dump())
 
 
-def _run_graph_safe(state: GraphState) -> GraphState:
+def _run_graph_safe(state: GraphState, *, explain_mode: bool | None = None) -> GraphState:
     """Run the graph with proper error handling."""
     from orchestration.graph import run_graph
-    return run_graph(state)
+    return run_graph(state, explain_mode=explain_mode)
 
 
 def _state_to_resolve_response(
@@ -237,10 +236,8 @@ async def resolve_explain(
     event = _build_order_event(req)
     state = GraphState(event=event)
 
-    prev = os.environ.get("ASOE_EXPLAIN_MODE")
-    os.environ["ASOE_EXPLAIN_MODE"] = "1"
     try:
-        final_state = _run_graph_safe(state)
+        final_state = _run_graph_safe(state, explain_mode=True)
     except Exception as exc:
         logger.error("Explain graph execution failed: %s", exc)
         raise ASOEError(
@@ -249,11 +246,6 @@ async def resolve_explain(
             status_code=500,
             trace_id=_get_trace_id(request),
         )
-    finally:
-        if prev is None:
-            os.environ.pop("ASOE_EXPLAIN_MODE", None)
-        else:
-            os.environ["ASOE_EXPLAIN_MODE"] = prev
 
     trace_id = final_state.shadow.trace_id if final_state.shadow else None
     exception_id = _persist_exception(tenant_id, final_state, trace_id)
