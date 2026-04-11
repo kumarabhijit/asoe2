@@ -60,21 +60,7 @@ def _get_trace_id(request: Request) -> str:
 
 def _build_order_event(req: ResolveRequest) -> OrderEvent:
     """Construct an OrderEvent from the API request body."""
-    return OrderEvent(
-        order_id=req.order_id,
-        line_item=req.line_item,
-        sku=req.sku,
-        event_type=req.event_type,
-        po_price=req.po_price,
-        sap_base_price=req.sap_base_price,
-        retailer_id=req.retailer_id,
-        event_ts=req.event_ts,
-        requester_role=req.requester_role,
-        credit_limit=req.credit_limit,
-        current_exposure=req.current_exposure,
-        line_count=req.line_count,
-        metadata=req.metadata,
-    )
+    return OrderEvent.model_validate(req.model_dump())
 
 
 def _run_graph_safe(state: GraphState) -> GraphState:

@@ -9,28 +9,18 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from contracts.models import OrderEvent
+
 
 # ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------
 
 
-class ResolveRequest(BaseModel):
-    """POST /api/v1/exceptions/resolve — constructs an OrderEvent."""
+class ResolveRequest(OrderEvent):
+    """POST /api/v1/exceptions/resolve — same fields as OrderEvent."""
 
-    order_id: str
-    line_item: int = 1
-    sku: Optional[str] = None
-    event_type: str = "EDI_850_PRICE_MISMATCH"
-    po_price: float
-    sap_base_price: float
-    retailer_id: Optional[str] = None
-    event_ts: Optional[str] = None
-    requester_role: Optional[str] = None
-    credit_limit: Optional[float] = None
-    current_exposure: Optional[float] = None
-    line_count: int = 1
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    pass
 
 
 class OverrideRequest(BaseModel):
