@@ -187,112 +187,213 @@ graph TD
 
 ## Getting started
 
-### Prerequisites
+### One-command setup (recommended for novices)
 
-- **Python 3.14.3** (stable, pinned in `.python-version`)
-- **uv** — fast Python package manager ([install](https://docs.astral.sh/uv/getting-started/installation/))
-
-No GPU or optional packages required for development or testing.
-
-### Install
+The quickstart script handles everything — Python check, virtual environment,
+dependency installation, database seeding, and test verification:
 
 ```bash
-# 1. Update uv
-uv self update 
-# 2. Install Python 3.14.3 (if not already present)
-uv python install 3.14.3
+git clone https://github.com/kumarabhijit/asoe2.git
+cd asoe2
+bash scripts/quickstart.sh
+```
+
+That's it. When it finishes you'll see a "Ready" banner with all available
+commands. Expected output: **891 tests passed**.
+
+**Other quickstart modes:**
+
+```bash
+bash scripts/quickstart.sh --test    # run tests only (skip install)
+bash scripts/quickstart.sh --prod    # adds PostgreSQL + Redis containers
+```
+
+### Manual setup (step by step)
+
+If you prefer to set up manually, or if the quickstart doesn't match your
+environment:
+
+#### Prerequisites
+
+- **Python 3.11+** (3.11, 3.12, 3.13, or 3.14 — pinned in `.python-version`)
+- **uv** (recommended) — fast Python package manager ([install](https://docs.astral.sh/uv/getting-started/installation/))
+- **Docker** (optional — only needed for `--prod` mode or `docker compose`)
+
+No GPU, cloud keys, or optional packages required for development or testing.
+
+#### Install (uv — recommended)
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/kumarabhijit/asoe2.git
+cd asoe2
+
+# 2. Install uv (if not already present)
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # 3. Create virtual environment
-uv venv --python 3.14.3
+uv venv --python 3.11
 
-# 4. Install core + dev dependencies
-uv pip install "langgraph>=0.2.0" "pydantic>=2.7.0" "fastapi>=0.110.0" "uvicorn[standard]>=0.29.0" "pytest>=8.0.0" "pytest-cov>=5.0.0" "httpx>=0.27.0"
+# 4. Activate the environment
+source .venv/bin/activate    # Linux/macOS
+# .venv\Scripts\activate     # Windows
 
-# 5. Apply compatibility patch (pydantic 2.12.x + Python 3.14 typing API change)
-bash scripts/apply-patches.sh .venv/bin/python
+# 5. Install core + dev dependencies
+uv pip install -e ".[dev]"
 
-# 6. Activate the environment
-source .venv/bin/activate
+# 6. Install Streamlit for the sandbox UI
+uv pip install streamlit
+
+# 7. Seed the sandbox database
+PYTHONPATH=. python tests/sandbox/seed.py
 ```
 
-For the optional Outlines constrained-generation backend (GPU-heavy, not needed for CI):
+> **Python 3.14 users:** Run the pydantic compatibility patch after
+> installing: `bash scripts/apply-patches.sh .venv/bin/python`.
+> Not needed on Python 3.11–3.13.
+
+<details>
+<summary><b>Alternative: Install with pip (if uv is not available)</b></summary>
 
 ```bash
-uv pip install "outlines>=0.0.46" "transformers>=4.41.0" "torch>=2.3.0" "accelerate>=0.30.0" "huggingface-hub>=0.23.0"
-bash scripts/apply-patches.sh .venv/bin/python   # re-run after any pydantic reinstall
+git clone https://github.com/kumarabhijit/asoe2.git
+cd asoe2
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+pip install streamlit
+PYTHONPATH=. python tests/sandbox/seed.py
 ```
 
-> **Note on the pydantic patch:** Python 3.14 renamed an internal `typing._eval_type`
-> parameter from `prefer_fwd_module` to `parent_fwdref`. Pydantic 2.12.5 uses the old
-> name. `scripts/apply-patches.sh` applies the one-line fix in-place. It is idempotent
-> and safe to re-run. The patch will become unnecessary once pydantic ships a compatible
-> release. See `patches/pydantic-py314-typing-eval-type.patch` for the diff.
+</details>
 
-### Run the tests
+**Optional extras:**
+
+```bash
+# Outlines constrained-generation backend (GPU-heavy, not needed for CI)
+uv pip install -e ".[outlines]"
+
+# PostgreSQL driver (for production-like database testing)
+uv pip install -e ".[postgres]"
+
+# LangFuse observability (trace forwarding)
+uv pip install -e ".[langfuse]"
+```
+
+#### Run the tests
 
 ```bash
 python -m pytest
 ```
 
-Expected: **764 passed, 0 failed** (a warning from `langchain_core` pydantic.v1 deprecation may appear — not a blocker).
+Expected: **891 passed, 0 failed**.
 
-> **Verified on Python 3.14.3 (stable).**
+| Test group | Count | What it covers |
+|---|---|---|
+| Core tests (`tests/test_*.py`) | 764 | Contracts, constraints, recipes, orchestration, shadow, API, DB, WebSocket, workflows, guardrails |
+| Sandbox integration (`tests/sandbox/test_*.py`) | 127 | Full API integration, auth flow, DB persistence, WebSocket events, compliance simulation, recipe integrity |
 
-### Smoke test
+```bash
+# Run only sandbox integration tests
+python -m pytest tests/sandbox/ -v
+
+# Run a specific test file
+python -m pytest tests/sandbox/test_auth_flow.py -v
+```
+
+#### Smoke test
 
 ```bash
 python main.py
 ```
 
 This runs a single demo `OrderEvent` through the full graph and prints the
-resulting `GraphState`.  Honoured by kill switch and explain mode.
+resulting `GraphState`. Honoured by kill switch and explain mode.
 
 ### Sandbox CLI (headless runner)
 
 The CLI runner executes sandbox scenarios through the full pipeline and prints
-execution traces to the terminal.  No browser or Streamlit required.
+execution traces to the terminal. Supports two modes:
+
+- **Direct mode** (default) — calls `run_graph()` via Python imports
+- **API mode** (`--api`) — authenticates via `/api/auth/login` multi-step flow,
+  then uses the 19 REST endpoints from architecture_v3.md
 
 ```bash
 # 1. Seed the SQLite database (if not already done)
-python tests/sandbox/seed.py
+PYTHONPATH=. python tests/sandbox/seed.py
 
-# 2. Run all 18 seeded events
+# 2. Run all 22 seeded events (direct mode)
 PYTHONPATH=. python tests/sandbox/cli.py
 
-# 3. Run a single event
+# 3. Run via REST API endpoints (API mode with JWT auth)
+PYTHONPATH=. python tests/sandbox/cli.py --api
+
+# 4. Run a single event
 PYTHONPATH=. python tests/sandbox/cli.py --event EVT-CC-001
 
-# 4. Filter by intent
+# 5. Filter by intent
 PYTHONPATH=. python tests/sandbox/cli.py --intent CREDIT_BLOCK
 
-# 5. Show full JSON trace and prompt previews
+# 6. Force BLOCKED state (RED shadow — test guardrail UI)
+PYTHONPATH=. python tests/sandbox/cli.py --force-blocked
+
+# 7. Force MANUAL_REVIEW_REQUIRED state (explain mode)
+PYTHONPATH=. python tests/sandbox/cli.py --force-manual-review
+
+# 8. Lily personality (conversational output)
+PYTHONPATH=. python tests/sandbox/cli.py --api --lily
+
+# 9. Show full JSON trace and prompt previews
 PYTHONPATH=. python tests/sandbox/cli.py --event EVT-CC-001 --json --prompts
 
-# 6. Summary only (suppress per-event traces)
+# 10. Summary only (suppress per-event traces)
 PYTHONPATH=. python tests/sandbox/cli.py --quiet
 ```
 
-The runner uses `DeterministicFallbackBackend` by default.  Set
+The runner uses `DeterministicFallbackBackend` by default. Set
 `LOCAL_LLM_BACKEND_CLASS` to use a real constrained-generation model (see
 environment variables below).
 
 ### Sandbox UI (local interactive visualiser)
 
-The sandbox runs all four intents through the live pipeline and displays a
-step-by-step execution trace in a browser.  It does not require a GPU or a
-cloud LLM — the `DeterministicFallbackBackend` is used by default.
+The Streamlit UI provides an interactive browser-based sandbox with all the
+same capabilities as the CLI, plus visual panels for auth flow, DB persistence,
+WebSocket events, and dashboard stats.
 
 ```bash
 # 1. Install sandbox dependencies (streamlit only; outlines/transformers optional)
 uv pip install streamlit
 
 # 2. Seed the SQLite database with sample SAP pricing, contracts, and EDI events
-python tests/sandbox/seed.py
+PYTHONPATH=. python tests/sandbox/seed.py
 
 # 3. Launch the UI
 PYTHONPATH=. streamlit run tests/sandbox/ui/app.py
 # → open http://localhost:8501
 ```
+
+**UI features (sidebar controls):**
+
+| Control | What it does |
+|---|---|
+| **Execution mode** | Toggle between Direct (`run_graph()`) and API (REST endpoints with JWT) |
+| **Force BLOCKED** | Override to trigger RED Compliance Shadow verdict |
+| **Force MANUAL_REVIEW** | Enable explain mode (pipeline runs, no recipe execution) |
+| **Lily personality** | Conversational output from the Lily agentic persona |
+
+**Expandable panels (after running an event):**
+
+| Panel | What it shows |
+|---|---|
+| Auth flow validation | Multi-step login steps, SSO init test, token refresh test |
+| DB persistence | Exception record + trace record fetched back from store |
+| WebSocket events | Pub/sub events published during resolve |
+| Dashboard stats | Aggregate metrics from `GET /api/v1/exceptions/stats` |
+| Exception queue | Paginated list from `GET /api/v1/exceptions` |
+| Execution trace | Step-by-step pipeline trace (same as CLI output) |
+| Prompt preview | LLM prompts for intent, recipe, shadow decisions |
+| Full JSON trace | Complete `GraphState` as JSON |
 
 **Optional: use a local open-weights model** (requires GPU or fast CPU)
 
@@ -630,7 +731,7 @@ HTTP_PROXY=http://proxy:8080 HTTPS_PROXY=http://proxy:8080 \
 
 1. `docker compose -f docker-compose.hub.yml up` — starts core + sandbox UI
 2. Open `http://localhost:8501` in your browser
-3. Select an EDI event from the sidebar (18 sample events covering all 4 intents)
+3. Select an EDI event from the sidebar (22 sample events covering all 4 intents)
 4. Click **Run** — the event runs through the full pipeline: classify → shadow → recipe → effects
 5. Inspect the execution trace: intent, shadow verdict, recipe, gateway activity, full JSON state
 6. Toggle `ASOE_EXPLAIN_MODE=1` in `.env` for dry-run mode (no recipe side effects)
@@ -710,14 +811,28 @@ db/                 Database layer (architecture_v3.md §9)
   migrations/       V001__initial_schema.sql (5 tables, RLS, SOX trigger, pgvector)
 docs/               AUDITOR_GUIDE.md, ADR-001, ADR-002
   specs/            Product-owner reference specs (not runtime code)
-tests/              pytest test suite (764 tests)
-  sandbox/          Local execution sandbox (not part of CI test suite)
-    cli.py          Headless CLI runner — run events from the terminal (no Streamlit needed)
+tests/              pytest test suite (891 tests)
+  test_*.py         Core tests: contracts, constraints, recipes, orchestration, shadow, API, DB, WebSocket, workflows, guardrails (764 tests)
+  sandbox/          Local execution sandbox + integration tests (127 tests)
+    conftest.py     Shared fixtures (client, JWT tokens for all RBAC roles, event payloads)
+    test_integration.py       Full API path: health, resolve, CRUD, stats, tenant isolation (31 tests)
+    test_auth_flow.py         Multi-step login, SSO, MFA, token refresh, RBAC (20 tests)
+    test_db_persistence.py    Exception/trace/policy persistence, lifecycle mapping (16 tests)
+    test_websocket_events.py  Pub/sub events, tenant isolation, WebSocket auth (17 tests)
+    test_compliance_simulation.py  Force BLOCKED/REVIEW, kill switch, approve/reject (19 tests)
+    test_recipe_integrity.py  Recipe registry, ERP mocking, naming, constraints (24 tests)
+    cli.py          Headless CLI runner — direct + API modes, simulation flags, Lily personality
     seed.py         SQLite seeder — creates sandbox.db with customers, DCs, promotions, SAP / EDI data
-    ui/app.py       Streamlit execution-trace visualiser
+    ui/app.py       Streamlit execution-trace visualiser — API mode, auth panel, DB verification, WebSocket monitor
     llm/local_backend.py  LocalHFBackend — Outlines + HuggingFace model (optional)
     llm/prompts.py  Human-readable prompt templates for the UI "Prompt Preview" panel
     requirements-sandbox.txt  Sandbox-only deps (streamlit, outlines, transformers, torch)
+scripts/
+  quickstart.sh     One-command dev setup (venv, deps, seed, tests) — start here
+  setup-sandbox.sh  PostgreSQL + Redis containers, DB migrations, --ci mode for SQLite
+  sandbox-entrypoint.sh  Docker entrypoint — auto-seeds sandbox.db
+  apply-patches.sh  Pydantic compatibility patch for Python 3.14+
+  docker-build-push.sh   Build and push Docker images to registry
 Dockerfile.core     Core orchestration container (LangGraph + recipes + shadow)
 Dockerfile.ui       Streamlit sandbox UI container (core + streamlit)
 Dockerfile.inference  Local LLM inference container (Outlines + torch + transformers)
@@ -754,11 +869,15 @@ k8s/                Kubernetes manifests for AKS production deployment
 | `prompts/phase_14_auth_security.md` | Auth & security hardening prompt — token expiry, env isolation, trace_id, partner scoping |
 | `prompts/phase_15_websocket_redis.md` | WebSocket/Redis prompt — event schemas, pub/sub, WebSocket hub, resolve wiring |
 | `prompts/phase_16_v1_guardrails.md` | V1 Foundation Guardrail tests — 6 CI-automated guardrails (AST inspection, metadata contracts, ERP-agnostic gateway, schema agnostic) |
-| `tests/sandbox/seed.py` | Sandbox seeder: customers, DCs, promotions, SAP pricing, retailer contracts, credit profiles, and 18 EDI events covering all four intents |
-| `tests/sandbox/cli.py` | Headless CLI runner — run sandbox events from the terminal without Streamlit |
-| `tests/sandbox/ui/app.py` | Streamlit execution-trace visualiser — select event, run pipeline, inspect trace |
+| `tests/sandbox/seed.py` | Sandbox seeder: customers, DCs, promotions, SAP pricing, retailer contracts, credit profiles, and 22 EDI events covering all four intents |
+| `tests/sandbox/cli.py` | Headless CLI runner — direct + API modes, simulation flags, Lily personality |
+| `tests/sandbox/ui/app.py` | Streamlit UI — API mode, auth panel, DB verification, WebSocket monitor, stats |
+| `tests/sandbox/conftest.py` | Shared test fixtures — JWT tokens for all 5 RBAC roles, event payloads |
+| `scripts/quickstart.sh` | One-command setup — venv, deps, seed, tests. Start here as a novice |
+| `scripts/setup-sandbox.sh` | PostgreSQL + Redis container setup, DB migrations, `--ci` mode for SQLite |
 
 **Start here if you are:**
+- **A novice** — run `bash scripts/quickstart.sh` first, then read this README
 - **A new engineer** — read `CLAUDE.md` first, then `tasks.md`, then this README
 - **An auditor** — go directly to `docs/AUDITOR_GUIDE.md`
 - **Adding a new recipe** — see the [Adding a new recipe](#adding-a-new-recipe) section below
@@ -786,6 +905,7 @@ k8s/                Kubernetes manifests for AKS production deployment
 | 14 | Auth & security hardening — token expiry (15min/7d), env isolation, X-Trace-ID propagation, partner-role scoping, configurable JWT secret; test count 690 → 718 |
 | 15 | WebSocket / Redis real-time event publishing — event schemas, pub/sub manager (in-memory + Redis), WebSocket hub with JWT auth + tenant scoping, resolve endpoint event wiring; test count 718 → 739 |
 | 16 | V1 Foundation Guardrail tests — 6 CI-automated guardrails (AST inspection, dynamic enums, metadata contracts, ERP-agnostic gateway, schema agnostic, policy key format) + Invariant #11; test count 739 → 764 |
+| 17 | Sandbox integration tests — REST API mode CLI, multi-step auth flow tests, DB persistence verification, WebSocket event tests, compliance simulation (force BLOCKED/REVIEW), recipe integrity + naming checks, setup-sandbox.sh with PostgreSQL/Redis containers; test count 764 → 891 |
 
 ---
 
