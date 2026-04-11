@@ -28,6 +28,16 @@ from constraints import get_constrained_backend
 
 logger = logging.getLogger("asoe.compliance")
 
+# Enforcement routing table: status → (action, description, log level).
+# The description is appended to the standard prefix
+# "Compliance Shadow returned {status}." to form the explanation string.
+# For non-GREEN verdicts, the decision reasons are also appended.
+_ENFORCE_TABLE: dict[ShadowStatus, tuple[str, str, int]] = {
+    ShadowStatus.RED: ("BLOCK", "Execution halted.", logging.WARNING),
+    ShadowStatus.YELLOW: ("ESCALATE", "Routing to MANUAL_REVIEW_REQUIRED.", logging.WARNING),
+    ShadowStatus.GREEN: ("PROCEED", "Auto-proceed is allowed.", logging.INFO),
+}
+
 
 # ---------------------------------------------------------------------------
 # Formal interface (tasks.md §2.1 "define a ComplianceShadow interface")
@@ -120,55 +130,19 @@ class ComplianceShadow(ComplianceShadowBase):
         YELLOW → ESCALATE  ("route to MANUAL_REVIEW_REQUIRED")
         RED    → BLOCK     ("halt immediately; explain compliance breach")
         """
-        if decision.status == ShadowStatus.RED:
-            explanation = (
-                "Compliance Shadow returned RED. "
-                "Execution halted. "
-                + "; ".join(decision.reasons)
-            )
-            enforcement = ShadowEnforcement(
-                action="BLOCK",
-                trace_id=decision.trace_id,
-                explanation=explanation,
-            )
-            logger.warning(
-                "shadow_enforce",
-                extra={
-                    "trace_id": enforcement.trace_id,
-                    "action": enforcement.action,
-                    "source_status": decision.status.value,
-                },
-            )
-            return enforcement
+        action, description, level = _ENFORCE_TABLE[decision.status]
 
-        if decision.status == ShadowStatus.YELLOW:
-            explanation = (
-                "Compliance Shadow returned YELLOW. "
-                "Routing to MANUAL_REVIEW_REQUIRED. "
-                + "; ".join(decision.reasons)
-            )
-            enforcement = ShadowEnforcement(
-                action="ESCALATE",
-                trace_id=decision.trace_id,
-                explanation=explanation,
-            )
-            logger.warning(
-                "shadow_enforce",
-                extra={
-                    "trace_id": enforcement.trace_id,
-                    "action": enforcement.action,
-                    "source_status": decision.status.value,
-                },
-            )
-            return enforcement
+        explanation = f"Compliance Shadow returned {decision.status.value}. {description}"
+        if decision.status != ShadowStatus.GREEN and decision.reasons:
+            explanation += " " + "; ".join(decision.reasons)
 
-        # GREEN
         enforcement = ShadowEnforcement(
-            action="PROCEED",
+            action=action,
             trace_id=decision.trace_id,
-            explanation="Compliance Shadow returned GREEN. Auto-proceed is allowed.",
+            explanation=explanation,
         )
-        logger.info(
+        logger.log(
+            level,
             "shadow_enforce",
             extra={
                 "trace_id": enforcement.trace_id,
