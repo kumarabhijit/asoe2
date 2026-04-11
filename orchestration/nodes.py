@@ -18,6 +18,8 @@ from __future__ import annotations
 #   - recipe name constrained to AllowedRecipeName via backend.propose_recipe()
 #   - shadow verdict constrained to GREEN|YELLOW|RED via backend.shadow_decision()
 
+import concurrent.futures
+
 from contracts.models import (
     GatewayRequest,
     GraphState,
@@ -51,10 +53,25 @@ import logging
 
 _node_logger = logging.getLogger("asoe.nodes")
 
+_cached_backend = None
+
 
 def _backend():
-    """Return the env-driven constrained backend (shared across all nodes)."""
-    return get_constrained_backend()
+    """Return the env-driven constrained backend (cached for the process lifetime).
+
+    The backend is stateless — caching the instance avoids redundant env var
+    reads and object construction on every node call (3x per graph execution).
+    """
+    global _cached_backend
+    if _cached_backend is None:
+        _cached_backend = get_constrained_backend()
+    return _cached_backend
+
+
+def _reset_backend_cache() -> None:
+    """Reset the cached backend.  Used by tests that change env vars."""
+    global _cached_backend
+    _cached_backend = None
 
 
 class NodeValidationError(Exception):
@@ -303,6 +320,8 @@ def resolve_dependencies(state: GraphState) -> GraphState:
     executor = GatewayExecutor()
     trace_id = state.shadow.trace_id if state.shadow else ""
 
+    # Build all requests up front so dependencies can be resolved concurrently.
+    requests = []
     for dep in spec.dependencies:
         params = {}
         for gw_param, state_path in dep.params_from_state.items():
@@ -313,13 +332,21 @@ def resolve_dependencies(state: GraphState) -> GraphState:
                     break
             params[gw_param] = value
 
-        request = GatewayRequest(
+        requests.append((dep, GatewayRequest(
             gateway_name=dep.gateway_name,
             operation=dep.operation,
             params=params,
             trace_id=trace_id,
-        )
-        response = executor.run(request)
+        )))
+
+    # Resolve independent dependencies concurrently.
+    future_to_dep = {
+        executor._pool.submit(executor.run, req): dep
+        for dep, req in requests
+    }
+    for future in concurrent.futures.as_completed(future_to_dep):
+        dep = future_to_dep[future]
+        response = future.result()
 
         if response.status != "SUCCESS":
             state.final_status = TerminalStatus.FAIL_TO_HUMAN

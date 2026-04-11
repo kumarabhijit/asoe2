@@ -32,6 +32,8 @@ from __future__ import annotations
 #                  explain_only when ASOE_EXPLAIN_MODE=1; returns
 #                  MANUAL_REVIEW_REQUIRED with a dry-run summary
 
+from functools import cache
+
 from langgraph.graph import END, StateGraph
 from contracts.models import GraphState
 from orchestration import nodes
@@ -72,6 +74,7 @@ def _add_common_nodes_and_edges(graph: StateGraph) -> None:
     )
 
 
+@cache
 def build_graph():
     """Build and compile the deterministic LangGraph state machine (normal execution)."""
     graph = StateGraph(GraphState)
@@ -89,6 +92,7 @@ def build_graph():
     return graph.compile()
 
 
+@cache
 def build_explain_graph():
     """Build the explain-mode graph.
 
