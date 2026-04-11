@@ -22,7 +22,7 @@ from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from api.deps import _get_jwt_secret, _jwt_decode, _expand_permissions
+from api.deps import validate_ws_token
 from api.pubsub import event_publisher, InMemoryPubSub
 
 logger = logging.getLogger("asoe.api.ws")
@@ -43,7 +43,7 @@ async def _authenticate_ws(websocket: WebSocket) -> Optional[dict]:
         return None
 
     try:
-        payload = _jwt_decode(msg["token"], _get_jwt_secret())
+        payload = validate_ws_token(msg["token"])
     except (ValueError, KeyError) as exc:
         logger.warning("WebSocket auth: JWT validation failed: %s", exc)
         return None

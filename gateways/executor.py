@@ -7,10 +7,6 @@ import time
 from contracts.models import GatewayRequest, GatewayResponse
 from gateways.registry import get_gateway
 
-
-class _GatewayTimeout(Exception):
-    """Raised when a gateway call exceeds its timeout_ms budget."""
-
 logger = logging.getLogger("asoe.gateways")
 
 

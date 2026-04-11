@@ -237,22 +237,16 @@ def require_role(*allowed_roles: str):
 
 
 # ---------------------------------------------------------------------------
-# X-Trace-ID propagation (architecture_v3.md §11.4)
+# WebSocket token validation (public API for ws.py)
 # ---------------------------------------------------------------------------
 
-async def get_trace_id(
-    request: Request,
-) -> str:
-    """Extract X-Trace-ID from request header, or generate a new UUID.
+def validate_ws_token(token: str) -> Dict[str, Any]:
+    """Validate a JWT token and return its payload.
 
-    The trace_id flows through ComplianceDecision → ExecutionLog →
-    TraceRecord unchanged (Execution Invariant #4).
+    Public entry point for WebSocket authentication — avoids importing
+    private helpers (_jwt_decode, _get_jwt_secret) across module boundaries.
     """
-    from uuid import uuid4
-    trace_id = request.headers.get("X-Trace-ID", "")
-    if not trace_id:
-        trace_id = str(uuid4())
-    return trace_id
+    return _jwt_decode(token, _get_jwt_secret())
 
 
 # ---------------------------------------------------------------------------

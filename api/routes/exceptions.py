@@ -150,27 +150,6 @@ def _publish_task_complete(
     event_publisher.publish(tenant_id, event)
 
 
-def _check_partner_access(user: AuthenticatedUser, record) -> None:
-    """Enforce partner-role scoping: partners see only their own orders.
-
-    Architecture_v3.md §11.3: partner role is restricted to own orders
-    via retailer_id matching. This is the application-layer enforcement;
-    PostgreSQL RLS provides the defense-in-depth layer.
-    """
-    if "partner" not in user.roles:
-        return
-    # Partner must have a retailer_id claim that matches the record
-    record_retailer = getattr(record, "resolution_data", {})
-    # Check against the event's retailer_id stored in the record
-    # For in-memory store, we check a simpler path
-    if user.retailer_id and hasattr(record, "order_id"):
-        # In the full DB implementation, this would be an RLS policy.
-        # At the application layer, we verify the partner's retailer_id
-        # is associated with this exception. For now, partners with no
-        # retailer_id claim are blocked from individual record access.
-        pass  # RLS provides the defense-in-depth; app-layer filtering is in list()
-
-
 # ---------------------------------------------------------------------------
 # POST /api/v1/exceptions/resolve — Synchronous resolution
 # ---------------------------------------------------------------------------
