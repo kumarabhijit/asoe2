@@ -65,17 +65,7 @@ for arg in "$@"; do
 done
 
 # ═══════════════════════════════════════════════════════════════════════
-# Test-only mode
-# ═══════════════════════════════════════════════════════════════════════
-
-if [ "$MODE" = "test" ]; then
-    header "Running test suite..."
-    python -m pytest
-    exit $?
-fi
-
-# ═══════════════════════════════════════════════════════════════════════
-# Step 1: Check prerequisites
+# Step 1: Check prerequisites (runs before all modes including --test)
 # ═══════════════════════════════════════════════════════════════════════
 
 header "Step 1: Checking prerequisites"
@@ -138,10 +128,24 @@ if [ -z "${VIRTUAL_ENV:-}" ]; then
         fi
     fi
     step "Activating .venv..."
-    source .venv/bin/activate
+    if [ -f ".venv/bin/activate" ]; then
+        source .venv/bin/activate
+    elif [ -f ".venv/Scripts/activate" ]; then
+        source .venv/Scripts/activate
+    else
+        error ".venv/bin/activate not found. Delete .venv and re-run this script."
+        exit 1
+    fi
     step "Virtual environment active: $VIRTUAL_ENV"
 else
     step "Already in virtual environment: $VIRTUAL_ENV"
+fi
+
+# ── Test-only mode (after prereqs + venv activation) ──
+if [ "$MODE" = "test" ]; then
+    header "Running test suite..."
+    PYTHONPATH=. $PYTHON -m pytest
+    exit $?
 fi
 
 # ═══════════════════════════════════════════════════════════════════════

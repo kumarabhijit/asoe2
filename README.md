@@ -321,7 +321,7 @@ execution traces to the terminal. Supports two modes:
 
 ```bash
 # 1. Seed the SQLite database (if not already done)
-python tests/sandbox/seed.py
+PYTHONPATH=. python tests/sandbox/seed.py
 
 # 2. Run all 22 seeded events (direct mode)
 PYTHONPATH=. python tests/sandbox/cli.py
@@ -815,12 +815,12 @@ tests/              pytest test suite (891 tests)
   test_*.py         Core tests: contracts, constraints, recipes, orchestration, shadow, API, DB, WebSocket, workflows, guardrails (764 tests)
   sandbox/          Local execution sandbox + integration tests (127 tests)
     conftest.py     Shared fixtures (client, JWT tokens for all RBAC roles, event payloads)
-    test_integration.py       Full API path: health, resolve, CRUD, stats, tenant isolation (40 tests)
+    test_integration.py       Full API path: health, resolve, CRUD, stats, tenant isolation (31 tests)
     test_auth_flow.py         Multi-step login, SSO, MFA, token refresh, RBAC (20 tests)
-    test_db_persistence.py    Exception/trace/policy persistence, lifecycle mapping (20 tests)
-    test_websocket_events.py  Pub/sub events, tenant isolation, WebSocket auth (20 tests)
-    test_compliance_simulation.py  Force BLOCKED/REVIEW, kill switch, approve/reject (20 tests)
-    test_recipe_integrity.py  Recipe registry, ERP mocking, naming, constraints (15 tests)
+    test_db_persistence.py    Exception/trace/policy persistence, lifecycle mapping (16 tests)
+    test_websocket_events.py  Pub/sub events, tenant isolation, WebSocket auth (17 tests)
+    test_compliance_simulation.py  Force BLOCKED/REVIEW, kill switch, approve/reject (19 tests)
+    test_recipe_integrity.py  Recipe registry, ERP mocking, naming, constraints (24 tests)
     cli.py          Headless CLI runner — direct + API modes, simulation flags, Lily personality
     seed.py         SQLite seeder — creates sandbox.db with customers, DCs, promotions, SAP / EDI data
     ui/app.py       Streamlit execution-trace visualiser — API mode, auth panel, DB verification, WebSocket monitor
