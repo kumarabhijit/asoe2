@@ -246,11 +246,17 @@ class TestExceptionCRUD:
         assert resp.status_code == 404
 
     def test_override_exception(self, client, manager_token):
-        exc_id = self._create_exception(client, manager_token)
+        # Override requires PENDING_REVIEW state — use explain mode
+        resp = client.post(
+            "/api/v1/exceptions/resolve/explain",
+            json=PRICING_EVENT,
+            headers=auth_header(manager_token),
+        )
+        exc_id = resp.json()["exception_id"]
         resp = client.patch(
             f"/api/v1/exceptions/{exc_id}/override",
             json={
-                "action": "MANUAL_ADJUSTMENT",
+                "action": "ALLOW_BOTH",
                 "notes": "Manually reviewed and adjusted",
                 "resolved_by": "manager-user",
             },
@@ -262,10 +268,15 @@ class TestExceptionCRUD:
         assert detail["lifecycle_state"] == "RESOLVED"
 
     def test_override_requires_manager_role(self, client, analyst_token):
-        exc_id = self._create_exception(client, analyst_token)
+        resp = client.post(
+            "/api/v1/exceptions/resolve/explain",
+            json=PRICING_EVENT,
+            headers=auth_header(analyst_token),
+        )
+        exc_id = resp.json()["exception_id"]
         resp = client.patch(
             f"/api/v1/exceptions/{exc_id}/override",
-            json={"action": "OVERRIDE", "notes": "test", "resolved_by": "analyst"},
+            json={"action": "ALLOW_BOTH", "notes": "test", "resolved_by": "analyst"},
             headers=auth_header(analyst_token),
         )
         assert resp.status_code == 403

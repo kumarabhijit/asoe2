@@ -147,16 +147,16 @@ class TestGuardrail2_DynamicEnumServing:
             f"don't match AllowedRecipeName {expected_recipes}"
         )
 
-    def test_health_serves_11_lifecycle_states(self, client):
-        """architecture_v3.md §9.1: 11 lifecycle states."""
+    def test_health_serves_12_lifecycle_states(self, client):
+        """architecture_v3.md §9.1: 12 lifecycle states (incl. PENDING_ADMIN_REVIEW)."""
         r = client.get("/api/v1/health")
         states = r.json()["lifecycle_states"]
-        assert len(states) == 11, (
-            f"Guardrail #2 violated: expected 11 lifecycle states, got {len(states)}"
+        assert len(states) == 12, (
+            f"Guardrail #2 violated: expected 12 lifecycle states, got {len(states)}"
         )
         required = {"INGESTED", "CLASSIFYING", "AUDITING", "PENDING_REVIEW",
-                     "ESCALATED", "EXECUTING", "RESOLVED", "FAILED",
-                     "BLOCKED", "REJECTED", "CLOSED"}
+                     "ESCALATED", "PENDING_ADMIN_REVIEW", "EXECUTING",
+                     "RESOLVED", "FAILED", "BLOCKED", "REJECTED", "CLOSED"}
         assert set(states) == required
 
     def test_enum_values_not_hardcoded_in_route(self):

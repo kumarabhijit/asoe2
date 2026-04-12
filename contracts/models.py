@@ -41,12 +41,22 @@ STATUS_TO_LIFECYCLE: Dict[str, str] = {
     "COMPLETE_WITH_CHILDREN": "RESOLVED",
 }
 
-# 11-state exception lifecycle (architecture_v3.md §9.1).
+# 12-state exception lifecycle (architecture_v3.md §9.1).
 # Consumed by api/routes/health.py and stats queries.
+# PENDING_ADMIN_REVIEW: RED-verdict admin release (three-tier HITL model).
 LIFECYCLE_STATES: List[str] = [
     "INGESTED", "CLASSIFYING", "AUDITING", "PENDING_REVIEW", "ESCALATED",
-    "EXECUTING", "RESOLVED", "FAILED", "BLOCKED", "REJECTED", "CLOSED",
+    "PENDING_ADMIN_REVIEW", "EXECUTING", "RESOLVED", "FAILED", "BLOCKED",
+    "REJECTED", "CLOSED",
 ]
+
+# Valid source states for each HITL action.
+# Consumed by api/routes/exceptions.py for state-machine enforcement.
+HITL_OVERRIDE_STATES = {"PENDING_REVIEW", "ESCALATED"}
+HITL_APPROVE_STATES = {"PENDING_REVIEW", "ESCALATED", "PENDING_ADMIN_REVIEW"}
+HITL_REJECT_STATES = {"PENDING_REVIEW", "ESCALATED", "PENDING_ADMIN_REVIEW"}
+CHALLENGE_SOURCE_STATES = {"RESOLVED"}
+ADMIN_RELEASE_SOURCE_STATES = {"BLOCKED"}
 
 
 class OrderEvent(BaseModel):

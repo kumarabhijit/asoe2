@@ -95,7 +95,7 @@ class TestHealth:
         assert len(data["allowed_recipes"]) >= 3
         assert "INGESTED" in data["lifecycle_states"]
         assert "CLOSED" in data["lifecycle_states"]
-        assert len(data["lifecycle_states"]) == 11
+        assert len(data["lifecycle_states"]) == 12
 
 
 # ---------------------------------------------------------------------------
@@ -148,25 +148,26 @@ class TestRBAC:
         assert r.status_code == 200
 
     def test_analyst_cannot_override(self, client, analyst_token, manager_token):
-        # Create an exception first
+        # Create a PENDING_REVIEW exception via explain mode
         r = client.post(
-            "/api/v1/exceptions/resolve",
+            "/api/v1/exceptions/resolve/explain",
             json=_sample_event(),
             headers=_auth(analyst_token),
         )
         exc_id = r.json()["exception_id"]
 
-        # Analyst cannot override
+        # Analyst cannot override (RBAC: manager+ only)
         r = client.patch(
             f"/api/v1/exceptions/{exc_id}/override",
-            json={"action": "ALLOW", "resolved_by": "human"},
+            json={"action": "ALLOW_BOTH", "notes": "test", "resolved_by": "human"},
             headers=_auth(analyst_token),
         )
         assert r.status_code == 403
 
     def test_manager_can_override(self, client, analyst_token, manager_token):
+        # Create a PENDING_REVIEW exception via explain mode
         r = client.post(
-            "/api/v1/exceptions/resolve",
+            "/api/v1/exceptions/resolve/explain",
             json=_sample_event(),
             headers=_auth(analyst_token),
         )
@@ -174,7 +175,7 @@ class TestRBAC:
 
         r = client.patch(
             f"/api/v1/exceptions/{exc_id}/override",
-            json={"action": "ALLOW", "resolved_by": "manager-user"},
+            json={"action": "ALLOW_BOTH", "notes": "Verified with buyer", "resolved_by": "manager-user"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200
@@ -396,8 +397,9 @@ class TestExceptionCRUD:
 
 class TestOverride:
     def test_override_success(self, client, analyst_token, manager_token):
+        # Override requires PENDING_REVIEW state — use explain mode
         r = client.post(
-            "/api/v1/exceptions/resolve",
+            "/api/v1/exceptions/resolve/explain",
             json=_sample_event(),
             headers=_auth(analyst_token),
         )

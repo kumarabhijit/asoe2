@@ -24,11 +24,36 @@ class ResolveRequest(OrderEvent):
 
 
 class OverrideRequest(BaseModel):
-    """PATCH /api/v1/exceptions/{id}/override — human override."""
+    """PATCH /api/v1/exceptions/{id}/override — human override of agent recommendation.
 
-    action: str
-    notes: Optional[str] = None
+    Available on PENDING_REVIEW and ESCALATED exceptions (YELLOW verdict HITL).
+    Action must be a valid AllowedResolutionAction. Notes are mandatory (SOX).
+    """
+
+    action: str  # validated against AllowedResolutionAction in the endpoint
+    notes: str  # mandatory for SOX audit trail
     resolved_by: str
+
+
+class ChallengeRequest(BaseModel):
+    """POST /api/v1/exceptions/{id}/challenge — post-execution challenge.
+
+    Available on RESOLVED exceptions (GREEN verdict post-execution review).
+    Transitions RESOLVED → ESCALATED for investigation.
+    """
+
+    challenge_reason: str
+
+
+class AdminReleaseRequest(BaseModel):
+    """POST /api/v1/exceptions/{id}/admin-release — admin release of RED-blocked exception.
+
+    Available on BLOCKED exceptions (RED verdict). Admin-only.
+    Transitions BLOCKED → PENDING_ADMIN_REVIEW for admin to select action.
+    """
+
+    release_reason: str
+    risk_acknowledgment: bool  # must be True
 
 
 class ApproveRequest(BaseModel):

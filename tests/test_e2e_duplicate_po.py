@@ -177,14 +177,14 @@ class TestHealthDuplicatePO:
         assert "DuplicatePORecipe.py" in recipes
 
     def test_lifecycle_states_complete(self, client):
-        """All 11 lifecycle states must be served — frontend uses these for filter dropdowns."""
+        """All 12 lifecycle states must be served — frontend uses these for filter dropdowns."""
         r = client.get("/api/v1/health")
         states = r.json()["lifecycle_states"]
-        assert len(states) == 11
+        assert len(states) == 12
         expected = [
             "INGESTED", "CLASSIFYING", "AUDITING", "PENDING_REVIEW",
-            "ESCALATED", "EXECUTING", "RESOLVED", "FAILED",
-            "BLOCKED", "REJECTED", "CLOSED",
+            "ESCALATED", "PENDING_ADMIN_REVIEW", "EXECUTING", "RESOLVED",
+            "FAILED", "BLOCKED", "REJECTED", "CLOSED",
         ]
         for s in expected:
             assert s in states, f"Missing lifecycle state: {s}"
@@ -522,13 +522,8 @@ class TestDuplicatePOHitlActions:
         assert data["lifecycle_state"] == "REJECTED"
 
     def test_override_duplicate_po(self, client, analyst_token, manager_token):
-        """Manager overrides a resolved DUPLICATE_PO exception with a different action."""
-        r = client.post(
-            "/api/v1/exceptions/resolve",
-            json=_duplicate_po_high_confidence(),
-            headers=_auth(analyst_token),
-        )
-        exc_id = r.json()["exception_id"]
+        """Manager overrides a PENDING_REVIEW DUPLICATE_PO with a different action."""
+        exc_id = self._create_pending_duplicate_po(client, analyst_token)
 
         r = client.patch(
             f"/api/v1/exceptions/{exc_id}/override",
@@ -548,12 +543,7 @@ class TestDuplicatePOHitlActions:
 
     def test_detail_after_override_shows_override_fields(self, client, analyst_token, manager_token):
         """After override, GET /exceptions/{id} shows the override fields."""
-        r = client.post(
-            "/api/v1/exceptions/resolve",
-            json=_duplicate_po_high_confidence(),
-            headers=_auth(analyst_token),
-        )
-        exc_id = r.json()["exception_id"]
+        exc_id = self._create_pending_duplicate_po(client, analyst_token)
         client.patch(
             f"/api/v1/exceptions/{exc_id}/override",
             json={
