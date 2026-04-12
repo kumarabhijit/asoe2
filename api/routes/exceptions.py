@@ -1,15 +1,22 @@
 """Exception management endpoints (architecture_v3.md Section 8.2).
 
-POST /api/v1/exceptions/resolve         — synchronous resolution
-POST /api/v1/exceptions/resolve/async   — async resolution (stub)
-POST /api/v1/exceptions/resolve/explain — explain mode dry-run
-GET  /api/v1/exceptions                 — paginated exception queue
-GET  /api/v1/exceptions/stats           — dashboard metrics
-GET  /api/v1/exceptions/{id}            — exception detail
-GET  /api/v1/exceptions/{id}/trace      — full TraceRecord
-PATCH /api/v1/exceptions/{id}/override  — human override
-POST  /api/v1/exceptions/{id}/approve   — resume paused exception
-POST  /api/v1/exceptions/{id}/reject    — reject paused exception
+POST  /api/v1/exceptions/resolve         — synchronous resolution
+POST  /api/v1/exceptions/resolve/async   — async resolution (stub)
+POST  /api/v1/exceptions/resolve/explain — explain mode dry-run
+GET   /api/v1/exceptions                 — paginated exception queue
+GET   /api/v1/exceptions/stats           — dashboard metrics
+GET   /api/v1/exceptions/{id}            — exception detail
+GET   /api/v1/exceptions/{id}/trace      — full TraceRecord
+PATCH /api/v1/exceptions/{id}/override   — YELLOW: override agent recommendation (manager+)
+POST  /api/v1/exceptions/{id}/approve    — resume paused exception (manager+)
+POST  /api/v1/exceptions/{id}/reject     — reject paused exception (manager+)
+POST  /api/v1/exceptions/{id}/challenge  — GREEN: post-execution challenge (analyst+)
+POST  /api/v1/exceptions/{id}/admin-release — RED: admin release of blocked exception (admin)
+
+Three-tier human intervention model:
+  GREEN  → Post-execution challenge (RESOLVED → ESCALATED)
+  YELLOW → Override recommendation (PENDING_REVIEW → RESOLVED)
+  RED    → Admin release (BLOCKED → PENDING_ADMIN_REVIEW)
 
 Security:
   §11.3 — Partner-role users see only their own orders (retailer_id filtering)
@@ -27,9 +34,11 @@ from fastapi import APIRouter, Depends, Query, Request
 from api.deps import AuthenticatedUser, get_current_user, get_tenant_id, require_role
 from api.errors import ASOEError
 from api.schemas import (
+    AdminReleaseRequest,
     AnalysisResponse,
     ApproveRequest,
     AsyncResolveResponse,
+    ChallengeRequest,
     ExceptionDetailResponse,
     ExceptionListResponse,
     LineAnalysis,
@@ -45,7 +54,16 @@ from api.schemas import (
 from api.events import WSEvent
 from api.pubsub import event_publisher
 from api.store import exception_store
-from contracts.models import GraphState, OrderEvent
+from constraints.specs import AllowedResolutionAction
+from contracts.models import (
+    ADMIN_RELEASE_SOURCE_STATES,
+    CHALLENGE_SOURCE_STATES,
+    HITL_APPROVE_STATES,
+    HITL_OVERRIDE_STATES,
+    HITL_REJECT_STATES,
+    GraphState,
+    OrderEvent,
+)
 
 logger = logging.getLogger("asoe.api.exceptions")
 
@@ -68,14 +86,23 @@ def _get_or_404(exception_id: str, tenant_id: str):
     return record
 
 
-def _require_pending_review(record) -> None:
-    """Raise 409 if the exception is not in PENDING_REVIEW state."""
-    if record.lifecycle_state != "PENDING_REVIEW":
+def _require_state(record, allowed_states: set, action: str) -> None:
+    """Raise 409 if the exception is not in one of the allowed states."""
+    if record.lifecycle_state not in allowed_states:
+        allowed_str = ", ".join(sorted(allowed_states))
         raise ASOEError(
             code="INVALID_STATE",
-            message=f"Exception is in state '{record.lifecycle_state}', not PENDING_REVIEW.",
+            message=(
+                f"Cannot {action}: exception is in state "
+                f"'{record.lifecycle_state}', expected one of: {allowed_str}."
+            ),
             status_code=409,
         )
+
+
+def _require_pending_review(record) -> None:
+    """Raise 409 if the exception is not in a HITL-approvable state."""
+    _require_state(record, HITL_APPROVE_STATES, "approve/reject")
 
 
 def _get_trace_id(request: Request) -> str:
@@ -382,12 +409,30 @@ async def override_exception(
     exception_id: str,
     req: OverrideRequest,
     tenant_id: str = Depends(get_tenant_id),
+    user: AuthenticatedUser = Depends(get_current_user),
 ) -> ExceptionDetailResponse:
-    _get_or_404(exception_id, tenant_id)
+    """YELLOW-tier HITL: override the agent's recommended action.
+
+    Restricted to PENDING_REVIEW and ESCALATED states.
+    Action must be a valid AllowedResolutionAction.
+    Notes are mandatory (SOX audit requirement).
+    """
+    record = _get_or_404(exception_id, tenant_id)
+    _require_state(record, HITL_OVERRIDE_STATES, "override")
+
+    # Validate action against constrained vocabulary
+    allowed = list(AllowedResolutionAction.__args__)  # type: ignore[attr-defined]
+    if req.action not in allowed:
+        raise ASOEError(
+            code="INVALID_ACTION",
+            message=f"Action '{req.action}' is not allowed. Valid: {allowed}",
+            status_code=422,
+        )
+
     updated = exception_store.update(
         exception_id,
         tenant_id,
-        resolved_by=req.resolved_by,
+        resolved_by=req.resolved_by or user.sub,
         resolved_action=req.action,
         resolution_notes=req.notes,
         lifecycle_state="RESOLVED",
@@ -399,6 +444,18 @@ async def override_exception(
             message="Failed to update exception.",
             status_code=500,
         )
+
+    # SOX audit: log override to policy_audit_log
+    exception_store.log_audit_event(
+        tenant_id=tenant_id,
+        policy_key="EXCEPTION_OVERRIDE",
+        previous_value={"lifecycle_state": record.lifecycle_state,
+                        "recommended_action": record.resolution_data.get("recommended_action")},
+        new_value={"resolved_action": req.action, "exception_id": exception_id},
+        changed_by=req.resolved_by or user.sub,
+        change_reason=req.notes,
+    )
+
     return updated.to_detail()
 
 
@@ -458,6 +515,108 @@ async def reject_exception(
     )
     if not updated:
         raise ASOEError(code="UPDATE_FAILED", message="Failed to update.", status_code=500)
+    return updated.to_detail()
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/exceptions/{id}/challenge — Post-execution challenge (GREEN tier)
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/exceptions/{exception_id}/challenge",
+    response_model=ExceptionDetailResponse,
+    dependencies=[Depends(require_role("analyst", "manager", "admin"))],
+)
+async def challenge_exception(
+    exception_id: str,
+    req: ChallengeRequest,
+    tenant_id: str = Depends(get_tenant_id),
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> ExceptionDetailResponse:
+    """GREEN-tier HITL: challenge a resolved exception for review.
+
+    Transitions RESOLVED → ESCALATED for investigation.
+    Does NOT undo executed actions (gateway effects already applied).
+    """
+    record = _get_or_404(exception_id, tenant_id)
+    _require_state(record, CHALLENGE_SOURCE_STATES, "challenge")
+
+    updated = exception_store.update(
+        exception_id,
+        tenant_id,
+        lifecycle_state="ESCALATED",
+        resolution_notes=f"CHALLENGED: {req.challenge_reason}",
+    )
+    if not updated:
+        raise ASOEError(code="UPDATE_FAILED", message="Failed to update.", status_code=500)
+
+    # SOX audit: log challenge event
+    exception_store.log_audit_event(
+        tenant_id=tenant_id,
+        policy_key="EXCEPTION_CHALLENGE",
+        previous_value={"lifecycle_state": "RESOLVED", "exception_id": exception_id},
+        new_value={"lifecycle_state": "ESCALATED", "challenge_reason": req.challenge_reason},
+        changed_by=user.sub,
+        change_reason=req.challenge_reason,
+    )
+
+    return updated.to_detail()
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/exceptions/{id}/admin-release — Admin release (RED tier)
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/exceptions/{exception_id}/admin-release",
+    response_model=ExceptionDetailResponse,
+    dependencies=[Depends(require_role("admin"))],
+)
+async def admin_release_exception(
+    exception_id: str,
+    req: AdminReleaseRequest,
+    tenant_id: str = Depends(get_tenant_id),
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> ExceptionDetailResponse:
+    """RED-tier HITL: admin releases a RED-blocked exception.
+
+    Transitions BLOCKED → PENDING_ADMIN_REVIEW.
+    The admin must then approve, override, or reject the exception.
+    The original RED verdict is preserved in the TraceRecord.
+    risk_acknowledgment must be True (explicit risk acceptance).
+    """
+    record = _get_or_404(exception_id, tenant_id)
+    _require_state(record, ADMIN_RELEASE_SOURCE_STATES, "admin-release")
+
+    if not req.risk_acknowledgment:
+        raise ASOEError(
+            code="RISK_NOT_ACKNOWLEDGED",
+            message="risk_acknowledgment must be true to release a RED-blocked exception.",
+            status_code=422,
+        )
+
+    updated = exception_store.update(
+        exception_id,
+        tenant_id,
+        lifecycle_state="PENDING_ADMIN_REVIEW",
+        resolution_notes=f"ADMIN_RELEASE: {req.release_reason}",
+    )
+    if not updated:
+        raise ASOEError(code="UPDATE_FAILED", message="Failed to update.", status_code=500)
+
+    # SOX audit: log admin release to policy_audit_log (immutable)
+    exception_store.log_audit_event(
+        tenant_id=tenant_id,
+        policy_key="EXCEPTION_ADMIN_RELEASE",
+        previous_value={"lifecycle_state": "BLOCKED", "shadow_verdict": record.shadow_verdict,
+                        "exception_id": exception_id},
+        new_value={"lifecycle_state": "PENDING_ADMIN_REVIEW",
+                   "release_reason": req.release_reason,
+                   "risk_acknowledged": True},
+        changed_by=user.sub,
+        change_reason=req.release_reason,
+    )
+
     return updated.to_detail()
 
 

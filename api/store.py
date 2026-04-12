@@ -11,10 +11,13 @@ use this singleton without knowing which backend is active.
 
 from __future__ import annotations
 
+import logging
 import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
+
+logger = logging.getLogger("asoe.api.store")
 
 from api.schemas import ExceptionDetailResponse, ExceptionSummary
 from contracts.models import STATUS_TO_LIFECYCLE
@@ -105,6 +108,7 @@ class ExceptionStore:
         with self._lock:
             self._records.clear()
             self._traces.clear()
+            self._audit_log: List[Dict[str, Any]] = []
 
     def create(
         self,
@@ -195,6 +199,45 @@ class ExceptionStore:
     def get_trace(self, exception_id: str) -> Optional[Dict[str, Any]]:
         with self._lock:
             return self._traces.get(exception_id)
+
+    def log_audit_event(
+        self,
+        tenant_id: str,
+        policy_key: str,
+        previous_value: Any,
+        new_value: Any,
+        changed_by: str,
+        change_reason: Optional[str] = None,
+    ) -> None:
+        """Record an immutable audit event (SOX compliance).
+
+        In-memory store: appends to _audit_log list.
+        Database store: inserts into policy_audit_log table.
+        """
+        event = {
+            "id": str(uuid4()),
+            "tenant_id": tenant_id,
+            "policy_key": policy_key,
+            "previous_value": previous_value,
+            "new_value": new_value,
+            "changed_by": changed_by,
+            "change_reason": change_reason,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        with self._lock:
+            if not hasattr(self, "_audit_log"):
+                self._audit_log: List[Dict[str, Any]] = []
+            self._audit_log.append(event)
+        logger.info(
+            "Audit event: %s by %s — %s",
+            policy_key, changed_by, change_reason,
+        )
+
+    def get_audit_log(self, tenant_id: str) -> List[Dict[str, Any]]:
+        """Return audit events for a tenant (for testing)."""
+        with self._lock:
+            log = getattr(self, "_audit_log", [])
+            return [e for e in log if e["tenant_id"] == tenant_id]
 
     def stats(self, tenant_id: str) -> Dict[str, Any]:
         with self._lock:
@@ -367,6 +410,42 @@ class DatabaseBackedStore:
 
     def stats(self, tenant_id: str) -> Dict[str, int]:
         return self._exceptions.stats(tenant_id)
+
+    def log_audit_event(
+        self,
+        tenant_id: str,
+        policy_key: str,
+        previous_value: Any,
+        new_value: Any,
+        changed_by: str,
+        change_reason: Optional[str] = None,
+    ) -> None:
+        """Record an immutable audit event to policy_audit_log (SOX)."""
+        try:
+            from db.repository import PolicyRepository
+            repo = PolicyRepository(self._adapter)
+            repo.create_override(
+                tenant_id=tenant_id,
+                policy_key=policy_key,
+                value=new_value,
+                created_by=changed_by,
+                change_reason=change_reason,
+            )
+        except Exception:
+            # Fallback: log to stdlib if DB write fails
+            logger.warning(
+                "Failed to write audit event to DB: %s by %s",
+                policy_key, changed_by,
+            )
+
+    def get_audit_log(self, tenant_id: str) -> List[Dict[str, Any]]:
+        """Return audit events for a tenant."""
+        try:
+            from db.repository import PolicyRepository
+            repo = PolicyRepository(self._adapter)
+            return repo.list_audit_log(tenant_id)
+        except Exception:
+            return []
 
     def _dict_to_record(self, d: Dict[str, Any]) -> ExceptionRecord:
         record = ExceptionRecord.__new__(ExceptionRecord)
