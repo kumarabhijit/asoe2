@@ -15,7 +15,7 @@ from fastapi import FastAPI
 
 from api.errors import ASOEError, asoe_error_handler, unhandled_error_handler
 from api.middleware import TraceIDMiddleware
-from api.routes import auth, exceptions, health, policies, workflows, ws
+from api.routes import accounts, auth, exceptions, health, policies, workflows, ws
 
 
 def create_app() -> FastAPI:
@@ -38,6 +38,7 @@ def create_app() -> FastAPI:
     application.include_router(exceptions.router, prefix="/api/v1", tags=["exceptions"])
     application.include_router(workflows.router, prefix="/api/v1", tags=["workflows"])
     application.include_router(policies.router, prefix="/api/v1", tags=["policies"])
+    application.include_router(accounts.router, prefix="/api/v1", tags=["accounts"])
     application.include_router(ws.router, prefix="/api/v1", tags=["websocket"])
     application.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 

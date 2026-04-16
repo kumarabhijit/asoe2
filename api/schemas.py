@@ -160,6 +160,8 @@ class ExceptionSummary(BaseModel):
     shadow_verdict: Optional[str] = None
     selected_recipe: Optional[str] = None
     final_status: Optional[str] = None
+    account_id: Optional[str] = None
+    account_name: Optional[str] = None
     created_at: str
     updated_at: str
 
@@ -184,6 +186,8 @@ class ExceptionDetailResponse(BaseModel):
     shadow_verdict: Optional[str] = None
     selected_recipe: Optional[str] = None
     final_status: Optional[str] = None
+    account_id: Optional[str] = None
+    account_name: Optional[str] = None
     trace_id: Optional[str] = None
     resolution_data: Dict[str, Any] = Field(default_factory=dict)
     resolved_by: Optional[str] = None
@@ -245,14 +249,45 @@ class AuthTokenResponse(BaseModel):
 
 
 class UserProfile(BaseModel):
-    """GET /api/auth/me — current user."""
+    """GET /api/auth/me — current user profile.
+
+    visible_tabs and permissions are computed from roles — never stored per user.
+    assigned_accounts drives server-side customer scope filtering.
+    """
 
     sub: str
     email: str
     name: str
+    title: Optional[str] = None
+    avatar_initials: Optional[str] = None
     roles: List[str]
     org: str
     permissions: List[str]
+    assigned_accounts: List[str] = Field(default_factory=list)
+    visible_tabs: List[str] = Field(default_factory=list)
+
+
+class UserListResponse(BaseModel):
+    """GET /api/v1/users — list of available users (sandbox only)."""
+
+    data: List[UserProfile]
+
+
+class AccountResponse(BaseModel):
+    """A retail customer account within a tenant."""
+
+    id: str
+    name: str
+    tenant_id: str
+    bp_number: str
+    tier: str
+    region: Optional[str] = None
+
+
+class AccountListResponse(BaseModel):
+    """GET /api/v1/accounts — list of accounts for the tenant."""
+
+    data: List[AccountResponse]
 
 
 # Rebuild AuthTokenResponse now that UserProfile is defined
