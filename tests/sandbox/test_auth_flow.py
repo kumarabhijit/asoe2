@@ -32,31 +32,32 @@ from tests.sandbox.conftest import auth_header, SANDBOX_TENANT
 class TestMultiStepLoginFlow:
     """POST /api/auth/login followed by POST /api/auth/mfa/verify."""
 
-    def test_step1_login_returns_mfa_challenge(self, client):
-        """Step 1: Email + password → MFA challenge with mfa_token."""
+    def test_step1_login_returns_tokens_for_known_user(self, client):
+        """Login with known user email returns tokens + user profile directly."""
         resp = client.post(
             "/api/auth/login",
-            json={"email": "admin@asoe.test", "password": "test-password"},
+            json={"email": "marcus.webb@acme-corp.com", "password": "password"},
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["mfa_required"] is True
-        assert data["mfa_token"]  # non-empty MFA token
-        assert data["access_token"] == ""  # no access token yet
+        assert data["access_token"] != ""
+        assert data["refresh_token"]
+        assert data["user"]["name"] == "Marcus Webb"
+        assert data["user"]["roles"] == ["admin"]
 
-    def test_step2_mfa_verify_returns_tokens(self, client):
-        """Step 2: MFA code → access_token + refresh_token + user profile."""
-        # Step 1
-        login_resp = client.post(
+    def test_step1_login_rejects_unknown_user(self, client):
+        """Login with unknown email returns 401."""
+        resp = client.post(
             "/api/auth/login",
             json={"email": "admin@asoe.test", "password": "test-password"},
         )
-        mfa_token = login_resp.json()["mfa_token"]
+        assert resp.status_code == 401
 
-        # Step 2
+    def test_step2_mfa_verify_returns_tokens(self, client):
+        """MFA verify still works (backward compat stub)."""
         resp = client.post(
             "/api/auth/mfa/verify",
-            json={"mfa_token": mfa_token, "code": "123456"},
+            json={"mfa_token": "any-token", "code": "123456"},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -65,27 +66,23 @@ class TestMultiStepLoginFlow:
         assert data["token_type"] == "bearer"
         assert data["user"]["roles"] == ["admin"]
         assert "permissions" in data["user"]
+        assert "visible_tabs" in data["user"]
 
     def test_full_flow_token_works_for_api_calls(self, client):
-        """End-to-end: login → MFA → use access_token for API."""
-        # Login + MFA
+        """End-to-end: login → use access_token for API."""
+        # Login directly (no MFA step needed for known users)
         login_resp = client.post(
             "/api/auth/login",
-            json={"email": "admin@asoe.test", "password": "test-password"},
+            json={"email": "marcus.webb@acme-corp.com", "password": "password"},
         )
-        mfa_resp = client.post(
-            "/api/auth/mfa/verify",
-            json={
-                "mfa_token": login_resp.json()["mfa_token"],
-                "code": "123456",
-            },
-        )
-        access_token = mfa_resp.json()["access_token"]
+        assert login_resp.status_code == 200
+        access_token = login_resp.json()["access_token"]
 
         # Use the token to access a protected endpoint
         resp = client.get("/api/auth/me", headers=auth_header(access_token))
         assert resp.status_code == 200
-        assert resp.json()["email"] == "admin@example.com"
+        assert resp.json()["email"] == "marcus.webb@acme-corp.com"
+        assert "visible_tabs" in resp.json()
 
     def test_login_rejects_empty_credentials(self, client):
         resp = client.post(

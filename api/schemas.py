@@ -245,14 +245,28 @@ class AuthTokenResponse(BaseModel):
 
 
 class UserProfile(BaseModel):
-    """GET /api/auth/me — current user."""
+    """GET /api/auth/me — current user profile.
+
+    visible_tabs and permissions are computed from roles — never stored per user.
+    assigned_accounts drives server-side customer scope filtering.
+    """
 
     sub: str
     email: str
     name: str
+    title: Optional[str] = None
+    avatar_initials: Optional[str] = None
     roles: List[str]
     org: str
     permissions: List[str]
+    assigned_accounts: List[str] = Field(default_factory=list)
+    visible_tabs: List[str] = Field(default_factory=list)
+
+
+class UserListResponse(BaseModel):
+    """GET /api/v1/users — list of available users (sandbox only)."""
+
+    data: List[UserProfile]
 
 
 # Rebuild AuthTokenResponse now that UserProfile is defined

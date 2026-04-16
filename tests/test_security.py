@@ -168,18 +168,11 @@ class TestTokenTypes:
 # ---------------------------------------------------------------------------
 
 class TestAuthMethod:
-    def test_mfa_verify_sets_auth_method(self, client):
-        # Login to get MFA token
+    def test_login_sets_auth_method(self, client):
+        """Login with known user sets auth_method claim on JWT."""
         r = client.post(
             "/api/auth/login",
-            json={"email": "admin@x.com", "password": "pass"},
-        )
-        mfa_token = r.json()["mfa_token"]
-
-        # Verify MFA
-        r = client.post(
-            "/api/auth/mfa/verify",
-            json={"mfa_token": mfa_token, "code": "123456"},
+            json={"email": "marcus.webb@acme-corp.com", "password": "password"},
         )
         access = r.json()["access_token"]
         payload = _jwt_decode(access, _get_jwt_secret())

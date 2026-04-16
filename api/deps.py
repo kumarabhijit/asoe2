@@ -93,9 +93,12 @@ class AuthenticatedUser(BaseModel):
     sub: str
     email: str
     name: str
+    title: str = ""
+    avatar_initials: str = ""
     roles: List[str]
     org: str  # tenant_id
     permissions: List[str] = []
+    assigned_accounts: List[str] = []  # empty = all customers
     env: str = "sandbox"
     retailer_id: Optional[str] = None  # partner-role: scoped to own orders
 
@@ -189,9 +192,12 @@ async def get_current_user(
         sub=payload.get("sub", ""),
         email=payload.get("email", ""),
         name=payload.get("name", ""),
+        title=payload.get("title", ""),
+        avatar_initials=payload.get("avatar_initials", ""),
         roles=roles,
         org=payload.get("org", ""),
         permissions=_expand_permissions(roles),
+        assigned_accounts=payload.get("assigned_accounts", []),
         env=token_env,
         retailer_id=payload.get("retailer_id"),
     )
@@ -264,6 +270,9 @@ def _create_token(
     env: str = "sandbox",
     auth_method: Optional[str] = None,
     retailer_id: Optional[str] = None,
+    title: str = "",
+    avatar_initials: str = "",
+    assigned_accounts: Optional[List[str]] = None,
 ) -> str:
     """Create a signed JWT with the given type and expiry."""
     now = int(time.time())
@@ -284,6 +293,12 @@ def _create_token(
         payload["auth_method"] = auth_method
     if retailer_id:
         payload["retailer_id"] = retailer_id
+    if title:
+        payload["title"] = title
+    if avatar_initials:
+        payload["avatar_initials"] = avatar_initials
+    if assigned_accounts:
+        payload["assigned_accounts"] = assigned_accounts
     return _jwt_encode(payload, _get_jwt_secret())
 
 
@@ -296,12 +311,17 @@ def create_access_token(
     env: str = "sandbox",
     auth_method: Optional[str] = None,
     retailer_id: Optional[str] = None,
+    title: str = "",
+    avatar_initials: str = "",
+    assigned_accounts: Optional[List[str]] = None,
 ) -> str:
     """Create a signed access token (15-minute expiry)."""
     return _create_token(
         "access", ACCESS_TOKEN_EXPIRE_SECONDS,
         sub=sub, email=email, name=name, roles=roles, org=org,
         env=env, auth_method=auth_method, retailer_id=retailer_id,
+        title=title, avatar_initials=avatar_initials,
+        assigned_accounts=assigned_accounts,
     )
 
 
@@ -313,12 +333,17 @@ def create_refresh_token(
     org: str,
     env: str = "sandbox",
     retailer_id: Optional[str] = None,
+    title: str = "",
+    avatar_initials: str = "",
+    assigned_accounts: Optional[List[str]] = None,
 ) -> str:
     """Create a signed refresh token (7-day expiry)."""
     return _create_token(
         "refresh", REFRESH_TOKEN_EXPIRE_SECONDS,
         sub=sub, email=email, name=name, roles=roles, org=org,
         env=env, retailer_id=retailer_id,
+        title=title, avatar_initials=avatar_initials,
+        assigned_accounts=assigned_accounts,
     )
 
 

@@ -550,27 +550,45 @@ class TestPolicies:
 # ---------------------------------------------------------------------------
 
 class TestAuthEndpoints:
-    def test_login_returns_mfa_challenge(self, client):
+    def test_login_known_user(self, client):
+        """Login with a known user email returns tokens + profile."""
         r = client.post(
             "/api/auth/login",
-            json={"email": "admin@example.com", "password": "secret"},
+            json={"email": "marcus.webb@acme-corp.com", "password": "password"},
         )
         assert r.status_code == 200
         data = r.json()
-        assert data["mfa_required"] is True
-        assert data["mfa_token"] != ""
+        assert data["access_token"] != ""
+        assert data["user"]["name"] == "Marcus Webb"
+        assert data["user"]["title"] == "Admin"
+        assert "admin" in data["user"]["roles"]
+        assert "visible_tabs" in data["user"]
+        assert "settings" in data["user"]["visible_tabs"]
 
-    def test_mfa_verify(self, client):
-        # Get MFA token
+    def test_login_unknown_user(self, client):
+        """Login with unknown email returns 401."""
         r = client.post(
             "/api/auth/login",
-            json={"email": "admin@example.com", "password": "secret"},
+            json={"email": "unknown@example.com", "password": "password"},
         )
-        mfa_token = r.json()["mfa_token"]
+        assert r.status_code == 401
 
+    def test_login_analyst_has_limited_tabs(self, client):
+        """Analyst user has no settings tab."""
+        r = client.post(
+            "/api/auth/login",
+            json={"email": "james.ortiz@acme-corp.com", "password": "password"},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert "settings" not in data["user"]["visible_tabs"]
+        assert "exceptions" in data["user"]["visible_tabs"]
+        assert data["user"]["assigned_accounts"] == ["Walmart", "Kroger"]
+
+    def test_mfa_verify(self, client):
         r = client.post(
             "/api/auth/mfa/verify",
-            json={"mfa_token": mfa_token, "code": "123456"},
+            json={"mfa_token": "any-token", "code": "123456"},
         )
         assert r.status_code == 200
         data = r.json()
@@ -614,6 +632,60 @@ class TestAuthEndpoints:
         assert data["email"] == "test@example.com"
         assert "analyst" in data["roles"]
         assert data["org"] == "tenant-a"
+        assert "visible_tabs" in data
+        assert isinstance(data["visible_tabs"], list)
+
+    def test_switch_user_sandbox(self, client):
+        """Switch user in sandbox mode returns new JWT for target user."""
+        # Login as admin first
+        r = client.post(
+            "/api/auth/login",
+            json={"email": "marcus.webb@acme-corp.com", "password": "password"},
+        )
+        admin_token = r.json()["access_token"]
+
+        # Switch to James Ortiz
+        r = client.post(
+            "/api/auth/switch",
+            json={"email": "james.ortiz@acme-corp.com", "password": ""},
+            headers=_auth(admin_token),
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["user"]["name"] == "James Ortiz"
+        assert data["user"]["assigned_accounts"] == ["Walmart", "Kroger"]
+        assert "settings" not in data["user"]["visible_tabs"]
+
+    def test_switch_user_unknown(self, client):
+        """Switch to unknown user returns 404."""
+        r = client.post(
+            "/api/auth/login",
+            json={"email": "marcus.webb@acme-corp.com", "password": "password"},
+        )
+        admin_token = r.json()["access_token"]
+
+        r = client.post(
+            "/api/auth/switch",
+            json={"email": "nobody@example.com", "password": ""},
+            headers=_auth(admin_token),
+        )
+        assert r.status_code == 404
+
+    def test_list_users_sandbox(self, client):
+        """List users returns all 5 seed users in sandbox mode."""
+        r = client.post(
+            "/api/auth/login",
+            json={"email": "marcus.webb@acme-corp.com", "password": "password"},
+        )
+        token = r.json()["access_token"]
+
+        r = client.get("/api/auth/users", headers=_auth(token))
+        assert r.status_code == 200
+        data = r.json()["data"]
+        assert len(data) == 5
+        names = [u["name"] for u in data]
+        assert "Marcus Webb" in names
+        assert "James Ortiz" in names
 
 
 # ---------------------------------------------------------------------------
