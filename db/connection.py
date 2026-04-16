@@ -95,6 +95,39 @@ class SQLiteAdapter:
 # PostgreSQL adapter
 # ---------------------------------------------------------------------------
 
+class _QmarkCursorWrapper:
+    """Wraps a psycopg2/psycopg cursor to accept ``?`` placeholders.
+
+    Repository code uses SQLite-style ``?`` placeholders for portability.
+    This wrapper translates ``?`` → ``%s`` before forwarding to the
+    underlying PostgreSQL cursor, so query strings work unchanged
+    across both backends.
+    """
+
+    def __init__(self, cursor) -> None:
+        self._cur = cursor
+
+    @staticmethod
+    def _translate(sql: str) -> str:
+        """Replace ``?`` with ``%s`` outside of string literals."""
+        return sql.replace("?", "%s")
+
+    def execute(self, sql: str, params: tuple = ()) -> Any:
+        return self._cur.execute(self._translate(sql), params)
+
+    def fetchone(self) -> Optional[tuple]:
+        return self._cur.fetchone()
+
+    def fetchall(self) -> List[tuple]:
+        return self._cur.fetchall()
+
+    def close(self) -> None:
+        return self._cur.close()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._cur, name)
+
+
 class PostgresAdapter:
     """PostgreSQL connection wrapper with thread-local connection reuse.
 
@@ -163,8 +196,9 @@ class PostgresAdapter:
     def cursor(self, tenant_id: Optional[str] = None) -> Generator[Any, None, None]:
         with self.connection(tenant_id) as conn:
             cur = conn.cursor()
+            wrapped = _QmarkCursorWrapper(cur)
             try:
-                yield cur
+                yield wrapped
                 conn.commit()
             except Exception:
                 conn.rollback()

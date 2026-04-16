@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS exceptions (
 
 CREATE INDEX IF NOT EXISTS idx_exceptions_tenant_state
     ON exceptions (tenant_id, lifecycle_state, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_exceptions_trace
+CREATE UNIQUE INDEX IF NOT EXISTS idx_exceptions_trace
     ON exceptions (trace_id);
 CREATE INDEX IF NOT EXISTS idx_exceptions_order
     ON exceptions (tenant_id, order_id);
