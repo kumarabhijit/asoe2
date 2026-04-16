@@ -682,7 +682,7 @@ class TestAuthEndpoints:
         r = client.get("/api/auth/users", headers=_auth(token))
         assert r.status_code == 200
         data = r.json()["data"]
-        assert len(data) == 5
+        assert len(data) == 6
         names = [u["name"] for u in data]
         assert "Marcus Webb" in names
         assert "James Ortiz" in names

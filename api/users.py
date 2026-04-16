@@ -122,6 +122,16 @@ def list_accounts(tenant_id: str) -> List[Account]:
 
 _SEED_USERS: List[UserRecord] = [
     UserRecord(
+        sub="usr_jane_doe",
+        email="jane@acme.com",
+        name="Jane Doe",
+        title="Admin",
+        avatar_initials="JD",
+        roles=["admin"],
+        org="acme-corp",
+        assigned_accounts=[],  # all accounts
+    ),
+    UserRecord(
         sub="usr_marcus_webb",
         email="marcus.webb@acme-corp.com",
         name="Marcus Webb",
