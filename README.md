@@ -199,7 +199,7 @@ bash scripts/quickstart.sh
 ```
 
 That's it. When it finishes you'll see a "Ready" banner with all available
-commands. Expected output: **1007 tests passed**.
+commands. Expected output: **1021 tests passed**.
 
 **Other quickstart modes:**
 
@@ -286,7 +286,7 @@ uv pip install -e ".[langfuse]"
 python -m pytest
 ```
 
-Expected: **1007 passed, 0 failed**.
+Expected: **1021 passed, 0 failed**.
 
 | Test group | Count | What it covers |
 |---|---|---|
@@ -435,9 +435,27 @@ PYTHONPATH=. uvicorn api.app:app --host 0.0.0.0 --port 8000 --reload
 | `POST` | `/api/v1/exceptions/resolve` | analyst+ | Synchronous exception resolution |
 | `POST` | `/api/v1/exceptions/resolve/explain` | analyst+ | Explain mode dry-run |
 | `GET` | `/api/v1/exceptions` | analyst+ | Paginated exception queue |
+| `GET` | `/api/v1/accounts` | analyst+ | Account list (filtered by user's assigned accounts) |
 | `PATCH` | `/api/v1/exceptions/{id}/override` | manager+ | Human override |
 | `POST` | `/api/v1/workflows` | manager+ | Multi-step workflow execution |
 | `PUT` | `/api/v1/policies/{tenant_id}` | admin | Policy override update |
+| `POST` | `/api/auth/switch` | any (sandbox) | Switch to a different user (sandbox only) |
+| `GET` | `/api/auth/users` | any (sandbox) | List available users (sandbox only) |
+
+**Login credentials (sandbox):**
+
+All 6 seed users accept any non-empty password (V1 stub auth). Production will validate against a real IdP.
+
+| Email | Name | Role | Account scope |
+|---|---|---|---|
+| `jane@acme.com` | Jane Doe | admin | All accounts |
+| `marcus.webb@acme-corp.com` | Marcus Webb | admin | All accounts |
+| `sarah.chen@acme-corp.com` | Sarah Chen | manager | All accounts |
+| `sarah.chen.sr@acme-corp.com` | Sarah Chen | analyst (Sr.) | All accounts |
+| `james.ortiz@acme-corp.com` | James Ortiz | analyst | Walmart, Kroger |
+| `priya.nair@acme-corp.com` | Priya Nair | analyst | Target, Costco |
+
+**Sandbox user switching:** `POST /api/auth/switch` issues a new JWT for a different user without re-authenticating. Requires a valid current JWT. Blocked in production via `ASOE_ENV` check. `GET /api/auth/users` lists all available users for the sandbox user switcher (also blocked in production).
 
 All protected endpoints require a JWT Bearer token in the `Authorization`
 header. Set `ASOE_JWT_SECRET` for production; the dev fallback is used when
@@ -817,7 +835,7 @@ db/                 Database layer (architecture_v3.md §9)
   migrations/       V001__initial_schema.sql (5 tables, RLS, SOX trigger, pgvector)
 docs/               AUDITOR_GUIDE.md, ADR-001, ADR-002
   specs/            Product-owner reference specs (not runtime code)
-tests/              pytest test suite (1007 tests)
+tests/              pytest test suite (1021 tests)
   test_*.py         Core tests: contracts, constraints, recipes, orchestration, shadow, API, DB, WebSocket, workflows, guardrails (772 tests)
   test_postgres.py  PostgreSQL integration tests: schema migration, RLS, SOX trigger, JSONB, UUID, repository CRUD (35 tests; requires ASOE_TEST_POSTGRES_URL)
   sandbox/          Local execution sandbox + integration tests (127 tests)
@@ -914,6 +932,7 @@ k8s/                Kubernetes manifests for AKS production deployment
 | 16 | V1 Foundation Guardrail tests — 6 CI-automated guardrails (AST inspection, dynamic enums, metadata contracts, ERP-agnostic gateway, schema agnostic, policy key format) + Invariant #11; test count 739 → 764 |
 | 17 | Sandbox integration tests — REST API mode CLI, multi-step auth flow tests, DB persistence verification, WebSocket event tests, compliance simulation (force BLOCKED/REVIEW), recipe integrity + naming checks, setup-sandbox.sh with PostgreSQL/Redis containers; test count 764 → 891 |
 | 13.8 | PostgreSQL integration tests — 35 tests on real PostgreSQL: _QmarkCursorWrapper (?→%s), V001 schema migration (pgcrypto, pgvector, UUID, JSONB, TIMESTAMPTZ), RLS tenant isolation, SOX immutability trigger, repository CRUD, DatabaseBackedStore; UNIQUE INDEX on `exceptions.trace_id`; test count 972 → 1007 |
+| 18 | Server-side user profiles & Account entity — user store (6 seed users), Account entity (4 accounts), updated auth endpoints (login, switch, users list), account scoping, JWT claims (title, avatar_initials, assigned_accounts), sandbox user switching; test count 1007 → 1021 |
 
 ---
 

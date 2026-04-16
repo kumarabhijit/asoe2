@@ -65,14 +65,16 @@ api/
   errors.py          # Standard error envelope (ASOEError, ErrorEnvelope)
   schemas.py         # Request/Response Pydantic models
   store.py           # Exception store: in-memory (default) or DatabaseBackedStore (when DATABASE_URL set)
+  users.py           # User store (6 seed users), Account entity (4 accounts), compute_visible_tabs(), expand_permissions()
   events.py          # WSEvent schema + factory methods (pipeline_progress, task_complete, etc.)
   pubsub.py          # InMemoryPubSub / RedisPubSub, create_pubsub() factory, event_publisher singleton
   routes/
     health.py        # GET /api/v1/health (public, no auth)
     exceptions.py    # Exception CRUD + resolve endpoints (11 routes)
+    accounts.py      # GET /api/v1/accounts — account list with account scoping
     workflows.py     # POST /api/v1/workflows
     policies.py      # PUT /api/v1/policies/{tenant_id}
-    auth.py          # Auth endpoints: login, SSO, MFA, refresh, me
+    auth.py          # Auth endpoints: login, SSO, MFA, refresh, me, switch (sandbox), users list (sandbox)
     ws.py            # WebSocket hub — ws://host/api/v1/ws (§10)
 
 db/
@@ -503,6 +505,9 @@ Implements architecture_v3.md §8 (API Contract), §11.1 (Authentication), §11.
 | `POST` | `/api/auth/mfa/verify` | public | `api/routes/auth.py::mfa_verify()` |
 | `POST` | `/api/auth/refresh` | public | `api/routes/auth.py::refresh()` |
 | `GET` | `/api/auth/me` | any | `api/routes/auth.py::me()` |
+| `POST` | `/api/auth/switch` | any (sandbox only) | `api/routes/auth.py::switch_user()` |
+| `GET` | `/api/auth/users` | any (sandbox only) | `api/routes/auth.py::list_available_users()` |
+| `GET` | `/api/v1/accounts` | analyst+ | `api/routes/accounts.py::get_accounts()` |
 
 ### 15.2 Authentication & RBAC
 
@@ -526,6 +531,14 @@ Refresh endpoint validates `token_type == "refresh"` and issues rotated tokens. 
 | `admin` | manager + `users:manage`, `policy:write`, `audit:read` |
 | `viewer` | `exceptions:read`, `dashboard:read` |
 | `partner` | `exceptions:read` (scoped to own orders via `retailer_id`) |
+
+**User store** (`api/users.py`): Server-side user profiles (6 seed users) and Account entity (4 accounts: Walmart, Kroger, Target, Costco). Login resolves against the user store instead of hardcoded credentials. `compute_visible_tabs()` derives tab visibility from the user's expanded permissions. `expand_permissions()` mirrors `deps._expand_permissions()`.
+
+**Additional JWT claims**: `title`, `avatar_initials`, and `assigned_accounts` are included in access and refresh tokens. `AuthenticatedUser` (deps.py) carries these fields. `assigned_accounts` scopes the user to specific retail customer accounts (empty list = all accounts).
+
+**Account scoping**: Users with `assigned_accounts` see only their assigned accounts in `GET /api/v1/accounts` and only exceptions matching those account IDs in exception list/detail endpoints. The `ExceptionRecord` and `ExceptionSummary`/`ExceptionDetail` schemas include `account_id` and `account_name` fields.
+
+**Sandbox-only endpoints**: `POST /api/auth/switch` issues a new JWT for a different user (blocked in production via `ASOE_ENV` check). `GET /api/auth/users` lists all available users for the sandbox user switcher (also blocked in production).
 
 **Tenant isolation** (`api/deps.py::get_tenant_id()`): Extracts `tenant_id` from JWT `org` claim. All queries scoped by `tenant_id`. Partner-role filtering by `retailer_id` claim (§11.3). PostgreSQL RLS provides defense-in-depth.
 
@@ -694,6 +707,7 @@ All three resolve endpoints (sync, async, explain) publish a `task_complete` eve
 | `test_router.py` | Constraint router fallback chain |
 | `test_shadow.py` | Compliance Shadow audit and enforcement |
 | `test_skill_loader.py` | SKILL.md loading |
+| `test_user_profiles.py` | User store, Account entity, JWT claims (title, avatar_initials, assigned_accounts), account scoping, sandbox user switching, visible_tabs |
 | `test_workflows.py` | WorkflowRunner Saga execution and compensation |
 
 ```bash
