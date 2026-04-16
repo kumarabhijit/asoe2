@@ -199,7 +199,7 @@ bash scripts/quickstart.sh
 ```
 
 That's it. When it finishes you'll see a "Ready" banner with all available
-commands. Expected output: **891 tests passed**.
+commands. Expected output: **1007 tests passed**.
 
 **Other quickstart modes:**
 
@@ -286,16 +286,22 @@ uv pip install -e ".[langfuse]"
 python -m pytest
 ```
 
-Expected: **891 passed, 0 failed**.
+Expected: **1007 passed, 0 failed**.
 
 | Test group | Count | What it covers |
 |---|---|---|
-| Core tests (`tests/test_*.py`) | 764 | Contracts, constraints, recipes, orchestration, shadow, API, DB, WebSocket, workflows, guardrails |
+| Core tests (`tests/test_*.py`) | 772 | Contracts, constraints, recipes, orchestration, shadow, API, DB, WebSocket, workflows, guardrails |
+| E2E data-flow (`tests/test_e2e_*.py`, `tests/test_three_tier_hitl.py`) | 73 | Full pipeline for DUPLICATE_PO, CONTRACTUAL_CORRECTION, CREDIT_BLOCK, MASS_PRICING_ERROR; HITL approve/reject/override |
 | Sandbox integration (`tests/sandbox/test_*.py`) | 127 | Full API integration, auth flow, DB persistence, WebSocket events, compliance simulation, recipe integrity |
+| PostgreSQL integration (`tests/test_postgres.py`) | 35 | Real PostgreSQL: schema migration, RLS tenant isolation, SOX immutability trigger, JSONB round-trips, UUID columns, repository CRUD, DatabaseBackedStore |
 
 ```bash
 # Run only sandbox integration tests
 python -m pytest tests/sandbox/ -v
+
+# Run only PostgreSQL integration tests (requires running PostgreSQL)
+ASOE_TEST_POSTGRES_URL=postgresql://asoe_test:asoe_test@localhost/asoe_test \
+    python -m pytest tests/test_postgres.py -v
 
 # Run a specific test file
 python -m pytest tests/sandbox/test_auth_flow.py -v
@@ -806,13 +812,14 @@ api/                FastAPI API layer (architecture_v3.md §8, §11)
   store.py          Exception store (in-memory or database-backed via DATABASE_URL)
   routes/           health, exceptions, workflows, policies, auth endpoints
 db/                 Database layer (architecture_v3.md §9)
-  connection.py     SQLiteAdapter / PostgresAdapter, create_adapter() factory
+  connection.py     SQLiteAdapter / PostgresAdapter + _QmarkCursorWrapper (?→%s), create_adapter() factory
   repository.py     ExceptionRepository, TraceRepository, PolicyRepository
   migrations/       V001__initial_schema.sql (5 tables, RLS, SOX trigger, pgvector)
 docs/               AUDITOR_GUIDE.md, ADR-001, ADR-002
   specs/            Product-owner reference specs (not runtime code)
-tests/              pytest test suite (891 tests)
-  test_*.py         Core tests: contracts, constraints, recipes, orchestration, shadow, API, DB, WebSocket, workflows, guardrails (764 tests)
+tests/              pytest test suite (1007 tests)
+  test_*.py         Core tests: contracts, constraints, recipes, orchestration, shadow, API, DB, WebSocket, workflows, guardrails (772 tests)
+  test_postgres.py  PostgreSQL integration tests: schema migration, RLS, SOX trigger, JSONB, UUID, repository CRUD (35 tests; requires ASOE_TEST_POSTGRES_URL)
   sandbox/          Local execution sandbox + integration tests (127 tests)
     conftest.py     Shared fixtures (client, JWT tokens for all RBAC roles, event payloads)
     test_integration.py       Full API path: health, resolve, CRUD, stats, tenant isolation (31 tests)
@@ -906,6 +913,7 @@ k8s/                Kubernetes manifests for AKS production deployment
 | 15 | WebSocket / Redis real-time event publishing — event schemas, pub/sub manager (in-memory + Redis), WebSocket hub with JWT auth + tenant scoping, resolve endpoint event wiring; test count 718 → 739 |
 | 16 | V1 Foundation Guardrail tests — 6 CI-automated guardrails (AST inspection, dynamic enums, metadata contracts, ERP-agnostic gateway, schema agnostic, policy key format) + Invariant #11; test count 739 → 764 |
 | 17 | Sandbox integration tests — REST API mode CLI, multi-step auth flow tests, DB persistence verification, WebSocket event tests, compliance simulation (force BLOCKED/REVIEW), recipe integrity + naming checks, setup-sandbox.sh with PostgreSQL/Redis containers; test count 764 → 891 |
+| 13.8 | PostgreSQL integration tests — 35 tests on real PostgreSQL: _QmarkCursorWrapper (?→%s), V001 schema migration (pgcrypto, pgvector, UUID, JSONB, TIMESTAMPTZ), RLS tenant isolation, SOX immutability trigger, repository CRUD, DatabaseBackedStore; UNIQUE INDEX on `exceptions.trace_id`; test count 972 → 1007 |
 
 ---
 
@@ -918,6 +926,7 @@ k8s/                Kubernetes manifests for AKS production deployment
 | `ASOE_ENV` | `sandbox` | `sandbox` or `production` — JWT `env` claim must match (§11.6) |
 | `ASOE_JWT_SECRET` | _(dev fallback)_ | JWT signing secret — **required for production** (Key Vault-managed) |
 | `DATABASE_URL` | _(unset)_ | PostgreSQL connection string; when set, API uses database-backed store |
+| `ASOE_TEST_POSTGRES_URL` | _(unset)_ | PostgreSQL connection string for integration tests; when unset, PostgreSQL tests are skipped |
 | `REDIS_URL` | _(unset)_ | Redis connection string for pub/sub, task queue, cache |
 | `USE_OUTLINES_BACKEND` | `0` | `1` — use `OutlinesConstrainedBackend` (requires `pip install -e ".[outlines]"`) |
 | `SANDBOX_DB_PATH` | `tests/sandbox/sandbox.db` | Path to the sandbox SQLite database |
