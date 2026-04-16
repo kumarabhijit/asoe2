@@ -331,8 +331,14 @@ async def list_exceptions(
         cursor=cursor,
     )
 
-    # §11.3: Partner-role sees only own orders (retailer_id filtering)
-    if "partner" in user.roles and user.retailer_id:
+    # Unified account scoping: assigned_accounts (internal) and retailer_id (partner)
+    # are enforced server-side using the same mechanism.
+    if user.assigned_accounts:
+        # Internal users scoped to specific accounts — filter by account_id
+        allowed = set(user.assigned_accounts)
+        records = [r for r in records if getattr(r, "account_id", None) in allowed]
+    elif "partner" in user.roles and user.retailer_id:
+        # Partner-role legacy: filter by order_id prefix (pre-account_id compat)
         records = [r for r in records if getattr(r, "order_id", "").startswith(user.retailer_id)]
 
     return ExceptionListResponse(

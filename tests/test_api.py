@@ -583,7 +583,7 @@ class TestAuthEndpoints:
         data = r.json()
         assert "settings" not in data["user"]["visible_tabs"]
         assert "exceptions" in data["user"]["visible_tabs"]
-        assert data["user"]["assigned_accounts"] == ["Walmart", "Kroger"]
+        assert data["user"]["assigned_accounts"] == ["acct-walmart", "acct-kroger"]
 
     def test_mfa_verify(self, client):
         r = client.post(
@@ -653,7 +653,7 @@ class TestAuthEndpoints:
         assert r.status_code == 200
         data = r.json()
         assert data["user"]["name"] == "James Ortiz"
-        assert data["user"]["assigned_accounts"] == ["Walmart", "Kroger"]
+        assert data["user"]["assigned_accounts"] == ["acct-walmart", "acct-kroger"]
         assert "settings" not in data["user"]["visible_tabs"]
 
     def test_switch_user_unknown(self, client):

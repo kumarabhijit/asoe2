@@ -41,6 +41,8 @@ class ExceptionRecord:
         resolved_by: Optional[str] = None,
         resolved_action: Optional[str] = None,
         resolution_notes: Optional[str] = None,
+        account_id: Optional[str] = None,
+        account_name: Optional[str] = None,
     ):
         self.id = str(uuid4())
         self.tenant_id = tenant_id
@@ -56,6 +58,8 @@ class ExceptionRecord:
         self.resolved_by = resolved_by
         self.resolved_action = resolved_action
         self.resolution_notes = resolution_notes
+        self.account_id = account_id
+        self.account_name = account_name
         now = datetime.now(timezone.utc).isoformat()
         self.created_at = now
         self.updated_at = now
@@ -71,6 +75,8 @@ class ExceptionRecord:
             shadow_verdict=self.shadow_verdict,
             selected_recipe=self.selected_recipe,
             final_status=self.final_status,
+            account_id=self.account_id,
+            account_name=self.account_name,
             created_at=self.created_at,
             updated_at=self.updated_at,
         )
@@ -86,6 +92,8 @@ class ExceptionRecord:
             shadow_verdict=self.shadow_verdict,
             selected_recipe=self.selected_recipe,
             final_status=self.final_status,
+            account_id=self.account_id,
+            account_name=self.account_name,
             trace_id=self.trace_id,
             resolution_data=self.resolution_data,
             resolved_by=self.resolved_by,

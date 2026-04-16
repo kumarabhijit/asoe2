@@ -1,10 +1,15 @@
-"""Server-side user profiles with role-based tab visibility and account scoping.
+"""Server-side user profiles and accounts.
 
 Users are real records (in-memory for V1, DB-backed in V1.1). Each user has:
   - A role from the existing RBAC system (analyst, manager, admin, viewer, partner)
   - Permissions derived from that role via _ROLE_PERMISSIONS (deps.py)
   - assigned_accounts for customer scope filtering (empty = all customers)
   - visible_tabs computed from permissions (not stored per user)
+
+Accounts are the first-class "customer" entity within a tenant.
+  - Tenants = manufacturers (e.g., acme-corp)
+  - Accounts = retail customers (e.g., Walmart, Kroger) within a tenant
+  - Each exception is associated with an account_id
 
 No parallel permission system — one role, one set of permissions, one truth.
 """
@@ -16,6 +21,21 @@ from typing import Dict, List, Optional
 from pydantic import BaseModel
 
 from api.deps import _ROLE_PERMISSIONS
+
+
+# ---------------------------------------------------------------------------
+# Account model — first-class customer entity within a tenant
+# ---------------------------------------------------------------------------
+
+class Account(BaseModel):
+    """A retail customer account within a tenant (manufacturer)."""
+
+    id: str
+    name: str
+    tenant_id: str
+    bp_number: str  # SAP Business Partner number
+    tier: str  # "enterprise" | "strategic" | "standard"
+    region: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -32,7 +52,7 @@ class UserRecord(BaseModel):
     avatar_initials: str
     roles: List[str]
     org: str
-    assigned_accounts: List[str] = []  # empty = all customers
+    assigned_accounts: List[str] = []  # account IDs — empty = all
     env: str = "sandbox"
 
 
@@ -40,7 +60,6 @@ class UserRecord(BaseModel):
 # Tab visibility — derived from permissions, never stored per user
 # ---------------------------------------------------------------------------
 
-# Permission → tab mapping. A tab appears if the user has ANY of its permissions.
 _PERMISSION_TAB_MAP: List[tuple[str, List[str]]] = [
     ("inbox",      ["exceptions:read"]),
     ("exceptions", ["exceptions:read"]),
@@ -68,6 +87,36 @@ def expand_permissions(roles: List[str]) -> List[str]:
 
 
 # ---------------------------------------------------------------------------
+# Seed accounts — retail customers within acme-corp tenant
+# ---------------------------------------------------------------------------
+
+_SEED_ACCOUNTS: List[Account] = [
+    Account(id="acct-walmart", name="Walmart", tenant_id="acme-corp", bp_number="BP-0001", tier="enterprise", region="National"),
+    Account(id="acct-kroger", name="Kroger", tenant_id="acme-corp", bp_number="BP-0002", tier="enterprise", region="Midwest"),
+    Account(id="acct-target", name="Target", tenant_id="acme-corp", bp_number="BP-0003", tier="strategic", region="National"),
+    Account(id="acct-costco", name="Costco", tenant_id="acme-corp", bp_number="BP-0004", tier="strategic", region="West"),
+]
+
+_ACCOUNTS_BY_ID: Dict[str, Account] = {a.id: a for a in _SEED_ACCOUNTS}
+_ACCOUNTS_BY_NAME: Dict[str, Account] = {a.name: a for a in _SEED_ACCOUNTS}
+
+
+def get_account(account_id: str) -> Optional[Account]:
+    """Look up an account by ID."""
+    return _ACCOUNTS_BY_ID.get(account_id)
+
+
+def get_account_by_name(name: str) -> Optional[Account]:
+    """Look up an account by name."""
+    return _ACCOUNTS_BY_NAME.get(name)
+
+
+def list_accounts(tenant_id: str) -> List[Account]:
+    """Return all accounts for a tenant."""
+    return [a for a in _SEED_ACCOUNTS if a.tenant_id == tenant_id]
+
+
+# ---------------------------------------------------------------------------
 # Seed users — 5 personas matching prototype, each with a real RBAC role
 # ---------------------------------------------------------------------------
 
@@ -80,7 +129,7 @@ _SEED_USERS: List[UserRecord] = [
         avatar_initials="MW",
         roles=["admin"],
         org="acme-corp",
-        assigned_accounts=[],  # all customers
+        assigned_accounts=[],  # all accounts
     ),
     UserRecord(
         sub="usr_sarah_chen_mgr",
@@ -90,7 +139,7 @@ _SEED_USERS: List[UserRecord] = [
         avatar_initials="SC",
         roles=["manager"],
         org="acme-corp",
-        assigned_accounts=[],  # all customers
+        assigned_accounts=[],  # all accounts
     ),
     UserRecord(
         sub="usr_sarah_chen_sr",
@@ -100,7 +149,7 @@ _SEED_USERS: List[UserRecord] = [
         avatar_initials="SC",
         roles=["analyst"],
         org="acme-corp",
-        assigned_accounts=[],  # all customers
+        assigned_accounts=[],  # all accounts
     ),
     UserRecord(
         sub="usr_james_ortiz",
@@ -110,7 +159,7 @@ _SEED_USERS: List[UserRecord] = [
         avatar_initials="JO",
         roles=["analyst"],
         org="acme-corp",
-        assigned_accounts=["Walmart", "Kroger"],
+        assigned_accounts=["acct-walmart", "acct-kroger"],
     ),
     UserRecord(
         sub="usr_priya_nair",
@@ -120,11 +169,10 @@ _SEED_USERS: List[UserRecord] = [
         avatar_initials="PN",
         roles=["analyst"],
         org="acme-corp",
-        assigned_accounts=["Target", "Costco"],
+        assigned_accounts=["acct-target", "acct-costco"],
     ),
 ]
 
-# Index by email for login lookup, by sub for token lookup
 _USERS_BY_EMAIL: Dict[str, UserRecord] = {u.email: u for u in _SEED_USERS}
 _USERS_BY_SUB: Dict[str, UserRecord] = {u.sub: u for u in _SEED_USERS}
 
