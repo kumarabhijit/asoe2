@@ -639,3 +639,55 @@ Build prompt: architecture_v3.md §15
 - [~] **SEC-6**: Add signal score clamping to [0.0, 1.0] — **SKIP**: silent correction masks upstream bugs; classifications unaffected even with out-of-bounds scores; input is internally generated
 - [~] **TEST-4**: Add adversarial input tests — **SKIP**: no known bugs caught; recipes already handle edge cases correctly; testing for testing's sake violates "smallest viable increment"
 - [~] **TEST-5**: Validate compensation recipe names against registry — **SKIP**: two independent guards (Pydantic Literal + registry KeyError) already prevent the failure mode
+---
+## PHASE 18 — Server-Side User Profiles & Account Entity
+Build prompt: prompts/phase_18_user_profiles.md
+### 18.1 User Store (`api/users.py`)
+- [x] `UserRecord` model: sub, email, name, title, avatar_initials, roles, org, assigned_accounts, env
+- [x] 6 seed users: Jane Doe (admin), Marcus Webb (admin), Sarah Chen (manager), Sarah Chen Sr (analyst), James Ortiz (analyst, scoped to Walmart/Kroger), Priya Nair (analyst, scoped to Target/Costco)
+- [x] Lookup helpers: `get_user_by_email()`, `get_user_by_sub()`, `list_users()`
+- [x] `compute_visible_tabs()` — derives tab visibility from expanded permissions
+- [x] `expand_permissions()` — mirrors `deps._expand_permissions()` for use outside request context
+✅ Outcome: server-side user profiles replace hardcoded login credentials
+
+### 18.2 Account Entity (`api/users.py`)
+- [x] `Account` model: id, name, tenant_id, bp_number, tier, region
+- [x] 4 seed accounts: Walmart (enterprise), Kroger (enterprise), Target (strategic), Costco (strategic)
+- [x] Lookup helpers: `get_account()`, `get_account_by_name()`, `list_accounts()`
+✅ Outcome: first-class customer entity within a tenant
+
+### 18.3 Account Scoping
+- [x] `GET /api/v1/accounts` endpoint (`api/routes/accounts.py`) — returns accounts filtered by user's `assigned_accounts`
+- [x] `ExceptionRecord` (store.py) gains `account_id`, `account_name` fields
+- [x] `ExceptionSummary`/`ExceptionDetail` (schemas.py) gain `account_id`, `account_name` fields
+- [x] Exception list/detail endpoints filter by `assigned_accounts` when set
+- [x] Partner role filters by `order_id` prefix in exception endpoints
+✅ Outcome: users see only their assigned accounts and corresponding exceptions
+
+### 18.4 Updated Auth Endpoints
+- [x] `POST /api/auth/login` resolves against user store (not hardcoded)
+- [x] `POST /api/auth/switch` — sandbox-only user switching (issues new JWT for target user, blocked in production)
+- [x] `GET /api/auth/users` — sandbox-only user list (returns all seed user profiles, blocked in production)
+✅ Outcome: auth flow uses real user records; sandbox supports user switching
+
+### 18.5 JWT Claims & AuthenticatedUser
+- [x] `AuthenticatedUser` (deps.py) gains `title`, `avatar_initials`, `assigned_accounts` fields
+- [x] `create_access_token()` and `create_refresh_token()` include `title`, `avatar_initials`, `assigned_accounts` claims
+- [x] `UserProfile` (schemas.py) gains `title`, `avatar_initials`, `assigned_accounts`, `visible_tabs` fields
+- [x] New schemas: `AccountResponse`, `AccountListResponse`, `UserListResponse`
+✅ Outcome: JWT carries user profile data; API responses include computed fields
+
+### 18.6 Tests
+- [x] 43 new tests in `tests/test_user_profiles.py` (1021 total)
+- [x] User store CRUD, Account entity, JWT claims (title, avatar_initials, assigned_accounts)
+- [x] Account scoping (assigned_accounts filtering), sandbox user switching, visible_tabs computation
+✅ Outcome: full coverage of user profiles, accounts, scoping, and sandbox endpoints
+
+### 18.7 Documentation
+- [x] `DESIGN.md` §1 — `api/users.py` and `api/routes/accounts.py` in module structure
+- [x] `DESIGN.md` §15.1 — new endpoints in route table (accounts, switch, users)
+- [x] `DESIGN.md` §15.2 — user store, JWT claims, account scoping, sandbox endpoints
+- [x] `DESIGN.md` §19 — `test_user_profiles.py` in test coverage table
+- [x] `tasks.md` — this phase checklist
+- [x] `README.md` — login credentials, new endpoints, sandbox user switching
+✅ Outcome: docs cover user profiles, accounts, auth flow, and scoping
