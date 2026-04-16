@@ -267,12 +267,6 @@ class UserProfile(BaseModel):
     visible_tabs: List[str] = Field(default_factory=list)
 
 
-class UserListResponse(BaseModel):
-    """GET /api/v1/users — list of available users (sandbox only)."""
-
-    data: List[UserProfile]
-
-
 class AccountResponse(BaseModel):
     """A retail customer account within a tenant."""
 

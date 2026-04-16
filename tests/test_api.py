@@ -635,57 +635,6 @@ class TestAuthEndpoints:
         assert "visible_tabs" in data
         assert isinstance(data["visible_tabs"], list)
 
-    def test_switch_user_sandbox(self, client):
-        """Switch user in sandbox mode returns new JWT for target user."""
-        # Login as admin first
-        r = client.post(
-            "/api/auth/login",
-            json={"email": "marcus.webb@acme-corp.com", "password": "password"},
-        )
-        admin_token = r.json()["access_token"]
-
-        # Switch to James Ortiz
-        r = client.post(
-            "/api/auth/switch",
-            json={"email": "james.ortiz@acme-corp.com", "password": ""},
-            headers=_auth(admin_token),
-        )
-        assert r.status_code == 200
-        data = r.json()
-        assert data["user"]["name"] == "James Ortiz"
-        assert data["user"]["assigned_accounts"] == ["acct-walmart", "acct-kroger"]
-        assert "settings" not in data["user"]["visible_tabs"]
-
-    def test_switch_user_unknown(self, client):
-        """Switch to unknown user returns 404."""
-        r = client.post(
-            "/api/auth/login",
-            json={"email": "marcus.webb@acme-corp.com", "password": "password"},
-        )
-        admin_token = r.json()["access_token"]
-
-        r = client.post(
-            "/api/auth/switch",
-            json={"email": "nobody@example.com", "password": ""},
-            headers=_auth(admin_token),
-        )
-        assert r.status_code == 404
-
-    def test_list_users_sandbox(self, client):
-        """List users returns all 5 seed users in sandbox mode."""
-        r = client.post(
-            "/api/auth/login",
-            json={"email": "marcus.webb@acme-corp.com", "password": "password"},
-        )
-        token = r.json()["access_token"]
-
-        r = client.get("/api/auth/users", headers=_auth(token))
-        assert r.status_code == 200
-        data = r.json()["data"]
-        assert len(data) == 6
-        names = [u["name"] for u in data]
-        assert "Marcus Webb" in names
-        assert "James Ortiz" in names
 
 
 # ---------------------------------------------------------------------------

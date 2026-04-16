@@ -6,15 +6,12 @@ GET  /api/auth/sso/callback — SSO callback (stub)
 POST /api/auth/mfa/verify   — MFA verification (stub)
 POST /api/auth/refresh      — Token refresh with rotation
 GET  /api/auth/me           — Current authenticated user profile
-POST /api/auth/switch       — Switch user in sandbox mode (returns new JWT)
 
 V1 implements stub auth with dev-signed JWTs. Production requires
 real IdP integration (Okta, Azure AD) and Key Vault-managed signing keys.
 """
 
 from __future__ import annotations
-
-import os
 
 from fastapi import APIRouter, Depends
 
@@ -33,15 +30,12 @@ from api.schemas import (
     LoginRequest,
     MFAVerifyRequest,
     RefreshRequest,
-    UserListResponse,
     UserProfile,
 )
 from api.users import (
     compute_visible_tabs,
     expand_permissions,
     get_user_by_email,
-    get_user_by_sub,
-    list_users,
 )
 
 router = APIRouter()
@@ -260,68 +254,3 @@ async def me(
         assigned_accounts=user.assigned_accounts,
         visible_tabs=compute_visible_tabs(user.permissions),
     )
-
-
-# ---------------------------------------------------------------------------
-# POST /api/auth/switch — Switch user (sandbox mode only)
-# ---------------------------------------------------------------------------
-
-@router.post("/switch", response_model=AuthTokenResponse)
-async def switch_user(
-    req: LoginRequest,
-    _user: AuthenticatedUser = Depends(get_current_user),
-) -> AuthTokenResponse:
-    """Switch to a different user in sandbox mode. Requires valid current JWT.
-
-    Issues a new JWT for the target user — full server round-trip, not
-    client-side localStorage manipulation. Blocked in production.
-    """
-    server_env = os.getenv("ASOE_ENV", "sandbox")
-    if server_env == "production":
-        raise ASOEError(
-            code="FORBIDDEN",
-            message="User switching is disabled in production.",
-            status_code=403,
-        )
-
-    target = get_user_by_email(req.email)
-    if not target:
-        raise ASOEError(
-            code="NOT_FOUND",
-            message=f"User '{req.email}' not found.",
-            status_code=404,
-        )
-
-    access, refresh = _create_tokens_for_user(target, auth_method="switch")
-    profile = _build_user_profile(target)
-
-    return AuthTokenResponse(
-        access_token=access,
-        refresh_token=refresh,
-        user=profile,
-    )
-
-
-# ---------------------------------------------------------------------------
-# GET /api/v1/users — List available users (sandbox only)
-# ---------------------------------------------------------------------------
-# Note: mounted at /api/auth prefix, so full path is /api/auth/users
-
-@router.get("/users", response_model=UserListResponse)
-async def list_available_users(
-    _user: AuthenticatedUser = Depends(get_current_user),
-) -> UserListResponse:
-    """List all available users for the sandbox user switcher.
-
-    Requires authentication. In production, this would be admin-only.
-    """
-    server_env = os.getenv("ASOE_ENV", "sandbox")
-    if server_env == "production":
-        raise ASOEError(
-            code="FORBIDDEN",
-            message="User listing is disabled in production.",
-            status_code=403,
-        )
-
-    profiles = [_build_user_profile(u) for u in list_users()]
-    return UserListResponse(data=profiles)
