@@ -467,6 +467,8 @@ All protected endpoints require a JWT Bearer token in the `Authorization` header
 
 **Partner-role scoping:** Partners with `retailer_id` claim see only their own orders in list endpoints. Partners are blocked from resolve, override, approve, reject, and trace endpoints.
 
+**RLS test coverage:** Row-Level Security is verified by integration tests on real PostgreSQL (`tests/test_postgres.py` — `TestRowLevelSecurity`). Tests confirm RLS is enabled on `exceptions` and `traces` tables, that Tenant A cannot see Tenant B's rows via the repository, and that GET by ID with wrong tenant returns `None`. These tests require `ASOE_TEST_POSTGRES_URL` and are skipped in CI when not set.
+
 ### 12.4 Environment Isolation (§11.6)
 
 JWT `env` claim is validated against `ASOE_ENV` environment variable on every authenticated request. A sandbox token presented to a production server returns **403 with generic "Access denied."** — no internal state, stack traces, or exception metadata leaked in the response.
@@ -493,6 +495,8 @@ Every policy override change is immutably logged in the `policy_audit_log` table
 | `change_reason` | Free-text reason for the change |
 
 **Immutability enforcement:** A PostgreSQL trigger (`trg_policy_audit_immutable`) raises an exception on any `UPDATE` or `DELETE` attempt. Additionally, `REVOKE UPDATE, DELETE` is applied for the `asoe_app` and `asoe_worker` roles.
+
+**Test coverage:** The SOX immutability trigger is verified by integration tests on real PostgreSQL (`tests/test_postgres.py` — `TestSOXAuditImmutability`). Tests confirm that INSERT succeeds while UPDATE and DELETE are blocked by the trigger. These tests require a running PostgreSQL instance and are skipped in CI when `ASOE_TEST_POSTGRES_URL` is not set.
 
 ### 13.2 Schema Security
 
@@ -551,7 +555,9 @@ Run the full suite:
 python -m pytest
 ```
 
-Expected outcome: **764 passed, 0 failed, 0 skipped.**
+Expected outcome: **1007 passed, 0 failed.**
+
+PostgreSQL integration tests (35 tests in `tests/test_postgres.py`) require a running PostgreSQL instance and `ASOE_TEST_POSTGRES_URL`. They are skipped automatically when the variable is unset.
 
 ---
 

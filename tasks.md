@@ -444,7 +444,19 @@ Build prompt: architecture_v3.md §9.2, §9.1, §11.3
 - [x] 31 new tests in `tests/test_db.py` (690 total): schema (5), exception CRUD (13), trace (2), policy+audit (4), DatabaseBackedStore (7)
 ✅ Outcome: full repository coverage using SQLite in-memory; no PostgreSQL required for CI
 
-### 13.8 Documentation
+### 13.8 PostgreSQL Integration Tests
+- [x] 35 new tests in `tests/test_postgres.py` exercising real PostgreSQL (1007 total)
+- [x] `_QmarkCursorWrapper` in `db/connection.py`: translates `?`→`%s` for PostgreSQL compatibility
+- [x] Schema migration V001 on real PostgreSQL (pgcrypto, pgvector, UUID, JSONB, TIMESTAMPTZ)
+- [x] Row-Level Security: tenant isolation enforced at database level
+- [x] SOX immutability trigger: UPDATE/DELETE blocked on `policy_audit_log`
+- [x] Repository CRUD on PostgreSQL: exceptions, traces, policies
+- [x] DatabaseBackedStore full round-trip on PostgreSQL
+- [x] UNIQUE index on `exceptions.trace_id` (required for checkpoints FK)
+- [x] Tests auto-skip when PostgreSQL unavailable (`ASOE_TEST_POSTGRES_URL`)
+✅ Outcome: PostgreSQL-specific features (RLS, SOX trigger, JSONB, UUID) are test-covered
+
+### 13.9 Documentation
 - [x] `DESIGN.md` §16 — database layer docs (schema, RLS, adapters, repositories)
 - [x] `DESIGN.md` §1 — db/ module added to module structure
 - [x] `tasks.md` — this phase checklist
