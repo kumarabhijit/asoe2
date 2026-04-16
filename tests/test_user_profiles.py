@@ -180,9 +180,9 @@ class TestUserLookups:
     def test_get_user_by_sub_not_found(self):
         assert get_user_by_sub("usr_nonexistent") is None
 
-    def test_list_users_returns_five(self):
+    def test_list_users_returns_all_seed_users(self):
         users = list_users()
-        assert len(users) == 5
+        assert len(users) == 6
         names = [u.name for u in users]
         assert "Marcus Webb" in names
         assert "James Ortiz" in names
