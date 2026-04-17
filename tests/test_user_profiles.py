@@ -182,7 +182,7 @@ class TestUserLookups:
 
     def test_list_users_returns_all_seed_users(self):
         users = list_users()
-        assert len(users) == 6
+        assert len(users) == 8
         names = [u.name for u in users]
         assert "Marcus Webb" in names
         assert "James Ortiz" in names
@@ -406,4 +406,100 @@ class TestJWTClaimsRoundTrip:
         assert data["avatar_initials"] == "SC"
         assert "settings" in data["visible_tabs"]
         assert data["assigned_accounts"] == []
+
+
+# ===========================================================================
+# Partner user tests
+# ===========================================================================
+
+
+class TestPartnerUsers:
+    """Partner users (external retailer reps) — read-only, single-account scoped."""
+
+    def test_partner_login(self, client):
+        """Partner user can log in."""
+        r = client.post(
+            "/api/auth/login",
+            json={"email": "tom.bradley@walmart.com", "password": "password"},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["user"]["name"] == "Tom Bradley"
+        assert data["user"]["title"] == "Walmart Buyer Rep"
+        assert "partner" in data["user"]["roles"]
+        assert data["user"]["assigned_accounts"] == ["acct-walmart"]
+
+    def test_partner_visible_tabs_no_dashboard_no_settings(self, client):
+        """Partner sees only inbox + exceptions (no dashboard, no settings)."""
+        r = client.post(
+            "/api/auth/login",
+            json={"email": "tom.bradley@walmart.com", "password": "password"},
+        )
+        tabs = r.json()["user"]["visible_tabs"]
+        assert "inbox" in tabs
+        assert "exceptions" in tabs
+        assert "dashboard" not in tabs
+        assert "settings" not in tabs
+
+    def test_partner_sees_only_own_account_exceptions(self, client):
+        """Partner scoped to acct-walmart sees only Walmart exceptions."""
+        admin_token = _login(client, "marcus.webb@acme-corp.com")
+        _create_exception_with_account(client, admin_token, "PO-WP1", "acct-walmart", "Walmart")
+        _create_exception_with_account(client, admin_token, "PO-KP1", "acct-kroger", "Kroger")
+        _create_exception_with_account(client, admin_token, "PO-TP1", "acct-target", "Target")
+
+        partner_token = _login(client, "tom.bradley@walmart.com")
+        r = client.get("/api/v1/exceptions", headers=_auth(partner_token))
+        assert r.status_code == 200
+        data = r.json()["data"]
+        assert len(data) == 1
+        assert data[0]["account_id"] == "acct-walmart"
+
+    def test_partner_cannot_approve(self, client):
+        """Partner role cannot approve exceptions (analyst+ required)."""
+        admin_token = _login(client, "marcus.webb@acme-corp.com")
+        exc_id = _create_exception_with_account(client, admin_token, "PO-WP2", "acct-walmart", "Walmart")
+
+        partner_token = _login(client, "tom.bradley@walmart.com")
+        r = client.post(
+            f"/api/v1/exceptions/{exc_id}/approve",
+            json={},
+            headers=_auth(partner_token),
+        )
+        assert r.status_code == 403
+
+    def test_partner_cannot_override(self, client):
+        """Partner role cannot override exceptions (manager+ required)."""
+        admin_token = _login(client, "marcus.webb@acme-corp.com")
+        exc_id = _create_exception_with_account(client, admin_token, "PO-WP3", "acct-walmart", "Walmart")
+
+        partner_token = _login(client, "tom.bradley@walmart.com")
+        r = client.patch(
+            f"/api/v1/exceptions/{exc_id}/override",
+            json={"action": "ALLOW_BOTH", "notes": "test", "resolved_by": "partner"},
+            headers=_auth(partner_token),
+        )
+        assert r.status_code == 403
+
+    def test_kroger_partner_sees_only_kroger(self, client):
+        """Kroger partner rep sees only Kroger exceptions."""
+        admin_token = _login(client, "marcus.webb@acme-corp.com")
+        _create_exception_with_account(client, admin_token, "PO-WP4", "acct-walmart", "Walmart")
+        _create_exception_with_account(client, admin_token, "PO-KP4", "acct-kroger", "Kroger")
+
+        partner_token = _login(client, "lisa.huang@kroger.com")
+        r = client.get("/api/v1/exceptions", headers=_auth(partner_token))
+        assert r.status_code == 200
+        data = r.json()["data"]
+        assert len(data) == 1
+        assert data[0]["account_id"] == "acct-kroger"
+
+    def test_partner_accounts_endpoint_scoped(self, client):
+        """Partner sees only their own account in accounts list."""
+        partner_token = _login(client, "tom.bradley@walmart.com")
+        r = client.get("/api/v1/accounts", headers=_auth(partner_token))
+        assert r.status_code == 200
+        data = r.json()["data"]
+        assert len(data) == 1
+        assert data[0]["name"] == "Walmart"
 

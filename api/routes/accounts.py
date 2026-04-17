@@ -19,7 +19,7 @@ router = APIRouter()
 @router.get(
     "/accounts",
     response_model=AccountListResponse,
-    dependencies=[Depends(require_role("analyst", "manager", "admin", "viewer"))],
+    dependencies=[Depends(require_role("analyst", "manager", "admin", "viewer", "partner"))],
 )
 async def get_accounts(
     tenant_id: str = Depends(get_tenant_id),
