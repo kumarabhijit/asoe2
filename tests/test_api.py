@@ -475,6 +475,136 @@ class TestApproveReject:
 
 
 # ---------------------------------------------------------------------------
+# Reanalyze
+# ---------------------------------------------------------------------------
+
+class TestReanalyze:
+    """POST /api/v1/exceptions/{id}/reanalyze — governance-compliant replay."""
+
+    def _create_pending_review(self, client, token) -> str:
+        """Create an exception in PENDING_REVIEW (YELLOW) via explain mode."""
+        r = client.post(
+            "/api/v1/exceptions/resolve/explain",
+            json=_sample_event(),
+            headers=_auth(token),
+        )
+        return r.json()["exception_id"]
+
+    def test_reanalyze_success_on_pending_review(self, client, analyst_token, manager_token):
+        exc_id = self._create_pending_review(client, analyst_token)
+        # Capture prior verdict so we can assert the history entry preserves
+        # it verbatim, without coupling the test to which verdict the sample
+        # event produces.
+        detail_before = client.get(
+            f"/api/v1/exceptions/{exc_id}", headers=_auth(manager_token),
+        ).json()
+        prior_verdict = detail_before["shadow_verdict"]
+        prior_trace_id = detail_before["trace_id"]
+
+        r = client.post(
+            f"/api/v1/exceptions/{exc_id}/reanalyze",
+            json={"reason": "Contract reference updated upstream"},
+            headers=_auth(manager_token),
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert len(data["reanalysis_history"]) == 1
+        entry = data["reanalysis_history"][0]
+        assert entry["attempt"] == 1
+        assert entry["reason"] == "Contract reference updated upstream"
+        # Append-only audit — prior verdict/trace must be preserved exactly.
+        assert entry["prior_shadow_verdict"] == prior_verdict
+        assert entry["prior_trace_id"] == prior_trace_id
+        # New trace must be distinct (fresh run through the graph).
+        assert entry["new_trace_id"] != prior_trace_id
+
+    def test_reanalyze_rejected_for_analyst_role(self, client, analyst_token):
+        exc_id = self._create_pending_review(client, analyst_token)
+        r = client.post(
+            f"/api/v1/exceptions/{exc_id}/reanalyze",
+            json={"reason": "trying"},
+            headers=_auth(analyst_token),
+        )
+        assert r.status_code == 403
+
+    def test_reanalyze_blocked_on_resolved_green(self, client, analyst_token, manager_token):
+        """Ineligibility gate rejects auto-resolved GREEN exceptions — the
+        hard stop against re-running a successfully resolved exception in
+        search of a different outcome."""
+        exc_id = self._create_pending_review(client, analyst_token)
+        # Force the record into a terminal RESOLVED/GREEN state. In
+        # production this would be reached by a manager approving the
+        # pending review and the recipe running to completion.
+        exception_store.update(
+            exc_id,
+            "tenant-a",
+            lifecycle_state="RESOLVED",
+            shadow_verdict="GREEN",
+            final_status="COMPLETE",
+        )
+        r = client.post(
+            f"/api/v1/exceptions/{exc_id}/reanalyze",
+            json={"reason": "curious"},
+            headers=_auth(manager_token),
+        )
+        assert r.status_code == 409
+        assert r.json()["error"]["code"] == "INVALID_STATE"
+
+    def test_reanalyze_rate_limit_enforced(self, client, analyst_token, manager_token):
+        from contracts.policy import REANALYSIS_MAX_ATTEMPTS
+        exc_id = self._create_pending_review(client, analyst_token)
+        # Exhaust attempts.
+        for i in range(REANALYSIS_MAX_ATTEMPTS):
+            r = client.post(
+                f"/api/v1/exceptions/{exc_id}/reanalyze",
+                json={"reason": f"attempt {i + 1}"},
+                headers=_auth(manager_token),
+            )
+            assert r.status_code == 200, r.json()
+        # Next call must be rejected with 429.
+        r = client.post(
+            f"/api/v1/exceptions/{exc_id}/reanalyze",
+            json={"reason": "one more"},
+            headers=_auth(manager_token),
+        )
+        assert r.status_code == 429
+        assert r.json()["error"]["code"] == "RATE_LIMITED"
+
+    def test_reanalyze_reason_is_required(self, client, analyst_token, manager_token):
+        exc_id = self._create_pending_review(client, analyst_token)
+        r = client.post(
+            f"/api/v1/exceptions/{exc_id}/reanalyze",
+            json={},  # missing reason
+            headers=_auth(manager_token),
+        )
+        assert r.status_code == 422
+
+    def test_reanalyze_writes_sox_audit_entry(self, client, analyst_token, manager_token):
+        exc_id = self._create_pending_review(client, analyst_token)
+        r = client.post(
+            f"/api/v1/exceptions/{exc_id}/reanalyze",
+            json={"reason": "Buyer provided new info"},
+            headers=_auth(manager_token),
+        )
+        assert r.status_code == 200
+        audit = exception_store.get_audit_log("tenant-a")
+        reanalysis_events = [e for e in audit if e["policy_key"] == "EXCEPTION_REANALYZE"]
+        assert len(reanalysis_events) == 1
+        assert reanalysis_events[0]["change_reason"] == "Buyer provided new info"
+
+    def test_reanalyze_tenant_isolation(self, client, analyst_token, manager_token, tenant_b_token):
+        exc_id = self._create_pending_review(client, analyst_token)
+        # Manager from tenant-b must not be able to reanalyze tenant-a's exception.
+        tenant_b_manager = create_test_token(roles=["manager"], org="tenant-b")
+        r = client.post(
+            f"/api/v1/exceptions/{exc_id}/reanalyze",
+            json={"reason": "cross-tenant"},
+            headers=_auth(tenant_b_manager),
+        )
+        assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # Workflows
 # ---------------------------------------------------------------------------
 

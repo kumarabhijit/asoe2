@@ -43,6 +43,7 @@ class ExceptionRecord:
         resolution_notes: Optional[str] = None,
         account_id: Optional[str] = None,
         account_name: Optional[str] = None,
+        original_event: Optional[Dict[str, Any]] = None,
     ):
         self.id = str(uuid4())
         self.tenant_id = tenant_id
@@ -60,6 +61,15 @@ class ExceptionRecord:
         self.resolution_notes = resolution_notes
         self.account_id = account_id
         self.account_name = account_name
+        # Original OrderEvent payload, captured at create time so a later
+        # re-analysis can faithfully replay through run_graph(). None for
+        # records created before the feature shipped.
+        self.original_event: Optional[Dict[str, Any]] = original_event
+        # Append-only audit trail of human-triggered re-analyses. Each entry:
+        # {attempt, triggered_at, triggered_by, reason, prior_trace_id,
+        #  prior_shadow_verdict, prior_final_status, new_trace_id,
+        #  new_shadow_verdict, new_final_status}
+        self.reanalysis_history: List[Dict[str, Any]] = []
         now = datetime.now(timezone.utc).isoformat()
         self.created_at = now
         self.updated_at = now
@@ -99,6 +109,7 @@ class ExceptionRecord:
             resolved_by=self.resolved_by,
             resolved_action=self.resolved_action,
             resolution_notes=self.resolution_notes,
+            reanalysis_history=list(self.reanalysis_history),
             created_at=self.created_at,
             updated_at=self.updated_at,
         )
@@ -129,6 +140,7 @@ class ExceptionStore:
         selected_recipe: Optional[str] = None,
         final_status: Optional[str] = None,
         resolution_data: Optional[Dict[str, Any]] = None,
+        original_event: Optional[Dict[str, Any]] = None,
     ) -> ExceptionRecord:
         lifecycle = STATUS_TO_LIFECYCLE.get(final_status or "", "INGESTED")
         record = ExceptionRecord(
@@ -142,6 +154,7 @@ class ExceptionStore:
             selected_recipe=selected_recipe,
             final_status=final_status,
             resolution_data=resolution_data,
+            original_event=original_event,
         )
         with self._lock:
             self._records[record.id] = record
@@ -207,6 +220,24 @@ class ExceptionStore:
     def get_trace(self, exception_id: str) -> Optional[Dict[str, Any]]:
         with self._lock:
             return self._traces.get(exception_id)
+
+    def append_reanalysis(
+        self,
+        exception_id: str,
+        tenant_id: str,
+        entry: Dict[str, Any],
+    ) -> Optional[ExceptionRecord]:
+        """Append an immutable entry to the reanalysis_history list.
+
+        Entries are append-only — callers must not mutate existing entries.
+        """
+        with self._lock:
+            record = self._records.get(exception_id)
+            if not record or record.tenant_id != tenant_id:
+                return None
+            record.reanalysis_history.append(entry)
+            record.updated_at = datetime.now(timezone.utc).isoformat()
+            return record
 
     def log_audit_event(
         self,
@@ -340,7 +371,15 @@ class DatabaseBackedStore:
         selected_recipe: Optional[str] = None,
         final_status: Optional[str] = None,
         resolution_data: Optional[Dict[str, Any]] = None,
+        original_event: Optional[Dict[str, Any]] = None,
     ) -> ExceptionRecord:
+        # Nest original_event and reanalysis metadata inside resolution_data
+        # under reserved keys. Avoids a DB schema migration while the
+        # reanalyze feature is still maturing; a follow-up migration will
+        # promote these to dedicated columns.
+        merged = dict(resolution_data or {})
+        if original_event is not None:
+            merged["_original_event"] = original_event
         row = self._exceptions.create(
             tenant_id=tenant_id,
             order_id=order_id,
@@ -350,7 +389,7 @@ class DatabaseBackedStore:
             shadow_verdict=shadow_verdict,
             selected_recipe=selected_recipe,
             final_status=final_status,
-            resolution_data=resolution_data,
+            resolution_data=merged,
         )
         return self._dict_to_record(row)
 
@@ -377,6 +416,27 @@ class DatabaseBackedStore:
 
     def update(self, exception_id: str, tenant_id: str, **fields) -> Optional[ExceptionRecord]:
         row = self._exceptions.update(exception_id, tenant_id, **fields)
+        if not row:
+            return None
+        return self._dict_to_record(row)
+
+    def append_reanalysis(
+        self,
+        exception_id: str,
+        tenant_id: str,
+        entry: Dict[str, Any],
+    ) -> Optional[ExceptionRecord]:
+        """Append a reanalysis entry into resolution_data['_reanalysis_history']."""
+        current = self._exceptions.get(exception_id, tenant_id)
+        if not current:
+            return None
+        data = dict(current.get("resolution_data") or {})
+        history = list(data.get("_reanalysis_history") or [])
+        history.append(entry)
+        data["_reanalysis_history"] = history
+        row = self._exceptions.update(
+            exception_id, tenant_id, resolution_data=data,
+        )
         if not row:
             return None
         return self._dict_to_record(row)
@@ -471,6 +531,18 @@ class DatabaseBackedStore:
         record.resolved_by = d.get("resolved_by")
         record.resolved_action = d.get("resolved_action")
         record.resolution_notes = d.get("resolution_notes")
+        record.account_id = d.get("account_id")
+        record.account_name = d.get("account_name")
+        # Reanalyze metadata: stored inside resolution_data under reserved
+        # keys until a dedicated migration promotes them to columns.
+        record.original_event = (
+            record.resolution_data.get("_original_event")
+            if isinstance(record.resolution_data, dict) else None
+        )
+        record.reanalysis_history = (
+            record.resolution_data.get("_reanalysis_history") or []
+            if isinstance(record.resolution_data, dict) else []
+        )
         record.created_at = d.get("created_at", "")
         record.updated_at = d.get("updated_at", "")
         return record
