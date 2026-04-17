@@ -68,6 +68,21 @@ class RejectRequest(BaseModel):
     reason: Optional[str] = None
 
 
+class ReanalyzeRequest(BaseModel):
+    """POST /api/v1/exceptions/{id}/reanalyze — human-triggered graph replay.
+
+    Allowed only on YELLOW/RED verdicts or FAILED lifecycle. The request
+    re-runs the full graph (including a fresh Compliance Shadow) and
+    appends the prior and new outcome to reanalysis_history (append-only).
+
+    A mandatory free-text `reason` is required for SOX audit traceability.
+    Rate-limited by REANALYSIS_MAX_ATTEMPTS (contracts/policy.py) to prevent
+    outcome-shopping.
+    """
+
+    reason: str
+
+
 class PolicyUpdateRequest(BaseModel):
     """PUT /api/v1/policies/{tenant_id} — update policy overrides."""
 
@@ -193,6 +208,7 @@ class ExceptionDetailResponse(BaseModel):
     resolved_by: Optional[str] = None
     resolved_action: Optional[str] = None
     resolution_notes: Optional[str] = None
+    reanalysis_history: List[Dict[str, Any]] = Field(default_factory=list)
     created_at: str
     updated_at: str
 

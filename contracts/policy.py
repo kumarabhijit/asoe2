@@ -73,6 +73,18 @@ CIRCUIT_BREAKER_MAX_VARIANCE: float = 10_000.0
 """Maximum total dollar variance per batch before halting."""
 
 # ---------------------------------------------------------------------------
+# Re-analysis (human-triggered graph replay) thresholds
+# ---------------------------------------------------------------------------
+
+REANALYSIS_MAX_ATTEMPTS: int = 3
+"""Maximum number of human-initiated re-analyses per exception.
+
+Bounded to prevent outcome-shopping — repeatedly re-running the graph in
+hopes of a different Compliance Shadow verdict. The prior outcome is always
+preserved in the exception's reanalysis_history for audit.
+"""
+
+# ---------------------------------------------------------------------------
 # Discrepancy threshold
 # ---------------------------------------------------------------------------
 

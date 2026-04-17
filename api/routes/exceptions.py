@@ -26,6 +26,7 @@ Security:
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
 
@@ -45,12 +46,14 @@ from api.schemas import (
     LineItem,
     LineItemsResponse,
     OverrideRequest,
+    ReanalyzeRequest,
     RejectRequest,
     ResolveRequest,
     ResolveResponse,
     StatsResponse,
     TraceResponse,
 )
+from contracts.policy import REANALYSIS_MAX_ATTEMPTS
 from api.events import WSEvent
 from api.pubsub import event_publisher
 from api.store import exception_store
@@ -161,6 +164,9 @@ def _persist_exception(
         selected_recipe=state.selected_recipe,
         final_status=state.final_status.value if state.final_status else None,
         resolution_data=state.execution_log.outputs if state.execution_log else {},
+        # Capture the source event so a future re-analysis can replay it
+        # through the graph without relying on external state reconstruction.
+        original_event=state.event.model_dump(mode="json"),
     )
 
     trace_data = {
@@ -463,6 +469,231 @@ async def override_exception(
     )
 
     return updated.to_detail()
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/exceptions/{id}/reanalyze — Human-triggered graph replay
+# ---------------------------------------------------------------------------
+
+# Lifecycle/verdict states eligible for reanalysis. Allowed only when the
+# prior outcome was non-terminal-success — preventing re-runs of GREEN
+# auto-resolved exceptions (which would indicate outcome-shopping) and of
+# already-closed exceptions.
+REANALYZE_ELIGIBLE_VERDICTS = {"YELLOW", "RED"}
+REANALYZE_ELIGIBLE_LIFECYCLES = {
+    "PENDING_REVIEW", "ESCALATED", "PENDING_ADMIN_REVIEW", "BLOCKED", "FAILED",
+}
+
+
+@router.post(
+    "/exceptions/{exception_id}/reanalyze",
+    response_model=ExceptionDetailResponse,
+    dependencies=[Depends(require_role("manager", "admin"))],
+)
+async def reanalyze_exception(
+    exception_id: str,
+    req: ReanalyzeRequest,
+    request: Request,
+    tenant_id: str = Depends(get_tenant_id),
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> ExceptionDetailResponse:
+    """Replay an exception through the full graph with a fresh Compliance
+    Shadow decision.
+
+    Governance (mirrors CLAUDE.md §4):
+    - Re-run flows through the same run_graph() pipeline — Compliance
+      Shadow is NOT bypassed.
+    - Eligible only for non-terminal outcomes where human review is already
+      warranted (YELLOW/RED verdict, or FAILED/BLOCKED/ESCALATED/PENDING*).
+    - Rate-limited per-exception (REANALYSIS_MAX_ATTEMPTS in
+      contracts/policy.py) to prevent outcome-shopping.
+    - Prior and new outcomes are preserved immutably in reanalysis_history
+      and in the policy audit log (SOX).
+    """
+    record = _get_or_404(exception_id, tenant_id)
+
+    # Eligibility gate — either the prior verdict needs review, or the
+    # prior run crashed/was blocked. GREEN + RESOLVED is ineligible.
+    verdict_eligible = record.shadow_verdict in REANALYZE_ELIGIBLE_VERDICTS
+    lifecycle_eligible = record.lifecycle_state in REANALYZE_ELIGIBLE_LIFECYCLES
+    if not (verdict_eligible or lifecycle_eligible):
+        raise ASOEError(
+            code="INVALID_STATE",
+            message=(
+                f"Cannot reanalyze: exception verdict is "
+                f"'{record.shadow_verdict}' and lifecycle is "
+                f"'{record.lifecycle_state}'. Reanalysis is permitted only "
+                f"on YELLOW/RED verdicts or on FAILED/BLOCKED/ESCALATED "
+                f"lifecycles."
+            ),
+            status_code=409,
+        )
+
+    # Rate limit — bound total re-runs per exception.
+    attempts_so_far = len(record.reanalysis_history)
+    if attempts_so_far >= REANALYSIS_MAX_ATTEMPTS:
+        raise ASOEError(
+            code="RATE_LIMITED",
+            message=(
+                f"Reanalysis limit reached ({REANALYSIS_MAX_ATTEMPTS} attempts). "
+                f"Escalate to admin for manual resolution."
+            ),
+            status_code=429,
+        )
+
+    # Replay requires the original event. If a record pre-dates the
+    # feature, there's nothing to replay — surface explicitly rather than
+    # reconstructing partial data.
+    if not record.original_event:
+        raise ASOEError(
+            code="REPLAY_UNAVAILABLE",
+            message=(
+                "Cannot reanalyze: the original event is not on file for "
+                "this exception. Reanalysis requires the source event."
+            ),
+            status_code=409,
+        )
+
+    # Re-run the graph — same pipeline, fresh Compliance Shadow.
+    trace_id = _get_trace_id(request)
+    try:
+        event = OrderEvent.model_validate(record.original_event)
+    except Exception as exc:
+        raise ASOEError(
+            code="REPLAY_UNAVAILABLE",
+            message=f"Stored event failed validation: {exc}",
+            status_code=409,
+            trace_id=trace_id,
+        )
+
+    state = GraphState(event=event)
+    try:
+        final_state = _run_graph_safe(state)
+    except Exception as exc:
+        logger.error("Reanalyze graph execution failed: %s", exc)
+        raise ASOEError(
+            code="GRAPH_EXECUTION_ERROR",
+            message=f"Graph execution failed during reanalysis: {exc}",
+            status_code=500,
+            trace_id=trace_id,
+        )
+
+    new_trace_id = (
+        final_state.shadow.trace_id if final_state.shadow else trace_id
+    )
+    new_verdict = (
+        final_state.shadow.status.value if final_state.shadow else None
+    )
+    new_final_status = (
+        final_state.final_status.value if final_state.final_status else None
+    )
+    new_lifecycle = (
+        # Reuse the same status→lifecycle mapping the resolve endpoint uses.
+        _resolve_lifecycle(new_final_status)
+    )
+
+    # Capture the prior outcome before mutating so the audit trail is exact.
+    prior_entry = {
+        "attempt": attempts_so_far + 1,
+        "triggered_at": datetime.now(timezone.utc).isoformat(),
+        "triggered_by": user.sub,
+        "reason": req.reason,
+        "prior_trace_id": record.trace_id,
+        "prior_shadow_verdict": record.shadow_verdict,
+        "prior_final_status": record.final_status,
+        "prior_lifecycle_state": record.lifecycle_state,
+        "new_trace_id": new_trace_id,
+        "new_shadow_verdict": new_verdict,
+        "new_final_status": new_final_status,
+        "new_lifecycle_state": new_lifecycle,
+    }
+
+    # Persist the new trace data, then update the record fields, then
+    # append to reanalysis_history. Order matters: history must reflect the
+    # new state already written to the record.
+    trace_data = {
+        "trace_id": new_trace_id,
+        "event_id": final_state.event.order_id,
+        "skill_name": final_state.skill.name if final_state.skill else None,
+        "intent_selected": final_state.intent.value if final_state.intent else None,
+        "shadow_verdict": new_verdict,
+        "shadow_policy_hits": final_state.shadow.policy_hits if final_state.shadow else [],
+        "recipe_name": final_state.selected_recipe,
+        "constrained_output_schemas": (
+            final_state.execution_log.constrained_outputs
+            if final_state.execution_log else {}
+        ),
+        "gateway_calls": [],
+        "backend_fallback": "deterministic_fallback",
+        "is_fallback_generated": True,
+        "final_status": new_final_status,
+        "explanation": final_state.explanation,
+    }
+    exception_store.store_trace(exception_id, trace_data)
+
+    updated = exception_store.update(
+        exception_id,
+        tenant_id,
+        trace_id=new_trace_id,
+        intent=final_state.intent.value if final_state.intent else record.intent,
+        shadow_verdict=new_verdict,
+        selected_recipe=final_state.selected_recipe,
+        final_status=new_final_status,
+        lifecycle_state=new_lifecycle,
+    )
+    if not updated:
+        raise ASOEError(
+            code="UPDATE_FAILED",
+            message="Failed to update exception after reanalysis.",
+            status_code=500,
+        )
+
+    updated = exception_store.append_reanalysis(
+        exception_id, tenant_id, prior_entry,
+    )
+    if not updated:
+        raise ASOEError(
+            code="UPDATE_FAILED",
+            message="Failed to persist reanalysis history.",
+            status_code=500,
+        )
+
+    # SOX audit — log reanalysis alongside other human governance actions.
+    exception_store.log_audit_event(
+        tenant_id=tenant_id,
+        policy_key="EXCEPTION_REANALYZE",
+        previous_value={
+            "shadow_verdict": prior_entry["prior_shadow_verdict"],
+            "final_status": prior_entry["prior_final_status"],
+            "lifecycle_state": prior_entry["prior_lifecycle_state"],
+            "trace_id": prior_entry["prior_trace_id"],
+            "exception_id": exception_id,
+        },
+        new_value={
+            "shadow_verdict": new_verdict,
+            "final_status": new_final_status,
+            "lifecycle_state": new_lifecycle,
+            "trace_id": new_trace_id,
+            "attempt": prior_entry["attempt"],
+        },
+        changed_by=user.sub,
+        change_reason=req.reason,
+    )
+
+    # Publish task_complete over pub/sub so subscribed clients refresh.
+    _publish_task_complete(tenant_id, exception_id, new_trace_id, final_state)
+
+    return updated.to_detail()
+
+
+def _resolve_lifecycle(final_status: Optional[str]) -> str:
+    """Map a final_status to the persisted lifecycle_state.
+
+    Re-uses the same mapping the store.create() helper applies so that a
+    reanalysis produces the same lifecycle the initial resolve would have.
+    """
+    from contracts.models import STATUS_TO_LIFECYCLE
+    return STATUS_TO_LIFECYCLE.get(final_status or "", "INGESTED")
 
 
 # ---------------------------------------------------------------------------
