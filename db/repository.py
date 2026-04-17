@@ -77,12 +77,18 @@ class ExceptionRepository:
         selected_recipe: Optional[str] = None,
         final_status: Optional[str] = None,
         resolution_data: Optional[Dict[str, Any]] = None,
+        original_event: Optional[Dict[str, Any]] = None,
+        reanalysis_history: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         record_id = _uuid()
         now = _now()
         if not lifecycle_state:
             lifecycle_state = STATUS_TO_LIFECYCLE.get(final_status or "", "INGESTED")
         res_data = _json_dumps(resolution_data or {})
+        original_event_json = (
+            _json_dumps(original_event) if original_event is not None else None
+        )
+        history_json = _json_dumps(reanalysis_history or [])
 
         with self._adapter.cursor(tenant_id) as cur:
             cur.execute(
@@ -90,11 +96,13 @@ class ExceptionRepository:
                    (id, tenant_id, order_id, event_type, intent,
                     lifecycle_state, shadow_verdict, selected_recipe,
                     final_status, trace_id, resolution_data,
+                    original_event, reanalysis_history,
                     created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (record_id, tenant_id, order_id, event_type, intent,
                  lifecycle_state, shadow_verdict, selected_recipe,
                  final_status, trace_id, res_data,
+                 original_event_json, history_json,
                  now, now),
             )
 
@@ -110,6 +118,8 @@ class ExceptionRepository:
             "final_status": final_status,
             "trace_id": trace_id,
             "resolution_data": resolution_data or {},
+            "original_event": original_event,
+            "reanalysis_history": reanalysis_history or [],
             "resolved_by": None,
             "resolved_action": None,
             "resolution_notes": None,
@@ -124,6 +134,7 @@ class ExceptionRepository:
                           lifecycle_state, shadow_verdict, selected_recipe,
                           final_status, trace_id, resolution_data,
                           resolved_by, resolved_action, resolution_notes,
+                          original_event, reanalysis_history,
                           created_at, updated_at
                    FROM exceptions
                    WHERE id = ? AND tenant_id = ?""",
@@ -165,6 +176,7 @@ class ExceptionRepository:
                            lifecycle_state, shadow_verdict, selected_recipe,
                            final_status, trace_id, resolution_data,
                            resolved_by, resolved_action, resolution_notes,
+                           original_event, reanalysis_history,
                            created_at, updated_at
                     FROM exceptions
                     WHERE {where}
@@ -187,9 +199,11 @@ class ExceptionRepository:
         if not fields:
             return self.get(exception_id, tenant_id)
 
-        # Serialize resolution_data if present
-        if "resolution_data" in fields and not isinstance(fields["resolution_data"], str):
-            fields["resolution_data"] = _json_dumps(fields["resolution_data"])
+        # Serialize JSON columns before binding. Callers pass native Python
+        # objects for these fields; we persist them as JSON strings.
+        for json_col in ("resolution_data", "original_event", "reanalysis_history"):
+            if json_col in fields and not isinstance(fields[json_col], str):
+                fields[json_col] = _json_dumps(fields[json_col])
 
         fields["updated_at"] = _now()
         set_clause = ", ".join(f"{k} = ?" for k in fields)
@@ -273,13 +287,27 @@ class ExceptionRepository:
         "id", "tenant_id", "order_id", "event_type", "intent",
         "lifecycle_state", "shadow_verdict", "selected_recipe",
         "final_status", "trace_id", "resolution_data", "resolved_by",
-        "resolved_action", "resolution_notes", "created_at", "updated_at",
+        "resolved_action", "resolution_notes",
+        "original_event", "reanalysis_history",
+        "created_at", "updated_at",
     )
 
     def _to_dict(self, row) -> Dict[str, Any]:
         r = _row_to_dict(row, self._COLUMNS)
-        if isinstance(r.get("resolution_data"), str):
-            r["resolution_data"] = _json_loads(r["resolution_data"])
+        for json_col in ("resolution_data", "original_event", "reanalysis_history"):
+            if isinstance(r.get(json_col), str):
+                r[json_col] = _json_loads(r[json_col])
+        # Pre-V002 rows had these nested under resolution_data reserved keys.
+        # Surface them transparently so callers see a uniform shape.
+        rd = r.get("resolution_data") if isinstance(r.get("resolution_data"), dict) else None
+        if rd is not None:
+            if r.get("original_event") is None and "_original_event" in rd:
+                r["original_event"] = rd.get("_original_event")
+            if not r.get("reanalysis_history") and "_reanalysis_history" in rd:
+                r["reanalysis_history"] = rd.get("_reanalysis_history") or []
+        # Normalise: always provide a list, never None, for reanalysis_history.
+        if r.get("reanalysis_history") is None:
+            r["reanalysis_history"] = []
         return r
 
 

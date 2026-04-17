@@ -120,8 +120,38 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 """
 
 
+# ---------------------------------------------------------------------------
+# V002 — promote original_event and reanalysis_history to dedicated columns
+# ---------------------------------------------------------------------------
+#
+# Idempotent: probes pragma_table_info before each ADD COLUMN so re-runs and
+# fresh databases alike converge to the same shape. SQLite lacks
+# ADD COLUMN IF NOT EXISTS before 3.35, hence the explicit guard.
+
+def _sqlite_column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    cur = conn.execute(f"PRAGMA table_info({table})")
+    return any(row[1] == column for row in cur.fetchall())
+
+
+def _apply_sqlite_v002(conn: sqlite3.Connection) -> None:
+    if not _sqlite_column_exists(conn, "exceptions", "original_event"):
+        conn.execute("ALTER TABLE exceptions ADD COLUMN original_event TEXT")
+    if not _sqlite_column_exists(conn, "exceptions", "reanalysis_history"):
+        conn.execute(
+            "ALTER TABLE exceptions ADD COLUMN reanalysis_history TEXT "
+            "NOT NULL DEFAULT '[]'"
+        )
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+        ("V002", now),
+    )
+    conn.commit()
+    logger.info("SQLite schema V002 applied")
+
+
 def apply_sqlite(conn: sqlite3.Connection) -> None:
-    """Apply the SQLite-compatible schema."""
+    """Apply the SQLite-compatible schema (V001 + subsequent migrations)."""
     conn.executescript(_SQLITE_SCHEMA)
     now = datetime.now(timezone.utc).isoformat()
     conn.execute(
@@ -130,6 +160,7 @@ def apply_sqlite(conn: sqlite3.Connection) -> None:
     )
     conn.commit()
     logger.info("SQLite schema V001 applied")
+    _apply_sqlite_v002(conn)
 
 
 def apply_postgres(database_url: str) -> None:
@@ -160,27 +191,45 @@ def apply_postgres(database_url: str) -> None:
         """)
         table_exists = cur.fetchone()[0]
 
+        v001_applied = False
         if table_exists:
             cur.execute(
                 "SELECT version FROM schema_migrations WHERE version = %s",
                 ("V001",),
             )
             if cur.fetchone():
-                logger.info("PostgreSQL schema V001 already applied, skipping")
-                return
+                v001_applied = True
 
-        # Read and execute the full migration SQL
-        sql_path = _MIGRATIONS_DIR / "V001__initial_schema.sql"
-        sql = sql_path.read_text()
-        cur.execute(sql)
+        if not v001_applied:
+            # Read and execute the full migration SQL
+            sql_path = _MIGRATIONS_DIR / "V001__initial_schema.sql"
+            sql = sql_path.read_text()
+            cur.execute(sql)
+            cur.execute(
+                "INSERT INTO schema_migrations (version) VALUES (%s)",
+                ("V001",),
+            )
+            logger.info("PostgreSQL schema V001 applied")
+        else:
+            logger.info("PostgreSQL schema V001 already applied, skipping")
 
-        # Record migration
+        # V002 — reanalyze columns. Idempotent via IF NOT EXISTS in SQL.
         cur.execute(
-            "INSERT INTO schema_migrations (version) VALUES (%s)",
-            ("V001",),
+            "SELECT version FROM schema_migrations WHERE version = %s",
+            ("V002",),
         )
+        if not cur.fetchone():
+            v002_sql = (_MIGRATIONS_DIR / "V002__reanalyze_columns.sql").read_text()
+            cur.execute(v002_sql)
+            cur.execute(
+                "INSERT INTO schema_migrations (version) VALUES (%s)",
+                ("V002",),
+            )
+            logger.info("PostgreSQL schema V002 applied")
+        else:
+            logger.info("PostgreSQL schema V002 already applied, skipping")
+
         conn.commit()
-        logger.info("PostgreSQL schema V001 applied")
     except Exception:
         conn.rollback()
         raise
