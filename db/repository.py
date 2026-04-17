@@ -297,14 +297,6 @@ class ExceptionRepository:
         for json_col in ("resolution_data", "original_event", "reanalysis_history"):
             if isinstance(r.get(json_col), str):
                 r[json_col] = _json_loads(r[json_col])
-        # Pre-V002 rows had these nested under resolution_data reserved keys.
-        # Surface them transparently so callers see a uniform shape.
-        rd = r.get("resolution_data") if isinstance(r.get("resolution_data"), dict) else None
-        if rd is not None:
-            if r.get("original_event") is None and "_original_event" in rd:
-                r["original_event"] = rd.get("_original_event")
-            if not r.get("reanalysis_history") and "_reanalysis_history" in rd:
-                r["reanalysis_history"] = rd.get("_reanalysis_history") or []
         # Normalise: always provide a list, never None, for reanalysis_history.
         if r.get("reanalysis_history") is None:
             r["reanalysis_history"] = []
