@@ -213,6 +213,19 @@ class ExceptionDetailResponse(BaseModel):
     updated_at: str
 
 
+class SAPActionStep(BaseModel):
+    """A recommended SAP action step.
+
+    Human-facing only — not machine-consumed. Rendered verbatim in Layer 2
+    for operator reference. Constrained generation is NOT required here
+    (CLAUDE.md §3).
+    """
+    transaction: str  # e.g., "VA02", "VK11"
+    table: Optional[str] = None  # e.g., "VBAK", "KONV"
+    field: Optional[str] = None  # e.g., "LIFSK", "KBETR"
+    description: str
+
+
 class TraceResponse(BaseModel):
     """GET /api/v1/exceptions/{id}/trace — full TraceRecord JSON."""
 
@@ -229,6 +242,22 @@ class TraceResponse(BaseModel):
     is_fallback_generated: bool = False
     final_status: Optional[str] = None
     explanation: Optional[str] = None
+
+    # ── Human-facing structured narrative (Layer 2 enrichment) ────────
+    # All optional. Populated by the recipe layer when available; the UI
+    # renders whichever fields are present. None of these are consumed by
+    # code downstream — constrained generation is not required.
+    narrative: Optional[str] = None
+    """Multi-paragraph human explanation of what the agent did and why."""
+
+    resolution_steps: List[str] = Field(default_factory=list)
+    """Ordered, actionable steps the operator should confirm / perform."""
+
+    sap_actions: List[SAPActionStep] = Field(default_factory=list)
+    """Recommended SAP transaction-level steps (T-codes, tables, fields)."""
+
+    customer_email_draft: Optional[str] = None
+    """Copy-paste-ready customer communication draft."""
 
 
 class StatsResponse(BaseModel):
