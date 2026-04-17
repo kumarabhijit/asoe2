@@ -181,6 +181,27 @@ _SEED_USERS: List[UserRecord] = [
         org="acme-corp",
         assigned_accounts=["acct-target", "acct-costco"],
     ),
+    # --- Partner users (external retailer representatives) ---
+    UserRecord(
+        sub="usr_tom_bradley",
+        email="tom.bradley@walmart.com",
+        name="Tom Bradley",
+        title="Walmart Buyer Rep",
+        avatar_initials="TB",
+        roles=["partner"],
+        org="acme-corp",
+        assigned_accounts=["acct-walmart"],
+    ),
+    UserRecord(
+        sub="usr_lisa_huang",
+        email="lisa.huang@kroger.com",
+        name="Lisa Huang",
+        title="Kroger Buyer Rep",
+        avatar_initials="LH",
+        roles=["partner"],
+        org="acme-corp",
+        assigned_accounts=["acct-kroger"],
+    ),
 ]
 
 _USERS_BY_EMAIL: Dict[str, UserRecord] = {u.email: u for u in _SEED_USERS}
