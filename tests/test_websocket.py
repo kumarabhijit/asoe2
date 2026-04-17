@@ -44,6 +44,11 @@ def analyst_token():
     return create_test_token(roles=["analyst"], org="tenant-a")
 
 
+@pytest.fixture()
+def manager_token():
+    return create_test_token(roles=["manager"], org="tenant-a")
+
+
 def _auth(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
@@ -243,6 +248,47 @@ class TestResolvePublishesEvents:
         last = json.loads(recent[-1])
         assert last["type"] == "task_complete"
         assert last["payload"]["final_status"] == "MANUAL_REVIEW_REQUIRED"
+
+
+class TestReanalysisStartedEvent:
+    """Reanalyze endpoint publishes a reanalysis_started event before
+    run_graph, then the usual task_complete after."""
+
+    def test_reanalyze_publishes_reanalysis_started_before_completion(
+        self, client, analyst_token, manager_token,
+    ):
+        # Seed a reanalyze-eligible exception via explain mode.
+        r = client.post(
+            "/api/v1/exceptions/resolve/explain",
+            json=_sample_event(),
+            headers=_auth(analyst_token),
+        )
+        exc_id = r.json()["exception_id"]
+        # Clear the initial task_complete so we can assert ordering.
+        event_publisher.clear()
+
+        r = client.post(
+            f"/api/v1/exceptions/{exc_id}/reanalyze",
+            json={"reason": "Buyer amended the PO"},
+            headers=_auth(manager_token),
+        )
+        assert r.status_code == 200
+
+        recent = [json.loads(e) for e in event_publisher.get_recent("tenant-a")]
+        types_in_order = [e["type"] for e in recent]
+        # reanalysis_started must appear before task_complete.
+        assert "reanalysis_started" in types_in_order
+        assert "task_complete" in types_in_order
+        assert types_in_order.index("reanalysis_started") < types_in_order.index("task_complete")
+
+        started = next(e for e in recent if e["type"] == "reanalysis_started")
+        # The payload carries audit-grade context — attempt number, reason,
+        # and the prior verdict/status the reviewer is questioning.
+        assert started["exception_id"] == exc_id
+        assert started["tenant_id"] == "tenant-a"
+        assert started["payload"]["attempt"] == 1
+        assert started["payload"]["reason"] == "Buyer amended the PO"
+        assert started["payload"]["triggered_by"]
 
 
 # ---------------------------------------------------------------------------

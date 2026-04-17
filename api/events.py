@@ -13,7 +13,10 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
-EventType = Literal["pipeline_progress", "exception_update", "task_complete", "error"]
+EventType = Literal[
+    "pipeline_progress", "exception_update", "task_complete", "error",
+    "reanalysis_started",
+]
 NodeStatus = Literal["started", "completed", "failed"]
 
 
@@ -42,6 +45,18 @@ class ErrorPayload(BaseModel):
     """Published on pipeline errors."""
     code: str
     message: str
+
+
+class ReanalysisStartedPayload(BaseModel):
+    """Published at the start of a human-triggered reanalysis, before
+    run_graph() runs. Subscribed clients can switch the detail panel into
+    a re-running state while the real pipeline events stream in."""
+    attempt: int
+    triggered_by: str
+    reason: str
+    prior_trace_id: Optional[str] = None
+    prior_shadow_verdict: Optional[str] = None
+    prior_final_status: Optional[str] = None
 
 
 class WSEvent(BaseModel):
@@ -143,4 +158,33 @@ class WSEvent(BaseModel):
             exception_id=exception_id,
             tenant_id=tenant_id,
             payload=payload.model_dump(),
+        )
+
+    @classmethod
+    def reanalysis_started(
+        cls,
+        trace_id: str,
+        exception_id: str,
+        tenant_id: str,
+        attempt: int,
+        triggered_by: str,
+        reason: str,
+        prior_trace_id: Optional[str] = None,
+        prior_shadow_verdict: Optional[str] = None,
+        prior_final_status: Optional[str] = None,
+    ) -> "WSEvent":
+        payload = ReanalysisStartedPayload(
+            attempt=attempt,
+            triggered_by=triggered_by,
+            reason=reason,
+            prior_trace_id=prior_trace_id,
+            prior_shadow_verdict=prior_shadow_verdict,
+            prior_final_status=prior_final_status,
+        )
+        return cls(
+            type="reanalysis_started",
+            trace_id=trace_id,
+            exception_id=exception_id,
+            tenant_id=tenant_id,
+            payload=payload.model_dump(exclude_none=True),
         )
