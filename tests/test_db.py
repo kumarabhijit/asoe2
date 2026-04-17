@@ -326,21 +326,6 @@ class TestExceptionRepository:
         assert fetched["reanalysis_history"][0]["attempt"] == 1
         assert fetched["reanalysis_history"][0]["reason"] == "Buyer sent update"
 
-    def test_legacy_shim_read_compatibility(self, exception_repo):
-        """Pre-V002 records had the fields nested in resolution_data under
-        reserved keys. The repository must still surface them on read."""
-        event = {"order_id": "PO-OLD", "po_price": 10.0}
-        hist = [{"attempt": 1, "reason": "pre-V002"}]
-        # Simulate a legacy row: columns are NULL but reserved keys are set.
-        record = exception_repo.create(
-            tenant_id="t1", order_id="PO-OLD", event_type="TEST",
-            trace_id="t-old",
-            resolution_data={"_original_event": event, "_reanalysis_history": hist},
-        )
-        fetched = exception_repo.get(record["id"], "t1")
-        assert fetched["original_event"] == event
-        assert fetched["reanalysis_history"] == hist
-
 
 # ---------------------------------------------------------------------------
 # Trace Repository

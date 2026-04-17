@@ -527,8 +527,6 @@ class DatabaseBackedStore:
         record.resolution_notes = d.get("resolution_notes")
         record.account_id = d.get("account_id")
         record.account_name = d.get("account_name")
-        # V002: read from dedicated columns. The repository surfaces pre-V002
-        # values transparently, so either source resolves here.
         record.original_event = d.get("original_event")
         record.reanalysis_history = d.get("reanalysis_history") or []
         record.created_at = d.get("created_at", "")
