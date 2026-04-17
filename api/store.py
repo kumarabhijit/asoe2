@@ -373,13 +373,6 @@ class DatabaseBackedStore:
         resolution_data: Optional[Dict[str, Any]] = None,
         original_event: Optional[Dict[str, Any]] = None,
     ) -> ExceptionRecord:
-        # Nest original_event and reanalysis metadata inside resolution_data
-        # under reserved keys. Avoids a DB schema migration while the
-        # reanalyze feature is still maturing; a follow-up migration will
-        # promote these to dedicated columns.
-        merged = dict(resolution_data or {})
-        if original_event is not None:
-            merged["_original_event"] = original_event
         row = self._exceptions.create(
             tenant_id=tenant_id,
             order_id=order_id,
@@ -389,7 +382,10 @@ class DatabaseBackedStore:
             shadow_verdict=shadow_verdict,
             selected_recipe=selected_recipe,
             final_status=final_status,
-            resolution_data=merged,
+            resolution_data=resolution_data,
+            # V002 promoted these to dedicated columns. The repository
+            # serialises to JSONB (Postgres) / JSON TEXT (SQLite).
+            original_event=original_event,
         )
         return self._dict_to_record(row)
 
@@ -426,16 +422,14 @@ class DatabaseBackedStore:
         tenant_id: str,
         entry: Dict[str, Any],
     ) -> Optional[ExceptionRecord]:
-        """Append a reanalysis entry into resolution_data['_reanalysis_history']."""
+        """Append an entry to the reanalysis_history JSON column."""
         current = self._exceptions.get(exception_id, tenant_id)
         if not current:
             return None
-        data = dict(current.get("resolution_data") or {})
-        history = list(data.get("_reanalysis_history") or [])
+        history = list(current.get("reanalysis_history") or [])
         history.append(entry)
-        data["_reanalysis_history"] = history
         row = self._exceptions.update(
-            exception_id, tenant_id, resolution_data=data,
+            exception_id, tenant_id, reanalysis_history=history,
         )
         if not row:
             return None
@@ -533,16 +527,10 @@ class DatabaseBackedStore:
         record.resolution_notes = d.get("resolution_notes")
         record.account_id = d.get("account_id")
         record.account_name = d.get("account_name")
-        # Reanalyze metadata: stored inside resolution_data under reserved
-        # keys until a dedicated migration promotes them to columns.
-        record.original_event = (
-            record.resolution_data.get("_original_event")
-            if isinstance(record.resolution_data, dict) else None
-        )
-        record.reanalysis_history = (
-            record.resolution_data.get("_reanalysis_history") or []
-            if isinstance(record.resolution_data, dict) else []
-        )
+        # V002: read from dedicated columns. The repository surfaces pre-V002
+        # values transparently, so either source resolves here.
+        record.original_event = d.get("original_event")
+        record.reanalysis_history = d.get("reanalysis_history") or []
         record.created_at = d.get("created_at", "")
         record.updated_at = d.get("updated_at", "")
         return record

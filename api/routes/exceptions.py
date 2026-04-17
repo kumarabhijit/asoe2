@@ -566,6 +566,24 @@ async def reanalyze_exception(
             trace_id=trace_id,
         )
 
+    # Announce the reanalysis before run_graph so subscribed UIs can flip
+    # the detail panel into a "re-running" state and render the streaming
+    # pipeline_progress events that follow.
+    event_publisher.publish(
+        tenant_id,
+        WSEvent.reanalysis_started(
+            trace_id=trace_id,
+            exception_id=exception_id,
+            tenant_id=tenant_id,
+            attempt=attempts_so_far + 1,
+            triggered_by=user.sub,
+            reason=req.reason,
+            prior_trace_id=record.trace_id,
+            prior_shadow_verdict=record.shadow_verdict,
+            prior_final_status=record.final_status,
+        ),
+    )
+
     state = GraphState(event=event)
     try:
         final_state = _run_graph_safe(state)

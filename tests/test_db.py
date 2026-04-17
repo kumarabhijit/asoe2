@@ -67,6 +67,16 @@ class TestMigration:
             cur.execute("SELECT version FROM schema_migrations")
             versions = [r[0] for r in cur.fetchall()]
         assert "V001" in versions
+        # V002 promotes reanalyze fields to dedicated columns.
+        assert "V002" in versions
+
+    def test_v002_columns_exist(self, adapter):
+        """V002 adds original_event and reanalysis_history to exceptions."""
+        with adapter.cursor() as cur:
+            cur.execute("PRAGMA table_info(exceptions)")
+            cols = {row[1] for row in cur.fetchall()}
+        assert "original_event" in cols
+        assert "reanalysis_history" in cols
 
     def test_idempotent_migration(self, adapter):
         """Applying schema twice should not raise."""
@@ -277,6 +287,59 @@ class TestExceptionRepository:
                 tenant_id="t1", order_id="PO-BAD", event_type="TEST",
                 trace_id="t-bad", intent="INVALID_INTENT",
             )
+
+    def test_original_event_roundtrip(self, exception_repo):
+        """V002: original_event persists as JSON and deserialises back."""
+        event = {
+            "order_id": "PO-555", "event_type": "EDI_850",
+            "po_price": 100.0, "sap_base_price": 120.0,
+        }
+        record = exception_repo.create(
+            tenant_id="t1", order_id="PO-555", event_type="EDI_850",
+            trace_id="t-555", original_event=event,
+        )
+        fetched = exception_repo.get(record["id"], "t1")
+        assert fetched["original_event"] == event
+
+    def test_reanalysis_history_defaults_empty(self, exception_repo):
+        """V002: reanalysis_history defaults to [] for new records."""
+        record = exception_repo.create(
+            tenant_id="t1", order_id="PO-556", event_type="TEST",
+            trace_id="t-556",
+        )
+        fetched = exception_repo.get(record["id"], "t1")
+        assert fetched["reanalysis_history"] == []
+
+    def test_reanalysis_history_update(self, exception_repo):
+        """V002: reanalysis_history can be updated with structured entries."""
+        record = exception_repo.create(
+            tenant_id="t1", order_id="PO-557", event_type="TEST",
+            trace_id="t-557",
+        )
+        entry = {
+            "attempt": 1, "triggered_by": "manager@tenant-a",
+            "reason": "Buyer sent update", "new_trace_id": "t-557-new",
+        }
+        exception_repo.update(record["id"], "t1", reanalysis_history=[entry])
+        fetched = exception_repo.get(record["id"], "t1")
+        assert len(fetched["reanalysis_history"]) == 1
+        assert fetched["reanalysis_history"][0]["attempt"] == 1
+        assert fetched["reanalysis_history"][0]["reason"] == "Buyer sent update"
+
+    def test_legacy_shim_read_compatibility(self, exception_repo):
+        """Pre-V002 records had the fields nested in resolution_data under
+        reserved keys. The repository must still surface them on read."""
+        event = {"order_id": "PO-OLD", "po_price": 10.0}
+        hist = [{"attempt": 1, "reason": "pre-V002"}]
+        # Simulate a legacy row: columns are NULL but reserved keys are set.
+        record = exception_repo.create(
+            tenant_id="t1", order_id="PO-OLD", event_type="TEST",
+            trace_id="t-old",
+            resolution_data={"_original_event": event, "_reanalysis_history": hist},
+        )
+        fetched = exception_repo.get(record["id"], "t1")
+        assert fetched["original_event"] == event
+        assert fetched["reanalysis_history"] == hist
 
 
 # ---------------------------------------------------------------------------
