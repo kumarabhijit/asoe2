@@ -72,7 +72,7 @@ from contracts.policy import REANALYSIS_MAX_ATTEMPTS
 from api.events import WSEvent
 from api.pubsub import event_publisher
 from api.store import exception_store
-from constraints.specs import AllowedResolutionAction
+from constraints.specs import AllowedOverrideReasonTag, AllowedResolutionAction
 from contracts.models import (
     ADMIN_RELEASE_SOURCE_STATES,
     CHALLENGE_SOURCE_STATES,
@@ -550,6 +550,21 @@ async def override_exception(
     """
     record = _get_or_404(exception_id, tenant_id)
 
+    # Idempotency short-circuit — must run BEFORE stateful guards (SoD,
+    # lifecycle state) because on a genuine retry the first call already
+    # mutated the record and the guards would now reject: for example SoD
+    # would see `resolved_by == user.sub` on the same exception. The request
+    # body is validated upstream by Pydantic; the cache key is derived from
+    # the authenticated user so one user's key cannot collide with another's.
+    key = _validate_idempotency_key(idempotency_key)
+    request_body = req.model_dump()
+    if key is not None:
+        cached = _idempotency_lookup(
+            tenant_id, exception_id, user.sub, key, request_body,
+        )
+        if cached is not None:
+            return ExceptionDetailResponse.model_validate(cached)
+
     # Guard 1: shadow verdict must correspond to an overridable agent
     # decision. FAILED-lifecycle records have no agent verdict to override.
     if record.shadow_verdict not in {"GREEN", "YELLOW", "RED"}:
@@ -566,6 +581,30 @@ async def override_exception(
     # Guard 2: lifecycle state must map to one of the three verdicts.
     _require_state(record, HITL_OVERRIDE_STATES, "override")
 
+    # Guard 3: Segregation of Duties — the user who previously resolved this
+    # exception cannot also be the one overriding it. Protects against a
+    # single manager silently self-approving an alternate resolution.
+    # `resolved_by` is only set once a human (or system principal) has acted
+    # on the record; on first-time overrides of PENDING_REVIEW/ESCALATED it
+    # is None and the check is a no-op. System-principal IDs (`system:*`)
+    # are excluded from the check — an agent-auto-resolution is a valid
+    # target for human override.
+    prior_resolver = record.resolved_by
+    if (
+        prior_resolver
+        and not prior_resolver.startswith("system:")
+        and prior_resolver == user.sub
+    ):
+        raise ASOEError(
+            code="SOD_VIOLATION",
+            message=(
+                "Segregation of duties: the user who previously resolved "
+                "this exception cannot be the one overriding it. A different "
+                "authorized user must perform the override."
+            ),
+            status_code=403,
+        )
+
     # Validate action against constrained vocabulary
     allowed = list(AllowedResolutionAction.__args__)  # type: ignore[attr-defined]
     if req.action not in allowed:
@@ -575,15 +614,17 @@ async def override_exception(
             status_code=422,
         )
 
-    # Idempotency check — validate, then look up before mutating.
-    key = _validate_idempotency_key(idempotency_key)
-    request_body = req.model_dump()
-    if key is not None:
-        cached = _idempotency_lookup(
-            tenant_id, exception_id, user.sub, key, request_body,
+    # Validate reason_tag (controlled vocabulary for override categorization)
+    allowed_tags = list(AllowedOverrideReasonTag.__args__)  # type: ignore[attr-defined]
+    if req.reason_tag not in allowed_tags:
+        raise ASOEError(
+            code="INVALID_REASON_TAG",
+            message=(
+                f"reason_tag '{req.reason_tag}' is not allowed. "
+                f"Valid: {allowed_tags}"
+            ),
+            status_code=422,
         )
-        if cached is not None:
-            return ExceptionDetailResponse.model_validate(cached)
 
     # Snapshot prior values BEFORE mutating — in-memory store updates the
     # live record object in place, so reading record.lifecycle_state after
@@ -615,11 +656,17 @@ async def override_exception(
     # "before" snapshot captures the prior lifecycle, verdict, and the
     # recipe-recommended action (persisted in resolution_data at resolve
     # time — see _persist_exception + ExecutionLog.outputs).
+    # `reason_tag` is stored in the new_value so downstream ML pipelines can
+    # cluster overrides by category without NLP on the free-text notes.
     exception_store.log_audit_event(
         tenant_id=tenant_id,
         policy_key="EXCEPTION_OVERRIDE",
         previous_value=prior_snapshot,
-        new_value={"resolved_action": req.action, "lifecycle_state": "RESOLVED"},
+        new_value={
+            "resolved_action": req.action,
+            "lifecycle_state": "RESOLVED",
+            "reason_tag": req.reason_tag,
+        },
         changed_by=user.sub,
         change_reason=req.notes,
     )

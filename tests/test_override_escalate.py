@@ -27,9 +27,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.app import create_app
-from api.deps import create_test_token
+from api.deps import create_test_token  # re-exported here for use inside test classes
 from api.routes.exceptions import _clear_idempotency_cache
 from api.store import exception_store
+# Re-export so the SoD tests below can mint per-user tokens without needing
+# to parameterize fixtures with different subs.
+__all__ = ["create_test_token"]
 
 
 # ---------------------------------------------------------------------------
@@ -429,3 +432,143 @@ class TestEscalateEndpoint:
         assert escalations[0]["reason"] == "needs manager review"
         assert escalations[0]["to_role"] == "manager"
         assert escalations[0]["from_lifecycle_state"] == "BLOCKED"
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — Segregation of Duties
+# ---------------------------------------------------------------------------
+
+
+class TestSegregationOfDuties:
+    """SoD: the user who previously resolved an exception must not be the
+    same user overriding it. Protects against silent self-approval of an
+    alternate resolution."""
+
+    def test_same_user_cannot_override_own_resolution(self, client, analyst_token):
+        # Priya (manager) resolves first, then tries to override herself
+        priya = create_test_token(sub="priya@x", roles=["manager"], org="tenant-a")
+        exception_id = _create_pending_review(client, analyst_token)
+        r1 = client.patch(
+            f"/api/v1/exceptions/{exception_id}/override",
+            json={
+                "action": "ALLOW_BOTH",
+                "notes": "first resolution",
+                "reason_tag": "policy_exception",
+            },
+            headers=_auth(priya),
+        )
+        assert r1.status_code == 200
+        r2 = client.patch(
+            f"/api/v1/exceptions/{exception_id}/override",
+            json={
+                "action": "SUPERSEDE",
+                "notes": "trying to self-revise",
+                "reason_tag": "other",
+            },
+            headers=_auth(priya),
+        )
+        assert r2.status_code == 403
+        assert r2.json()["error"]["code"] == "SOD_VIOLATION"
+
+    def test_different_user_can_override_prior_resolution(self, client, analyst_token):
+        # Priya resolves; Raj (admin, different sub) overrides → 200
+        priya = create_test_token(sub="priya@x", roles=["manager"], org="tenant-a")
+        raj = create_test_token(sub="raj@x", roles=["admin"], org="tenant-a")
+        exception_id = _create_pending_review(client, analyst_token)
+        r1 = client.patch(
+            f"/api/v1/exceptions/{exception_id}/override",
+            json={
+                "action": "ALLOW_BOTH",
+                "notes": "first pass",
+                "reason_tag": "data_error",
+            },
+            headers=_auth(priya),
+        )
+        assert r1.status_code == 200
+        r2 = client.patch(
+            f"/api/v1/exceptions/{exception_id}/override",
+            json={
+                "action": "SUPERSEDE",
+                "notes": "admin correction",
+                "reason_tag": "customer_concession",
+            },
+            headers=_auth(raj),
+        )
+        assert r2.status_code == 200, r2.json()
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — reason_tag controlled vocabulary
+# ---------------------------------------------------------------------------
+
+
+class TestReasonTagVocabulary:
+
+    def test_valid_reason_tag_accepted(self, client, analyst_token, manager_token):
+        exception_id = _create_pending_review(client, analyst_token)
+        r = client.patch(
+            f"/api/v1/exceptions/{exception_id}/override",
+            json={
+                "action": "ALLOW_BOTH",
+                "notes": "buyer confirmed concession",
+                "reason_tag": "customer_concession",
+            },
+            headers=_auth(manager_token),
+        )
+        assert r.status_code == 200
+
+    def test_invalid_reason_tag_rejected(self, client, analyst_token, manager_token):
+        exception_id = _create_pending_review(client, analyst_token)
+        r = client.patch(
+            f"/api/v1/exceptions/{exception_id}/override",
+            json={
+                "action": "ALLOW_BOTH",
+                "notes": "should fail",
+                "reason_tag": "made_up_tag",
+            },
+            headers=_auth(manager_token),
+        )
+        assert r.status_code == 422
+        assert r.json()["error"]["code"] == "INVALID_REASON_TAG"
+
+    def test_omitted_reason_tag_defaults_to_other(
+        self, client, analyst_token, manager_token
+    ):
+        """Phase 2 compatibility: callers without reason_tag default to 'other'.
+        Phase 3 will tighten this to required."""
+        exception_id = _create_pending_review(client, analyst_token)
+        r = client.patch(
+            f"/api/v1/exceptions/{exception_id}/override",
+            json={"action": "ALLOW_BOTH", "notes": "legacy caller"},
+            headers=_auth(manager_token),
+        )
+        assert r.status_code == 200
+
+    def test_reason_tag_persisted_to_audit(
+        self, client, analyst_token, manager_token
+    ):
+        from api.store import exception_store
+        exception_id = _create_pending_review(client, analyst_token)
+        r = client.patch(
+            f"/api/v1/exceptions/{exception_id}/override",
+            json={
+                "action": "ALLOW_BOTH",
+                "notes": "recipe misclassified intent",
+                "reason_tag": "agent_misclassification",
+            },
+            headers=_auth(manager_token),
+        )
+        assert r.status_code == 200
+        audit = exception_store.get_audit_log("tenant-a")
+        override_events = [e for e in audit if e["policy_key"] == "EXCEPTION_OVERRIDE"]
+        assert override_events, "EXCEPTION_OVERRIDE audit event missing"
+        new_value = override_events[0]["new_value"]
+        assert new_value.get("reason_tag") == "agent_misclassification"
+
+    def test_health_exposes_reason_tag_vocabulary(self, client):
+        r = client.get("/api/v1/health")
+        assert r.status_code == 200
+        body = r.json()
+        assert isinstance(body["allowed_override_reason_tags"], list)
+        assert "customer_concession" in body["allowed_override_reason_tags"]
+        assert "other" in body["allowed_override_reason_tags"]

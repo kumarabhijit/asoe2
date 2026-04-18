@@ -40,6 +40,13 @@ class OverrideRequest(BaseModel):
 
     action: str  # validated against AllowedResolutionAction in the endpoint
     notes: str  # mandatory for SOX audit trail
+    # Controlled-vocabulary categorization of why the override was made.
+    # Validated server-side against AllowedOverrideReasonTag. Stored in the
+    # audit log new_value so ML pipelines can cluster overrides without
+    # NLP on the free-text notes. Defaults to "other" in Phase 2 to keep
+    # legacy callers working; Phase 3 will make this a required field
+    # once all clients emit a real tag.
+    reason_tag: str = "other"
 
 
 class EscalateRequest(BaseModel):
@@ -171,6 +178,7 @@ class HealthResponse(BaseModel):
     lifecycle_states: List[str]
     allowed_recipes: List[str]
     allowed_resolution_actions: List[str]
+    allowed_override_reason_tags: List[str]
 
 
 class ResolveResponse(BaseModel):

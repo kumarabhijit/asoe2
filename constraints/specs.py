@@ -27,6 +27,19 @@ AllowedResolutionAction = Literal[
     "REQUEST_BUYER_CONFIRMATION",
 ]
 
+# Controlled vocabulary for categorizing an override's justification. Kept
+# deliberately small and intent-agnostic so clustering downstream is stable;
+# free-text notes on OverrideRequest capture the specifics. ML retraining
+# consumes (intent, recommended_action, chosen_action, reason_tag) tuples.
+AllowedOverrideReasonTag = Literal[
+    "customer_concession",
+    "contract_stale",
+    "data_error",
+    "policy_exception",
+    "agent_misclassification",
+    "other",
+]
+
 
 class IntentDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
