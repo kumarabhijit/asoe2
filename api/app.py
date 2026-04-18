@@ -15,7 +15,10 @@ from fastapi import FastAPI
 
 from api.errors import ASOEError, asoe_error_handler, unhandled_error_handler
 from api.middleware import TraceIDMiddleware
+import os
+
 from api.routes import accounts, auth, exceptions, health, policies, workflows, ws
+from api.routes import sandbox as _sandbox_routes
 
 
 def create_app() -> FastAPI:
@@ -41,6 +44,14 @@ def create_app() -> FastAPI:
     application.include_router(accounts.router, prefix="/api/v1", tags=["accounts"])
     application.include_router(ws.router, prefix="/api/v1", tags=["websocket"])
     application.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+
+    # Sandbox-only test-fixture endpoints (Playwright browser e2e). Mounted
+    # only when ASOE_ENV=sandbox; each handler additionally re-checks the
+    # env at call time (defence in depth against accidental mis-include).
+    if os.getenv("ASOE_ENV", "sandbox").lower() == "sandbox":
+        application.include_router(
+            _sandbox_routes.router, prefix="/api/v1", tags=["sandbox"],
+        )
 
     return application
 
