@@ -90,3 +90,18 @@ preserved in the exception's reanalysis_history for audit.
 
 DISCREPANCY_THRESHOLD: float = 0.15
 """Maximum price discrepancy (%) before flagging as outside threshold."""
+
+# ---------------------------------------------------------------------------
+# Four-eyes high-value override (Phase 2 #5)
+# ---------------------------------------------------------------------------
+
+HIGH_VALUE_OVERRIDE_THRESHOLD_USD: float = 10_000.0
+"""Financial impact at/above which a manager override requires a second
+reviewer to cosign before the action is applied.
+
+When the exception's financial_impact_usd meets or exceeds this threshold,
+POST /exceptions/{id}/override transitions the record to PENDING_COSIGN
+instead of RESOLVED; a different manager+ must then POST to
+/exceptions/{id}/override/cosign to approve (applies the action) or reject
+(restores prior lifecycle). Standard SOX control under §404 — any single
+manager cannot unilaterally authorize a material change."""

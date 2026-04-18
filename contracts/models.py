@@ -46,8 +46,8 @@ STATUS_TO_LIFECYCLE: Dict[str, str] = {
 # PENDING_ADMIN_REVIEW: RED-verdict admin release (three-tier HITL model).
 LIFECYCLE_STATES: List[str] = [
     "INGESTED", "CLASSIFYING", "AUDITING", "PENDING_REVIEW", "ESCALATED",
-    "PENDING_ADMIN_REVIEW", "EXECUTING", "RESOLVED", "FAILED", "BLOCKED",
-    "REJECTED", "CLOSED",
+    "PENDING_ADMIN_REVIEW", "PENDING_COSIGN", "EXECUTING", "RESOLVED",
+    "FAILED", "BLOCKED", "REJECTED", "CLOSED",
 ]
 
 # Valid source states for each HITL action.
@@ -58,6 +58,12 @@ LIFECYCLE_STATES: List[str] = [
 # lifecycles, not only YELLOW (PENDING_REVIEW/ESCALATED). Escalate is a
 # separate routing event with its own endpoint and its own source states.
 HITL_OVERRIDE_STATES = {"PENDING_REVIEW", "ESCALATED", "RESOLVED", "BLOCKED"}
+# Four-eyes (Phase 2 #5): a /override call whose financial_impact_usd >=
+# HIGH_VALUE_OVERRIDE_THRESHOLD_USD transitions the record to PENDING_COSIGN
+# instead of RESOLVED. A second manager+ must cosign via /override/cosign
+# before the action is applied. The cosign caller must not be the initiator
+# (enforced server-side alongside the standard SoD check).
+COSIGN_ELIGIBLE_STATES = {"PENDING_COSIGN"}
 HITL_APPROVE_STATES = {"PENDING_REVIEW", "ESCALATED", "PENDING_ADMIN_REVIEW"}
 HITL_REJECT_STATES = {"PENDING_REVIEW", "ESCALATED", "PENDING_ADMIN_REVIEW"}
 CHALLENGE_SOURCE_STATES = {"RESOLVED"}

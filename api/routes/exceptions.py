@@ -54,6 +54,7 @@ from api.schemas import (
     ApproveRequest,
     AsyncResolveResponse,
     ChallengeRequest,
+    CosignRequest,
     EscalateRequest,
     ExceptionDetailResponse,
     ExceptionListResponse,
@@ -68,7 +69,10 @@ from api.schemas import (
     StatsResponse,
     TraceResponse,
 )
-from contracts.policy import REANALYSIS_MAX_ATTEMPTS
+from contracts.policy import (
+    HIGH_VALUE_OVERRIDE_THRESHOLD_USD,
+    REANALYSIS_MAX_ATTEMPTS,
+)
 from api.events import WSEvent
 from api.pubsub import event_publisher
 from api.store import exception_store
@@ -76,6 +80,7 @@ from constraints.specs import AllowedOverrideReasonTag, AllowedResolutionAction
 from contracts.models import (
     ADMIN_RELEASE_SOURCE_STATES,
     CHALLENGE_SOURCE_STATES,
+    COSIGN_ELIGIBLE_STATES,
     ESCALATE_ELIGIBLE_STATES,
     HITL_APPROVE_STATES,
     HITL_OVERRIDE_STATES,
@@ -313,6 +318,28 @@ def _clear_idempotency_cache() -> None:
     """Test helper: wipe the module-level cache between tests."""
     with _idempotency_lock:
         _idempotency_cache.clear()
+
+
+def _utc_now_iso() -> str:
+    """ISO-8601 UTC timestamp (second precision)."""
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _financial_impact_usd(record) -> Optional[float]:
+    """Extract the record's financial impact for four-eyes gating.
+
+    Different recipes surface the impact under different keys; keep the
+    lookup lenient. Absent or non-numeric values are treated as "not
+    available" (None) — the four-eyes gate then only fires when the
+    impact is explicit, avoiding false cosign blocks on records where we
+    simply can't measure materiality.
+    """
+    data = record.resolution_data or {}
+    for key in ("financial_impact_usd", "financial_impact", "impact_usd"):
+        val = data.get(key)
+        if isinstance(val, (int, float)):
+            return float(val)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -636,6 +663,62 @@ async def override_exception(
         "exception_id": exception_id,
     }
 
+    # Four-eyes (Phase 2 #5): a high financial-impact override cannot be
+    # unilaterally applied. Transition to PENDING_COSIGN and stash the
+    # pending request on the record; a different manager+ will POST to
+    # /override/cosign to apply or reject. Below the threshold, apply
+    # immediately (existing Phase 1 behavior).
+    financial_impact = _financial_impact_usd(record)
+    requires_cosign = (
+        financial_impact is not None
+        and financial_impact >= HIGH_VALUE_OVERRIDE_THRESHOLD_USD
+    )
+
+    if requires_cosign:
+        pending_override = {
+            "action": req.action,
+            "notes": req.notes,
+            "reason_tag": req.reason_tag,
+            "initiator": user.sub,
+            "initiated_at": _utc_now_iso(),
+            "financial_impact_usd": financial_impact,
+            "from_lifecycle_state": record.lifecycle_state,
+        }
+        merged_resolution_data = dict(record.resolution_data or {})
+        merged_resolution_data["pending_override"] = pending_override
+        updated = exception_store.update(
+            exception_id,
+            tenant_id,
+            lifecycle_state="PENDING_COSIGN",
+            resolution_data=merged_resolution_data,
+        )
+        if not updated:
+            raise ASOEError(
+                code="UPDATE_FAILED",
+                message="Failed to stage pending override.",
+                status_code=500,
+            )
+        exception_store.log_audit_event(
+            tenant_id=tenant_id,
+            policy_key="EXCEPTION_OVERRIDE_INITIATED",
+            previous_value=prior_snapshot,
+            new_value={
+                "lifecycle_state": "PENDING_COSIGN",
+                "pending_action": req.action,
+                "reason_tag": req.reason_tag,
+                "financial_impact_usd": financial_impact,
+            },
+            changed_by=user.sub,
+            change_reason=req.notes,
+        )
+        response = updated.to_detail()
+        if key is not None:
+            _idempotency_store(
+                tenant_id, exception_id, user.sub, key,
+                request_body, response.model_dump(),
+            )
+        return response
+
     updated = exception_store.update(
         exception_id,
         tenant_id,
@@ -670,6 +753,166 @@ async def override_exception(
         changed_by=user.sub,
         change_reason=req.notes,
     )
+
+    response = updated.to_detail()
+    if key is not None:
+        _idempotency_store(
+            tenant_id, exception_id, user.sub, key,
+            request_body, response.model_dump(),
+        )
+    return response
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/exceptions/{id}/override/cosign — Four-eyes second reviewer
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/exceptions/{exception_id}/override/cosign",
+    response_model=ExceptionDetailResponse,
+    dependencies=[Depends(require_role("manager", "admin"))],
+)
+async def cosign_override(
+    exception_id: str,
+    req: CosignRequest,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    tenant_id: str = Depends(get_tenant_id),
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> ExceptionDetailResponse:
+    """Second-reviewer decision on a pending high-value override.
+
+    Gating:
+      - Lifecycle must be PENDING_COSIGN.
+      - Caller must not be the pending_override.initiator (SoD).
+      - Idempotency-Key supported identically to /override.
+
+    Outcome:
+      - approve=True  → apply the pending override (lifecycle → RESOLVED,
+                        resolved_by = initiator, cosigned_by = caller,
+                        EXCEPTION_OVERRIDE_COSIGNED audit event).
+      - approve=False → restore the prior lifecycle_state (stashed on the
+                        pending_override), clear pending_override,
+                        EXCEPTION_OVERRIDE_REJECTED audit event.
+    """
+    record = _get_or_404(exception_id, tenant_id)
+
+    # Idempotency short-circuit — same rationale as /override: a retry must
+    # return the cached answer rather than fail state-transition guards.
+    key = _validate_idempotency_key(idempotency_key)
+    request_body = req.model_dump()
+    if key is not None:
+        cached = _idempotency_lookup(
+            tenant_id, exception_id, user.sub, key, request_body,
+        )
+        if cached is not None:
+            return ExceptionDetailResponse.model_validate(cached)
+
+    _require_state(record, COSIGN_ELIGIBLE_STATES, "override/cosign")
+
+    pending = (record.resolution_data or {}).get("pending_override")
+    if not pending or "initiator" not in pending:
+        raise ASOEError(
+            code="NO_PENDING_OVERRIDE",
+            message="Record is in PENDING_COSIGN but carries no pending_override metadata.",
+            status_code=409,
+        )
+
+    if pending["initiator"] == user.sub:
+        raise ASOEError(
+            code="SOD_VIOLATION",
+            message=(
+                "Segregation of duties: the user who initiated the override "
+                "cannot cosign their own action. A different authorized user "
+                "must cosign."
+            ),
+            status_code=403,
+        )
+
+    if not req.notes or not req.notes.strip():
+        raise ASOEError(
+            code="NOTES_REQUIRED",
+            message="Cosign notes are mandatory (SOX audit requirement).",
+            status_code=422,
+        )
+
+    prior_snapshot = {
+        "lifecycle_state": record.lifecycle_state,
+        "pending_action": pending.get("action"),
+        "pending_reason_tag": pending.get("reason_tag"),
+        "initiator": pending["initiator"],
+        "exception_id": exception_id,
+    }
+
+    if req.approve:
+        # Apply the pending override. resolved_by is set to the INITIATOR
+        # (they proposed the action); cosigned_by and cosigned_at capture
+        # the reviewer for the audit trail.
+        merged_resolution_data = dict(record.resolution_data or {})
+        merged_resolution_data.pop("pending_override", None)
+        merged_resolution_data["cosign"] = {
+            "cosigned_by": user.sub,
+            "cosigned_at": _utc_now_iso(),
+            "cosign_notes": req.notes,
+            "initiator": pending["initiator"],
+            "initiated_at": pending.get("initiated_at"),
+        }
+        updated = exception_store.update(
+            exception_id,
+            tenant_id,
+            resolved_by=pending["initiator"],
+            resolved_action=pending["action"],
+            resolution_notes=pending.get("notes"),
+            lifecycle_state="RESOLVED",
+            final_status="COMPLETE",
+            resolution_data=merged_resolution_data,
+        )
+        if not updated:
+            raise ASOEError(code="UPDATE_FAILED", message="Failed to apply override.", status_code=500)
+        exception_store.log_audit_event(
+            tenant_id=tenant_id,
+            policy_key="EXCEPTION_OVERRIDE_COSIGNED",
+            previous_value=prior_snapshot,
+            new_value={
+                "lifecycle_state": "RESOLVED",
+                "resolved_action": pending["action"],
+                "reason_tag": pending.get("reason_tag"),
+                "initiator": pending["initiator"],
+                "cosigned_by": user.sub,
+            },
+            changed_by=user.sub,
+            change_reason=req.notes,
+        )
+    else:
+        # Restore prior lifecycle; clear pending_override; audit rejection.
+        from_lifecycle = pending.get("from_lifecycle_state") or "PENDING_REVIEW"
+        merged_resolution_data = dict(record.resolution_data or {})
+        merged_resolution_data.pop("pending_override", None)
+        merged_resolution_data["cosign_rejection"] = {
+            "rejected_by": user.sub,
+            "rejected_at": _utc_now_iso(),
+            "rejection_notes": req.notes,
+            "initiator": pending["initiator"],
+        }
+        updated = exception_store.update(
+            exception_id,
+            tenant_id,
+            lifecycle_state=from_lifecycle,
+            resolution_data=merged_resolution_data,
+        )
+        if not updated:
+            raise ASOEError(code="UPDATE_FAILED", message="Failed to reject override.", status_code=500)
+        exception_store.log_audit_event(
+            tenant_id=tenant_id,
+            policy_key="EXCEPTION_OVERRIDE_REJECTED",
+            previous_value=prior_snapshot,
+            new_value={
+                "lifecycle_state": from_lifecycle,
+                "initiator": pending["initiator"],
+                "rejected_by": user.sub,
+            },
+            changed_by=user.sub,
+            change_reason=req.notes,
+        )
 
     response = updated.to_detail()
     if key is not None:

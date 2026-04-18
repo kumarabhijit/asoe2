@@ -49,6 +49,24 @@ class OverrideRequest(BaseModel):
     reason_tag: str = "other"
 
 
+class CosignRequest(BaseModel):
+    """POST /api/v1/exceptions/{id}/override/cosign — second-reviewer decision
+    on a pending high-value override (Phase 2 four-eyes control).
+
+    ``approve=True`` applies the pending override (lifecycle → RESOLVED);
+    ``approve=False`` rejects it and restores the prior lifecycle. Notes
+    are mandatory (SOX) in both cases.
+
+    The cosigner's identity comes from the authenticated user and must
+    differ from the initiator — same-person cosign is a SOD violation.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    approve: bool
+    notes: str
+
+
 class EscalateRequest(BaseModel):
     """POST /api/v1/exceptions/{id}/escalate — dedicated escalation routing.
 

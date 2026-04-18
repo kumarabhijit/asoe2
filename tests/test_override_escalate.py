@@ -572,3 +572,209 @@ class TestReasonTagVocabulary:
         assert isinstance(body["allowed_override_reason_tags"], list)
         assert "customer_concession" in body["allowed_override_reason_tags"]
         assert "other" in body["allowed_override_reason_tags"]
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 #5 — Four-eyes high-value override
+# ---------------------------------------------------------------------------
+
+
+def _seed_high_value_pending(client, token, *, impact_usd: float = 25_000.0) -> str:
+    """Create a YELLOW+PENDING_REVIEW exception and stamp an explicit
+    financial impact on resolution_data so the four-eyes threshold fires.
+    Returns the exception_id."""
+    eid = _create_pending_review(client, token)
+    rec = exception_store.get(eid, "tenant-a")
+    assert rec is not None, "seeded exception not found"
+    merged = dict(rec.resolution_data or {})
+    merged["financial_impact_usd"] = impact_usd
+    # ExceptionStore.update mutates in place for the in-memory store; for
+    # the db-backed store it persists via SQL.
+    exception_store.update(eid, "tenant-a", resolution_data=merged)
+    return eid
+
+
+class TestFourEyesOverride:
+    """Phase 2 #5 — high-value overrides require a second reviewer."""
+
+    def test_low_value_override_applies_immediately(
+        self, client, analyst_token, manager_token
+    ):
+        # Impact below threshold → Phase 1 behavior: lifecycle becomes RESOLVED.
+        eid = _seed_high_value_pending(client, analyst_token, impact_usd=500.0)
+        r = client.patch(
+            f"/api/v1/exceptions/{eid}/override",
+            json={
+                "action": "ALLOW_BOTH",
+                "notes": "small fix, no cosign",
+                "reason_tag": "data_error",
+            },
+            headers=_auth(manager_token),
+        )
+        assert r.status_code == 200, r.json()
+        assert r.json()["lifecycle_state"] == "RESOLVED"
+
+    def test_high_value_override_transitions_to_pending_cosign(
+        self, client, analyst_token
+    ):
+        priya = create_test_token(sub="priya@x", roles=["manager"], org="tenant-a")
+        eid = _seed_high_value_pending(client, analyst_token, impact_usd=25_000.0)
+        r = client.patch(
+            f"/api/v1/exceptions/{eid}/override",
+            json={
+                "action": "ALLOW_BOTH",
+                "notes": "buyer confirmed concession — large refund",
+                "reason_tag": "customer_concession",
+            },
+            headers=_auth(priya),
+        )
+        assert r.status_code == 200, r.json()
+        body = r.json()
+        assert body["lifecycle_state"] == "PENDING_COSIGN"
+        # Not yet resolved — resolved_by/resolved_action must remain absent.
+        assert body.get("resolved_by") in (None, "")
+        # pending_override metadata is stashed for cosigner inspection.
+        pending = body["resolution_data"]["pending_override"]
+        assert pending["action"] == "ALLOW_BOTH"
+        assert pending["reason_tag"] == "customer_concession"
+        assert pending["initiator"] == "priya@x"
+        assert pending["financial_impact_usd"] == 25_000.0
+
+    def test_cosign_approve_applies_override(self, client, analyst_token):
+        priya = create_test_token(sub="priya@x", roles=["manager"], org="tenant-a")
+        raj = create_test_token(sub="raj@x", roles=["admin"], org="tenant-a")
+        eid = _seed_high_value_pending(client, analyst_token, impact_usd=25_000.0)
+        client.patch(
+            f"/api/v1/exceptions/{eid}/override",
+            json={
+                "action": "ALLOW_BOTH",
+                "notes": "initiator notes",
+                "reason_tag": "customer_concession",
+            },
+            headers=_auth(priya),
+        )
+        r = client.post(
+            f"/api/v1/exceptions/{eid}/override/cosign",
+            json={"approve": True, "notes": "verified — approve"},
+            headers=_auth(raj),
+        )
+        assert r.status_code == 200, r.json()
+        body = r.json()
+        assert body["lifecycle_state"] == "RESOLVED"
+        assert body["resolved_action"] == "ALLOW_BOTH"
+        # resolved_by is the initiator (they proposed); cosign captures raj.
+        assert body["resolved_by"] == "priya@x"
+        cosign = body["resolution_data"]["cosign"]
+        assert cosign["cosigned_by"] == "raj@x"
+        assert cosign["initiator"] == "priya@x"
+        # pending_override is cleared from resolution_data once applied.
+        assert "pending_override" not in body["resolution_data"]
+
+    def test_cosign_reject_restores_prior_lifecycle(self, client, analyst_token):
+        priya = create_test_token(sub="priya@x", roles=["manager"], org="tenant-a")
+        raj = create_test_token(sub="raj@x", roles=["admin"], org="tenant-a")
+        eid = _seed_high_value_pending(client, analyst_token, impact_usd=25_000.0)
+        client.patch(
+            f"/api/v1/exceptions/{eid}/override",
+            json={
+                "action": "ALLOW_BOTH",
+                "notes": "initiator notes",
+                "reason_tag": "customer_concession",
+            },
+            headers=_auth(priya),
+        )
+        r = client.post(
+            f"/api/v1/exceptions/{eid}/override/cosign",
+            json={"approve": False, "notes": "insufficient justification"},
+            headers=_auth(raj),
+        )
+        assert r.status_code == 200, r.json()
+        body = r.json()
+        assert body["lifecycle_state"] == "PENDING_REVIEW"
+        assert body.get("resolved_action") in (None, "")
+        rej = body["resolution_data"]["cosign_rejection"]
+        assert rej["rejected_by"] == "raj@x"
+        assert "pending_override" not in body["resolution_data"]
+
+    def test_cosign_initiator_rejected(self, client, analyst_token):
+        priya = create_test_token(sub="priya@x", roles=["manager"], org="tenant-a")
+        eid = _seed_high_value_pending(client, analyst_token, impact_usd=25_000.0)
+        client.patch(
+            f"/api/v1/exceptions/{eid}/override",
+            json={
+                "action": "ALLOW_BOTH",
+                "notes": "initiator",
+                "reason_tag": "customer_concession",
+            },
+            headers=_auth(priya),
+        )
+        # Same user trying to cosign their own override → SOD_VIOLATION.
+        r = client.post(
+            f"/api/v1/exceptions/{eid}/override/cosign",
+            json={"approve": True, "notes": "self-approve"},
+            headers=_auth(priya),
+        )
+        assert r.status_code == 403
+        assert r.json()["error"]["code"] == "SOD_VIOLATION"
+
+    def test_cosign_analyst_forbidden(self, client, analyst_token):
+        priya = create_test_token(sub="priya@x", roles=["manager"], org="tenant-a")
+        eid = _seed_high_value_pending(client, analyst_token, impact_usd=25_000.0)
+        client.patch(
+            f"/api/v1/exceptions/{eid}/override",
+            json={
+                "action": "ALLOW_BOTH",
+                "notes": "initiator",
+                "reason_tag": "customer_concession",
+            },
+            headers=_auth(priya),
+        )
+        r = client.post(
+            f"/api/v1/exceptions/{eid}/override/cosign",
+            json={"approve": True, "notes": "analyst trying"},
+            headers=_auth(analyst_token),
+        )
+        assert r.status_code == 403  # require_role rejects analyst
+
+    def test_cosign_on_non_pending_returns_409(self, client, analyst_token):
+        priya = create_test_token(sub="priya@x", roles=["manager"], org="tenant-a")
+        raj = create_test_token(sub="raj@x", roles=["admin"], org="tenant-a")
+        # Low-value override resolves immediately — lifecycle=RESOLVED,
+        # not PENDING_COSIGN. /override/cosign should 409 STATE_MISMATCH.
+        eid = _seed_high_value_pending(client, analyst_token, impact_usd=500.0)
+        client.patch(
+            f"/api/v1/exceptions/{eid}/override",
+            json={
+                "action": "ALLOW_BOTH",
+                "notes": "low-value",
+                "reason_tag": "data_error",
+            },
+            headers=_auth(priya),
+        )
+        r = client.post(
+            f"/api/v1/exceptions/{eid}/override/cosign",
+            json={"approve": True, "notes": "wrong endpoint"},
+            headers=_auth(raj),
+        )
+        assert r.status_code == 409
+
+    def test_cosign_notes_required(self, client, analyst_token):
+        priya = create_test_token(sub="priya@x", roles=["manager"], org="tenant-a")
+        raj = create_test_token(sub="raj@x", roles=["admin"], org="tenant-a")
+        eid = _seed_high_value_pending(client, analyst_token, impact_usd=25_000.0)
+        client.patch(
+            f"/api/v1/exceptions/{eid}/override",
+            json={
+                "action": "ALLOW_BOTH",
+                "notes": "initiator",
+                "reason_tag": "customer_concession",
+            },
+            headers=_auth(priya),
+        )
+        r = client.post(
+            f"/api/v1/exceptions/{eid}/override/cosign",
+            json={"approve": True, "notes": "   "},
+            headers=_auth(raj),
+        )
+        assert r.status_code == 422
+        assert r.json()["error"]["code"] == "NOTES_REQUIRED"

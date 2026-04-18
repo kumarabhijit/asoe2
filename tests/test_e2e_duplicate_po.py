@@ -177,14 +177,16 @@ class TestHealthDuplicatePO:
         assert "DuplicatePORecipe.py" in recipes
 
     def test_lifecycle_states_complete(self, client):
-        """All 12 lifecycle states must be served — frontend uses these for filter dropdowns."""
+        """All 13 lifecycle states must be served — frontend uses these for
+        filter dropdowns. PENDING_COSIGN was added in Phase 2 #5 for the
+        four-eyes high-value override control."""
         r = client.get("/api/v1/health")
         states = r.json()["lifecycle_states"]
-        assert len(states) == 12
+        assert len(states) == 13
         expected = [
             "INGESTED", "CLASSIFYING", "AUDITING", "PENDING_REVIEW",
-            "ESCALATED", "PENDING_ADMIN_REVIEW", "EXECUTING", "RESOLVED",
-            "FAILED", "BLOCKED", "REJECTED", "CLOSED",
+            "ESCALATED", "PENDING_ADMIN_REVIEW", "PENDING_COSIGN",
+            "EXECUTING", "RESOLVED", "FAILED", "BLOCKED", "REJECTED", "CLOSED",
         ]
         for s in expected:
             assert s in states, f"Missing lifecycle state: {s}"
