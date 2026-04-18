@@ -7,10 +7,19 @@ Architecture_v3.md Section 9.2 (schema), Section 11.3 (tenant isolation).
 
 All queries include a ``tenant_id`` predicate for application-layer
 tenant isolation. PostgreSQL RLS provides the defense-in-depth layer.
+
+Phase 4: ``policy_audit_log`` is hash-chained — every insert reads the
+prior row's ``event_hash`` and computes ``event_hash = sha256(prev || json)``.
+A DB-level trigger (V003 migration) additionally rejects UPDATE and DELETE,
+so a casual ``DELETE FROM policy_audit_log`` is a hard error. The companion
+``verify_audit_chain()`` walks the chain and reports the first broken
+event. Same hash function as ``api/store.py`` (in-memory store) — both
+sides stay in lockstep.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from datetime import datetime, timezone
@@ -367,11 +376,80 @@ class TraceRepository:
 # Policy Repository
 # ---------------------------------------------------------------------------
 
+def _audit_event_hash(prev_hash: str, fields: Dict[str, Any]) -> str:
+    """Canonical-JSON SHA-256 over the event payload + prev_hash.
+
+    Mirrors api/store.py::log_audit_event AND db/migrations/runner.py
+    backfill — all three implementations must produce identical hashes
+    for the same event so a chain written by one is verifiable by the
+    others.
+    """
+    payload = json.dumps(
+        {k: fields[k] for k in sorted(fields)},
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(
+        (prev_hash + "|" + payload).encode("utf-8")
+    ).hexdigest()
+
+
 class PolicyRepository:
     """CRUD for ``policy_overrides`` and ``policy_audit_log`` tables."""
 
     def __init__(self, adapter=None):
         self._adapter = adapter or create_adapter()
+
+    def _last_event_hash(self, cur, tenant_id: str) -> str:
+        """Per-tenant prev_hash lookup. Returns 'GENESIS' for first row."""
+        cur.execute(
+            "SELECT event_hash FROM policy_audit_log "
+            "WHERE tenant_id = ? "
+            "ORDER BY created_at DESC, id DESC LIMIT 1",
+            (tenant_id,),
+        )
+        row = cur.fetchone()
+        return row[0] if row else "GENESIS"
+
+    def _insert_audit_event(
+        self,
+        cur,
+        *,
+        tenant_id: str,
+        policy_key: str,
+        previous_value: Optional[str],
+        new_value: str,
+        changed_by: str,
+        change_reason: Optional[str],
+    ) -> str:
+        """Hash-chained INSERT into policy_audit_log. Returns the new row id."""
+        audit_id = _uuid()
+        now = _now()
+        prev_hash = self._last_event_hash(cur, tenant_id)
+        event_hash = _audit_event_hash(
+            prev_hash,
+            {
+                "id": audit_id,
+                "tenant_id": tenant_id,
+                "policy_key": policy_key,
+                "previous_value": previous_value,
+                "new_value": new_value,
+                "changed_by": changed_by,
+                "change_reason": change_reason,
+                "created_at": now,
+                "prev_hash": prev_hash,
+            },
+        )
+        cur.execute(
+            """INSERT INTO policy_audit_log
+               (id, tenant_id, policy_key, previous_value, new_value,
+                changed_by, change_reason, created_at,
+                prev_hash, event_hash)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (audit_id, tenant_id, policy_key, previous_value, new_value,
+             changed_by, change_reason, now, prev_hash, event_hash),
+        )
+        return audit_id
 
     def create_override(
         self,
@@ -400,15 +478,15 @@ class PolicyRepository:
                  created_by, now),
             )
 
-            # Insert audit log entry (SOX requirement)
-            audit_id = _uuid()
-            cur.execute(
-                """INSERT INTO policy_audit_log
-                   (id, tenant_id, policy_key, previous_value, new_value,
-                    changed_by, change_reason, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (audit_id, tenant_id, policy_key, previous_value,
-                 value_json, created_by, change_reason, now),
+            # Insert hash-chained audit log entry (SOX + tamper-evidence).
+            self._insert_audit_event(
+                cur,
+                tenant_id=tenant_id,
+                policy_key=policy_key,
+                previous_value=previous_value,
+                new_value=value_json,
+                changed_by=created_by,
+                change_reason=change_reason,
             )
 
         return {
@@ -419,6 +497,81 @@ class PolicyRepository:
             "effective_from": now,
             "created_by": created_by,
         }
+
+    def create_audit_event(
+        self,
+        tenant_id: str,
+        policy_key: str,
+        previous_value: Any,
+        new_value: Any,
+        changed_by: str,
+        change_reason: Optional[str] = None,
+    ) -> str:
+        """Audit-only insert (no policy_override row).
+
+        Used by the exception-store DB backend for events like
+        EXCEPTION_RESOLVED / EXCEPTION_OVERRIDE_INITIATED — these are
+        application-level audit events, not policy threshold tunings.
+        Returns the new audit row id.
+        """
+        with self._adapter.cursor(tenant_id) as cur:
+            return self._insert_audit_event(
+                cur,
+                tenant_id=tenant_id,
+                policy_key=policy_key,
+                previous_value=_json_dumps(previous_value)
+                    if previous_value is not None else None,
+                new_value=_json_dumps(new_value),
+                changed_by=changed_by,
+                change_reason=change_reason,
+            )
+
+    def verify_audit_chain(
+        self, tenant_id: str
+    ) -> tuple[bool, Optional[int]]:
+        """Walk the tenant's chain in (created_at, id) order.
+
+        Returns (True, None) on a valid chain, or (False, idx) where idx
+        is the zero-based position of the first event whose stored
+        ``event_hash`` does not match a recompute, or whose ``prev_hash``
+        does not link to the predecessor's ``event_hash``.
+        """
+        with self._adapter.cursor(tenant_id) as cur:
+            cur.execute(
+                """SELECT id, tenant_id, policy_key, previous_value,
+                          new_value, changed_by, change_reason, created_at,
+                          prev_hash, event_hash
+                     FROM policy_audit_log
+                    WHERE tenant_id = ?
+                    ORDER BY created_at, id""",
+                (tenant_id,),
+            )
+            rows = cur.fetchall()
+        expected_prev = "GENESIS"
+        for i, r in enumerate(rows):
+            (audit_id, t_id, policy_key, previous_value, new_value,
+             changed_by, change_reason, created_at,
+             prev_hash, event_hash) = r
+            if prev_hash != expected_prev:
+                return False, i
+            recomputed = _audit_event_hash(
+                prev_hash,
+                {
+                    "id": audit_id,
+                    "tenant_id": t_id,
+                    "policy_key": policy_key,
+                    "previous_value": previous_value,
+                    "new_value": new_value,
+                    "changed_by": changed_by,
+                    "change_reason": change_reason,
+                    "created_at": created_at,
+                    "prev_hash": prev_hash,
+                },
+            )
+            if recomputed != event_hash:
+                return False, i
+            expected_prev = event_hash
+        return True, None
 
     def get_override(
         self, tenant_id: str, policy_key: str
@@ -450,7 +603,8 @@ class PolicyRepository:
         with self._adapter.cursor(tenant_id) as cur:
             cur.execute(
                 """SELECT id, tenant_id, policy_key, previous_value,
-                          new_value, changed_by, change_reason, created_at
+                          new_value, changed_by, change_reason, created_at,
+                          prev_hash, event_hash
                    FROM policy_audit_log
                    WHERE tenant_id = ?
                    ORDER BY created_at DESC LIMIT ?""",
@@ -460,13 +614,20 @@ class PolicyRepository:
         _AUDIT_COLS = (
             "id", "tenant_id", "policy_key", "previous_value",
             "new_value", "changed_by", "change_reason", "created_at",
+            "prev_hash", "event_hash",
         )
         results = []
         for row in rows:
             r = _row_to_dict(row, _AUDIT_COLS)
             if isinstance(r.get("previous_value"), str):
-                r["previous_value"] = _json_loads(r["previous_value"])
+                try:
+                    r["previous_value"] = _json_loads(r["previous_value"])
+                except Exception:
+                    pass  # leave as raw string (matches in-memory store)
             if isinstance(r.get("new_value"), str):
-                r["new_value"] = _json_loads(r["new_value"])
+                try:
+                    r["new_value"] = _json_loads(r["new_value"])
+                except Exception:
+                    pass
             results.append(r)
         return results

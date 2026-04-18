@@ -539,15 +539,23 @@ class DatabaseBackedStore:
         changed_by: str,
         change_reason: Optional[str] = None,
     ) -> None:
-        """Record an immutable audit event to policy_audit_log (SOX)."""
+        """Record an immutable audit event to policy_audit_log (SOX).
+
+        Phase 4: routes through PolicyRepository.create_audit_event so the
+        DB-side hash chain is updated on every write. Previously this
+        called create_override, which incorrectly inserted a stray row
+        into policy_overrides for application-level events like
+        EXCEPTION_RESOLVED.
+        """
         try:
             from db.repository import PolicyRepository
             repo = PolicyRepository(self._adapter)
-            repo.create_override(
+            repo.create_audit_event(
                 tenant_id=tenant_id,
                 policy_key=policy_key,
-                value=new_value,
-                created_by=changed_by,
+                previous_value=previous_value,
+                new_value=new_value,
+                changed_by=changed_by,
                 change_reason=change_reason,
             )
         except Exception:

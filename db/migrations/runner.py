@@ -150,6 +150,113 @@ def _apply_sqlite_v002(conn: sqlite3.Connection) -> None:
     logger.info("SQLite schema V002 applied")
 
 
+# ---------------------------------------------------------------------------
+# V003 — Hash-chained, append-only policy_audit_log (Phase 4)
+# ---------------------------------------------------------------------------
+#
+# SQLite has no built-in sha256 / digest, so the per-row hash backfill is
+# implemented in Python here. The Postgres path (V003__audit_hash_chain.sql)
+# uses pgcrypto's digest() in a single statement.
+
+def _audit_event_hash(prev_hash: str, row: dict) -> str:
+    """Mirror api/store.py::log_audit_event hashing — keep them in lockstep."""
+    import hashlib
+    import json as _json
+    fields = {
+        "id": row["id"],
+        "tenant_id": row["tenant_id"],
+        "policy_key": row["policy_key"],
+        "previous_value": row.get("previous_value"),
+        "new_value": row["new_value"],
+        "changed_by": row["changed_by"],
+        "change_reason": row.get("change_reason"),
+        "created_at": row["created_at"],
+        "prev_hash": prev_hash,
+    }
+    payload = _json.dumps(
+        {k: fields[k] for k in sorted(fields)},
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256((prev_hash + "|" + payload).encode("utf-8")).hexdigest()
+
+
+def _apply_sqlite_v003(conn: sqlite3.Connection) -> None:
+    # Columns -----------------------------------------------------------
+    if not _sqlite_column_exists(conn, "policy_audit_log", "prev_hash"):
+        conn.execute(
+            "ALTER TABLE policy_audit_log ADD COLUMN prev_hash TEXT "
+            "NOT NULL DEFAULT 'GENESIS'"
+        )
+    if not _sqlite_column_exists(conn, "policy_audit_log", "event_hash"):
+        conn.execute(
+            "ALTER TABLE policy_audit_log ADD COLUMN event_hash TEXT "
+            "NOT NULL DEFAULT ''"
+        )
+
+    # Backfill ---------------------------------------------------------
+    # Walk per-tenant in (created_at, id) order; assign the chain. Skip
+    # rows that already carry a hash (re-entrant migration).
+    cur = conn.execute(
+        "SELECT id, tenant_id, policy_key, previous_value, new_value, "
+        "       changed_by, change_reason, created_at "
+        "FROM policy_audit_log "
+        "WHERE event_hash = '' "
+        "ORDER BY tenant_id, created_at, id"
+    )
+    rows = [
+        dict(
+            id=r[0], tenant_id=r[1], policy_key=r[2],
+            previous_value=r[3], new_value=r[4],
+            changed_by=r[5], change_reason=r[6], created_at=r[7],
+        )
+        for r in cur.fetchall()
+    ]
+    last_hash_by_tenant: dict[str, str] = {}
+    for row in rows:
+        prev = last_hash_by_tenant.get(row["tenant_id"], "GENESIS")
+        h = _audit_event_hash(prev, row)
+        conn.execute(
+            "UPDATE policy_audit_log SET prev_hash = ?, event_hash = ? "
+            "WHERE id = ?",
+            (prev, h, row["id"]),
+        )
+        last_hash_by_tenant[row["tenant_id"]] = h
+
+    # Triggers ----------------------------------------------------------
+    # SQLite trigger syntax differs from Postgres but the contract is
+    # the same: any UPDATE/DELETE against policy_audit_log raises an
+    # error and the transaction is rolled back.
+    conn.executescript(
+        """
+        DROP TRIGGER IF EXISTS policy_audit_log_no_update;
+        CREATE TRIGGER policy_audit_log_no_update
+        BEFORE UPDATE ON policy_audit_log
+        BEGIN
+            SELECT RAISE(ABORT, 'policy_audit_log is append-only; UPDATE rejected');
+        END;
+
+        DROP TRIGGER IF EXISTS policy_audit_log_no_delete;
+        CREATE TRIGGER policy_audit_log_no_delete
+        BEFORE DELETE ON policy_audit_log
+        BEGIN
+            SELECT RAISE(ABORT, 'policy_audit_log is append-only; DELETE rejected');
+        END;
+
+        CREATE INDEX IF NOT EXISTS idx_policy_audit_chain
+            ON policy_audit_log (tenant_id, created_at, id);
+        """
+    )
+
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+        ("V003", now),
+    )
+    conn.commit()
+    logger.info("SQLite schema V003 applied (hash-chained policy_audit_log)")
+
+
 def apply_sqlite(conn: sqlite3.Connection) -> None:
     """Apply the SQLite-compatible schema (V001 + subsequent migrations)."""
     conn.executescript(_SQLITE_SCHEMA)
@@ -161,6 +268,7 @@ def apply_sqlite(conn: sqlite3.Connection) -> None:
     conn.commit()
     logger.info("SQLite schema V001 applied")
     _apply_sqlite_v002(conn)
+    _apply_sqlite_v003(conn)
 
 
 def apply_postgres(database_url: str) -> None:
@@ -228,6 +336,22 @@ def apply_postgres(database_url: str) -> None:
             logger.info("PostgreSQL schema V002 applied")
         else:
             logger.info("PostgreSQL schema V002 already applied, skipping")
+
+        # V003 — hash-chained, append-only policy_audit_log (Phase 4).
+        cur.execute(
+            "SELECT version FROM schema_migrations WHERE version = %s",
+            ("V003",),
+        )
+        if not cur.fetchone():
+            v003_sql = (_MIGRATIONS_DIR / "V003__audit_hash_chain.sql").read_text()
+            cur.execute(v003_sql)
+            cur.execute(
+                "INSERT INTO schema_migrations (version) VALUES (%s)",
+                ("V003",),
+            )
+            logger.info("PostgreSQL schema V003 applied (hash-chained audit log)")
+        else:
+            logger.info("PostgreSQL schema V003 already applied, skipping")
 
         conn.commit()
     except Exception:
