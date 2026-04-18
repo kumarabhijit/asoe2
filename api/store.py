@@ -250,22 +250,49 @@ class ExceptionStore:
     ) -> None:
         """Record an immutable audit event (SOX compliance).
 
+        Phase 3 #3: hash-chained. Each entry carries
+          event_hash = sha256(prev_hash || canonical_event_json)
+        so a later reader can verify that nothing was deleted or mutated
+        between events. `prev_hash` for the first event in a tenant's log
+        is the literal string "GENESIS".
+
         In-memory store: appends to _audit_log list.
-        Database store: inserts into policy_audit_log table.
+        Database store: inserts into policy_audit_log table (hash columns
+        to be added in a follow-up migration).
         """
-        event = {
-            "id": str(uuid4()),
-            "tenant_id": tenant_id,
-            "policy_key": policy_key,
-            "previous_value": previous_value,
-            "new_value": new_value,
-            "changed_by": changed_by,
-            "change_reason": change_reason,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
+        import hashlib
+        import json
+
         with self._lock:
             if not hasattr(self, "_audit_log"):
                 self._audit_log: List[Dict[str, Any]] = []
+            # Find the last event for THIS tenant; chains are per-tenant so
+            # a bad actor can't cross-contaminate another tenant's log.
+            prev_hash = "GENESIS"
+            for e in reversed(self._audit_log):
+                if e["tenant_id"] == tenant_id:
+                    prev_hash = e["event_hash"]
+                    break
+            event = {
+                "id": str(uuid4()),
+                "tenant_id": tenant_id,
+                "policy_key": policy_key,
+                "previous_value": previous_value,
+                "new_value": new_value,
+                "changed_by": changed_by,
+                "change_reason": change_reason,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "prev_hash": prev_hash,
+            }
+            # Canonical JSON so reordering keys doesn't change the hash.
+            payload = json.dumps(
+                {k: event[k] for k in sorted(event) if k != "event_hash"},
+                sort_keys=True,
+                default=str,
+            )
+            event["event_hash"] = hashlib.sha256(
+                (prev_hash + "|" + payload).encode("utf-8")
+            ).hexdigest()
             self._audit_log.append(event)
         logger.info(
             "Audit event: %s by %s — %s",
@@ -277,6 +304,36 @@ class ExceptionStore:
         with self._lock:
             log = getattr(self, "_audit_log", [])
             return [e for e in log if e["tenant_id"] == tenant_id]
+
+    def verify_audit_chain(self, tenant_id: str) -> tuple[bool, Optional[int]]:
+        """Phase 3 #3 — walk the tenant's audit chain and verify hashes.
+
+        Returns (is_valid, first_break_index). A valid chain returns
+        (True, None). A tamper-evident break (edit/delete) returns
+        (False, i) where i is the zero-based index of the first event
+        whose recomputed hash does not match its stored event_hash or
+        whose prev_hash does not match the prior event's event_hash.
+        """
+        import hashlib
+        import json
+
+        events = self.get_audit_log(tenant_id)
+        expected_prev = "GENESIS"
+        for i, e in enumerate(events):
+            if e.get("prev_hash") != expected_prev:
+                return False, i
+            payload = json.dumps(
+                {k: e[k] for k in sorted(e) if k != "event_hash"},
+                sort_keys=True,
+                default=str,
+            )
+            expected = hashlib.sha256(
+                (e["prev_hash"] + "|" + payload).encode("utf-8")
+            ).hexdigest()
+            if e.get("event_hash") != expected:
+                return False, i
+            expected_prev = e["event_hash"]
+        return True, None
 
     def stats(self, tenant_id: str) -> Dict[str, Any]:
         with self._lock:
