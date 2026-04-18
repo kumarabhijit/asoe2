@@ -691,3 +691,62 @@ Build prompt: prompts/phase_18_user_profiles.md
 - [x] `tasks.md` — this phase checklist
 - [x] `README.md` — login credentials, new endpoints, sandbox user switching
 ✅ Outcome: docs cover user profiles, accounts, auth flow, and scoping
+
+---
+
+## Phase 5 — Deferred: curated per-intent reason_tag vocabularies
+
+Phase 3 Option A shipped the **framework** for per-intent override-reason
+vocabularies: `INTENT_REASON_TAGS` in `constraints/specs.py`, a
+`/api/v1/health.allowed_override_reason_tags_by_intent` map, server-side
+validation in `/disposition`, and a UI chooser that narrows by
+`detail.intent`. Every intent today points at the full global set — so
+the ML clustering signal is currently *no better than the global vocab*.
+
+The next step is **data only** (no schema / API / UI work):
+
+### 5.1 Stakeholder-curated categories
+- [ ] Product / Compliance review a sample of historical override
+      `change_reason` notes per intent.
+- [ ] Propose 4–6 categories per intent that capture the common drivers.
+      Example starting table (needs review, not committed):
+
+      PRICE_MISMATCH       — customer_concession, contract_stale,
+                             promo_window, data_error, other
+      DUPLICATE_PO         — confirmed_separate_orders, customer_intent,
+                             data_error, other
+      CREDIT_BLOCK         — prepayment_received, credit_limit_review,
+                             customer_relationship, other
+      BACK_ORDER           — partial_fulfillment_ok, substitute_sku_offered,
+                             customer_waived, other
+
+- [ ] `other` must remain in every intent's set (prevents workflow
+      dead-ends when the real reason doesn't fit a listed category).
+
+### 5.2 Wiring
+- [ ] Replace the `INTENT_REASON_TAGS = {i: _GLOBAL_REASON_TAGS for i in ...}`
+      seeding in `constraints/specs.py` with the curated table.
+- [ ] Regenerate `openapi/asoe2.openapi.json`.
+- [ ] `cd ../asoe-ui && npm run generate-types` — no manual TS changes
+      required (the `allowed_override_reason_tags_by_intent` field is
+      already in the frontend's HealthResponse type).
+- [ ] Update the narrowing test `TestPerIntentReasonTag` to exercise the
+      new vocabulary.
+
+### 5.3 Audit of existing rows
+- [ ] Existing audit events carry reason_tags that were valid under the
+      global set. After curation, some of those tags may no longer be
+      valid for their intent. Decide: grandfather them (recommended —
+      the chain's tamper-evidence must not be retroactively invalidated)
+      or re-label. The grandfather path is purely a validator change
+      on new writes; existing rows are immutable by DB trigger anyway.
+
+### 5.4 ML signal activation
+- [ ] Once curated categories land, the ML team can cluster
+      `(intent, reason_tag)` tuples for meaningful override-pattern
+      analysis. This is the outcome the v3 expert panel's
+      Data / ML-signal voice asked for — Option A delivered the
+      mechanism, Phase 5 delivers the value.
+
+🕰️  Owner: product/compliance jointly; ML engineering consumes the
+    resulting signal.

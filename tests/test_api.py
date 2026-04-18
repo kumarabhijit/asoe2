@@ -96,12 +96,25 @@ class TestHealth:
         assert "INGESTED" in data["lifecycle_states"]
         assert "CLOSED" in data["lifecycle_states"]
         assert "PENDING_COSIGN" in data["lifecycle_states"]
-        assert len(data["lifecycle_states"]) == 13
+        # Phase 3: 12 states after removing EXECUTING (legacy /approve
+        # transition; disposition goes PENDING_REVIEW → RESOLVED directly).
+        assert "EXECUTING" not in data["lifecycle_states"]
+        assert len(data["lifecycle_states"]) == 12
         # Resolution actions must be served dynamically so the UI Override
         # chooser never hardcodes codes (Guardrail #2).
         assert isinstance(data["allowed_resolution_actions"], list)
         assert "ALLOW_BOTH" in data["allowed_resolution_actions"]
         assert "ESCALATE" in data["allowed_resolution_actions"]
+        # Per-intent reason-tag map (Phase 3 Option A framework). Every
+        # intent in allowed_intents must also appear as a key in the map.
+        # Today all values equal the global set; curation happens later.
+        per_intent = data["allowed_override_reason_tags_by_intent"]
+        assert isinstance(per_intent, dict)
+        for intent in data["allowed_intents"]:
+            assert intent in per_intent, f"missing intent in reason-tag map: {intent}"
+            assert "other" in per_intent[intent], (
+                f"'other' must be a fallback tag for every intent; missing for {intent}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -164,8 +177,8 @@ class TestRBAC:
 
         # Analyst cannot override (RBAC: manager+ only)
         r = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
-            json={"action": "ALLOW_BOTH", "notes": "test"},
+            f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "ALLOW_BOTH", "notes": "test", "reason_tag": "other"},
             headers=_auth(analyst_token),
         )
         assert r.status_code == 403
@@ -180,8 +193,8 @@ class TestRBAC:
         exc_id = r.json()["exception_id"]
 
         r = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
-            json={"action": "ALLOW_BOTH", "notes": "Verified with buyer"},
+            f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "ALLOW_BOTH", "notes": "Verified with buyer", "reason_tag": "other"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200
@@ -191,9 +204,8 @@ class TestRBAC:
         assert r.status_code == 200
 
     def test_viewer_cannot_approve(self, client, viewer_token):
-        r = client.post(
-            "/api/v1/exceptions/fake-id/approve",
-            json={},
+        r = client.patch("/api/v1/exceptions/fake-id/disposition",
+            json={"action": "ALLOW_BOTH", "reason_tag": "other", },
             headers=_auth(viewer_token),
         )
         assert r.status_code == 403
@@ -412,10 +424,11 @@ class TestOverride:
         exc_id = r.json()["exception_id"]
 
         r = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
+            f"/api/v1/exceptions/{exc_id}/disposition",
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "Verified with buyer",
+                "reason_tag": "other",
             },
             headers=_auth(manager_token),
         )
@@ -444,19 +457,17 @@ class TestApproveReject:
 
     def test_approve_pending_review(self, client, analyst_token, manager_token):
         exc_id = self._create_pending_review(client, analyst_token)
-        r = client.post(
-            f"/api/v1/exceptions/{exc_id}/approve",
-            json={"notes": "Approved after review"},
+        r = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "ALLOW_BOTH", "reason_tag": "other", "notes": "Approved after review"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200
-        assert r.json()["lifecycle_state"] == "EXECUTING"
+        assert r.json()["lifecycle_state"] == "RESOLVED"
 
     def test_reject_pending_review(self, client, analyst_token, manager_token):
         exc_id = self._create_pending_review(client, analyst_token)
-        r = client.post(
-            f"/api/v1/exceptions/{exc_id}/reject",
-            json={"reason": "Not valid"},
+        r = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "NO_ACTION", "reason_tag": "other", "notes": "Not valid"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200
@@ -471,11 +482,14 @@ class TestApproveReject:
         )
         exc_id = r.json()["exception_id"]
 
-        r = client.post(
-            f"/api/v1/exceptions/{exc_id}/approve",
-            json={},
+        r = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "ALLOW_BOTH", "reason_tag": "other", "notes": "should fail"},
             headers=_auth(manager_token),
         )
+        # RESOLVED lifecycle + action=ALLOW_BOTH routes to OVERRIDE sub-type;
+        # if that record's recommended_action already matches ALLOW_BOTH the
+        # path becomes APPROVE, which then fails HITL_DISPOSITION_STATES
+        # (RESOLVED is not approvable). Either way, 409 is the shape.
         assert r.status_code == 409
         assert r.json()["error"]["code"] == "INVALID_STATE"
 

@@ -23,32 +23,6 @@ class ResolveRequest(OrderEvent):
     pass
 
 
-class OverrideRequest(BaseModel):
-    """PATCH /api/v1/exceptions/{id}/override — human override of agent recommendation.
-
-    Option A (Phase 1 unified action model): available on PENDING_REVIEW,
-    ESCALATED, RESOLVED (GREEN), and BLOCKED (RED) exceptions. Analysts
-    cannot Override — this is a manager+ action. Action must be a valid
-    AllowedResolutionAction. Notes are mandatory (SOX).
-
-    The auditor identity is derived server-side from the authenticated
-    user (user.sub) — clients must not pass a ``resolved_by`` field
-    (identity-spoofing risk). Any such extra field is rejected (422).
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    action: str  # validated against AllowedResolutionAction in the endpoint
-    notes: str  # mandatory for SOX audit trail
-    # Controlled-vocabulary categorization of why the override was made.
-    # Validated server-side against AllowedOverrideReasonTag. Stored in the
-    # audit log new_value so ML pipelines can cluster overrides without
-    # NLP on the free-text notes. Defaults to "other" in Phase 2 to keep
-    # legacy callers working; Phase 3 will make this a required field
-    # once all clients emit a real tag.
-    reason_tag: str = "other"
-
-
 class DispositionRequest(BaseModel):
     """PATCH /api/v1/exceptions/{id}/disposition — unified HITL primitive
     (v2 consolidation).
@@ -69,9 +43,9 @@ class DispositionRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    action: str  # validated against AllowedResolutionAction
-    notes: str
-    reason_tag: str = "other"
+    action: str  # validated against AllowedResolutionAction ∪ {NO_ACTION}
+    notes: str  # mandatory (SOX)
+    reason_tag: str  # required (Phase 3); validated against AllowedOverrideReasonTag
 
 
 class CosignRequest(BaseModel):
@@ -127,18 +101,6 @@ class AdminReleaseRequest(BaseModel):
 
     release_reason: str
     risk_acknowledgment: bool  # must be True
-
-
-class ApproveRequest(BaseModel):
-    """POST /api/v1/exceptions/{id}/approve — resume paused exception."""
-
-    notes: Optional[str] = None
-
-
-class RejectRequest(BaseModel):
-    """POST /api/v1/exceptions/{id}/reject — reject paused exception."""
-
-    reason: Optional[str] = None
 
 
 class ReanalyzeRequest(BaseModel):
@@ -222,6 +184,12 @@ class HealthResponse(BaseModel):
     allowed_recipes: List[str]
     allowed_resolution_actions: List[str]
     allowed_override_reason_tags: List[str]
+    # Per-intent override-reason vocabulary. Same keys as allowed_intents;
+    # values are the subset of allowed_override_reason_tags that apply to
+    # each intent. Seeded with the global set for every intent today —
+    # product/compliance will curate these in a follow-up. Consumed by
+    # the UI Override chooser to narrow its options by record.intent.
+    allowed_override_reason_tags_by_intent: Dict[str, List[str]]
 
 
 class ResolveResponse(BaseModel):

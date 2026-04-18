@@ -51,7 +51,6 @@ from api.errors import ASOEError
 from api.schemas import (
     AdminReleaseRequest,
     AnalysisResponse,
-    ApproveRequest,
     AsyncResolveResponse,
     ChallengeRequest,
     CosignRequest,
@@ -62,9 +61,7 @@ from api.schemas import (
     LineAnalysis,
     LineItem,
     LineItemsResponse,
-    OverrideRequest,
     ReanalyzeRequest,
-    RejectRequest,
     ResolveRequest,
     ResolveResponse,
     StatsResponse,
@@ -77,15 +74,18 @@ from contracts.policy import (
 from api.events import WSEvent
 from api.pubsub import event_publisher
 from api.store import exception_store
-from constraints.specs import AllowedOverrideReasonTag, AllowedResolutionAction
+from constraints.specs import (
+    INTENT_REASON_TAGS,
+    AllowedOverrideReasonTag,
+    AllowedResolutionAction,
+)
 from contracts.models import (
     ADMIN_RELEASE_SOURCE_STATES,
     CHALLENGE_SOURCE_STATES,
     COSIGN_ELIGIBLE_STATES,
     ESCALATE_ELIGIBLE_STATES,
-    HITL_APPROVE_STATES,
+    HITL_DISPOSITION_STATES,
     HITL_OVERRIDE_STATES,
-    HITL_REJECT_STATES,
     GraphState,
     OrderEvent,
 )
@@ -125,9 +125,6 @@ def _require_state(record, allowed_states: set, action: str) -> None:
         )
 
 
-def _require_pending_review(record) -> None:
-    """Raise 409 if the exception is not in a HITL-approvable state."""
-    _require_state(record, HITL_APPROVE_STATES, "approve/reject")
 
 
 def _get_trace_id(request: Request) -> str:
@@ -544,227 +541,6 @@ async def get_trace(
 
 
 # ---------------------------------------------------------------------------
-# PATCH /api/v1/exceptions/{id}/override — Human override
-# ---------------------------------------------------------------------------
-
-@router.patch(
-    "/exceptions/{exception_id}/override",
-    response_model=ExceptionDetailResponse,
-    dependencies=[Depends(require_role("manager", "admin"))],
-)
-async def override_exception(
-    exception_id: str,
-    req: OverrideRequest,
-    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
-    tenant_id: str = Depends(get_tenant_id),
-    user: AuthenticatedUser = Depends(get_current_user),
-) -> ExceptionDetailResponse:
-    """Override the agent's recommended action (Option A, Phase 1).
-
-    Privileged users (manager+) may Override across GREEN (RESOLVED),
-    YELLOW (PENDING_REVIEW/ESCALATED), and RED (BLOCKED) verdicts.
-    Analysts cannot Override (they use Approve/Reject on YELLOW).
-
-    The shadow_verdict must be one of GREEN/YELLOW/RED — FAILED-lifecycle
-    exceptions (where no agent decision exists to override) are rejected
-    with 409 INVALID_VERDICT.
-
-    The auditor identity is always ``user.sub`` (JWT); clients must not
-    pass ``resolved_by``. Notes are mandatory (SOX audit requirement).
-
-    Supports an optional ``Idempotency-Key`` header. Repeat calls within
-    24h return the cached response; conflicting bodies with the same key
-    return 409 IDEMPOTENCY_CONFLICT.
-    """
-    record = _get_or_404(exception_id, tenant_id)
-
-    # Idempotency short-circuit — must run BEFORE stateful guards (SoD,
-    # lifecycle state) because on a genuine retry the first call already
-    # mutated the record and the guards would now reject: for example SoD
-    # would see `resolved_by == user.sub` on the same exception. The request
-    # body is validated upstream by Pydantic; the cache key is derived from
-    # the authenticated user so one user's key cannot collide with another's.
-    key = _validate_idempotency_key(idempotency_key)
-    request_body = req.model_dump()
-    if key is not None:
-        cached = _idempotency_lookup(
-            tenant_id, exception_id, user.sub, key, request_body,
-        )
-        if cached is not None:
-            return ExceptionDetailResponse.model_validate(cached)
-
-    # Guard 1: shadow verdict must correspond to an overridable agent
-    # decision. FAILED-lifecycle records have no agent verdict to override.
-    if record.shadow_verdict not in {"GREEN", "YELLOW", "RED"}:
-        raise ASOEError(
-            code="INVALID_VERDICT",
-            message=(
-                f"Cannot override: exception has no overridable agent "
-                f"verdict (shadow_verdict='{record.shadow_verdict}'). "
-                f"Override requires GREEN, YELLOW, or RED."
-            ),
-            status_code=409,
-        )
-
-    # Guard 2: lifecycle state must map to one of the three verdicts.
-    _require_state(record, HITL_OVERRIDE_STATES, "override")
-
-    # Guard 3: Segregation of Duties — the user who previously resolved this
-    # exception cannot also be the one overriding it. Protects against a
-    # single manager silently self-approving an alternate resolution.
-    # `resolved_by` is only set once a human (or system principal) has acted
-    # on the record; on first-time overrides of PENDING_REVIEW/ESCALATED it
-    # is None and the check is a no-op. System-principal IDs (`system:*`)
-    # are excluded from the check — an agent-auto-resolution is a valid
-    # target for human override.
-    prior_resolver = record.resolved_by
-    if (
-        prior_resolver
-        and not prior_resolver.startswith("system:")
-        and prior_resolver == user.sub
-    ):
-        raise ASOEError(
-            code="SOD_VIOLATION",
-            message=(
-                "Segregation of duties: the user who previously resolved "
-                "this exception cannot be the one overriding it. A different "
-                "authorized user must perform the override."
-            ),
-            status_code=403,
-        )
-
-    # Validate action against constrained vocabulary
-    allowed = list(AllowedResolutionAction.__args__)  # type: ignore[attr-defined]
-    if req.action not in allowed:
-        raise ASOEError(
-            code="INVALID_ACTION",
-            message=f"Action '{req.action}' is not allowed. Valid: {allowed}",
-            status_code=422,
-        )
-
-    # Validate reason_tag (controlled vocabulary for override categorization)
-    allowed_tags = list(AllowedOverrideReasonTag.__args__)  # type: ignore[attr-defined]
-    if req.reason_tag not in allowed_tags:
-        raise ASOEError(
-            code="INVALID_REASON_TAG",
-            message=(
-                f"reason_tag '{req.reason_tag}' is not allowed. "
-                f"Valid: {allowed_tags}"
-            ),
-            status_code=422,
-        )
-
-    # Snapshot prior values BEFORE mutating — in-memory store updates the
-    # live record object in place, so reading record.lifecycle_state after
-    # update() would return the new value.
-    prior_snapshot = {
-        "lifecycle_state": record.lifecycle_state,
-        "shadow_verdict": record.shadow_verdict,
-        "recommended_action": record.resolution_data.get("recommended_action"),
-        "exception_id": exception_id,
-    }
-
-    # Four-eyes (Phase 2 #5): a high financial-impact override cannot be
-    # unilaterally applied. Transition to PENDING_COSIGN and stash the
-    # pending request on the record; a different manager+ will POST to
-    # /override/cosign to apply or reject. Below the threshold, apply
-    # immediately (existing Phase 1 behavior).
-    financial_impact = _financial_impact_usd(record)
-    requires_cosign = (
-        financial_impact is not None
-        and financial_impact >= HIGH_VALUE_OVERRIDE_THRESHOLD_USD
-    )
-
-    if requires_cosign:
-        pending_override = {
-            "action": req.action,
-            "notes": req.notes,
-            "reason_tag": req.reason_tag,
-            "initiator": user.sub,
-            "initiated_at": _utc_now_iso(),
-            "financial_impact_usd": financial_impact,
-            "from_lifecycle_state": record.lifecycle_state,
-        }
-        merged_resolution_data = dict(record.resolution_data or {})
-        merged_resolution_data["pending_override"] = pending_override
-        updated = exception_store.update(
-            exception_id,
-            tenant_id,
-            lifecycle_state="PENDING_COSIGN",
-            resolution_data=merged_resolution_data,
-        )
-        if not updated:
-            raise ASOEError(
-                code="UPDATE_FAILED",
-                message="Failed to stage pending override.",
-                status_code=500,
-            )
-        exception_store.log_audit_event(
-            tenant_id=tenant_id,
-            policy_key="EXCEPTION_OVERRIDE_INITIATED",
-            previous_value=prior_snapshot,
-            new_value={
-                "lifecycle_state": "PENDING_COSIGN",
-                "pending_action": req.action,
-                "reason_tag": req.reason_tag,
-                "financial_impact_usd": financial_impact,
-            },
-            changed_by=user.sub,
-            change_reason=req.notes,
-        )
-        response = updated.to_detail()
-        if key is not None:
-            _idempotency_store(
-                tenant_id, exception_id, user.sub, key,
-                request_body, response.model_dump(),
-            )
-        return response
-
-    updated = exception_store.update(
-        exception_id,
-        tenant_id,
-        resolved_by=user.sub,
-        resolved_action=req.action,
-        resolution_notes=req.notes,
-        lifecycle_state="RESOLVED",
-        final_status="COMPLETE",
-    )
-    if not updated:
-        raise ASOEError(
-            code="UPDATE_FAILED",
-            message="Failed to update exception.",
-            status_code=500,
-        )
-
-    # SOX audit: log override to policy_audit_log.
-    # "before" snapshot captures the prior lifecycle, verdict, and the
-    # recipe-recommended action (persisted in resolution_data at resolve
-    # time — see _persist_exception + ExecutionLog.outputs).
-    # `reason_tag` is stored in the new_value so downstream ML pipelines can
-    # cluster overrides by category without NLP on the free-text notes.
-    exception_store.log_audit_event(
-        tenant_id=tenant_id,
-        policy_key="EXCEPTION_OVERRIDE",
-        previous_value=prior_snapshot,
-        new_value={
-            "resolved_action": req.action,
-            "lifecycle_state": "RESOLVED",
-            "reason_tag": req.reason_tag,
-        },
-        changed_by=user.sub,
-        change_reason=req.notes,
-    )
-
-    response = updated.to_detail()
-    if key is not None:
-        _idempotency_store(
-            tenant_id, exception_id, user.sub, key,
-            request_body, response.model_dump(),
-        )
-    return response
-
-
-# ---------------------------------------------------------------------------
 # POST /api/v1/exceptions/{id}/override/cosign — Four-eyes second reviewer
 # ---------------------------------------------------------------------------
 
@@ -994,13 +770,24 @@ async def disposition_exception(
             ),
             status_code=422,
         )
-    allowed_tags = list(AllowedOverrideReasonTag.__args__)  # type: ignore[attr-defined]
+    # Per-intent reason-tag validation (Phase 3 Option A framework).
+    # When the record carries a known intent, narrow the allowed set to
+    # INTENT_REASON_TAGS[intent]; otherwise fall back to the global
+    # AllowedOverrideReasonTag set (FAILED-lifecycle records and any
+    # intent not yet in the map). Today all per-intent sets equal the
+    # global set, so this is a no-op in behavior — the framework is
+    # ready for a data-only swap when product/compliance curates real
+    # per-intent categories.
+    global_tags = list(AllowedOverrideReasonTag.__args__)  # type: ignore[attr-defined]
+    per_intent = INTENT_REASON_TAGS.get(record.intent) if record.intent else None
+    allowed_tags = list(per_intent) if per_intent else global_tags
     if req.reason_tag not in allowed_tags:
         raise ASOEError(
             code="INVALID_REASON_TAG",
             message=(
-                f"reason_tag '{req.reason_tag}' is not allowed. "
-                f"Valid: {allowed_tags}"
+                f"reason_tag '{req.reason_tag}' is not allowed"
+                + (f" for intent '{record.intent}'" if per_intent else "")
+                + f". Valid: {allowed_tags}"
             ),
             status_code=422,
         )
@@ -1114,7 +901,7 @@ async def disposition_exception(
     else:
         # APPROVE / REJECT also require the record to be in a state where
         # a disposition is meaningful. Reuse the existing HITL sets.
-        _require_state(record, HITL_APPROVE_STATES, sub_type.lower())
+        _require_state(record, HITL_DISPOSITION_STATES, sub_type.lower())
 
     prior_snapshot = {
         "lifecycle_state": record.lifecycle_state,
@@ -1495,65 +1282,6 @@ def _resolve_lifecycle(final_status: Optional[str]) -> str:
     """
     from contracts.models import STATUS_TO_LIFECYCLE
     return STATUS_TO_LIFECYCLE.get(final_status or "", "INGESTED")
-
-
-# ---------------------------------------------------------------------------
-# POST /api/v1/exceptions/{id}/approve — Resume paused exception
-# ---------------------------------------------------------------------------
-
-@router.post(
-    "/exceptions/{exception_id}/approve",
-    response_model=ExceptionDetailResponse,
-    dependencies=[Depends(require_role("manager", "admin"))],
-)
-async def approve_exception(
-    exception_id: str,
-    req: ApproveRequest,
-    tenant_id: str = Depends(get_tenant_id),
-    user: AuthenticatedUser = Depends(get_current_user),
-) -> ExceptionDetailResponse:
-    record = _get_or_404(exception_id, tenant_id)
-    _require_pending_review(record)
-    updated = exception_store.update(
-        exception_id,
-        tenant_id,
-        lifecycle_state="EXECUTING",
-        resolved_by=user.sub,
-        resolution_notes=req.notes,
-    )
-    if not updated:
-        raise ASOEError(code="UPDATE_FAILED", message="Failed to update.", status_code=500)
-    return updated.to_detail()
-
-
-# ---------------------------------------------------------------------------
-# POST /api/v1/exceptions/{id}/reject — Reject paused exception
-# ---------------------------------------------------------------------------
-
-@router.post(
-    "/exceptions/{exception_id}/reject",
-    response_model=ExceptionDetailResponse,
-    dependencies=[Depends(require_role("manager", "admin"))],
-)
-async def reject_exception(
-    exception_id: str,
-    req: RejectRequest,
-    tenant_id: str = Depends(get_tenant_id),
-    user: AuthenticatedUser = Depends(get_current_user),
-) -> ExceptionDetailResponse:
-    record = _get_or_404(exception_id, tenant_id)
-    _require_pending_review(record)
-    updated = exception_store.update(
-        exception_id,
-        tenant_id,
-        lifecycle_state="REJECTED",
-        final_status="REJECTED",
-        resolved_by=user.sub,
-        resolution_notes=req.reason,
-    )
-    if not updated:
-        raise ASOEError(code="UPDATE_FAILED", message="Failed to update.", status_code=500)
-    return updated.to_detail()
 
 
 # ---------------------------------------------------------------------------

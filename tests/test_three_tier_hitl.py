@@ -214,16 +214,17 @@ class TestGreenChallenge:
 # ===========================================================================
 
 class TestYellowOverride:
-    """PATCH /api/v1/exceptions/{id}/override — PENDING_REVIEW → RESOLVED."""
+    """PATCH /api/v1/exceptions/{id}/disposition — PENDING_REVIEW → RESOLVED."""
 
     def test_override_with_valid_action(self, client, analyst_token, manager_token):
         """Manager overrides agent recommendation with a valid action."""
         exc_id = _create_pending_review(client, analyst_token)
         r = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
+            f"/api/v1/exceptions/{exc_id}/disposition",
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "Verified with buyer — both POs are intentional",
+                "reason_tag": "other",
             },
             headers=_auth(manager_token),
         )
@@ -238,10 +239,11 @@ class TestYellowOverride:
         """Invalid action value is rejected (422)."""
         exc_id = _create_pending_review(client, analyst_token)
         r = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
+            f"/api/v1/exceptions/{exc_id}/disposition",
             json={
                 "action": "YOLO",
                 "notes": "test",
+                "reason_tag": "other",
             },
             headers=_auth(manager_token),
         )
@@ -252,10 +254,11 @@ class TestYellowOverride:
         """Option A: manager can Override a GREEN+RESOLVED exception."""
         exc_id = _create_resolved(client, analyst_token)
         r = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
+            f"/api/v1/exceptions/{exc_id}/disposition",
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "Reviewed post-execution — action refined",
+                "reason_tag": "other",
             },
             headers=_auth(manager_token),
         )
@@ -266,10 +269,11 @@ class TestYellowOverride:
         """Option A: manager can Override a RED+BLOCKED exception directly."""
         exc_id = _create_blocked(client, analyst_token)
         r = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
+            f"/api/v1/exceptions/{exc_id}/disposition",
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "Red verdict overridden with risk acknowledged",
+                "reason_tag": "other",
             },
             headers=_auth(manager_token),
         )
@@ -280,10 +284,11 @@ class TestYellowOverride:
         """Notes field is mandatory (SOX)."""
         exc_id = _create_pending_review(client, analyst_token)
         r = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
+            f"/api/v1/exceptions/{exc_id}/disposition",
             json={
                 "action": "ALLOW_BOTH",
                 # notes missing — should fail validation
+                "reason_tag": "other",
             },
             headers=_auth(manager_token),
         )
@@ -293,10 +298,11 @@ class TestYellowOverride:
         """Analyst cannot override (manager+ only)."""
         exc_id = _create_pending_review(client, analyst_token)
         r = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
+            f"/api/v1/exceptions/{exc_id}/disposition",
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "test",
+                "reason_tag": "other",
             },
             headers=_auth(analyst_token),
         )
@@ -306,15 +312,23 @@ class TestYellowOverride:
         """Override creates an immutable SOX audit entry."""
         exc_id = _create_pending_review(client, analyst_token)
         client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
+            f"/api/v1/exceptions/{exc_id}/disposition",
             json={
                 "action": "SUPERSEDE",
                 "notes": "Original PO superseded by revision",
+                "reason_tag": "other",
             },
             headers=_auth(manager_token),
         )
         audit_log = exception_store.get_audit_log("tenant-a")
-        override_events = [e for e in audit_log if e["policy_key"] == "EXCEPTION_OVERRIDE"]
+        # Phase 3: /disposition emits EXCEPTION_RESOLVED with sub_type on
+        # new_value (APPROVE/REJECT/OVERRIDE) — one event stream replaces
+        # the previous per-endpoint policy_keys.
+        override_events = [
+            e for e in audit_log
+            if e["policy_key"] == "EXCEPTION_RESOLVED"
+            and e["new_value"].get("sub_type") in {"APPROVE", "OVERRIDE"}
+        ]
         assert len(override_events) >= 1
         event = override_events[-1]
         assert event["change_reason"] == "Original PO superseded by revision"
@@ -329,10 +343,11 @@ class TestYellowOverride:
             exception_store.clear()
             exc_id = _create_pending_review(client, analyst_token)
             r = client.patch(
-                f"/api/v1/exceptions/{exc_id}/override",
+                f"/api/v1/exceptions/{exc_id}/disposition",
                 json={
                     "action": action,
                     "notes": f"Testing {action}",
+                    "reason_tag": "other",
                 },
                 headers=_auth(manager_token),
             )
@@ -441,13 +456,12 @@ class TestRedAdminRelease:
         assert r.json()["lifecycle_state"] == "PENDING_ADMIN_REVIEW"
 
         # Step 2: Admin approves from PENDING_ADMIN_REVIEW
-        r = client.post(
-            f"/api/v1/exceptions/{exc_id}/approve",
-            json={"notes": "Proceeding after admin review"},
+        r = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "ALLOW_BOTH", "reason_tag": "other", "notes": "Proceeding after admin review"},
             headers=_auth(admin_token),
         )
         assert r.status_code == 200
-        assert r.json()["lifecycle_state"] == "EXECUTING"
+        assert r.json()["lifecycle_state"] == "RESOLVED"
 
     def test_admin_release_then_reject(self, client, analyst_token, admin_token):
         """Full RED flow: admin-release → reject → REJECTED."""
@@ -460,9 +474,8 @@ class TestRedAdminRelease:
         )
         assert r.json()["lifecycle_state"] == "PENDING_ADMIN_REVIEW"
 
-        r = client.post(
-            f"/api/v1/exceptions/{exc_id}/reject",
-            json={"reason": "After review, RED verdict was correct"},
+        r = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "NO_ACTION", "reason_tag": "other", "notes": "After review, RED verdict was correct"},
             headers=_auth(admin_token),
         )
         assert r.status_code == 200
@@ -482,13 +495,12 @@ class TestRedAdminRelease:
         # PENDING_ADMIN_REVIEW is not in HITL_OVERRIDE_STATES — admin must approve first
         # or we could use override from PENDING_ADMIN_REVIEW if we add it.
         # For now, admin approves then the exception enters EXECUTING.
-        r = client.post(
-            f"/api/v1/exceptions/{exc_id}/approve",
-            json={"notes": "Releasing with admin approval"},
+        r = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "ALLOW_BOTH", "reason_tag": "other", "notes": "Releasing with admin approval"},
             headers=_auth(admin_token),
         )
         assert r.status_code == 200
-        assert r.json()["lifecycle_state"] == "EXECUTING"
+        assert r.json()["lifecycle_state"] == "RESOLVED"
 
 
 # ===========================================================================
@@ -502,7 +514,8 @@ class TestPendingAdminReviewInHealth:
         states = r.json()["lifecycle_states"]
         assert "PENDING_ADMIN_REVIEW" in states
 
-    def test_lifecycle_states_count_is_13(self, client):
-        """13 lifecycle states after Phase 2 #5 (PENDING_COSIGN for four-eyes)."""
+    def test_lifecycle_states_count_is_12(self, client):
+        """12 lifecycle states after Phase 3 dropped EXECUTING."""
         r = client.get("/api/v1/health")
-        assert len(r.json()["lifecycle_states"]) == 13
+        assert len(r.json()["lifecycle_states"]) == 12
+        assert "EXECUTING" not in r.json()["lifecycle_states"]

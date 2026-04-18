@@ -177,16 +177,16 @@ class TestHealthDuplicatePO:
         assert "DuplicatePORecipe.py" in recipes
 
     def test_lifecycle_states_complete(self, client):
-        """All 13 lifecycle states must be served — frontend uses these for
-        filter dropdowns. PENDING_COSIGN was added in Phase 2 #5 for the
-        four-eyes high-value override control."""
+        """All 12 lifecycle states must be served. Phase 3 dropped
+        EXECUTING (legacy /approve transition) and consolidated dispositions
+        under PATCH /disposition which resolves straight to RESOLVED."""
         r = client.get("/api/v1/health")
         states = r.json()["lifecycle_states"]
-        assert len(states) == 13
+        assert len(states) == 12
         expected = [
             "INGESTED", "CLASSIFYING", "AUDITING", "PENDING_REVIEW",
             "ESCALATED", "PENDING_ADMIN_REVIEW", "PENDING_COSIGN",
-            "EXECUTING", "RESOLVED", "FAILED", "BLOCKED", "REJECTED", "CLOSED",
+            "RESOLVED", "FAILED", "BLOCKED", "REJECTED", "CLOSED",
         ]
         for s in expected:
             assert s in states, f"Missing lifecycle state: {s}"
@@ -501,22 +501,20 @@ class TestDuplicatePOHitlActions:
         """Manager approves a PENDING_REVIEW DUPLICATE_PO exception."""
         exc_id = self._create_pending_duplicate_po(client, analyst_token)
 
-        r = client.post(
-            f"/api/v1/exceptions/{exc_id}/approve",
-            json={"notes": "Verified — duplicate confirmed by buyer"},
+        r = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "ALLOW_BOTH", "reason_tag": "other", "notes": "Verified — duplicate confirmed by buyer"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200
         data = r.json()
-        assert data["lifecycle_state"] == "EXECUTING"
+        assert data["lifecycle_state"] == "RESOLVED"
 
     def test_reject_duplicate_po(self, client, analyst_token, manager_token):
         """Manager rejects a PENDING_REVIEW DUPLICATE_PO exception."""
         exc_id = self._create_pending_duplicate_po(client, analyst_token)
 
-        r = client.post(
-            f"/api/v1/exceptions/{exc_id}/reject",
-            json={"reason": "Not a duplicate — different delivery date"},
+        r = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "NO_ACTION", "reason_tag": "other", "notes": "Not a duplicate — different delivery date"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200
@@ -528,10 +526,11 @@ class TestDuplicatePOHitlActions:
         exc_id = self._create_pending_duplicate_po(client, analyst_token)
 
         r = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
+            f"/api/v1/exceptions/{exc_id}/disposition",
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "Buyer confirmed both POs are intentional",
+                "reason_tag": "other",
             },
             headers=_auth(manager_token),
         )
@@ -547,10 +546,11 @@ class TestDuplicatePOHitlActions:
         """After override, GET /exceptions/{id} shows the override fields."""
         exc_id = self._create_pending_duplicate_po(client, analyst_token)
         client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
+            f"/api/v1/exceptions/{exc_id}/disposition",
             json={
                 "action": "SUPERSEDE",
                 "notes": "Original PO superseded",
+                "reason_tag": "other",
             },
             headers=_auth(manager_token),
         )

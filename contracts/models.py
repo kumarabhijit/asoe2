@@ -46,7 +46,7 @@ STATUS_TO_LIFECYCLE: Dict[str, str] = {
 # PENDING_ADMIN_REVIEW: RED-verdict admin release (three-tier HITL model).
 LIFECYCLE_STATES: List[str] = [
     "INGESTED", "CLASSIFYING", "AUDITING", "PENDING_REVIEW", "ESCALATED",
-    "PENDING_ADMIN_REVIEW", "PENDING_COSIGN", "EXECUTING", "RESOLVED",
+    "PENDING_ADMIN_REVIEW", "PENDING_COSIGN", "RESOLVED",
     "FAILED", "BLOCKED", "REJECTED", "CLOSED",
 ]
 
@@ -57,15 +57,24 @@ LIFECYCLE_STATES: List[str] = [
 # Override the agent's recommendation on GREEN (RESOLVED) and RED (BLOCKED)
 # lifecycles, not only YELLOW (PENDING_REVIEW/ESCALATED). Escalate is a
 # separate routing event with its own endpoint and its own source states.
-HITL_OVERRIDE_STATES = {"PENDING_REVIEW", "ESCALATED", "RESOLVED", "BLOCKED"}
+HITL_OVERRIDE_STATES = {
+    "PENDING_REVIEW", "ESCALATED", "RESOLVED", "BLOCKED",
+    # Admin-released RED exceptions land here and must be dispositionable
+    # by the releasing admin or a manager. Without this the admin-release
+    # → disposition flow returns 409.
+    "PENDING_ADMIN_REVIEW",
+}
 # Four-eyes (Phase 2 #5): a /override call whose financial_impact_usd >=
 # HIGH_VALUE_OVERRIDE_THRESHOLD_USD transitions the record to PENDING_COSIGN
 # instead of RESOLVED. A second manager+ must cosign via /override/cosign
 # before the action is applied. The cosign caller must not be the initiator
 # (enforced server-side alongside the standard SoD check).
 COSIGN_ELIGIBLE_STATES = {"PENDING_COSIGN"}
-HITL_APPROVE_STATES = {"PENDING_REVIEW", "ESCALATED", "PENDING_ADMIN_REVIEW"}
-HITL_REJECT_STATES = {"PENDING_REVIEW", "ESCALATED", "PENDING_ADMIN_REVIEW"}
+HITL_DISPOSITION_STATES = {"PENDING_REVIEW", "ESCALATED", "PENDING_ADMIN_REVIEW"}
+"""Source states for /disposition sub-type APPROVE and REJECT. Phase 3
+collapsed HITL_APPROVE_STATES + HITL_REJECT_STATES into this single set —
+they had identical membership and the endpoints they gated no longer
+exist."""
 CHALLENGE_SOURCE_STATES = {"RESOLVED"}
 ADMIN_RELEASE_SOURCE_STATES = {"BLOCKED"}
 # Escalate is a pure routing event decoupled from Override.

@@ -293,13 +293,12 @@ class TestApproveRejectFlow:
             roles=["manager"], org=SANDBOX_TENANT,
         )
         exc_id = self._create_pending_review(client, manager_token)
-        resp = client.post(
-            f"/api/v1/exceptions/{exc_id}/approve",
-            json={"notes": "Approved after review"},
+        resp = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "ALLOW_BOTH", "reason_tag": "other", "notes": "Approved after review"},
             headers=auth_header(manager_token),
         )
         assert resp.status_code == 200
-        assert resp.json()["lifecycle_state"] == "EXECUTING"
+        assert resp.json()["lifecycle_state"] == "RESOLVED"
 
     def test_reject_transitions_from_pending_review(self, client):
         manager_token = create_test_token(
@@ -307,39 +306,40 @@ class TestApproveRejectFlow:
             roles=["manager"], org=SANDBOX_TENANT,
         )
         exc_id = self._create_pending_review(client, manager_token)
-        resp = client.post(
-            f"/api/v1/exceptions/{exc_id}/reject",
-            json={"reason": "Not valid"},
+        resp = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "NO_ACTION", "reason_tag": "other", "notes": "Not valid"},
             headers=auth_header(manager_token),
         )
         assert resp.status_code == 200
         assert resp.json()["lifecycle_state"] == "REJECTED"
         assert resp.json()["final_status"] == "REJECTED"
 
-    def test_approve_rejects_wrong_state(self, client):
+    def test_disposition_on_resolved_routes_to_override(self, client):
+        """Phase 3: /disposition on a RESOLVED exception is a valid operation
+        when the chosen action differs from the recipe recommendation — it
+        routes through the OVERRIDE sub-type (RESOLVED ∈ HITL_OVERRIDE_STATES).
+        Replaces the old /approve state-gate assertion from the three-tier era."""
         manager_token = create_test_token(
             sub="mgr", email="mgr@asoe.test", name="Manager",
             roles=["manager"], org=SANDBOX_TENANT,
         )
-        # Create a COMPLETE exception (not PENDING_REVIEW)
         resp = client.post(
             "/api/v1/exceptions/resolve",
             json=PRICING_EVENT,
             headers=auth_header(manager_token),
         )
         exc_id = resp.json()["exception_id"]
-        resp = client.post(
-            f"/api/v1/exceptions/{exc_id}/approve",
-            json={"notes": "test"},
+        resp = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "ALLOW_BOTH", "reason_tag": "other", "notes": "revise"},
             headers=auth_header(manager_token),
         )
-        assert resp.status_code == 409
+        assert resp.status_code == 200
+        assert resp.json()["lifecycle_state"] == "RESOLVED"
 
     def test_approve_requires_manager_role(self, client, analyst_token):
         exc_id = self._create_pending_review(client, analyst_token)
-        resp = client.post(
-            f"/api/v1/exceptions/{exc_id}/approve",
-            json={"notes": "test"},
+        resp = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "ALLOW_BOTH", "reason_tag": "other", "notes": "test"},
             headers=auth_header(analyst_token),
         )
         assert resp.status_code == 403

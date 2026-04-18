@@ -327,13 +327,12 @@ class TestCreditBlock:
         )
         exc_id = r.json()["exception_id"]
 
-        r = client.post(
-            f"/api/v1/exceptions/{exc_id}/approve",
-            json={"notes": "Credit limit increase approved by Finance"},
+        r = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "ALLOW_BOTH", "reason_tag": "other", "notes": "Credit limit increase approved by Finance"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200
-        assert r.json()["lifecycle_state"] == "EXECUTING"
+        assert r.json()["lifecycle_state"] == "RESOLVED"
 
     def test_credit_block_reject_flow(self, client, analyst_token, manager_token):
         """Manager rejects credit block → REJECTED."""
@@ -344,9 +343,8 @@ class TestCreditBlock:
         )
         exc_id = r.json()["exception_id"]
 
-        r = client.post(
-            f"/api/v1/exceptions/{exc_id}/reject",
-            json={"reason": "Customer has outstanding payment — hold maintained"},
+        r = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "NO_ACTION", "reason_tag": "other", "notes": "Customer has outstanding payment — hold maintained"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200
@@ -362,10 +360,11 @@ class TestCreditBlock:
         exc_id = r.json()["exception_id"]
 
         r = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
+            f"/api/v1/exceptions/{exc_id}/disposition",
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "One-time exception — VIP customer with pending payment confirmed",
+                "reason_tag": "other",
             },
             headers=_auth(manager_token),
         )
@@ -458,13 +457,12 @@ class TestMassPricingError:
         assert r.json()["lifecycle_state"] == "PENDING_ADMIN_REVIEW"
 
         # Admin approves
-        r = client.post(
-            f"/api/v1/exceptions/{exc_id}/approve",
-            json={"notes": "Verified — proceeding with manual review"},
+        r = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "ALLOW_BOTH", "reason_tag": "other", "notes": "Verified — proceeding with manual review"},
             headers=_auth(admin_token),
         )
         assert r.status_code == 200
-        assert r.json()["lifecycle_state"] == "EXECUTING"
+        assert r.json()["lifecycle_state"] == "RESOLVED"
 
     def test_mass_pricing_blocked_can_be_overridden_by_manager(
         self, client, analyst_token, manager_token,
@@ -484,10 +482,11 @@ class TestMassPricingError:
         exc_id = r.json()["exception_id"]
 
         r = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
+            f"/api/v1/exceptions/{exc_id}/disposition",
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "Red verdict overridden with risk acknowledged",
+                "reason_tag": "other",
             },
             headers=_auth(manager_token),
         )
