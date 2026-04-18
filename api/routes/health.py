@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from api.schemas import HealthResponse
-from constraints.specs import AllowedIntent, AllowedRecipeName
+from constraints.specs import AllowedIntent, AllowedRecipeName, AllowedResolutionAction
 from contracts.models import LIFECYCLE_STATES
 from hardening.explain_mode import is_explain_mode_active
 from hardening.kill_switch import is_kill_switch_active
@@ -20,6 +20,7 @@ router = APIRouter()
 # Dynamic enum extraction from Pydantic Literal types
 _ALLOWED_INTENTS = list(AllowedIntent.__args__)  # type: ignore[attr-defined]
 _ALLOWED_RECIPES = list(AllowedRecipeName.__args__)  # type: ignore[attr-defined]
+_ALLOWED_RESOLUTION_ACTIONS = list(AllowedResolutionAction.__args__)  # type: ignore[attr-defined]
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -32,4 +33,5 @@ async def health() -> HealthResponse:
         allowed_intents=_ALLOWED_INTENTS,
         lifecycle_states=LIFECYCLE_STATES,
         allowed_recipes=_ALLOWED_RECIPES,
+        allowed_resolution_actions=_ALLOWED_RESOLUTION_ACTIONS,
     )
