@@ -1253,6 +1253,25 @@
         "title": "SAPActionStep",
         "type": "object"
       },
+      "SeedFinancialImpactRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "exception_id": {
+            "title": "Exception Id",
+            "type": "string"
+          },
+          "financial_impact_usd": {
+            "title": "Financial Impact Usd",
+            "type": "number"
+          }
+        },
+        "required": [
+          "exception_id",
+          "financial_impact_usd"
+        ],
+        "title": "SeedFinancialImpactRequest",
+        "type": "object"
+      },
       "StatsResponse": {
         "description": "GET /api/v1/exceptions/stats \u2014 dashboard metrics.",
         "properties": {
@@ -1320,6 +1339,24 @@
           }
         },
         "title": "StatsResponse",
+        "type": "object"
+      },
+      "TenantResetRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "tenant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Id"
+          }
+        },
+        "title": "TenantResetRequest",
         "type": "object"
       },
       "TraceResponse": {
@@ -1897,6 +1934,130 @@
         "summary": "Sso Init",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/v1/_sandbox/seed/financial-impact": {
+      "post": {
+        "description": "Stamp financial_impact_usd onto an exception's resolution_data.\n\nUsed by the Playwright four-eyes spec to push an existing record\npast HIGH_VALUE_OVERRIDE_THRESHOLD_USD so the next /disposition\ncall stages to PENDING_COSIGN. No new audit event is emitted \u2014\nthis is test fixture wiring, not a SOX-relevant state transition.",
+        "operationId": "seed_financial_impact_api_v1__sandbox_seed_financial_impact_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeedFinancialImpactRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Seed Financial Impact Api V1  Sandbox Seed Financial Impact Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Seed Financial Impact",
+        "tags": [
+          "sandbox"
+        ]
+      }
+    },
+    "/api/v1/_sandbox/tenant/reset": {
+      "post": {
+        "description": "Clear in-memory exception records for a tenant.\n\nFor the in-memory store (the default sandbox mode), this wipes all\nexceptions belonging to the target tenant_id so the next spec starts\nfrom a clean slate. For the DB-backed store, this is a no-op \u2014 tests\nagainst a real DB spin up their own SQLite :memory: per run.",
+        "operationId": "reset_tenant_api_v1__sandbox_tenant_reset_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantResetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reset Tenant Api V1  Sandbox Tenant Reset Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reset Tenant",
+        "tags": [
+          "sandbox"
         ]
       }
     },

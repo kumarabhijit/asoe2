@@ -12,10 +12,14 @@ Usage:
 from __future__ import annotations
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from api.errors import ASOEError, asoe_error_handler, unhandled_error_handler
 from api.middleware import TraceIDMiddleware
+import os
+
 from api.routes import accounts, auth, exceptions, health, policies, workflows, ws
+from api.routes import sandbox as _sandbox_routes
 
 
 def create_app() -> FastAPI:
@@ -25,6 +29,28 @@ def create_app() -> FastAPI:
         version="0.3.2",
         description="Deterministic, compliance-aware exception management API.",
     )
+
+    # Sandbox-only CORS — production fronts this service with an API
+    # gateway + same-origin UI, so Access-Control-Allow-Origin is not
+    # needed there. In sandbox the Next dev server runs on localhost:3100
+    # and the UI makes cross-origin fetch() calls to localhost:8000; the
+    # browser rejects those without explicit CORS. Allowlist is the
+    # common local dev origins only — not a wildcard, so accidental
+    # production mis-configuration still blocks foreign origins.
+    if os.getenv("ASOE_ENV", "sandbox").lower() == "sandbox":
+        application.add_middleware(
+            CORSMiddleware,
+            allow_origins=[
+                "http://localhost:3000",
+                "http://localhost:3100",
+                "http://127.0.0.1:3000",
+                "http://127.0.0.1:3100",
+            ],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+            expose_headers=["X-Trace-ID"],
+        )
 
     # Middleware (§11.4 — X-Trace-ID propagation)
     application.add_middleware(TraceIDMiddleware)
@@ -41,6 +67,14 @@ def create_app() -> FastAPI:
     application.include_router(accounts.router, prefix="/api/v1", tags=["accounts"])
     application.include_router(ws.router, prefix="/api/v1", tags=["websocket"])
     application.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+
+    # Sandbox-only test-fixture endpoints (Playwright browser e2e). Mounted
+    # only when ASOE_ENV=sandbox; each handler additionally re-checks the
+    # env at call time (defence in depth against accidental mis-include).
+    if os.getenv("ASOE_ENV", "sandbox").lower() == "sandbox":
+        application.include_router(
+            _sandbox_routes.router, prefix="/api/v1", tags=["sandbox"],
+        )
 
     return application
 
