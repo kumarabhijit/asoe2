@@ -363,6 +363,28 @@ to the `asoe.observability` Python logger.  The record contains:
 
 The record is JSON-serialisable and field-compatible with LangFuse trace schema.
 
+### HITL Audit Events (Phase 19 — Override Action consolidation)
+
+Human-in-the-loop actions on an exception are logged to `policy_audit_log`
+under the following `policy_key` values. Each row carries
+`previous_value` (the pre-action snapshot), `new_value` (the post-action
+payload), `changed_by` (the JWT `sub` of the caller — never
+client-supplied), and `change_reason` (the caller's notes).
+
+| `policy_key` | Emitted by | Notes |
+|---|---|---|
+| `EXCEPTION_RESOLVED` | `PATCH /exceptions/{id}/disposition` | `new_value.sub_type` is one of `APPROVE`, `REJECT`, `OVERRIDE`. A single SQL query against this event answers "how often do humans deviate from the agent?" |
+| `EXCEPTION_ESCALATED` | `POST /exceptions/{id}/escalate` | Routing-only event (no resolution asserted). Own permission: `exceptions:escalate` (analyst+) |
+| `EXCEPTION_OVERRIDE_INITIATED` | `/disposition` when chosen ≠ recommended AND `financial_impact_usd >= HIGH_VALUE_OVERRIDE_THRESHOLD_USD` | Lifecycle transitions to `PENDING_COSIGN`. The pending action is stashed on `resolution_data.pending_override` |
+| `EXCEPTION_OVERRIDE_COSIGNED` | `POST /exceptions/{id}/override/cosign` with `approve=true` | Applies the pending override (lifecycle → `RESOLVED`). `new_value` includes both `initiator` and `cosigned_by` |
+| `EXCEPTION_OVERRIDE_REJECTED` | `POST /exceptions/{id}/override/cosign` with `approve=false` | Restores the prior `lifecycle_state` stashed on `pending_override.from_lifecycle_state` |
+
+The legacy `EXCEPTION_OVERRIDE`, `EXCEPTION_APPROVE`, and
+`EXCEPTION_REJECT` event types were **retired in Phase 19** along with
+the per-verb endpoints that produced them. Historical rows carrying
+those keys remain immutable in the chain; new writes use the events
+above.
+
 ### LangFuse Forwarding (Optional)
 
 When `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are set and the `langfuse`
@@ -498,6 +520,34 @@ Every policy override change is immutably logged in the `policy_audit_log` table
 
 **Test coverage:** The SOX immutability trigger is verified by integration tests on real PostgreSQL (`tests/test_postgres.py` — `TestSOXAuditImmutability`). Tests confirm that INSERT succeeds while UPDATE and DELETE are blocked by the trigger. These tests require a running PostgreSQL instance and are skipped in CI when `ASOE_TEST_POSTGRES_URL` is not set.
 
+### 13.1.1 Hash-Chained Append-Only Audit Log (Phase 20)
+
+On top of the immutability trigger above, `policy_audit_log` is a
+**tamper-evident hash chain** at both the application and the database
+layers.
+
+| Property | Value |
+|---|---|
+| **Columns added** | `prev_hash TEXT NOT NULL DEFAULT 'GENESIS'`, `event_hash TEXT NOT NULL` |
+| **Hash function** | `sha256(prev_hash || "|" || canonical_json(row))` — identical in Python (`api/store.py`, `db/repository.py`) and SQL (`V003` migration, pgcrypto `digest()`) |
+| **Tenant isolation** | Each `tenant_id` has its own chain rooted at `GENESIS` — no cross-tenant contamination is possible |
+| **Append-only enforcement** | `BEFORE UPDATE` and `BEFORE DELETE` triggers raise `policy_audit_log is append-only; <OP> rejected (drop trigger to override)` |
+| **Verification API** | `PolicyRepository.verify_audit_chain(tenant_id)` (DB backend) and `ExceptionStore.verify_audit_chain(tenant_id)` (in-memory backend) — both return `(True, None)` on a clean chain or `(False, first_break_idx)` on any tampering |
+| **Migration** | `db/migrations/V003__audit_hash_chain.sql` — adds columns, backfills a valid chain across existing rows in `(tenant_id, created_at, id)` order, installs the triggers. Idempotent. |
+
+**Why this matters:** the single `REVOKE` + trigger in V001 already
+prevented casual edits, but an operator with `DROP TRIGGER` privilege
+could mutate a row and re-enable the trigger. The chain makes such a
+mutation visible: any row whose recomputed `event_hash` no longer
+matches breaks the chain from that index onwards, and
+`verify_audit_chain` reports the break position.
+
+**Test coverage:** `tests/test_audit_chain.py` (6 tests — in-memory) and
+`tests/test_db_audit_chain.py` (8 tests — SQLite + optional PostgreSQL).
+Includes a cross-implementation parity test that locks in identical
+hashes between `api/store.py`, `db/repository.py`, and the V003
+migration backfill.
+
 ### 13.2 Schema Security
 
 - All tables use `extra="forbid"` equivalent CHECK constraints
@@ -580,3 +630,58 @@ to run live pipeline executions without touching production systems.
 - The "Full JSON trace" expander exposes the complete serialised `GraphState`
 
 The sandbox database (`.db`) is git-ignored; only the seeder script is committed.
+
+---
+
+## 18. HITL Governance Controls (Phase 19 — Override Action consolidation)
+
+The four controls below wrap every human disposition on an exception.
+They are enforced server-side by `api/routes/exceptions.py` and backed
+by the hash-chained audit log in §13.1.1.
+
+### 18.1 Segregation of Duties
+
+| Property | Value |
+|---|---|
+| **Where** | `PATCH /exceptions/{id}/disposition` (OVERRIDE sub-type) and `POST /exceptions/{id}/override/cosign` |
+| **Rule** | On an override, the caller's `user.sub` must not equal the record's prior `resolved_by`. On a cosign, the caller's `user.sub` must not equal `resolution_data.pending_override.initiator`. |
+| **Principals exempt** | Prior resolvers whose subject starts with `system:` are exempt — the control targets human self-approval, not agent auto-resolutions that humans must still be able to correct. |
+| **Failure mode** | `403 SOD_VIOLATION` with a message naming the boundary violated. Idempotency-Key lookups run **before** the SoD check so a retry of a successful first call still returns the cached success. |
+
+### 18.2 Four-Eyes High-Value Override
+
+| Property | Value |
+|---|---|
+| **Threshold** | `HIGH_VALUE_OVERRIDE_THRESHOLD_USD` in `contracts/policy.py` (default `10_000.0`) — externalised, not hardcoded in a handler. |
+| **Impact source** | Extracted from `record.resolution_data` under any of `financial_impact_usd`, `financial_impact`, `impact_usd`. Absent/non-numeric impact → four-eyes does **not** fire (we never block on unmeasurable materiality). |
+| **Staging** | A `/disposition` call whose derived `sub_type == OVERRIDE` and whose impact meets or exceeds the threshold transitions the record to `PENDING_COSIGN` and stashes `{ action, notes, reason_tag, initiator, initiated_at, financial_impact_usd, from_lifecycle_state }` on `resolution_data.pending_override`. |
+| **Cosign endpoint** | `POST /exceptions/{id}/override/cosign` with `{ approve: bool, notes: str }`. `approve=true` applies the pending override (lifecycle → `RESOLVED`, `resolved_by = initiator`, `cosigned_by = caller`); `approve=false` restores `pending_override.from_lifecycle_state`. Notes are mandatory in both cases. |
+| **Audit event stream** | `EXCEPTION_OVERRIDE_INITIATED` → (either) `EXCEPTION_OVERRIDE_COSIGNED` or `EXCEPTION_OVERRIDE_REJECTED`. All three are hash-chained. |
+| **Standards** | SOX §404 management-override control: two reviewers required above the materiality threshold. |
+
+### 18.3 Hash-Chained Append-Only Audit Log
+
+See §13.1.1 — `prev_hash` + `event_hash` columns, `BEFORE UPDATE` /
+`BEFORE DELETE` triggers raising `policy_audit_log is append-only`,
+`verify_audit_chain()` at both the application and DB layers,
+per-tenant chains rooted at `GENESIS`, and the V003 migration that
+installs everything idempotently.
+
+### 18.4 Idempotency
+
+| Property | Value |
+|---|---|
+| **Where** | `PATCH /exceptions/{id}/disposition`, `POST /exceptions/{id}/escalate`, `POST /exceptions/{id}/override/cosign` |
+| **Header** | `Idempotency-Key: [A-Za-z0-9_-]{1,128}`. Malformed values return `422 INVALID_IDEMPOTENCY_KEY`. |
+| **Cache key** | `(tenant_id, exception_id, user.sub, key)` |
+| **TTL** | 24 hours, in-memory, per-process (single-replica deployment). Phase 3+ migrates this to Redis for multi-replica safety. |
+| **Conflict** | Reusing the same key with a different request body returns `409 IDEMPOTENCY_CONFLICT`. |
+| **Ordering** | Idempotency lookup runs before state-machine and SoD guards, so a retry of a successful first call returns the cached response rather than being rejected by a transition that the first call already completed. |
+
+### 18.5 Trust-Boundary Fix (Phase 19)
+
+`resolved_by` is **never** client-supplied. All HITL endpoints derive
+it from `user.sub` on the JWT. The legacy `OverrideRequest.resolved_by`
+field was removed as part of the `/disposition` consolidation —
+spoofing the auditor identity is no longer representable in the wire
+format.

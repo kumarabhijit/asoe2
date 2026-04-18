@@ -291,7 +291,7 @@ Expected: **1021 passed, 0 failed**.
 | Test group | Count | What it covers |
 |---|---|---|
 | Core tests (`tests/test_*.py`) | 772 | Contracts, constraints, recipes, orchestration, shadow, API, DB, WebSocket, workflows, guardrails |
-| E2E data-flow (`tests/test_e2e_*.py`, `tests/test_three_tier_hitl.py`) | 73 | Full pipeline for DUPLICATE_PO, CONTRACTUAL_CORRECTION, CREDIT_BLOCK, MASS_PRICING_ERROR; HITL approve/reject/override |
+| E2E data-flow (`tests/test_e2e_*.py`, `tests/test_three_tier_hitl.py`) | 73 | Full pipeline for DUPLICATE_PO, CONTRACTUAL_CORRECTION, CREDIT_BLOCK, MASS_PRICING_ERROR; HITL disposition + escalate + cosign |
 | Sandbox integration (`tests/sandbox/test_*.py`) | 127 | Full API integration, auth flow, DB persistence, WebSocket events, compliance simulation, recipe integrity |
 | PostgreSQL integration (`tests/test_postgres.py`) | 35 | Real PostgreSQL: schema migration, RLS tenant isolation, SOX immutability trigger, JSONB round-trips, UUID columns, repository CRUD, DatabaseBackedStore |
 
@@ -436,11 +436,49 @@ PYTHONPATH=. uvicorn api.app:app --host 0.0.0.0 --port 8000 --reload
 | `POST` | `/api/v1/exceptions/resolve/explain` | analyst+ | Explain mode dry-run |
 | `GET` | `/api/v1/exceptions` | analyst+ | Paginated exception queue |
 | `GET` | `/api/v1/accounts` | analyst+ | Account list (filtered by user's assigned accounts) |
-| `PATCH` | `/api/v1/exceptions/{id}/override` | manager+ | Human override |
+| `PATCH` | `/api/v1/exceptions/{id}/disposition` | analyst+ (`exceptions:approve`); `exceptions:override` when chosen differs from recommended | Unified HITL disposition — server derives `sub_type` (APPROVE / REJECT / OVERRIDE) |
+| `POST` | `/api/v1/exceptions/{id}/escalate` | analyst+ (`exceptions:escalate`) | Route an exception to ESCALATED (no resolution asserted) |
+| `POST` | `/api/v1/exceptions/{id}/override/cosign` | manager+ | Four-eyes second reviewer on a high-value override (PENDING_COSIGN → RESOLVED or prior state) |
 | `POST` | `/api/v1/workflows` | manager+ | Multi-step workflow execution |
 | `PUT` | `/api/v1/policies/{tenant_id}` | admin | Policy override update |
 | `POST` | `/api/auth/switch` | any (sandbox) | Switch to a different user (sandbox only) |
 | `GET` | `/api/auth/users` | any (sandbox) | List available users (sandbox only) |
+
+**Unified HITL disposition model (Phase 19 — Override Action consolidation):**
+
+`PATCH /exceptions/{id}/disposition` is the single primitive for Approve,
+Reject, and Override. The request body is
+`{ action, notes, reason_tag }`. The server derives `sub_type` from the
+chosen action vs. the agent's `recommended_action`:
+
+- `action == "NO_ACTION"`         → `sub_type = REJECT`
+- `action == recommended_action`  → `sub_type = APPROVE`
+- `action != recommended_action`  → `sub_type = OVERRIDE` (requires
+  `exceptions:override`, triggers Segregation of Duties and four-eyes
+  checks)
+
+A single `EXCEPTION_RESOLVED` audit event is emitted with the derived
+`sub_type` in `new_value`. `reason_tag` is required and validated against
+`AllowedOverrideReasonTag` (or the per-intent subset when a curated one
+is published — see `constraints/specs.py` → `INTENT_REASON_TAGS`). The
+legacy `/override`, `/approve`, and `/reject` endpoints and the
+`EXECUTING` lifecycle state were retired in Phase 19 — the full
+lifecycle is 12 states (`contracts/models.py` → `LIFECYCLE_STATES`),
+including `PENDING_COSIGN` for staged high-value overrides.
+
+Pass an optional `Idempotency-Key` header to make retries safe. Reusing
+the key with a different body returns `409 IDEMPOTENCY_CONFLICT`.
+
+High-value overrides (`financial_impact_usd >= HIGH_VALUE_OVERRIDE_THRESHOLD_USD`
+in `contracts/policy.py`; default `10_000.0`) stage to `PENDING_COSIGN`
+and require a second manager via `/override/cosign`. The cosigner must
+differ from the initiator (SoD); a caller whose `user.sub` matches the
+record's prior `resolved_by` is rejected with `403 SOD_VIOLATION` on
+the disposition itself.
+
+`/escalate` is a separate routing primitive (no resolution asserted)
+with its own permission (`exceptions:escalate`, analyst+) and its own
+audit event (`EXCEPTION_ESCALATED`).
 
 **Login credentials (sandbox):**
 
@@ -460,6 +498,30 @@ All 6 seed users accept any non-empty password (V1 stub auth). Production will v
 All protected endpoints require a JWT Bearer token in the `Authorization`
 header. Set `ASOE_JWT_SECRET` for production; the dev fallback is used when
 unset. See `DESIGN.md` §15 for the full endpoint table and RBAC matrix.
+
+### Audit trail (hash-chained, append-only)
+
+`policy_audit_log` is the SOX audit record for every policy change and
+every human governance action on an exception. As of Phase 20 it is a
+**tamper-evident, append-only** structure:
+
+- Each row carries `prev_hash` and
+  `event_hash = sha256(prev_hash || canonical_json(row))`. The first
+  row per tenant chains from `GENESIS`.
+- `BEFORE UPDATE` and `BEFORE DELETE` triggers on `policy_audit_log`
+  raise `policy_audit_log is append-only` — a casual `psql` session
+  cannot edit or delete a row without first dropping the trigger,
+  which itself leaves an obvious trail.
+- Chains are per-tenant (no cross-tenant contamination).
+- To verify: call
+  `PolicyRepository.verify_audit_chain(tenant_id)` (or
+  `exception_store.verify_audit_chain(tenant_id)` for the in-memory
+  backend). Returns `(True, None)` on a clean chain, or
+  `(False, first_break_idx)` pointing at the first mismatched row.
+
+Migration: `db/migrations/V003__audit_hash_chain.sql` adds the
+columns, the triggers, and backfills existing rows into a valid chain.
+The runner applies the equivalent SQLite-compatible subset for CI.
 
 ### LangFuse observability (optional)
 
@@ -832,8 +894,8 @@ api/                FastAPI API layer (architecture_v3.md §8, §11)
 db/                 Database layer (architecture_v3.md §9)
   connection.py     SQLiteAdapter / PostgresAdapter + _QmarkCursorWrapper (?→%s), create_adapter() factory
   repository.py     ExceptionRepository, TraceRepository, PolicyRepository
-  migrations/       V001__initial_schema.sql (5 tables, RLS, SOX trigger, pgvector)
-docs/               AUDITOR_GUIDE.md, ADR-001, ADR-002
+  migrations/       V001__initial_schema.sql (5 tables, RLS, SOX trigger, pgvector); V003__audit_hash_chain.sql (prev_hash/event_hash + append-only triggers)
+docs/               AUDITOR_GUIDE.md, ADR-021, ADR-022, ADR-023
   specs/            Product-owner reference specs (not runtime code)
 tests/              pytest test suite (1021 tests)
   test_*.py         Core tests: contracts, constraints, recipes, orchestration, shadow, API, DB, WebSocket, workflows, guardrails (772 tests)
@@ -884,8 +946,9 @@ k8s/                Kubernetes manifests for AKS production deployment
 | `DESIGN.md` | Implementation reference: module map, class/function names, graph node wiring, env vars, container layout |
 | `docs/AUDITOR_GUIDE.md` | Audit controls: constrained-generation boundaries, kill switch, explain mode, 10 execution invariants |
 | `contracts/policy.py` | Centralised business thresholds — discount limits, circuit breaker bounds, credit exposure tolerance |
-| `docs/adr/ADR-001-core-deployment-model.md` | Library vs. service deployment decision, staged evolution triggers |
-| `docs/adr/ADR-002-database-access-pattern.md` | Raw SQL vs. ORM decision, migration triggers, expert perspectives |
+| `docs/adr/ADR-021-core-deployment-model.md` | Library vs. service deployment decision, staged evolution triggers |
+| `docs/adr/ADR-022-database-access-pattern.md` | Raw SQL vs. ORM decision, migration triggers, expert perspectives |
+| `docs/adr/ADR-023-disposition-and-hash-chained-audit.md` | Unified `/disposition` primitive + hash-chained append-only audit log (Phases 1–4 of the Override Action overhaul) |
 | `prompts/po-spec-to-asoe.md` | Step-by-step prompt for converting a Product Owner specification into ASOE Skill–Shadow–Recipe components |
 | `prompts/triple_check_review_board.md` | Reusable review prompt — three-persona architecture, security, and test coverage assessment |
 | `prompts/phase_10_langfuse.md` | LangFuse integration prompt — sink design, trace mapping, self-hosted setup, SDK compatibility, test plan |
