@@ -350,8 +350,8 @@ class TestPartnerScoping:
         """Partner role cannot override (requires manager+)."""
         token = create_test_token(roles=["partner"], org="t1")
         r = client.patch(
-            "/api/v1/exceptions/fake-id/override",
-            json={"action": "X", "notes": "Y"},
+            "/api/v1/exceptions/fake-id/disposition",
+            json={"action": "X", "notes": "Y", "reason_tag": "other"},
             headers=_auth(token),
         )
         assert r.status_code == 403

@@ -284,7 +284,7 @@ class ExceptionStore:
                 r for r in self._records.values()
                 if r.tenant_id == tenant_id
             ]
-        _OPEN_STATES = {"INGESTED", "CLASSIFYING", "AUDITING", "EXECUTING"}
+        _OPEN_STATES = {"INGESTED", "CLASSIFYING", "AUDITING"}
         open_count = auto_resolved = manual_review = blocked = failed = 0
         by_intent: Dict[str, int] = {}
         by_lifecycle_state: Dict[str, int] = {}

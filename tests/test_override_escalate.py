@@ -169,8 +169,8 @@ class TestOverrideEligibilityMatrix:
     def test_manager_on_green_resolved_accepted(self, client, analyst_token, manager_token):
         exc_id = _create_resolved(client, analyst_token)
         r = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
-            json={"action": "ALLOW_BOTH", "notes": "post-exec refinement"},
+            f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "ALLOW_BOTH", "notes": "post-exec refinement", "reason_tag": "other"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200, r.json()
@@ -181,8 +181,8 @@ class TestOverrideEligibilityMatrix:
     ):
         exc_id = _create_pending_review(client, analyst_token)
         r = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
-            json={"action": "ALLOW_BOTH", "notes": "buyer confirmed"},
+            f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "ALLOW_BOTH", "notes": "buyer confirmed", "reason_tag": "other"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200, r.json()
@@ -193,8 +193,8 @@ class TestOverrideEligibilityMatrix:
     ):
         exc_id = _create_blocked(client, analyst_token)
         r = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
-            json={"action": "ALLOW_BOTH", "notes": "risk acknowledged"},
+            f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "ALLOW_BOTH", "notes": "risk acknowledged", "reason_tag": "other"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200, r.json()
@@ -206,8 +206,8 @@ class TestOverrideEligibilityMatrix:
         exc_id = _create_pending_review(client, analyst_token)
         _force_failed_lifecycle(exc_id)
         r = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
-            json={"action": "ALLOW_BOTH", "notes": "should fail"},
+            f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "ALLOW_BOTH", "notes": "should fail", "reason_tag": "other"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 409
@@ -216,8 +216,8 @@ class TestOverrideEligibilityMatrix:
     def test_analyst_on_yellow_forbidden(self, client, analyst_token):
         exc_id = _create_pending_review(client, analyst_token)
         r = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
-            json={"action": "ALLOW_BOTH", "notes": "should fail"},
+            f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "ALLOW_BOTH", "notes": "should fail", "reason_tag": "other"},
             headers=_auth(analyst_token),
         )
         assert r.status_code == 403
@@ -225,8 +225,8 @@ class TestOverrideEligibilityMatrix:
     def test_viewer_forbidden(self, client, analyst_token, viewer_token):
         exc_id = _create_pending_review(client, analyst_token)
         r = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
-            json={"action": "ALLOW_BOTH", "notes": "should fail"},
+            f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "ALLOW_BOTH", "notes": "should fail", "reason_tag": "other"},
             headers=_auth(viewer_token),
         )
         assert r.status_code == 403
@@ -242,11 +242,12 @@ class TestResolvedByTrustBoundary:
     ):
         exc_id = _create_pending_review(client, analyst_token)
         r = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
+            f"/api/v1/exceptions/{exc_id}/disposition",
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "trying to spoof identity",
                 "resolved_by": "attacker@example.com",
+                "reason_tag": "other",
             },
             headers=_auth(manager_token),
         )
@@ -277,16 +278,22 @@ class TestAuditRecommendedAction:
         expected_prior_action = rec.resolution_data["recommended_action"]
 
         r = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
-            json={"action": "ALLOW_BOTH", "notes": "override block"},
+            f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "ALLOW_BOTH", "notes": "override block", "reason_tag": "other"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200
 
         audit = exception_store.get_audit_log("tenant-a")
-        overrides = [e for e in audit if e["policy_key"] == "EXCEPTION_OVERRIDE"]
-        assert overrides, "override audit event not emitted"
-        prev = overrides[-1]["previous_value"]
+        # /disposition emits EXCEPTION_RESOLVED with sub_type=OVERRIDE (the
+        # chosen action differs from the recipe-recommended action).
+        events = [
+            e for e in audit
+            if e["policy_key"] == "EXCEPTION_RESOLVED"
+            and e["new_value"].get("sub_type") == "OVERRIDE"
+        ]
+        assert events, "OVERRIDE resolution audit event not emitted"
+        prev = events[-1]["previous_value"]
         assert prev["recommended_action"] == expected_prior_action
         assert prev["lifecycle_state"] == "BLOCKED"
 
@@ -300,11 +307,11 @@ class TestOverrideIdempotency:
         self, client, analyst_token, manager_token,
     ):
         exc_id = _create_pending_review(client, analyst_token)
-        body = {"action": "ALLOW_BOTH", "notes": "first pass"}
+        body = {"action": "ALLOW_BOTH", "notes": "first pass", "reason_tag": "other"}
         headers = {**_auth(manager_token), "Idempotency-Key": "abc_123-XYZ"}
 
         r1 = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override", json=body, headers=headers,
+            f"/api/v1/exceptions/{exc_id}/disposition", json=body, headers=headers,
         )
         assert r1.status_code == 200
         first_updated_at = r1.json()["updated_at"]
@@ -316,7 +323,7 @@ class TestOverrideIdempotency:
         ])
 
         r2 = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override", json=body, headers=headers,
+            f"/api/v1/exceptions/{exc_id}/disposition", json=body, headers=headers,
         )
         assert r2.status_code == 200
         # Cached response returns verbatim — identical updated_at proves no
@@ -336,15 +343,15 @@ class TestOverrideIdempotency:
         headers = {**_auth(manager_token), "Idempotency-Key": "conflict-key-1"}
 
         r1 = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
-            json={"action": "ALLOW_BOTH", "notes": "first"},
+            f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "ALLOW_BOTH", "notes": "first", "reason_tag": "other"},
             headers=headers,
         )
         assert r1.status_code == 200
 
         r2 = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
-            json={"action": "SUPERSEDE", "notes": "different body"},
+            f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "SUPERSEDE", "notes": "different body", "reason_tag": "other"},
             headers=headers,
         )
         assert r2.status_code == 409
@@ -449,7 +456,7 @@ class TestSegregationOfDuties:
         priya = create_test_token(sub="priya@x", roles=["manager"], org="tenant-a")
         exception_id = _create_pending_review(client, analyst_token)
         r1 = client.patch(
-            f"/api/v1/exceptions/{exception_id}/override",
+            f"/api/v1/exceptions/{exception_id}/disposition",
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "first resolution",
@@ -459,7 +466,7 @@ class TestSegregationOfDuties:
         )
         assert r1.status_code == 200
         r2 = client.patch(
-            f"/api/v1/exceptions/{exception_id}/override",
+            f"/api/v1/exceptions/{exception_id}/disposition",
             json={
                 "action": "SUPERSEDE",
                 "notes": "trying to self-revise",
@@ -476,7 +483,7 @@ class TestSegregationOfDuties:
         raj = create_test_token(sub="raj@x", roles=["admin"], org="tenant-a")
         exception_id = _create_pending_review(client, analyst_token)
         r1 = client.patch(
-            f"/api/v1/exceptions/{exception_id}/override",
+            f"/api/v1/exceptions/{exception_id}/disposition",
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "first pass",
@@ -486,7 +493,7 @@ class TestSegregationOfDuties:
         )
         assert r1.status_code == 200
         r2 = client.patch(
-            f"/api/v1/exceptions/{exception_id}/override",
+            f"/api/v1/exceptions/{exception_id}/disposition",
             json={
                 "action": "SUPERSEDE",
                 "notes": "admin correction",
@@ -507,7 +514,7 @@ class TestReasonTagVocabulary:
     def test_valid_reason_tag_accepted(self, client, analyst_token, manager_token):
         exception_id = _create_pending_review(client, analyst_token)
         r = client.patch(
-            f"/api/v1/exceptions/{exception_id}/override",
+            f"/api/v1/exceptions/{exception_id}/disposition",
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "buyer confirmed concession",
@@ -520,7 +527,7 @@ class TestReasonTagVocabulary:
     def test_invalid_reason_tag_rejected(self, client, analyst_token, manager_token):
         exception_id = _create_pending_review(client, analyst_token)
         r = client.patch(
-            f"/api/v1/exceptions/{exception_id}/override",
+            f"/api/v1/exceptions/{exception_id}/disposition",
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "should fail",
@@ -538,8 +545,8 @@ class TestReasonTagVocabulary:
         Phase 3 will tighten this to required."""
         exception_id = _create_pending_review(client, analyst_token)
         r = client.patch(
-            f"/api/v1/exceptions/{exception_id}/override",
-            json={"action": "ALLOW_BOTH", "notes": "legacy caller"},
+            f"/api/v1/exceptions/{exception_id}/disposition",
+            json={"action": "ALLOW_BOTH", "notes": "legacy caller", "reason_tag": "other"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200
@@ -550,7 +557,7 @@ class TestReasonTagVocabulary:
         from api.store import exception_store
         exception_id = _create_pending_review(client, analyst_token)
         r = client.patch(
-            f"/api/v1/exceptions/{exception_id}/override",
+            f"/api/v1/exceptions/{exception_id}/disposition",
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "recipe misclassified intent",
@@ -560,10 +567,13 @@ class TestReasonTagVocabulary:
         )
         assert r.status_code == 200
         audit = exception_store.get_audit_log("tenant-a")
-        override_events = [e for e in audit if e["policy_key"] == "EXCEPTION_OVERRIDE"]
-        assert override_events, "EXCEPTION_OVERRIDE audit event missing"
-        new_value = override_events[0]["new_value"]
+        # /disposition collapses approve/reject/override into EXCEPTION_RESOLVED
+        # with sub_type on new_value. reason_tag is preserved for ML clustering.
+        events = [e for e in audit if e["policy_key"] == "EXCEPTION_RESOLVED"]
+        assert events, "EXCEPTION_RESOLVED audit event missing"
+        new_value = events[0]["new_value"]
         assert new_value.get("reason_tag") == "agent_misclassification"
+        assert new_value.get("sub_type") in {"APPROVE", "OVERRIDE"}
 
     def test_health_exposes_reason_tag_vocabulary(self, client):
         r = client.get("/api/v1/health")
@@ -603,7 +613,7 @@ class TestFourEyesOverride:
         # Impact below threshold → Phase 1 behavior: lifecycle becomes RESOLVED.
         eid = _seed_high_value_pending(client, analyst_token, impact_usd=500.0)
         r = client.patch(
-            f"/api/v1/exceptions/{eid}/override",
+            f"/api/v1/exceptions/{eid}/disposition",
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "small fix, no cosign",
@@ -620,7 +630,7 @@ class TestFourEyesOverride:
         priya = create_test_token(sub="priya@x", roles=["manager"], org="tenant-a")
         eid = _seed_high_value_pending(client, analyst_token, impact_usd=25_000.0)
         r = client.patch(
-            f"/api/v1/exceptions/{eid}/override",
+            f"/api/v1/exceptions/{eid}/disposition",
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "buyer confirmed concession — large refund",
@@ -645,7 +655,7 @@ class TestFourEyesOverride:
         raj = create_test_token(sub="raj@x", roles=["admin"], org="tenant-a")
         eid = _seed_high_value_pending(client, analyst_token, impact_usd=25_000.0)
         client.patch(
-            f"/api/v1/exceptions/{eid}/override",
+            f"/api/v1/exceptions/{eid}/disposition",
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "initiator notes",
@@ -675,7 +685,7 @@ class TestFourEyesOverride:
         raj = create_test_token(sub="raj@x", roles=["admin"], org="tenant-a")
         eid = _seed_high_value_pending(client, analyst_token, impact_usd=25_000.0)
         client.patch(
-            f"/api/v1/exceptions/{eid}/override",
+            f"/api/v1/exceptions/{eid}/disposition",
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "initiator notes",
@@ -700,7 +710,7 @@ class TestFourEyesOverride:
         priya = create_test_token(sub="priya@x", roles=["manager"], org="tenant-a")
         eid = _seed_high_value_pending(client, analyst_token, impact_usd=25_000.0)
         client.patch(
-            f"/api/v1/exceptions/{eid}/override",
+            f"/api/v1/exceptions/{eid}/disposition",
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "initiator",
@@ -721,7 +731,7 @@ class TestFourEyesOverride:
         priya = create_test_token(sub="priya@x", roles=["manager"], org="tenant-a")
         eid = _seed_high_value_pending(client, analyst_token, impact_usd=25_000.0)
         client.patch(
-            f"/api/v1/exceptions/{eid}/override",
+            f"/api/v1/exceptions/{eid}/disposition",
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "initiator",
@@ -743,7 +753,7 @@ class TestFourEyesOverride:
         # not PENDING_COSIGN. /override/cosign should 409 STATE_MISMATCH.
         eid = _seed_high_value_pending(client, analyst_token, impact_usd=500.0)
         client.patch(
-            f"/api/v1/exceptions/{eid}/override",
+            f"/api/v1/exceptions/{eid}/disposition",
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "low-value",
@@ -763,7 +773,7 @@ class TestFourEyesOverride:
         raj = create_test_token(sub="raj@x", roles=["admin"], org="tenant-a")
         eid = _seed_high_value_pending(client, analyst_token, impact_usd=25_000.0)
         client.patch(
-            f"/api/v1/exceptions/{eid}/override",
+            f"/api/v1/exceptions/{eid}/disposition",
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "initiator",

@@ -118,24 +118,6 @@
         "title": "AnalysisResponse",
         "type": "object"
       },
-      "ApproveRequest": {
-        "description": "POST /api/v1/exceptions/{id}/approve \u2014 resume paused exception.",
-        "properties": {
-          "notes": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Notes"
-          }
-        },
-        "title": "ApproveRequest",
-        "type": "object"
-      },
       "AsyncResolveResponse": {
         "description": "POST /api/v1/exceptions/resolve/async \u2014 queued task.",
         "properties": {
@@ -258,14 +240,14 @@
             "type": "string"
           },
           "reason_tag": {
-            "default": "other",
             "title": "Reason Tag",
             "type": "string"
           }
         },
         "required": [
           "action",
-          "notes"
+          "notes",
+          "reason_tag"
         ],
         "title": "DispositionRequest",
         "type": "object"
@@ -839,31 +821,6 @@
         "title": "MFAVerifyRequest",
         "type": "object"
       },
-      "OverrideRequest": {
-        "additionalProperties": false,
-        "description": "PATCH /api/v1/exceptions/{id}/override \u2014 human override of agent recommendation.\n\nOption A (Phase 1 unified action model): available on PENDING_REVIEW,\nESCALATED, RESOLVED (GREEN), and BLOCKED (RED) exceptions. Analysts\ncannot Override \u2014 this is a manager+ action. Action must be a valid\nAllowedResolutionAction. Notes are mandatory (SOX).\n\nThe auditor identity is derived server-side from the authenticated\nuser (user.sub) \u2014 clients must not pass a ``resolved_by`` field\n(identity-spoofing risk). Any such extra field is rejected (422).",
-        "properties": {
-          "action": {
-            "title": "Action",
-            "type": "string"
-          },
-          "notes": {
-            "title": "Notes",
-            "type": "string"
-          },
-          "reason_tag": {
-            "default": "other",
-            "title": "Reason Tag",
-            "type": "string"
-          }
-        },
-        "required": [
-          "action",
-          "notes"
-        ],
-        "title": "OverrideRequest",
-        "type": "object"
-      },
       "PolicyOverrideResponse": {
         "description": "Response for policy update.",
         "properties": {
@@ -1031,24 +988,6 @@
           "refresh_token"
         ],
         "title": "RefreshRequest",
-        "type": "object"
-      },
-      "RejectRequest": {
-        "description": "POST /api/v1/exceptions/{id}/reject \u2014 reject paused exception.",
-        "properties": {
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          }
-        },
-        "title": "RejectRequest",
         "type": "object"
       },
       "ResolveRequest": {
@@ -2526,74 +2465,6 @@
         ]
       }
     },
-    "/api/v1/exceptions/{exception_id}/approve": {
-      "post": {
-        "operationId": "approve_exception_api_v1_exceptions__exception_id__approve_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "exception_id",
-            "required": true,
-            "schema": {
-              "title": "Exception Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApproveRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExceptionDetailResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Approve Exception",
-        "tags": [
-          "exceptions"
-        ]
-      }
-    },
     "/api/v1/exceptions/{exception_id}/challenge": {
       "post": {
         "description": "GREEN-tier HITL: challenge a resolved exception for review.\n\nTransitions RESOLVED \u2192 ESCALATED for investigation.\nDoes NOT undo executed actions (gateway effects already applied).",
@@ -2891,91 +2762,6 @@
         ]
       }
     },
-    "/api/v1/exceptions/{exception_id}/override": {
-      "patch": {
-        "description": "Override the agent's recommended action (Option A, Phase 1).\n\nPrivileged users (manager+) may Override across GREEN (RESOLVED),\nYELLOW (PENDING_REVIEW/ESCALATED), and RED (BLOCKED) verdicts.\nAnalysts cannot Override (they use Approve/Reject on YELLOW).\n\nThe shadow_verdict must be one of GREEN/YELLOW/RED \u2014 FAILED-lifecycle\nexceptions (where no agent decision exists to override) are rejected\nwith 409 INVALID_VERDICT.\n\nThe auditor identity is always ``user.sub`` (JWT); clients must not\npass ``resolved_by``. Notes are mandatory (SOX audit requirement).\n\nSupports an optional ``Idempotency-Key`` header. Repeat calls within\n24h return the cached response; conflicting bodies with the same key\nreturn 409 IDEMPOTENCY_CONFLICT.",
-        "operationId": "override_exception_api_v1_exceptions__exception_id__override_patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "exception_id",
-            "required": true,
-            "schema": {
-              "title": "Exception Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OverrideRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExceptionDetailResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Override Exception",
-        "tags": [
-          "exceptions"
-        ]
-      }
-    },
     "/api/v1/exceptions/{exception_id}/override/cosign": {
       "post": {
         "description": "Second-reviewer decision on a pending high-value override.\n\nGating:\n  - Lifecycle must be PENDING_COSIGN.\n  - Caller must not be the pending_override.initiator (SoD).\n  - Idempotency-Key supported identically to /override.\n\nOutcome:\n  - approve=True  \u2192 apply the pending override (lifecycle \u2192 RESOLVED,\n                    resolved_by = initiator, cosigned_by = caller,\n                    EXCEPTION_OVERRIDE_COSIGNED audit event).\n  - approve=False \u2192 restore the prior lifecycle_state (stashed on the\n                    pending_override), clear pending_override,\n                    EXCEPTION_OVERRIDE_REJECTED audit event.",
@@ -3125,74 +2911,6 @@
           }
         },
         "summary": "Reanalyze Exception",
-        "tags": [
-          "exceptions"
-        ]
-      }
-    },
-    "/api/v1/exceptions/{exception_id}/reject": {
-      "post": {
-        "operationId": "reject_exception_api_v1_exceptions__exception_id__reject_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "exception_id",
-            "required": true,
-            "schema": {
-              "title": "Exception Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RejectRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExceptionDetailResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Reject Exception",
         "tags": [
           "exceptions"
         ]

@@ -255,8 +255,11 @@ class TestRBACEnforcement:
         )
         exc_id = res.json()["exception_id"]
         resp = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
-            json={"action": "OVERRIDE", "notes": ""},
+            f"/api/v1/exceptions/{exc_id}/disposition",
+            # Analyst picks an action that differs from the recipe
+            # recommendation → /disposition classifies as OVERRIDE sub-type
+            # and rejects for insufficient permission.
+            json={"action": "ALLOW_BOTH", "notes": "analyst attempt", "reason_tag": "other"},
             headers=auth_header(analyst_token),
         )
         assert resp.status_code == 403

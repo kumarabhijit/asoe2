@@ -223,7 +223,7 @@ class ExceptionRepository:
             cur.execute(
                 """SELECT
                        COUNT(*) as total,
-                       SUM(CASE WHEN lifecycle_state IN ('INGESTED','CLASSIFYING','AUDITING','EXECUTING') THEN 1 ELSE 0 END) as open_exc,
+                       SUM(CASE WHEN lifecycle_state IN ('INGESTED','CLASSIFYING','AUDITING') THEN 1 ELSE 0 END) as open_exc,
                        SUM(CASE WHEN lifecycle_state = 'RESOLVED' THEN 1 ELSE 0 END) as auto_resolved,
                        SUM(CASE WHEN lifecycle_state = 'PENDING_REVIEW' THEN 1 ELSE 0 END) as manual_review,
                        SUM(CASE WHEN lifecycle_state = 'BLOCKED' THEN 1 ELSE 0 END) as blocked,

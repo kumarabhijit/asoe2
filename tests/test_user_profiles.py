@@ -461,9 +461,8 @@ class TestPartnerUsers:
         exc_id = _create_exception_with_account(client, admin_token, "PO-WP2", "acct-walmart", "Walmart")
 
         partner_token = _login(client, "tom.bradley@walmart.com")
-        r = client.post(
-            f"/api/v1/exceptions/{exc_id}/approve",
-            json={},
+        r = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "ALLOW_BOTH", "reason_tag": "other", },
             headers=_auth(partner_token),
         )
         assert r.status_code == 403
@@ -475,8 +474,8 @@ class TestPartnerUsers:
 
         partner_token = _login(client, "tom.bradley@walmart.com")
         r = client.patch(
-            f"/api/v1/exceptions/{exc_id}/override",
-            json={"action": "ALLOW_BOTH", "notes": "test"},
+            f"/api/v1/exceptions/{exc_id}/disposition",
+            json={"action": "ALLOW_BOTH", "notes": "test", "reason_tag": "other"},
             headers=_auth(partner_token),
         )
         assert r.status_code == 403
