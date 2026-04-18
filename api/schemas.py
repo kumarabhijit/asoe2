@@ -170,6 +170,7 @@ class HealthResponse(BaseModel):
     allowed_intents: List[str]
     lifecycle_states: List[str]
     allowed_recipes: List[str]
+    allowed_resolution_actions: List[str]
 
 
 class ResolveResponse(BaseModel):

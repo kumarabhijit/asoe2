@@ -96,6 +96,11 @@ class TestHealth:
         assert "INGESTED" in data["lifecycle_states"]
         assert "CLOSED" in data["lifecycle_states"]
         assert len(data["lifecycle_states"]) == 12
+        # Resolution actions must be served dynamically so the UI Override
+        # chooser never hardcodes codes (Guardrail #2).
+        assert isinstance(data["allowed_resolution_actions"], list)
+        assert "ALLOW_BOTH" in data["allowed_resolution_actions"]
+        assert "ESCALATE" in data["allowed_resolution_actions"]
 
 
 # ---------------------------------------------------------------------------
