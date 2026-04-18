@@ -694,7 +694,201 @@ Build prompt: prompts/phase_18_user_profiles.md
 
 ---
 
-## Phase 5 — Deferred: curated per-intent reason_tag vocabularies
+## PHASE 19 — Override Action Consolidation (Option A)
+
+Three-phase body of work that fixed the Override feature, consolidated
+Approve/Reject/Override into a single backend primitive, and added the
+compliance controls the expert panels called for. Branch:
+`claude/fix-override-action-agents-IkRPl`.
+
+### 19.1 Option A gating — `/override` spans GREEN / YELLOW / RED
+- [x] Extend `HITL_OVERRIDE_STATES` to include `RESOLVED` and `BLOCKED`
+      so manager+ overrides are valid on GREEN-resolved and RED-blocked
+      exceptions, not only YELLOW.
+- [x] Explicit 409 `INVALID_VERDICT` guard — FAILED-lifecycle records
+      have no agent decision to override.
+- [x] Remove `OverrideRequest.resolved_by` (identity-spoofing vector);
+      auditor identity always derives from `user.sub`.
+- [x] Populate `recommended_action` in audit `previous_value` so the
+      SOX "before" snapshot is meaningful (was always `None`).
+- [x] `Idempotency-Key` header on `/override` — duplicate key + same
+      body returns cached response; same key + different body → 409
+      `IDEMPOTENCY_CONFLICT`. In-memory TTL cache; Redis is a Phase 3+
+      hardening item.
+- [x] New `POST /exceptions/{id}/escalate` endpoint with its own
+      `EscalateRequest`, own audit event `EXCEPTION_ESCALATED`, own
+      permission `exceptions:escalate` (analyst+). Decouples routing
+      from resolution.
+- [x] Eligibility-matrix tests (verdict × role × lifecycle × idempotency).
+✅ Outcome: Override available on GREEN/YELLOW/RED for manager+;
+   Escalate is a separate primitive; all trust-boundary bugs fixed.
+
+### 19.2 Four-eyes for high-value overrides (Phase 2 #5)
+- [x] `HIGH_VALUE_OVERRIDE_THRESHOLD_USD = 10_000.0` in
+      `contracts/policy.py` (externalised; not hardcoded in a handler).
+- [x] New lifecycle state `PENDING_COSIGN`.
+- [x] `/override` branches: impact ≥ threshold → stash
+      `resolution_data.pending_override` and transition to
+      PENDING_COSIGN; below threshold → apply immediately.
+- [x] New `POST /exceptions/{id}/override/cosign` endpoint with
+      `CosignRequest { approve, notes }`. Gates: `exceptions:override`,
+      caller ≠ `pending_override.initiator` (SoD), non-empty notes.
+- [x] `EXCEPTION_OVERRIDE_INITIATED` / `EXCEPTION_OVERRIDE_COSIGNED` /
+      `EXCEPTION_OVERRIDE_REJECTED` audit events.
+- [x] Eight new four-eyes tests (low-value applies, high-value stages,
+      cosign approve, cosign reject, SoD self-cosign rejected, analyst
+      forbidden, non-pending 409, notes required).
+✅ Outcome: SOX §404 management-override control in place; two reviewers
+   required above the threshold.
+
+### 19.3 Segregation of Duties
+- [x] `/override` rejects a caller whose `user.sub` equals the record's
+      prior `resolved_by` (excluding `system:*` principals so
+      agent-auto-resolutions remain overridable). New 403
+      `SOD_VIOLATION`.
+- [x] Idempotency check moved above the SoD guard so retries of a
+      successful first call still return the cached success.
+✅ Outcome: a single manager cannot silently self-approve an alternate
+   resolution of their own prior decision.
+
+### 19.4 Controlled-vocabulary reason_tag
+- [x] New `AllowedOverrideReasonTag` Literal in `constraints/specs.py`
+      (`customer_concession`, `contract_stale`, `data_error`,
+      `policy_exception`, `agent_misclassification`, `other`).
+- [x] `DispositionRequest.reason_tag` validated against the vocabulary;
+      422 `INVALID_REASON_TAG` on a bad value.
+- [x] Persisted to the audit log `new_value` so downstream ML pipelines
+      can cluster overrides by category without NLP on free-text notes.
+- [x] `/health` exposes `allowed_override_reason_tags` at runtime for
+      the UI chooser (Guardrail #2).
+- [x] Phase 3 tightening: `reason_tag` is now required on the wire
+      (was defaulting to `"other"` for Phase 2 compatibility).
+
+### 19.5 OpenAPI-generated shared types (Phase 2 #9)
+- [x] `scripts/export_openapi.py` dumps the FastAPI schema to
+      `openapi/asoe2.openapi.json` with stable ordering.
+- [x] Drift test `tests/test_openapi_contract.py` regenerates in-process
+      and fails CI when the committed artifact is stale.
+- [x] asoe-ui consumes via `openapi-typescript` → `src/types/generated.ts`
+      with its own drift test.
+✅ Outcome: every backend schema change forces a coordinated UI regen.
+   Eliminates the class of bug that produced the original Override
+   trust-boundary defect.
+
+### 19.6 Unified `/disposition` primitive + retirement of legacy endpoints
+- [x] New `PATCH /exceptions/{id}/disposition` with
+      `DispositionRequest { action, notes, reason_tag }`.
+      Server derives sub_type from (`chosen_action`,
+      `recommended_action`):
+      - `NO_ACTION`              → REJECT (exceptions:approve)
+      - matches recommended      → APPROVE (exceptions:approve)
+      - differs from recommended → OVERRIDE (exceptions:override,
+        four-eyes applies)
+- [x] Single `EXCEPTION_RESOLVED` audit event with `sub_type` on
+      `new_value` — compliance tooling can answer "how often do managers
+      deviate from the agent?" with one SQL query.
+- [x] Phase 3 deletions (no backward compat): removed `/override`,
+      `/approve`, `/reject` endpoints + `OverrideRequest`,
+      `ApproveRequest`, `RejectRequest` schemas. Consolidated
+      `HITL_APPROVE_STATES` + `HITL_REJECT_STATES` → single
+      `HITL_DISPOSITION_STATES`. Dropped `EXECUTING` lifecycle state
+      (only ever produced by the deleted `/approve`).
+- [x] Test migration: 70+ call sites across 10 test files rewritten to
+      use `/disposition`; audit assertions switched from
+      `EXCEPTION_OVERRIDE` to `EXCEPTION_RESOLVED + sub_type`.
+- [x] `/challenge` and `/admin-release` left intact — stakeholder-
+      approved (Option A); different primitives (re-open / unblock,
+      not resolve).
+✅ Outcome: one disposition endpoint, distinct sub-type audit, legacy
+   HITL surface retired. Lifecycle count 13 → 12.
+
+### 19.7 Per-intent reason_tag framework (Phase 3 Option A)
+- [x] `INTENT_REASON_TAGS: dict[str, tuple[str, ...]]` in
+      `constraints/specs.py`, seeded with the global six-tag set for
+      every `AllowedIntent`.
+- [x] `/disposition` narrows validation to `INTENT_REASON_TAGS[intent]`
+      when the record has a known intent; falls back to the global set
+      otherwise (FAILED, unmapped).
+- [x] `/health.allowed_override_reason_tags_by_intent` maps every
+      intent → narrowed set. UI chooser filters by `detail.intent`.
+- [x] Tests monkey-patch a narrower set to prove the mechanism; today's
+      seeding produces no operator-visible change.
+✅ Outcome: mechanism ready for a **data-only** curation follow-up (see
+   Phase 5 — Deferred). Structural piece closed.
+
+### 19.8 UX rename — "Override…" → "Decide…"
+- [x] Voice-of-user research (v3 UX panel) found "override" carried
+      negative connotation — analysts avoided the button. Visible label
+      renamed to "Decide…"; aria-label and hover tooltip carry the
+      long-form "Choose different action".
+- [x] Approve button gains a hover tooltip previewing the recommended
+      action ("Approve: Apply Contract Price") so the 1-click happy
+      path is informed.
+- [x] In-flight label "Overriding…" → "Deciding…".
+- [x] Backend unchanged — `sub_type=OVERRIDE` continues to fire on
+      chosen ≠ recommended.
+✅ Outcome: queue-clearing speed preserved; naming friction removed.
+
+### 19.9 Tests
+- [x] 8 four-eyes tests in `tests/test_override_escalate.py`
+- [x] 7 disposition sub-type tests
+- [x] 2 SoD tests
+- [x] 5 reason_tag vocabulary tests (incl. per-intent narrowing)
+- [x] 1 OpenAPI drift test
+- [x] 70+ migrated call sites across 10 existing test files
+✅ Outcome: 1086 passed, 35 skipped. Audit event stream verified
+   consistent with sub_type discriminator.
+
+### 19.10 Documentation
+- [x] `openapi/asoe2.openapi.json` regenerated (new `/disposition`,
+      `/escalate`, `/override/cosign`; deleted `/override`, `/approve`,
+      `/reject`).
+- [x] `README.md` / `AUDITOR_GUIDE.md` / ADR — this Phase.
+- [x] `tasks.md` — this checklist.
+
+---
+
+## PHASE 20 — Hash-Chained Append-Only Audit Log
+
+### 20.1 In-memory hash chain (Phase 3 #3)
+- [x] Every `policy_audit_log` entry carries
+      `prev_hash` + `event_hash = sha256(prev_hash || canonical_json)`.
+      First event per tenant chains from `GENESIS`.
+- [x] `api/store.py::ExceptionStore.verify_audit_chain(tenant_id) →
+      (valid, first_break_idx)` walks events and detects any mid-chain
+      edit or deletion.
+- [x] Per-tenant isolation — one tenant cannot contaminate another's
+      chain.
+- [x] 6 tests in `tests/test_audit_chain.py`.
+
+### 20.2 SQL-layer hash chain + triggers (Phase 4)
+- [x] V003 migration adds `prev_hash` + `event_hash` columns to
+      `policy_audit_log` on both SQLite and PostgreSQL paths.
+- [x] `BEFORE UPDATE` / `BEFORE DELETE` triggers raise
+      `policy_audit_log is append-only` — rejects casual `psql`
+      surgery without first dropping the trigger.
+- [x] Backfill: walks existing rows in (tenant_id, created_at, id)
+      order and assigns a real chain so the verifier reports valid from
+      row 1 onward. Idempotent.
+- [x] `db/repository.py::PolicyRepository._insert_audit_event` reads the
+      tenant tail hash, writes `prev_hash` + `event_hash` on each INSERT.
+- [x] `create_audit_event(...)` — audit-only path (no `policy_overrides`
+      row); fixes a pre-existing bug where
+      `DatabaseBackedStore.log_audit_event` spuriously wrote
+      policy_override rows for application events.
+- [x] `verify_audit_chain(tenant_id)` walks the SQL log in order,
+      recomputes each row, returns `(True, None)` on a clean chain.
+- [x] Shared `_audit_event_hash` helper — same canonical-JSON SHA-256
+      algorithm as `api/store.py` and the V003 migration backfill. A
+      parity test locks in the cross-implementation identity.
+- [x] 8 tests in `tests/test_db_audit_chain.py` — columns present,
+      GENESIS on first event, chain links, verify clean-log,
+      per-tenant isolation, UPDATE trigger rejects, DELETE trigger
+      rejects, cross-implementation hash parity.
+✅ Outcome: tamper-evidence at both layers — application verification
+   (`verify_audit_chain`) and database-level mutation rejection.
+   Compliance reviewers can prove an audit row was neither edited nor
+   deleted after write.
 
 Phase 3 Option A shipped the **framework** for per-intent override-reason
 vocabularies: `INTENT_REASON_TAGS` in `constraints/specs.py`, a
