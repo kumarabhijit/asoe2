@@ -502,7 +502,7 @@ class TestPendingAdminReviewInHealth:
         states = r.json()["lifecycle_states"]
         assert "PENDING_ADMIN_REVIEW" in states
 
-    def test_lifecycle_states_count_is_12(self, client):
-        """12 lifecycle states after adding PENDING_ADMIN_REVIEW."""
+    def test_lifecycle_states_count_is_13(self, client):
+        """13 lifecycle states after Phase 2 #5 (PENDING_COSIGN for four-eyes)."""
         r = client.get("/api/v1/health")
-        assert len(r.json()["lifecycle_states"]) == 12
+        assert len(r.json()["lifecycle_states"]) == 13

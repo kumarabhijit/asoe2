@@ -10,7 +10,12 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from api.schemas import HealthResponse
-from constraints.specs import AllowedIntent, AllowedRecipeName, AllowedResolutionAction
+from constraints.specs import (
+    AllowedIntent,
+    AllowedOverrideReasonTag,
+    AllowedRecipeName,
+    AllowedResolutionAction,
+)
 from contracts.models import LIFECYCLE_STATES
 from hardening.explain_mode import is_explain_mode_active
 from hardening.kill_switch import is_kill_switch_active
@@ -21,6 +26,7 @@ router = APIRouter()
 _ALLOWED_INTENTS = list(AllowedIntent.__args__)  # type: ignore[attr-defined]
 _ALLOWED_RECIPES = list(AllowedRecipeName.__args__)  # type: ignore[attr-defined]
 _ALLOWED_RESOLUTION_ACTIONS = list(AllowedResolutionAction.__args__)  # type: ignore[attr-defined]
+_ALLOWED_OVERRIDE_REASON_TAGS = list(AllowedOverrideReasonTag.__args__)  # type: ignore[attr-defined]
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -34,4 +40,5 @@ async def health() -> HealthResponse:
         lifecycle_states=LIFECYCLE_STATES,
         allowed_recipes=_ALLOWED_RECIPES,
         allowed_resolution_actions=_ALLOWED_RESOLUTION_ACTIONS,
+        allowed_override_reason_tags=_ALLOWED_OVERRIDE_REASON_TAGS,
     )

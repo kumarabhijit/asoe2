@@ -1,0 +1,3410 @@
+{
+  "components": {
+    "schemas": {
+      "AccountListResponse": {
+        "description": "GET /api/v1/accounts \u2014 list of accounts for the tenant.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/AccountResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "AccountListResponse",
+        "type": "object"
+      },
+      "AccountResponse": {
+        "description": "A retail customer account within a tenant.",
+        "properties": {
+          "bp_number": {
+            "title": "Bp Number",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "tier": {
+            "title": "Tier",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "tenant_id",
+          "bp_number",
+          "tier"
+        ],
+        "title": "AccountResponse",
+        "type": "object"
+      },
+      "AdminReleaseRequest": {
+        "description": "POST /api/v1/exceptions/{id}/admin-release \u2014 admin release of RED-blocked exception.\n\nAvailable on BLOCKED exceptions (RED verdict). Admin-only.\nTransitions BLOCKED \u2192 PENDING_ADMIN_REVIEW for admin to select action.",
+        "properties": {
+          "release_reason": {
+            "title": "Release Reason",
+            "type": "string"
+          },
+          "risk_acknowledgment": {
+            "title": "Risk Acknowledgment",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "release_reason",
+          "risk_acknowledgment"
+        ],
+        "title": "AdminReleaseRequest",
+        "type": "object"
+      },
+      "AnalysisResponse": {
+        "description": "GET /api/v1/exceptions/{id}/analysis",
+        "properties": {
+          "confidence": {
+            "title": "Confidence",
+            "type": "integer"
+          },
+          "diagnosis": {
+            "title": "Diagnosis",
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/LineAnalysis"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "resolution": {
+            "title": "Resolution",
+            "type": "string"
+          },
+          "risk": {
+            "title": "Risk",
+            "type": "string"
+          }
+        },
+        "required": [
+          "diagnosis",
+          "confidence",
+          "risk",
+          "resolution"
+        ],
+        "title": "AnalysisResponse",
+        "type": "object"
+      },
+      "ApproveRequest": {
+        "description": "POST /api/v1/exceptions/{id}/approve \u2014 resume paused exception.",
+        "properties": {
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          }
+        },
+        "title": "ApproveRequest",
+        "type": "object"
+      },
+      "AsyncResolveResponse": {
+        "description": "POST /api/v1/exceptions/resolve/async \u2014 queued task.",
+        "properties": {
+          "status": {
+            "default": "queued",
+            "title": "Status",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "title": "AsyncResolveResponse",
+        "type": "object"
+      },
+      "AuthTokenResponse": {
+        "description": "Auth response with JWT tokens.",
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "mfa_required": {
+            "default": false,
+            "title": "Mfa Required",
+            "type": "boolean"
+          },
+          "mfa_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mfa Token"
+          },
+          "refresh_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Token"
+          },
+          "token_type": {
+            "default": "bearer",
+            "title": "Token Type",
+            "type": "string"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserProfile"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "access_token"
+        ],
+        "title": "AuthTokenResponse",
+        "type": "object"
+      },
+      "ChallengeRequest": {
+        "description": "POST /api/v1/exceptions/{id}/challenge \u2014 post-execution challenge.\n\nAvailable on RESOLVED exceptions (GREEN verdict post-execution review).\nTransitions RESOLVED \u2192 ESCALATED for investigation.",
+        "properties": {
+          "challenge_reason": {
+            "title": "Challenge Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "challenge_reason"
+        ],
+        "title": "ChallengeRequest",
+        "type": "object"
+      },
+      "CosignRequest": {
+        "additionalProperties": false,
+        "description": "POST /api/v1/exceptions/{id}/override/cosign \u2014 second-reviewer decision\non a pending high-value override (Phase 2 four-eyes control).\n\n``approve=True`` applies the pending override (lifecycle \u2192 RESOLVED);\n``approve=False`` rejects it and restores the prior lifecycle. Notes\nare mandatory (SOX) in both cases.\n\nThe cosigner's identity comes from the authenticated user and must\ndiffer from the initiator \u2014 same-person cosign is a SOD violation.",
+        "properties": {
+          "approve": {
+            "title": "Approve",
+            "type": "boolean"
+          },
+          "notes": {
+            "title": "Notes",
+            "type": "string"
+          }
+        },
+        "required": [
+          "approve",
+          "notes"
+        ],
+        "title": "CosignRequest",
+        "type": "object"
+      },
+      "DispositionRequest": {
+        "additionalProperties": false,
+        "description": "PATCH /api/v1/exceptions/{id}/disposition \u2014 unified HITL primitive\n(v2 consolidation).\n\nSingle endpoint collapsing Approve + Reject + Override into a\nsub-type-discriminated resolution. The caller specifies the chosen\naction; the server derives the sub-type:\n  - chosen_action == recommended_action \u2192 APPROVE (exceptions:approve)\n  - chosen_action == \"NO_ACTION\"        \u2192 REJECT  (exceptions:approve)\n  - chosen_action != recommended_action \u2192 OVERRIDE (exceptions:override,\n                                                     four-eyes applies)\n\nNotes are mandatory (SOX). reason_tag is validated against\nAllowedOverrideReasonTag when present; it defaults to \"other\" for\nPhase 2 compatibility. Emits a single EXCEPTION_RESOLVED audit event\nwith sub_type in new_value so downstream analytics stay consistent.",
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "notes": {
+            "title": "Notes",
+            "type": "string"
+          },
+          "reason_tag": {
+            "default": "other",
+            "title": "Reason Tag",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "notes"
+        ],
+        "title": "DispositionRequest",
+        "type": "object"
+      },
+      "EscalateRequest": {
+        "additionalProperties": false,
+        "description": "POST /api/v1/exceptions/{id}/escalate \u2014 dedicated escalation routing.\n\nDecoupled from Override: escalation changes routing (lifecycle \u2192\nESCALATED) without asserting a resolution action. ``reason`` is a\nmandatory SOX justification (min length 1). ``to_role`` optionally\nnames the target role for routing metadata only \u2014 policy and state\nmachine do not branch on it.",
+        "properties": {
+          "reason": {
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "to_role": {
+            "anyOf": [
+              {
+                "enum": [
+                  "admin",
+                  "manager"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Role"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "EscalateRequest",
+        "type": "object"
+      },
+      "ExceptionDetailResponse": {
+        "description": "GET /api/v1/exceptions/{id} \u2014 full detail.",
+        "properties": {
+          "account_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Id"
+          },
+          "account_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Name"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "final_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Status"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "intent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intent"
+          },
+          "lifecycle_state": {
+            "title": "Lifecycle State",
+            "type": "string"
+          },
+          "order_id": {
+            "title": "Order Id",
+            "type": "string"
+          },
+          "reanalysis_history": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Reanalysis History",
+            "type": "array"
+          },
+          "resolution_data": {
+            "additionalProperties": true,
+            "title": "Resolution Data",
+            "type": "object"
+          },
+          "resolution_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Notes"
+          },
+          "resolved_action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved Action"
+          },
+          "resolved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved By"
+          },
+          "selected_recipe": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Recipe"
+          },
+          "shadow_verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shadow Verdict"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "order_id",
+          "event_type",
+          "lifecycle_state",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ExceptionDetailResponse",
+        "type": "object"
+      },
+      "ExceptionListResponse": {
+        "description": "GET /api/v1/exceptions \u2014 paginated list.",
+        "properties": {
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cursor"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ExceptionSummary"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "has_more": {
+            "default": false,
+            "title": "Has More",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ExceptionListResponse",
+        "type": "object"
+      },
+      "ExceptionSummary": {
+        "description": "Single exception in a list response.",
+        "properties": {
+          "account_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Id"
+          },
+          "account_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Name"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "final_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Status"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "intent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intent"
+          },
+          "lifecycle_state": {
+            "title": "Lifecycle State",
+            "type": "string"
+          },
+          "order_id": {
+            "title": "Order Id",
+            "type": "string"
+          },
+          "selected_recipe": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Recipe"
+          },
+          "shadow_verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shadow Verdict"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "order_id",
+          "event_type",
+          "lifecycle_state",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ExceptionSummary",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "description": "GET /api/v1/health",
+        "properties": {
+          "allowed_intents": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Intents",
+            "type": "array"
+          },
+          "allowed_override_reason_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Override Reason Tags",
+            "type": "array"
+          },
+          "allowed_recipes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Recipes",
+            "type": "array"
+          },
+          "allowed_resolution_actions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Resolution Actions",
+            "type": "array"
+          },
+          "explain_mode": {
+            "title": "Explain Mode",
+            "type": "boolean"
+          },
+          "kill_switch": {
+            "title": "Kill Switch",
+            "type": "boolean"
+          },
+          "lifecycle_states": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Lifecycle States",
+            "type": "array"
+          },
+          "status": {
+            "default": "ok",
+            "title": "Status",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "kill_switch",
+          "explain_mode",
+          "allowed_intents",
+          "lifecycle_states",
+          "allowed_recipes",
+          "allowed_resolution_actions",
+          "allowed_override_reason_tags"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "LineAnalysis": {
+        "description": "Analysis details for a single line item.",
+        "properties": {
+          "diagnosis": {
+            "title": "Diagnosis",
+            "type": "string"
+          },
+          "line_id": {
+            "title": "Line Id",
+            "type": "string"
+          },
+          "resolution": {
+            "title": "Resolution",
+            "type": "string"
+          },
+          "risk": {
+            "title": "Risk",
+            "type": "string"
+          },
+          "waterfall": {
+            "items": {
+              "$ref": "#/components/schemas/PricingWaterfallStep"
+            },
+            "title": "Waterfall",
+            "type": "array"
+          }
+        },
+        "required": [
+          "line_id",
+          "diagnosis",
+          "resolution",
+          "risk"
+        ],
+        "title": "LineAnalysis",
+        "type": "object"
+      },
+      "LineItem": {
+        "description": "Single line item in an exception.",
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "erp_price": {
+            "title": "Erp Price",
+            "type": "number"
+          },
+          "line_id": {
+            "title": "Line Id",
+            "type": "string"
+          },
+          "po_price": {
+            "title": "Po Price",
+            "type": "number"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "root_cause": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Cause"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          },
+          "uom": {
+            "title": "Uom",
+            "type": "string"
+          }
+        },
+        "required": [
+          "line_id",
+          "sku",
+          "description",
+          "uom",
+          "quantity",
+          "erp_price",
+          "po_price"
+        ],
+        "title": "LineItem",
+        "type": "object"
+      },
+      "LineItemsResponse": {
+        "description": "GET /api/v1/exceptions/{id}/line-items",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/LineItem"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "LineItemsResponse",
+        "type": "object"
+      },
+      "LoginRequest": {
+        "description": "POST /api/auth/login \u2014 email/password auth.",
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "password": {
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "LoginRequest",
+        "type": "object"
+      },
+      "MFAVerifyRequest": {
+        "description": "POST /api/auth/mfa/verify \u2014 TOTP verification.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "mfa_token": {
+            "title": "Mfa Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mfa_token",
+          "code"
+        ],
+        "title": "MFAVerifyRequest",
+        "type": "object"
+      },
+      "OverrideRequest": {
+        "additionalProperties": false,
+        "description": "PATCH /api/v1/exceptions/{id}/override \u2014 human override of agent recommendation.\n\nOption A (Phase 1 unified action model): available on PENDING_REVIEW,\nESCALATED, RESOLVED (GREEN), and BLOCKED (RED) exceptions. Analysts\ncannot Override \u2014 this is a manager+ action. Action must be a valid\nAllowedResolutionAction. Notes are mandatory (SOX).\n\nThe auditor identity is derived server-side from the authenticated\nuser (user.sub) \u2014 clients must not pass a ``resolved_by`` field\n(identity-spoofing risk). Any such extra field is rejected (422).",
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "notes": {
+            "title": "Notes",
+            "type": "string"
+          },
+          "reason_tag": {
+            "default": "other",
+            "title": "Reason Tag",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "notes"
+        ],
+        "title": "OverrideRequest",
+        "type": "object"
+      },
+      "PolicyOverrideResponse": {
+        "description": "Response for policy update.",
+        "properties": {
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "effective_from": {
+            "title": "Effective From",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "policy_key": {
+            "title": "Policy Key",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "policy_key",
+          "value",
+          "effective_from",
+          "created_by"
+        ],
+        "title": "PolicyOverrideResponse",
+        "type": "object"
+      },
+      "PolicyUpdateRequest": {
+        "description": "PUT /api/v1/policies/{tenant_id} \u2014 update policy overrides.",
+        "properties": {
+          "change_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Reason"
+          },
+          "policy_key": {
+            "title": "Policy Key",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "policy_key",
+          "value"
+        ],
+        "title": "PolicyUpdateRequest",
+        "type": "object"
+      },
+      "PricingWaterfallStep": {
+        "description": "A single step in the pricing waterfall analysis.",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "record": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record"
+          },
+          "running": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "type",
+          "label"
+        ],
+        "title": "PricingWaterfallStep",
+        "type": "object"
+      },
+      "ReanalyzeRequest": {
+        "description": "POST /api/v1/exceptions/{id}/reanalyze \u2014 human-triggered graph replay.\n\nAllowed only on YELLOW/RED verdicts or FAILED lifecycle. The request\nre-runs the full graph (including a fresh Compliance Shadow) and\nappends the prior and new outcome to reanalysis_history (append-only).\n\nA mandatory free-text `reason` is required for SOX audit traceability.\nRate-limited by REANALYSIS_MAX_ATTEMPTS (contracts/policy.py) to prevent\noutcome-shopping.",
+        "properties": {
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "ReanalyzeRequest",
+        "type": "object"
+      },
+      "RefreshRequest": {
+        "description": "POST /api/auth/refresh \u2014 token refresh.",
+        "properties": {
+          "refresh_token": {
+            "title": "Refresh Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "refresh_token"
+        ],
+        "title": "RefreshRequest",
+        "type": "object"
+      },
+      "RejectRequest": {
+        "description": "POST /api/v1/exceptions/{id}/reject \u2014 reject paused exception.",
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "title": "RejectRequest",
+        "type": "object"
+      },
+      "ResolveRequest": {
+        "additionalProperties": false,
+        "description": "POST /api/v1/exceptions/resolve \u2014 same fields as OrderEvent.",
+        "properties": {
+          "credit_limit": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credit Limit"
+          },
+          "current_exposure": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Exposure"
+          },
+          "event_ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Ts"
+          },
+          "event_type": {
+            "default": "EDI_850_PRICE_MISMATCH",
+            "title": "Event Type",
+            "type": "string"
+          },
+          "line_count": {
+            "default": 1,
+            "title": "Line Count",
+            "type": "integer"
+          },
+          "line_item": {
+            "default": 1,
+            "title": "Line Item",
+            "type": "integer"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "order_id": {
+            "title": "Order Id",
+            "type": "string"
+          },
+          "po_price": {
+            "title": "Po Price",
+            "type": "number"
+          },
+          "requester_role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requester Role"
+          },
+          "retailer_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retailer Id"
+          },
+          "sap_base_price": {
+            "title": "Sap Base Price",
+            "type": "number"
+          },
+          "sku": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sku"
+          }
+        },
+        "required": [
+          "order_id",
+          "po_price",
+          "sap_base_price"
+        ],
+        "title": "ResolveRequest",
+        "type": "object"
+      },
+      "ResolveResponse": {
+        "description": "Response for synchronous resolve and explain endpoints.",
+        "properties": {
+          "effect_results": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Effect Results",
+            "type": "array"
+          },
+          "exception_id": {
+            "title": "Exception Id",
+            "type": "string"
+          },
+          "execution_log": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Log"
+          },
+          "explanation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explanation"
+          },
+          "final_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Status"
+          },
+          "intent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intent"
+          },
+          "selected_recipe": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Recipe"
+          },
+          "shadow_verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shadow Verdict"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id"
+          }
+        },
+        "required": [
+          "exception_id"
+        ],
+        "title": "ResolveResponse",
+        "type": "object"
+      },
+      "SAPActionStep": {
+        "description": "A recommended SAP action step.\n\nHuman-facing only \u2014 not machine-consumed. Rendered verbatim in Layer 2\nfor operator reference. Constrained generation is NOT required here\n(CLAUDE.md \u00a73).",
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field"
+          },
+          "table": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table"
+          },
+          "transaction": {
+            "title": "Transaction",
+            "type": "string"
+          }
+        },
+        "required": [
+          "transaction",
+          "description"
+        ],
+        "title": "SAPActionStep",
+        "type": "object"
+      },
+      "StatsResponse": {
+        "description": "GET /api/v1/exceptions/stats \u2014 dashboard metrics.",
+        "properties": {
+          "auto_resolved": {
+            "default": 0,
+            "title": "Auto Resolved",
+            "type": "integer"
+          },
+          "avg_resolution_time_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Resolution Time Seconds"
+          },
+          "blocked": {
+            "default": 0,
+            "title": "Blocked",
+            "type": "integer"
+          },
+          "by_intent": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Intent",
+            "type": "object"
+          },
+          "by_lifecycle_state": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Lifecycle State",
+            "type": "object"
+          },
+          "by_shadow_verdict": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Shadow Verdict",
+            "type": "object"
+          },
+          "failed": {
+            "default": 0,
+            "title": "Failed",
+            "type": "integer"
+          },
+          "manual_review": {
+            "default": 0,
+            "title": "Manual Review",
+            "type": "integer"
+          },
+          "open_exceptions": {
+            "default": 0,
+            "title": "Open Exceptions",
+            "type": "integer"
+          },
+          "total_exceptions": {
+            "default": 0,
+            "title": "Total Exceptions",
+            "type": "integer"
+          }
+        },
+        "title": "StatsResponse",
+        "type": "object"
+      },
+      "TraceResponse": {
+        "description": "GET /api/v1/exceptions/{id}/trace \u2014 full TraceRecord JSON.",
+        "properties": {
+          "backend_fallback": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backend Fallback"
+          },
+          "constrained_output_schemas": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Constrained Output Schemas",
+            "type": "object"
+          },
+          "customer_email_draft": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Email Draft"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "explanation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explanation"
+          },
+          "final_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Status"
+          },
+          "gateway_calls": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Gateway Calls",
+            "type": "array"
+          },
+          "intent_selected": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intent Selected"
+          },
+          "is_fallback_generated": {
+            "default": false,
+            "title": "Is Fallback Generated",
+            "type": "boolean"
+          },
+          "narrative": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Narrative"
+          },
+          "recipe_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipe Name"
+          },
+          "resolution_steps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Resolution Steps",
+            "type": "array"
+          },
+          "sap_actions": {
+            "items": {
+              "$ref": "#/components/schemas/SAPActionStep"
+            },
+            "title": "Sap Actions",
+            "type": "array"
+          },
+          "shadow_policy_hits": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Shadow Policy Hits",
+            "type": "array"
+          },
+          "shadow_verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shadow Verdict"
+          },
+          "skill_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skill Name"
+          },
+          "trace_id": {
+            "title": "Trace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trace_id",
+          "event_id"
+        ],
+        "title": "TraceResponse",
+        "type": "object"
+      },
+      "UserProfile": {
+        "description": "GET /api/auth/me \u2014 current user profile.\n\nvisible_tabs and permissions are computed from roles \u2014 never stored per user.\nassigned_accounts drives server-side customer scope filtering.",
+        "properties": {
+          "assigned_accounts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Assigned Accounts",
+            "type": "array"
+          },
+          "avatar_initials": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Initials"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "org": {
+            "title": "Org",
+            "type": "string"
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Permissions",
+            "type": "array"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "sub": {
+            "title": "Sub",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "visible_tabs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Visible Tabs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sub",
+          "email",
+          "name",
+          "roles",
+          "org",
+          "permissions"
+        ],
+        "title": "UserProfile",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "WorkflowRequest": {
+        "description": "POST /api/v1/workflows \u2014 multi-step workflow execution.",
+        "properties": {
+          "base_event": {
+            "$ref": "#/components/schemas/ResolveRequest"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowStepRequest"
+            },
+            "title": "Steps",
+            "type": "array"
+          },
+          "workflow_id": {
+            "title": "Workflow Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workflow_id",
+          "name",
+          "steps",
+          "base_event"
+        ],
+        "title": "WorkflowRequest",
+        "type": "object"
+      },
+      "WorkflowStepRequest": {
+        "properties": {
+          "compensation_recipe": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compensation Recipe"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "input_mapping": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Input Mapping",
+            "type": "object"
+          },
+          "intent": {
+            "title": "Intent",
+            "type": "string"
+          },
+          "step_id": {
+            "title": "Step Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "step_id",
+          "intent",
+          "description"
+        ],
+        "title": "WorkflowStepRequest",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Deterministic, compliance-aware exception management API.",
+    "title": "ASOE \u2014 Agentic System for Order-to-Cash Exceptions",
+    "version": "0.3.2"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/auth/login": {
+      "post": {
+        "operationId": "login_api_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthTokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Login",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "operationId": "me_api_auth_me_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfile"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Me",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/mfa/verify": {
+      "post": {
+        "operationId": "mfa_verify_api_auth_mfa_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MFAVerifyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthTokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mfa Verify",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/refresh": {
+      "post": {
+        "operationId": "refresh_api_auth_refresh_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthTokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/sso/callback": {
+      "get": {
+        "operationId": "sso_callback_api_auth_sso_callback_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Sso Callback Api Auth Sso Callback Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Sso Callback",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/sso/init": {
+      "post": {
+        "operationId": "sso_init_api_auth_sso_init_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Sso Init Api Auth Sso Init Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Sso Init",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/accounts": {
+      "get": {
+        "description": "Return all accounts for the tenant. Scoped users see only their assigned accounts.",
+        "operationId": "get_accounts_api_v1_accounts_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Accounts",
+        "tags": [
+          "accounts"
+        ]
+      }
+    },
+    "/api/v1/exceptions": {
+      "get": {
+        "operationId": "list_exceptions_api_v1_exceptions_get",
+        "parameters": [
+          {
+            "description": "Filter by lifecycle state",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by lifecycle state",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Filter by intent",
+            "in": "query",
+            "name": "intent",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by intent",
+              "title": "Intent"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Pagination cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Pagination cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExceptionListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Exceptions",
+        "tags": [
+          "exceptions"
+        ]
+      }
+    },
+    "/api/v1/exceptions/resolve": {
+      "post": {
+        "operationId": "resolve_api_v1_exceptions_resolve_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolveResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve",
+        "tags": [
+          "exceptions"
+        ]
+      }
+    },
+    "/api/v1/exceptions/resolve/async": {
+      "post": {
+        "operationId": "resolve_async_api_v1_exceptions_resolve_async_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AsyncResolveResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Async",
+        "tags": [
+          "exceptions"
+        ]
+      }
+    },
+    "/api/v1/exceptions/resolve/explain": {
+      "post": {
+        "operationId": "resolve_explain_api_v1_exceptions_resolve_explain_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolveResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Explain",
+        "tags": [
+          "exceptions"
+        ]
+      }
+    },
+    "/api/v1/exceptions/stats": {
+      "get": {
+        "operationId": "stats_api_v1_exceptions_stats_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stats",
+        "tags": [
+          "exceptions"
+        ]
+      }
+    },
+    "/api/v1/exceptions/{exception_id}": {
+      "get": {
+        "operationId": "get_exception_api_v1_exceptions__exception_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "exception_id",
+            "required": true,
+            "schema": {
+              "title": "Exception Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExceptionDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Exception",
+        "tags": [
+          "exceptions"
+        ]
+      }
+    },
+    "/api/v1/exceptions/{exception_id}/admin-release": {
+      "post": {
+        "description": "RED-tier HITL: admin releases a RED-blocked exception.\n\nTransitions BLOCKED \u2192 PENDING_ADMIN_REVIEW.\nThe admin must then approve, override, or reject the exception.\nThe original RED verdict is preserved in the TraceRecord.\nrisk_acknowledgment must be True (explicit risk acceptance).",
+        "operationId": "admin_release_exception_api_v1_exceptions__exception_id__admin_release_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "exception_id",
+            "required": true,
+            "schema": {
+              "title": "Exception Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminReleaseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExceptionDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Release Exception",
+        "tags": [
+          "exceptions"
+        ]
+      }
+    },
+    "/api/v1/exceptions/{exception_id}/analysis": {
+      "get": {
+        "operationId": "get_analysis_api_v1_exceptions__exception_id__analysis_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "exception_id",
+            "required": true,
+            "schema": {
+              "title": "Exception Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Analysis",
+        "tags": [
+          "exceptions"
+        ]
+      }
+    },
+    "/api/v1/exceptions/{exception_id}/approve": {
+      "post": {
+        "operationId": "approve_exception_api_v1_exceptions__exception_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "exception_id",
+            "required": true,
+            "schema": {
+              "title": "Exception Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExceptionDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Exception",
+        "tags": [
+          "exceptions"
+        ]
+      }
+    },
+    "/api/v1/exceptions/{exception_id}/challenge": {
+      "post": {
+        "description": "GREEN-tier HITL: challenge a resolved exception for review.\n\nTransitions RESOLVED \u2192 ESCALATED for investigation.\nDoes NOT undo executed actions (gateway effects already applied).",
+        "operationId": "challenge_exception_api_v1_exceptions__exception_id__challenge_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "exception_id",
+            "required": true,
+            "schema": {
+              "title": "Exception Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChallengeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExceptionDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Challenge Exception",
+        "tags": [
+          "exceptions"
+        ]
+      }
+    },
+    "/api/v1/exceptions/{exception_id}/disposition": {
+      "patch": {
+        "description": "Unified HITL disposition: single endpoint for Approve/Reject/Override.\n\nSee module comment above for sub-type rules and permission gating.\nEmits EXCEPTION_RESOLVED with sub_type=APPROVE|REJECT|OVERRIDE so\ncompliance tooling can answer \"how often do managers deviate from\nthe agent?\" with one SQL query across a consistent event stream.",
+        "operationId": "disposition_exception_api_v1_exceptions__exception_id__disposition_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "exception_id",
+            "required": true,
+            "schema": {
+              "title": "Exception Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DispositionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExceptionDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Disposition Exception",
+        "tags": [
+          "exceptions"
+        ]
+      }
+    },
+    "/api/v1/exceptions/{exception_id}/escalate": {
+      "post": {
+        "description": "Escalate an exception into ESCALATED lifecycle (routing only).\n\nDecoupled from Override: this endpoint changes routing without\nasserting a resolution action. Eligible lifecycles are\nESCALATE_ELIGIBLE_STATES (PENDING_REVIEW, FAILED, BLOCKED). Already\nESCALATED (no-op) and RESOLVED (use Challenge) return 409.\n\nSupports the optional Idempotency-Key header (same semantics as\n/override).",
+        "operationId": "escalate_exception_api_v1_exceptions__exception_id__escalate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "exception_id",
+            "required": true,
+            "schema": {
+              "title": "Exception Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EscalateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExceptionDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Escalate Exception",
+        "tags": [
+          "exceptions"
+        ]
+      }
+    },
+    "/api/v1/exceptions/{exception_id}/line-items": {
+      "get": {
+        "operationId": "get_line_items_api_v1_exceptions__exception_id__line_items_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "exception_id",
+            "required": true,
+            "schema": {
+              "title": "Exception Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LineItemsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Line Items",
+        "tags": [
+          "exceptions"
+        ]
+      }
+    },
+    "/api/v1/exceptions/{exception_id}/override": {
+      "patch": {
+        "description": "Override the agent's recommended action (Option A, Phase 1).\n\nPrivileged users (manager+) may Override across GREEN (RESOLVED),\nYELLOW (PENDING_REVIEW/ESCALATED), and RED (BLOCKED) verdicts.\nAnalysts cannot Override (they use Approve/Reject on YELLOW).\n\nThe shadow_verdict must be one of GREEN/YELLOW/RED \u2014 FAILED-lifecycle\nexceptions (where no agent decision exists to override) are rejected\nwith 409 INVALID_VERDICT.\n\nThe auditor identity is always ``user.sub`` (JWT); clients must not\npass ``resolved_by``. Notes are mandatory (SOX audit requirement).\n\nSupports an optional ``Idempotency-Key`` header. Repeat calls within\n24h return the cached response; conflicting bodies with the same key\nreturn 409 IDEMPOTENCY_CONFLICT.",
+        "operationId": "override_exception_api_v1_exceptions__exception_id__override_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "exception_id",
+            "required": true,
+            "schema": {
+              "title": "Exception Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OverrideRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExceptionDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Override Exception",
+        "tags": [
+          "exceptions"
+        ]
+      }
+    },
+    "/api/v1/exceptions/{exception_id}/override/cosign": {
+      "post": {
+        "description": "Second-reviewer decision on a pending high-value override.\n\nGating:\n  - Lifecycle must be PENDING_COSIGN.\n  - Caller must not be the pending_override.initiator (SoD).\n  - Idempotency-Key supported identically to /override.\n\nOutcome:\n  - approve=True  \u2192 apply the pending override (lifecycle \u2192 RESOLVED,\n                    resolved_by = initiator, cosigned_by = caller,\n                    EXCEPTION_OVERRIDE_COSIGNED audit event).\n  - approve=False \u2192 restore the prior lifecycle_state (stashed on the\n                    pending_override), clear pending_override,\n                    EXCEPTION_OVERRIDE_REJECTED audit event.",
+        "operationId": "cosign_override_api_v1_exceptions__exception_id__override_cosign_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "exception_id",
+            "required": true,
+            "schema": {
+              "title": "Exception Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CosignRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExceptionDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cosign Override",
+        "tags": [
+          "exceptions"
+        ]
+      }
+    },
+    "/api/v1/exceptions/{exception_id}/reanalyze": {
+      "post": {
+        "description": "Replay an exception through the full graph with a fresh Compliance\nShadow decision.\n\nGovernance (mirrors CLAUDE.md \u00a74):\n- Re-run flows through the same run_graph() pipeline \u2014 Compliance\n  Shadow is NOT bypassed.\n- Eligible only for non-terminal outcomes where human review is already\n  warranted (YELLOW/RED verdict, or FAILED/BLOCKED/ESCALATED/PENDING*).\n- Rate-limited per-exception (REANALYSIS_MAX_ATTEMPTS in\n  contracts/policy.py) to prevent outcome-shopping.\n- Prior and new outcomes are preserved immutably in reanalysis_history\n  and in the policy audit log (SOX).",
+        "operationId": "reanalyze_exception_api_v1_exceptions__exception_id__reanalyze_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "exception_id",
+            "required": true,
+            "schema": {
+              "title": "Exception Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReanalyzeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExceptionDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reanalyze Exception",
+        "tags": [
+          "exceptions"
+        ]
+      }
+    },
+    "/api/v1/exceptions/{exception_id}/reject": {
+      "post": {
+        "operationId": "reject_exception_api_v1_exceptions__exception_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "exception_id",
+            "required": true,
+            "schema": {
+              "title": "Exception Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExceptionDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reject Exception",
+        "tags": [
+          "exceptions"
+        ]
+      }
+    },
+    "/api/v1/exceptions/{exception_id}/trace": {
+      "get": {
+        "operationId": "get_trace_api_v1_exceptions__exception_id__trace_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "exception_id",
+            "required": true,
+            "schema": {
+              "title": "Exception Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Trace",
+        "tags": [
+          "exceptions"
+        ]
+      }
+    },
+    "/api/v1/health": {
+      "get": {
+        "operationId": "health_api_v1_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/api/v1/policies/{tenant_id}": {
+      "put": {
+        "operationId": "update_policy_api_v1_policies__tenant_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyOverrideResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Policy",
+        "tags": [
+          "policies"
+        ]
+      }
+    },
+    "/api/v1/workflows": {
+      "post": {
+        "operationId": "run_workflow_api_v1_workflows_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkflowRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Run Workflow Api V1 Workflows Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Workflow",
+        "tags": [
+          "workflows"
+        ]
+      }
+    }
+  }
+}

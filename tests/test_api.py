@@ -95,7 +95,8 @@ class TestHealth:
         assert len(data["allowed_recipes"]) >= 3
         assert "INGESTED" in data["lifecycle_states"]
         assert "CLOSED" in data["lifecycle_states"]
-        assert len(data["lifecycle_states"]) == 12
+        assert "PENDING_COSIGN" in data["lifecycle_states"]
+        assert len(data["lifecycle_states"]) == 13
         # Resolution actions must be served dynamically so the UI Override
         # chooser never hardcodes codes (Guardrail #2).
         assert isinstance(data["allowed_resolution_actions"], list)

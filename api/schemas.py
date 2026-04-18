@@ -40,6 +40,56 @@ class OverrideRequest(BaseModel):
 
     action: str  # validated against AllowedResolutionAction in the endpoint
     notes: str  # mandatory for SOX audit trail
+    # Controlled-vocabulary categorization of why the override was made.
+    # Validated server-side against AllowedOverrideReasonTag. Stored in the
+    # audit log new_value so ML pipelines can cluster overrides without
+    # NLP on the free-text notes. Defaults to "other" in Phase 2 to keep
+    # legacy callers working; Phase 3 will make this a required field
+    # once all clients emit a real tag.
+    reason_tag: str = "other"
+
+
+class DispositionRequest(BaseModel):
+    """PATCH /api/v1/exceptions/{id}/disposition — unified HITL primitive
+    (v2 consolidation).
+
+    Single endpoint collapsing Approve + Reject + Override into a
+    sub-type-discriminated resolution. The caller specifies the chosen
+    action; the server derives the sub-type:
+      - chosen_action == recommended_action → APPROVE (exceptions:approve)
+      - chosen_action == "NO_ACTION"        → REJECT  (exceptions:approve)
+      - chosen_action != recommended_action → OVERRIDE (exceptions:override,
+                                                         four-eyes applies)
+
+    Notes are mandatory (SOX). reason_tag is validated against
+    AllowedOverrideReasonTag when present; it defaults to "other" for
+    Phase 2 compatibility. Emits a single EXCEPTION_RESOLVED audit event
+    with sub_type in new_value so downstream analytics stay consistent.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: str  # validated against AllowedResolutionAction
+    notes: str
+    reason_tag: str = "other"
+
+
+class CosignRequest(BaseModel):
+    """POST /api/v1/exceptions/{id}/override/cosign — second-reviewer decision
+    on a pending high-value override (Phase 2 four-eyes control).
+
+    ``approve=True`` applies the pending override (lifecycle → RESOLVED);
+    ``approve=False`` rejects it and restores the prior lifecycle. Notes
+    are mandatory (SOX) in both cases.
+
+    The cosigner's identity comes from the authenticated user and must
+    differ from the initiator — same-person cosign is a SOD violation.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    approve: bool
+    notes: str
 
 
 class EscalateRequest(BaseModel):
@@ -171,6 +221,7 @@ class HealthResponse(BaseModel):
     lifecycle_states: List[str]
     allowed_recipes: List[str]
     allowed_resolution_actions: List[str]
+    allowed_override_reason_tags: List[str]
 
 
 class ResolveResponse(BaseModel):
