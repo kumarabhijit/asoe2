@@ -11,6 +11,7 @@ from fastapi import APIRouter
 
 from api.schemas import HealthResponse
 from constraints.specs import (
+    INTENT_REASON_TAGS,
     AllowedIntent,
     AllowedOverrideReasonTag,
     AllowedRecipeName,
@@ -27,6 +28,7 @@ _ALLOWED_INTENTS = list(AllowedIntent.__args__)  # type: ignore[attr-defined]
 _ALLOWED_RECIPES = list(AllowedRecipeName.__args__)  # type: ignore[attr-defined]
 _ALLOWED_RESOLUTION_ACTIONS = list(AllowedResolutionAction.__args__)  # type: ignore[attr-defined]
 _ALLOWED_OVERRIDE_REASON_TAGS = list(AllowedOverrideReasonTag.__args__)  # type: ignore[attr-defined]
+_REASON_TAGS_BY_INTENT = {k: list(v) for k, v in INTENT_REASON_TAGS.items()}
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -41,4 +43,5 @@ async def health() -> HealthResponse:
         allowed_recipes=_ALLOWED_RECIPES,
         allowed_resolution_actions=_ALLOWED_RESOLUTION_ACTIONS,
         allowed_override_reason_tags=_ALLOWED_OVERRIDE_REASON_TAGS,
+        allowed_override_reason_tags_by_intent=_REASON_TAGS_BY_INTENT,
     )

@@ -40,6 +40,39 @@ AllowedOverrideReasonTag = Literal[
     "other",
 ]
 
+# Per-intent override-reason vocabulary (Phase 3 follow-up — Option A).
+#
+# Framework only: every intent currently points at the full global
+# AllowedOverrideReasonTag set, so clustering by (intent, reason_tag)
+# produces the same signal the global vocab gives today. The value-add
+# of per-intent tags arrives in a follow-up when product / compliance
+# supplies curated categories — e.g. PRICE_MISMATCH might narrow to
+# {customer_concession, contract_stale, promo_window, data_error, other}
+# and DUPLICATE_PO to
+# {confirmed_separate_orders, customer_intent, data_error, other}.
+# Swapping those in is a DATA change — no schema, API, or UI work.
+#
+# ``other`` is mandatory in every set so operators always have a fallback
+# when the real reason doesn't fit a listed category (prevents workflow
+# dead-ends while the vocabulary is being curated).
+#
+# Falls-back behavior: the /disposition endpoint uses the per-intent set
+# when the record carries a known intent, and the global set otherwise
+# (FAILED lifecycle records and any unlisted intent). The UI reads the
+# map from /api/v1/health.allowed_override_reason_tags_by_intent and
+# narrows its chooser accordingly.
+_GLOBAL_REASON_TAGS: tuple[str, ...] = (
+    "customer_concession",
+    "contract_stale",
+    "data_error",
+    "policy_exception",
+    "agent_misclassification",
+    "other",
+)
+INTENT_REASON_TAGS: dict[str, tuple[str, ...]] = {
+    intent: _GLOBAL_REASON_TAGS for intent in AllowedIntent.__args__  # type: ignore[attr-defined]
+}
+
 
 class IntentDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")

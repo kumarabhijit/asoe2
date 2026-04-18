@@ -936,3 +936,63 @@ class TestDispositionUnified:
         )
         assert r.status_code == 422
         assert r.json()["error"]["code"] == "NOTES_REQUIRED"
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 Option A — per-intent reason_tag framework
+# ---------------------------------------------------------------------------
+
+
+class TestPerIntentReasonTag:
+    """The framework is seeded with the global vocabulary today — every
+    intent points at the same six tags, so no operator-visible change.
+    This test locks in the MECHANISM: when a curated per-intent set is
+    introduced, an out-of-set tag is rejected with a clear error that
+    names the intent.
+    """
+
+    def test_per_intent_narrow_set_rejects_out_of_set_tag(
+        self, client, analyst_token, manager_token, monkeypatch
+    ):
+        """Simulate curation: temporarily narrow CONTRACTUAL_CORRECTION
+        to {customer_concession, other} and prove the endpoint enforces it."""
+        import api.routes.exceptions as routes_mod
+        narrowed = {"CONTRACTUAL_CORRECTION": ("customer_concession", "other")}
+        # Patch the import-bound reference the handler actually reads.
+        monkeypatch.setattr(routes_mod, "INTENT_REASON_TAGS", narrowed)
+
+        exc_id = _create_pending_review(client, analyst_token)
+        # data_error is in the global set but NOT in the narrowed per-intent set.
+        r = client.patch(
+            f"/api/v1/exceptions/{exc_id}/disposition",
+            json={
+                "action": "ALLOW_BOTH",
+                "notes": "not allowed under narrow vocab",
+                "reason_tag": "data_error",
+            },
+            headers=_auth(manager_token),
+        )
+        assert r.status_code == 422
+        body = r.json()["error"]
+        assert body["code"] == "INVALID_REASON_TAG"
+        assert "CONTRACTUAL_CORRECTION" in body["message"]
+        assert "customer_concession" in body["message"]
+
+    def test_per_intent_narrow_set_accepts_listed_tag(
+        self, client, analyst_token, manager_token, monkeypatch
+    ):
+        import api.routes.exceptions as routes_mod
+        narrowed = {"CONTRACTUAL_CORRECTION": ("customer_concession", "other")}
+        monkeypatch.setattr(routes_mod, "INTENT_REASON_TAGS", narrowed)
+
+        exc_id = _create_pending_review(client, analyst_token)
+        r = client.patch(
+            f"/api/v1/exceptions/{exc_id}/disposition",
+            json={
+                "action": "ALLOW_BOTH",
+                "notes": "allowed under narrow vocab",
+                "reason_tag": "customer_concession",
+            },
+            headers=_auth(manager_token),
+        )
+        assert r.status_code == 200, r.json()

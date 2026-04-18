@@ -623,6 +623,16 @@
             "title": "Allowed Override Reason Tags",
             "type": "array"
           },
+          "allowed_override_reason_tags_by_intent": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Allowed Override Reason Tags By Intent",
+            "type": "object"
+          },
           "allowed_recipes": {
             "items": {
               "type": "string"
@@ -670,7 +680,8 @@
           "lifecycle_states",
           "allowed_recipes",
           "allowed_resolution_actions",
-          "allowed_override_reason_tags"
+          "allowed_override_reason_tags",
+          "allowed_override_reason_tags_by_intent"
         ],
         "title": "HealthResponse",
         "type": "object"

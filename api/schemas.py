@@ -184,6 +184,12 @@ class HealthResponse(BaseModel):
     allowed_recipes: List[str]
     allowed_resolution_actions: List[str]
     allowed_override_reason_tags: List[str]
+    # Per-intent override-reason vocabulary. Same keys as allowed_intents;
+    # values are the subset of allowed_override_reason_tags that apply to
+    # each intent. Seeded with the global set for every intent today —
+    # product/compliance will curate these in a follow-up. Consumed by
+    # the UI Override chooser to narrow its options by record.intent.
+    allowed_override_reason_tags_by_intent: Dict[str, List[str]]
 
 
 class ResolveResponse(BaseModel):

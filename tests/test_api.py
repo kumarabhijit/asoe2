@@ -105,6 +105,16 @@ class TestHealth:
         assert isinstance(data["allowed_resolution_actions"], list)
         assert "ALLOW_BOTH" in data["allowed_resolution_actions"]
         assert "ESCALATE" in data["allowed_resolution_actions"]
+        # Per-intent reason-tag map (Phase 3 Option A framework). Every
+        # intent in allowed_intents must also appear as a key in the map.
+        # Today all values equal the global set; curation happens later.
+        per_intent = data["allowed_override_reason_tags_by_intent"]
+        assert isinstance(per_intent, dict)
+        for intent in data["allowed_intents"]:
+            assert intent in per_intent, f"missing intent in reason-tag map: {intent}"
+            assert "other" in per_intent[intent], (
+                f"'other' must be a fallback tag for every intent; missing for {intent}"
+            )
 
 
 # ---------------------------------------------------------------------------

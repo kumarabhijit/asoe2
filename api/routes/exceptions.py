@@ -74,7 +74,11 @@ from contracts.policy import (
 from api.events import WSEvent
 from api.pubsub import event_publisher
 from api.store import exception_store
-from constraints.specs import AllowedOverrideReasonTag, AllowedResolutionAction
+from constraints.specs import (
+    INTENT_REASON_TAGS,
+    AllowedOverrideReasonTag,
+    AllowedResolutionAction,
+)
 from contracts.models import (
     ADMIN_RELEASE_SOURCE_STATES,
     CHALLENGE_SOURCE_STATES,
@@ -766,13 +770,24 @@ async def disposition_exception(
             ),
             status_code=422,
         )
-    allowed_tags = list(AllowedOverrideReasonTag.__args__)  # type: ignore[attr-defined]
+    # Per-intent reason-tag validation (Phase 3 Option A framework).
+    # When the record carries a known intent, narrow the allowed set to
+    # INTENT_REASON_TAGS[intent]; otherwise fall back to the global
+    # AllowedOverrideReasonTag set (FAILED-lifecycle records and any
+    # intent not yet in the map). Today all per-intent sets equal the
+    # global set, so this is a no-op in behavior — the framework is
+    # ready for a data-only swap when product/compliance curates real
+    # per-intent categories.
+    global_tags = list(AllowedOverrideReasonTag.__args__)  # type: ignore[attr-defined]
+    per_intent = INTENT_REASON_TAGS.get(record.intent) if record.intent else None
+    allowed_tags = list(per_intent) if per_intent else global_tags
     if req.reason_tag not in allowed_tags:
         raise ASOEError(
             code="INVALID_REASON_TAG",
             message=(
-                f"reason_tag '{req.reason_tag}' is not allowed. "
-                f"Valid: {allowed_tags}"
+                f"reason_tag '{req.reason_tag}' is not allowed"
+                + (f" for intent '{record.intent}'" if per_intent else "")
+                + f". Valid: {allowed_tags}"
             ),
             status_code=422,
         )
