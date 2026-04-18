@@ -530,14 +530,14 @@ class TestDuplicatePOHitlActions:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "Buyer confirmed both POs are intentional",
-                "resolved_by": "manager@example.com",
             },
             headers=_auth(manager_token),
         )
         assert r.status_code == 200
         data = r.json()
         assert data["resolved_action"] == "ALLOW_BOTH"
-        assert data["resolved_by"] == "manager@example.com"
+        # Auditor identity derives from JWT sub (create_test_token default)
+        assert data["resolved_by"] == "test-user"
         assert data["resolution_notes"] == "Buyer confirmed both POs are intentional"
         assert data["lifecycle_state"] == "RESOLVED"
 
@@ -549,7 +549,6 @@ class TestDuplicatePOHitlActions:
             json={
                 "action": "SUPERSEDE",
                 "notes": "Original PO superseded",
-                "resolved_by": "manager@example.com",
             },
             headers=_auth(manager_token),
         )
@@ -561,7 +560,7 @@ class TestDuplicatePOHitlActions:
         )
         data = r.json()
         assert data["resolved_action"] == "SUPERSEDE"
-        assert data["resolved_by"] == "manager@example.com"
+        assert data["resolved_by"] == "test-user"
         assert data["resolution_notes"] == "Original PO superseded"
 
 

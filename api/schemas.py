@@ -5,9 +5,9 @@ Maps to architecture_v3.md Section 8.2 endpoint contracts.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from contracts.models import OrderEvent
 
@@ -26,13 +26,36 @@ class ResolveRequest(OrderEvent):
 class OverrideRequest(BaseModel):
     """PATCH /api/v1/exceptions/{id}/override — human override of agent recommendation.
 
-    Available on PENDING_REVIEW and ESCALATED exceptions (YELLOW verdict HITL).
-    Action must be a valid AllowedResolutionAction. Notes are mandatory (SOX).
+    Option A (Phase 1 unified action model): available on PENDING_REVIEW,
+    ESCALATED, RESOLVED (GREEN), and BLOCKED (RED) exceptions. Analysts
+    cannot Override — this is a manager+ action. Action must be a valid
+    AllowedResolutionAction. Notes are mandatory (SOX).
+
+    The auditor identity is derived server-side from the authenticated
+    user (user.sub) — clients must not pass a ``resolved_by`` field
+    (identity-spoofing risk). Any such extra field is rejected (422).
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     action: str  # validated against AllowedResolutionAction in the endpoint
     notes: str  # mandatory for SOX audit trail
-    resolved_by: str
+
+
+class EscalateRequest(BaseModel):
+    """POST /api/v1/exceptions/{id}/escalate — dedicated escalation routing.
+
+    Decoupled from Override: escalation changes routing (lifecycle →
+    ESCALATED) without asserting a resolution action. ``reason`` is a
+    mandatory SOX justification (min length 1). ``to_role`` optionally
+    names the target role for routing metadata only — policy and state
+    machine do not branch on it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(..., min_length=1)
+    to_role: Optional[Literal["admin", "manager"]] = None
 
 
 class ChallengeRequest(BaseModel):

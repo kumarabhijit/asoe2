@@ -159,7 +159,7 @@ class TestRBAC:
         # Analyst cannot override (RBAC: manager+ only)
         r = client.patch(
             f"/api/v1/exceptions/{exc_id}/override",
-            json={"action": "ALLOW_BOTH", "notes": "test", "resolved_by": "human"},
+            json={"action": "ALLOW_BOTH", "notes": "test"},
             headers=_auth(analyst_token),
         )
         assert r.status_code == 403
@@ -175,7 +175,7 @@ class TestRBAC:
 
         r = client.patch(
             f"/api/v1/exceptions/{exc_id}/override",
-            json={"action": "ALLOW_BOTH", "notes": "Verified with buyer", "resolved_by": "manager-user"},
+            json={"action": "ALLOW_BOTH", "notes": "Verified with buyer"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200
@@ -410,13 +410,13 @@ class TestOverride:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "Verified with buyer",
-                "resolved_by": "manager@example.com",
             },
             headers=_auth(manager_token),
         )
         assert r.status_code == 200
         data = r.json()
-        assert data["resolved_by"] == "manager@example.com"
+        # resolved_by is derived from the JWT sub (create_test_token default)
+        assert data["resolved_by"] == "test-user"
         assert data["resolved_action"] == "ALLOW_BOTH"
         assert data["lifecycle_state"] == "RESOLVED"
 

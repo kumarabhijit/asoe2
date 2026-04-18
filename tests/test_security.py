@@ -351,7 +351,7 @@ class TestPartnerScoping:
         token = create_test_token(roles=["partner"], org="t1")
         r = client.patch(
             "/api/v1/exceptions/fake-id/override",
-            json={"action": "X", "resolved_by": "Y"},
+            json={"action": "X", "notes": "Y"},
             headers=_auth(token),
         )
         assert r.status_code == 403

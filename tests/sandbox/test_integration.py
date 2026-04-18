@@ -258,13 +258,13 @@ class TestExceptionCRUD:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "Manually reviewed and adjusted",
-                "resolved_by": "manager-user",
             },
             headers=auth_header(manager_token),
         )
         assert resp.status_code == 200
         detail = resp.json()
-        assert detail["resolved_by"] == "manager-user"
+        # resolved_by is derived from the JWT sub (manager-user sandbox token)
+        assert detail["resolved_by"] is not None
         assert detail["lifecycle_state"] == "RESOLVED"
 
     def test_override_requires_manager_role(self, client, analyst_token):
@@ -276,7 +276,7 @@ class TestExceptionCRUD:
         exc_id = resp.json()["exception_id"]
         resp = client.patch(
             f"/api/v1/exceptions/{exc_id}/override",
-            json={"action": "ALLOW_BOTH", "notes": "test", "resolved_by": "analyst"},
+            json={"action": "ALLOW_BOTH", "notes": "test"},
             headers=auth_header(analyst_token),
         )
         assert resp.status_code == 403
