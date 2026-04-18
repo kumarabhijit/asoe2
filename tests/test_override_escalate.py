@@ -778,3 +778,151 @@ class TestFourEyesOverride:
         )
         assert r.status_code == 422
         assert r.json()["error"]["code"] == "NOTES_REQUIRED"
+
+
+# ---------------------------------------------------------------------------
+# v2 consolidation — unified /disposition primitive (Approve/Reject/Override)
+# ---------------------------------------------------------------------------
+
+
+class TestDispositionUnified:
+    """One endpoint, sub_type-discriminated audit — v2 consolidation."""
+
+    def _stamp_recommended(self, exception_id: str, action: str) -> None:
+        rec = exception_store.get(exception_id, "tenant-a")
+        assert rec is not None
+        merged = dict(rec.resolution_data or {})
+        merged["recommended_action"] = action
+        exception_store.update(exception_id, "tenant-a", resolution_data=merged)
+
+    def test_disposition_approve_matches_recommended(self, client, analyst_token):
+        eid = _create_pending_review(client, analyst_token)
+        self._stamp_recommended(eid, "ALLOW_BOTH")
+        r = client.patch(
+            f"/api/v1/exceptions/{eid}/disposition",
+            json={
+                "action": "ALLOW_BOTH",
+                "notes": "confirm agent recommendation",
+                "reason_tag": "other",
+            },
+            headers=_auth(analyst_token),
+        )
+        assert r.status_code == 200, r.json()
+        assert r.json()["lifecycle_state"] == "RESOLVED"
+        events = [
+            e for e in exception_store.get_audit_log("tenant-a")
+            if e["policy_key"] == "EXCEPTION_RESOLVED"
+        ]
+        assert events, "EXCEPTION_RESOLVED audit event missing"
+        assert events[-1]["new_value"]["sub_type"] == "APPROVE"
+
+    def test_disposition_reject_on_no_action(self, client, analyst_token):
+        eid = _create_pending_review(client, analyst_token)
+        self._stamp_recommended(eid, "ALLOW_BOTH")
+        r = client.patch(
+            f"/api/v1/exceptions/{eid}/disposition",
+            json={
+                "action": "NO_ACTION",
+                "notes": "order cancelled upstream",
+                "reason_tag": "data_error",
+            },
+            headers=_auth(analyst_token),
+        )
+        assert r.status_code == 200, r.json()
+        assert r.json()["lifecycle_state"] == "REJECTED"
+        events = [
+            e for e in exception_store.get_audit_log("tenant-a")
+            if e["policy_key"] == "EXCEPTION_RESOLVED"
+        ]
+        assert events[-1]["new_value"]["sub_type"] == "REJECT"
+
+    def test_disposition_override_requires_override_perm(
+        self, client, analyst_token
+    ):
+        eid = _create_pending_review(client, analyst_token)
+        self._stamp_recommended(eid, "ALLOW_BOTH")
+        # Analyst picks a DIFFERENT action → server auto-classifies as OVERRIDE
+        # and rejects for insufficient permission.
+        r = client.patch(
+            f"/api/v1/exceptions/{eid}/disposition",
+            json={
+                "action": "SUPERSEDE",
+                "notes": "analyst attempt",
+                "reason_tag": "other",
+            },
+            headers=_auth(analyst_token),
+        )
+        assert r.status_code == 403
+        assert r.json()["error"]["code"] == "PERMISSION_DENIED"
+
+    def test_disposition_override_manager_succeeds(self, client, analyst_token):
+        priya = create_test_token(sub="priya@x", roles=["manager"], org="tenant-a")
+        eid = _create_pending_review(client, analyst_token)
+        self._stamp_recommended(eid, "ALLOW_BOTH")
+        r = client.patch(
+            f"/api/v1/exceptions/{eid}/disposition",
+            json={
+                "action": "SUPERSEDE",
+                "notes": "manager override",
+                "reason_tag": "policy_exception",
+            },
+            headers=_auth(priya),
+        )
+        assert r.status_code == 200, r.json()
+        assert r.json()["lifecycle_state"] == "RESOLVED"
+        events = [
+            e for e in exception_store.get_audit_log("tenant-a")
+            if e["policy_key"] == "EXCEPTION_RESOLVED"
+        ]
+        assert events[-1]["new_value"]["sub_type"] == "OVERRIDE"
+
+    def test_disposition_high_value_override_four_eyes(self, client, analyst_token):
+        priya = create_test_token(sub="priya@x", roles=["manager"], org="tenant-a")
+        eid = _seed_high_value_pending(client, analyst_token, impact_usd=25_000.0)
+        self._stamp_recommended(eid, "ALLOW_BOTH")
+        r = client.patch(
+            f"/api/v1/exceptions/{eid}/disposition",
+            json={
+                "action": "SUPERSEDE",
+                "notes": "manager override",
+                "reason_tag": "customer_concession",
+            },
+            headers=_auth(priya),
+        )
+        assert r.status_code == 200, r.json()
+        assert r.json()["lifecycle_state"] == "PENDING_COSIGN"
+        events = [
+            e for e in exception_store.get_audit_log("tenant-a")
+            if e["policy_key"] == "EXCEPTION_OVERRIDE_INITIATED"
+        ]
+        assert events, "EXCEPTION_OVERRIDE_INITIATED audit event missing"
+        assert events[-1]["new_value"]["initiated_via"] == "disposition"
+
+    def test_disposition_invalid_action_422(self, client, analyst_token):
+        eid = _create_pending_review(client, analyst_token)
+        r = client.patch(
+            f"/api/v1/exceptions/{eid}/disposition",
+            json={
+                "action": "MADE_UP",
+                "notes": "typo",
+                "reason_tag": "other",
+            },
+            headers=_auth(analyst_token),
+        )
+        assert r.status_code == 422
+        assert r.json()["error"]["code"] == "INVALID_ACTION"
+
+    def test_disposition_notes_required(self, client, analyst_token):
+        eid = _create_pending_review(client, analyst_token)
+        self._stamp_recommended(eid, "ALLOW_BOTH")
+        r = client.patch(
+            f"/api/v1/exceptions/{eid}/disposition",
+            json={
+                "action": "ALLOW_BOTH",
+                "notes": "   ",
+                "reason_tag": "other",
+            },
+            headers=_auth(analyst_token),
+        )
+        assert r.status_code == 422
+        assert r.json()["error"]["code"] == "NOTES_REQUIRED"

@@ -245,6 +245,31 @@
         "title": "CosignRequest",
         "type": "object"
       },
+      "DispositionRequest": {
+        "additionalProperties": false,
+        "description": "PATCH /api/v1/exceptions/{id}/disposition \u2014 unified HITL primitive\n(v2 consolidation).\n\nSingle endpoint collapsing Approve + Reject + Override into a\nsub-type-discriminated resolution. The caller specifies the chosen\naction; the server derives the sub-type:\n  - chosen_action == recommended_action \u2192 APPROVE (exceptions:approve)\n  - chosen_action == \"NO_ACTION\"        \u2192 REJECT  (exceptions:approve)\n  - chosen_action != recommended_action \u2192 OVERRIDE (exceptions:override,\n                                                     four-eyes applies)\n\nNotes are mandatory (SOX). reason_tag is validated against\nAllowedOverrideReasonTag when present; it defaults to \"other\" for\nPhase 2 compatibility. Emits a single EXCEPTION_RESOLVED audit event\nwith sub_type in new_value so downstream analytics stay consistent.",
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "notes": {
+            "title": "Notes",
+            "type": "string"
+          },
+          "reason_tag": {
+            "default": "other",
+            "title": "Reason Tag",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "notes"
+        ],
+        "title": "DispositionRequest",
+        "type": "object"
+      },
       "EscalateRequest": {
         "additionalProperties": false,
         "description": "POST /api/v1/exceptions/{id}/escalate \u2014 dedicated escalation routing.\n\nDecoupled from Override: escalation changes routing (lifecycle \u2192\nESCALATED) without asserting a resolution action. ``reason`` is a\nmandatory SOX justification (min length 1). ``to_role`` optionally\nnames the target role for routing metadata only \u2014 policy and state\nmachine do not branch on it.",
@@ -2633,6 +2658,91 @@
           }
         },
         "summary": "Challenge Exception",
+        "tags": [
+          "exceptions"
+        ]
+      }
+    },
+    "/api/v1/exceptions/{exception_id}/disposition": {
+      "patch": {
+        "description": "Unified HITL disposition: single endpoint for Approve/Reject/Override.\n\nSee module comment above for sub-type rules and permission gating.\nEmits EXCEPTION_RESOLVED with sub_type=APPROVE|REJECT|OVERRIDE so\ncompliance tooling can answer \"how often do managers deviate from\nthe agent?\" with one SQL query across a consistent event stream.",
+        "operationId": "disposition_exception_api_v1_exceptions__exception_id__disposition_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "exception_id",
+            "required": true,
+            "schema": {
+              "title": "Exception Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DispositionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExceptionDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Disposition Exception",
         "tags": [
           "exceptions"
         ]
