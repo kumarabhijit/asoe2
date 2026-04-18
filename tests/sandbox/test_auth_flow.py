@@ -256,7 +256,7 @@ class TestRBACEnforcement:
         exc_id = res.json()["exception_id"]
         resp = client.patch(
             f"/api/v1/exceptions/{exc_id}/override",
-            json={"action": "OVERRIDE", "notes": "", "resolved_by": "analyst"},
+            json={"action": "OVERRIDE", "notes": ""},
             headers=auth_header(analyst_token),
         )
         assert resp.status_code == 403

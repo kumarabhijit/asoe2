@@ -366,7 +366,6 @@ class TestCreditBlock:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "One-time exception — VIP customer with pending payment confirmed",
-                "resolved_by": "manager@example.com",
             },
             headers=_auth(manager_token),
         )
@@ -467,8 +466,16 @@ class TestMassPricingError:
         assert r.status_code == 200
         assert r.json()["lifecycle_state"] == "EXECUTING"
 
-    def test_mass_pricing_cannot_be_overridden_directly(self, client, analyst_token, manager_token):
-        """BLOCKED exceptions cannot be overridden — must use admin-release first."""
+    def test_mass_pricing_blocked_can_be_overridden_by_manager(
+        self, client, analyst_token, manager_token,
+    ):
+        """Option A: manager can Override a RED+BLOCKED exception directly.
+
+        Prior to the Phase 1 unified action model, BLOCKED was not
+        overridable and required an admin-release first. Under Option A,
+        the auditable Override path is available to manager+ across
+        GREEN/YELLOW/RED verdicts.
+        """
         r = client.post(
             "/api/v1/exceptions/resolve",
             json=_mass_pricing_error(),
@@ -478,10 +485,14 @@ class TestMassPricingError:
 
         r = client.patch(
             f"/api/v1/exceptions/{exc_id}/override",
-            json={"action": "ALLOW_BOTH", "notes": "test", "resolved_by": "m@test.com"},
+            json={
+                "action": "ALLOW_BOTH",
+                "notes": "Red verdict overridden with risk acknowledged",
+            },
             headers=_auth(manager_token),
         )
-        assert r.status_code == 409
+        assert r.status_code == 200
+        assert r.json()["lifecycle_state"] == "RESOLVED"
 
     def test_mass_pricing_trace(self, client, analyst_token):
         """Trace shows RED verdict with policy hit."""

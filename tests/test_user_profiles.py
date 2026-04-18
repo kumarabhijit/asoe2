@@ -476,7 +476,7 @@ class TestPartnerUsers:
         partner_token = _login(client, "tom.bradley@walmart.com")
         r = client.patch(
             f"/api/v1/exceptions/{exc_id}/override",
-            json={"action": "ALLOW_BOTH", "notes": "test", "resolved_by": "partner"},
+            json={"action": "ALLOW_BOTH", "notes": "test"},
             headers=_auth(partner_token),
         )
         assert r.status_code == 403

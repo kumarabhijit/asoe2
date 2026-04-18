@@ -52,11 +52,20 @@ LIFECYCLE_STATES: List[str] = [
 
 # Valid source states for each HITL action.
 # Consumed by api/routes/exceptions.py for state-machine enforcement.
-HITL_OVERRIDE_STATES = {"PENDING_REVIEW", "ESCALATED"}
+#
+# Option A (Phase 1 unified action model): privileged users (manager+) can
+# Override the agent's recommendation on GREEN (RESOLVED) and RED (BLOCKED)
+# lifecycles, not only YELLOW (PENDING_REVIEW/ESCALATED). Escalate is a
+# separate routing event with its own endpoint and its own source states.
+HITL_OVERRIDE_STATES = {"PENDING_REVIEW", "ESCALATED", "RESOLVED", "BLOCKED"}
 HITL_APPROVE_STATES = {"PENDING_REVIEW", "ESCALATED", "PENDING_ADMIN_REVIEW"}
 HITL_REJECT_STATES = {"PENDING_REVIEW", "ESCALATED", "PENDING_ADMIN_REVIEW"}
 CHALLENGE_SOURCE_STATES = {"RESOLVED"}
 ADMIN_RELEASE_SOURCE_STATES = {"BLOCKED"}
+# Escalate is a pure routing event decoupled from Override.
+# Already-ESCALATED and RESOLVED are 409 (the former is a no-op; the latter
+# already has a dedicated Challenge path).
+ESCALATE_ELIGIBLE_STATES = {"PENDING_REVIEW", "FAILED", "BLOCKED"}
 
 
 class OrderEvent(BaseModel):

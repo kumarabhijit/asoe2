@@ -108,15 +108,18 @@ class AuthenticatedUser(BaseModel):
 # ---------------------------------------------------------------------------
 
 _ROLE_PERMISSIONS = {
-    "analyst": ["exceptions:read", "exceptions:approve", "dashboard:read"],
+    "analyst": [
+        "exceptions:read", "exceptions:approve", "exceptions:escalate",
+        "dashboard:read",
+    ],
     "manager": [
-        "exceptions:read", "exceptions:approve", "exceptions:override",
-        "rules:write", "dashboard:read",
+        "exceptions:read", "exceptions:approve", "exceptions:escalate",
+        "exceptions:override", "rules:write", "dashboard:read",
     ],
     "admin": [
-        "exceptions:read", "exceptions:approve", "exceptions:override",
-        "rules:write", "users:manage", "policy:write", "audit:read",
-        "dashboard:read",
+        "exceptions:read", "exceptions:approve", "exceptions:escalate",
+        "exceptions:override", "rules:write", "users:manage", "policy:write",
+        "audit:read", "dashboard:read",
     ],
     "viewer": ["exceptions:read", "dashboard:read"],
     "partner": ["exceptions:read"],
@@ -240,6 +243,29 @@ def require_role(*allowed_roles: str):
         return user
 
     return _check_role
+
+
+def require_permission(*allowed_permissions: str):
+    """Return a FastAPI dependency that checks the user has at least one of
+    the specified permissions (expanded from roles)."""
+
+    async def _check_permission(
+        user: AuthenticatedUser = Depends(get_current_user),
+    ) -> AuthenticatedUser:
+        # user.permissions is already expanded from roles in get_current_user
+        granted = set(user.permissions)
+        if not any(p in granted for p in allowed_permissions):
+            raise ASOEError(
+                code="FORBIDDEN",
+                message=(
+                    "Requires one of permissions: "
+                    f"{', '.join(allowed_permissions)}."
+                ),
+                status_code=403,
+            )
+        return user
+
+    return _check_permission
 
 
 # ---------------------------------------------------------------------------

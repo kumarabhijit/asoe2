@@ -7,16 +7,21 @@ GET   /api/v1/exceptions                 — paginated exception queue
 GET   /api/v1/exceptions/stats           — dashboard metrics
 GET   /api/v1/exceptions/{id}            — exception detail
 GET   /api/v1/exceptions/{id}/trace      — full TraceRecord
-PATCH /api/v1/exceptions/{id}/override   — YELLOW: override agent recommendation (manager+)
+PATCH /api/v1/exceptions/{id}/override   — override agent recommendation across
+                                          GREEN/YELLOW/RED lifecycles (manager+)
+POST  /api/v1/exceptions/{id}/escalate   — route exception to ESCALATED (analyst+)
 POST  /api/v1/exceptions/{id}/approve    — resume paused exception (manager+)
 POST  /api/v1/exceptions/{id}/reject     — reject paused exception (manager+)
 POST  /api/v1/exceptions/{id}/challenge  — GREEN: post-execution challenge (analyst+)
 POST  /api/v1/exceptions/{id}/admin-release — RED: admin release of blocked exception (admin)
 
-Three-tier human intervention model:
-  GREEN  → Post-execution challenge (RESOLVED → ESCALATED)
-  YELLOW → Override recommendation (PENDING_REVIEW → RESOLVED)
-  RED    → Admin release (BLOCKED → PENDING_ADMIN_REVIEW)
+Unified action model (Phase 1 — Option A):
+  Override spans GREEN (RESOLVED), YELLOW (PENDING_REVIEW/ESCALATED), and
+  RED (BLOCKED) verdicts for privileged users (manager+). Analysts cannot
+  Override; they use Approve/Reject on YELLOW and Escalate for routing.
+  Escalate is a separate routing event with its own endpoint, permission
+  (exceptions:escalate, granted analyst+), and audit event
+  (EXCEPTION_ESCALATED).
 
 Security:
   §11.3 — Partner-role users see only their own orders (retailer_id filtering)
@@ -26,13 +31,22 @@ Security:
 from __future__ import annotations
 
 import logging
+import re
+import threading
+import time
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Dict, Optional, Tuple
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 
-from api.deps import AuthenticatedUser, get_current_user, get_tenant_id, require_role
+from api.deps import (
+    AuthenticatedUser,
+    get_current_user,
+    get_tenant_id,
+    require_permission,
+    require_role,
+)
 from api.errors import ASOEError
 from api.schemas import (
     AdminReleaseRequest,
@@ -40,6 +54,7 @@ from api.schemas import (
     ApproveRequest,
     AsyncResolveResponse,
     ChallengeRequest,
+    EscalateRequest,
     ExceptionDetailResponse,
     ExceptionListResponse,
     LineAnalysis,
@@ -61,6 +76,7 @@ from constraints.specs import AllowedResolutionAction
 from contracts.models import (
     ADMIN_RELEASE_SOURCE_STATES,
     CHALLENGE_SOURCE_STATES,
+    ESCALATE_ELIGIBLE_STATES,
     HITL_APPROVE_STATES,
     HITL_OVERRIDE_STATES,
     HITL_REJECT_STATES,
@@ -206,6 +222,97 @@ def _publish_task_complete(
         explanation=state.explanation,
     )
     event_publisher.publish(tenant_id, event)
+
+
+# ---------------------------------------------------------------------------
+# Idempotency-Key support (Phase 1: in-memory TTL cache)
+# ---------------------------------------------------------------------------
+#
+# Keyed on (tenant_id, exception_id, user_sub, key). A repeat call within
+# TTL returns the cached response verbatim; a differing body with the same
+# key returns 409 IDEMPOTENCY_CONFLICT.
+#
+# Phase 1 only — production will move this to Redis. The in-memory map is
+# per-process, so it does NOT span replicas. This is acceptable for the
+# single-process deployment used today; it is documented so the Phase 2
+# migration to Redis is a drop-in replacement.
+
+_IDEMPOTENCY_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_\-]{1,128}$")
+_IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60  # 24h
+
+# Value: (created_at_epoch, request_body_json, cached_response_dict)
+_idempotency_cache: Dict[
+    Tuple[str, str, str, str],
+    Tuple[float, Dict[str, Any], Dict[str, Any]],
+] = {}
+_idempotency_lock = threading.Lock()
+
+
+def _validate_idempotency_key(key: Optional[str]) -> Optional[str]:
+    """Return the validated key or None; raise 422 on malformed input."""
+    if key is None:
+        return None
+    if not _IDEMPOTENCY_KEY_PATTERN.match(key):
+        raise ASOEError(
+            code="INVALID_IDEMPOTENCY_KEY",
+            message=(
+                "Idempotency-Key must be 1-128 chars of [A-Za-z0-9_-]."
+            ),
+            status_code=422,
+        )
+    return key
+
+
+def _idempotency_lookup(
+    tenant_id: str,
+    exception_id: str,
+    user_sub: str,
+    key: str,
+    request_body: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Return a cached response dict if a valid entry exists.
+
+    Raises 409 IDEMPOTENCY_CONFLICT when the same key is presented with a
+    different body. Evicts expired entries on read.
+    """
+    cache_key = (tenant_id, exception_id, user_sub, key)
+    now = time.time()
+    with _idempotency_lock:
+        entry = _idempotency_cache.get(cache_key)
+        if entry is None:
+            return None
+        created_at, stored_body, cached_response = entry
+        if now - created_at > _IDEMPOTENCY_TTL_SECONDS:
+            _idempotency_cache.pop(cache_key, None)
+            return None
+    if stored_body != request_body:
+        raise ASOEError(
+            code="IDEMPOTENCY_CONFLICT",
+            message=(
+                "Idempotency-Key reused with a different request body."
+            ),
+            status_code=409,
+        )
+    return cached_response
+
+
+def _idempotency_store(
+    tenant_id: str,
+    exception_id: str,
+    user_sub: str,
+    key: str,
+    request_body: Dict[str, Any],
+    response_body: Dict[str, Any],
+) -> None:
+    cache_key = (tenant_id, exception_id, user_sub, key)
+    with _idempotency_lock:
+        _idempotency_cache[cache_key] = (time.time(), request_body, response_body)
+
+
+def _clear_idempotency_cache() -> None:
+    """Test helper: wipe the module-level cache between tests."""
+    with _idempotency_lock:
+        _idempotency_cache.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -420,16 +527,43 @@ async def get_trace(
 async def override_exception(
     exception_id: str,
     req: OverrideRequest,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     tenant_id: str = Depends(get_tenant_id),
     user: AuthenticatedUser = Depends(get_current_user),
 ) -> ExceptionDetailResponse:
-    """YELLOW-tier HITL: override the agent's recommended action.
+    """Override the agent's recommended action (Option A, Phase 1).
 
-    Restricted to PENDING_REVIEW and ESCALATED states.
-    Action must be a valid AllowedResolutionAction.
-    Notes are mandatory (SOX audit requirement).
+    Privileged users (manager+) may Override across GREEN (RESOLVED),
+    YELLOW (PENDING_REVIEW/ESCALATED), and RED (BLOCKED) verdicts.
+    Analysts cannot Override (they use Approve/Reject on YELLOW).
+
+    The shadow_verdict must be one of GREEN/YELLOW/RED — FAILED-lifecycle
+    exceptions (where no agent decision exists to override) are rejected
+    with 409 INVALID_VERDICT.
+
+    The auditor identity is always ``user.sub`` (JWT); clients must not
+    pass ``resolved_by``. Notes are mandatory (SOX audit requirement).
+
+    Supports an optional ``Idempotency-Key`` header. Repeat calls within
+    24h return the cached response; conflicting bodies with the same key
+    return 409 IDEMPOTENCY_CONFLICT.
     """
     record = _get_or_404(exception_id, tenant_id)
+
+    # Guard 1: shadow verdict must correspond to an overridable agent
+    # decision. FAILED-lifecycle records have no agent verdict to override.
+    if record.shadow_verdict not in {"GREEN", "YELLOW", "RED"}:
+        raise ASOEError(
+            code="INVALID_VERDICT",
+            message=(
+                f"Cannot override: exception has no overridable agent "
+                f"verdict (shadow_verdict='{record.shadow_verdict}'). "
+                f"Override requires GREEN, YELLOW, or RED."
+            ),
+            status_code=409,
+        )
+
+    # Guard 2: lifecycle state must map to one of the three verdicts.
     _require_state(record, HITL_OVERRIDE_STATES, "override")
 
     # Validate action against constrained vocabulary
@@ -441,10 +575,30 @@ async def override_exception(
             status_code=422,
         )
 
+    # Idempotency check — validate, then look up before mutating.
+    key = _validate_idempotency_key(idempotency_key)
+    request_body = req.model_dump()
+    if key is not None:
+        cached = _idempotency_lookup(
+            tenant_id, exception_id, user.sub, key, request_body,
+        )
+        if cached is not None:
+            return ExceptionDetailResponse.model_validate(cached)
+
+    # Snapshot prior values BEFORE mutating — in-memory store updates the
+    # live record object in place, so reading record.lifecycle_state after
+    # update() would return the new value.
+    prior_snapshot = {
+        "lifecycle_state": record.lifecycle_state,
+        "shadow_verdict": record.shadow_verdict,
+        "recommended_action": record.resolution_data.get("recommended_action"),
+        "exception_id": exception_id,
+    }
+
     updated = exception_store.update(
         exception_id,
         tenant_id,
-        resolved_by=req.resolved_by or user.sub,
+        resolved_by=user.sub,
         resolved_action=req.action,
         resolution_notes=req.notes,
         lifecycle_state="RESOLVED",
@@ -457,18 +611,117 @@ async def override_exception(
             status_code=500,
         )
 
-    # SOX audit: log override to policy_audit_log
+    # SOX audit: log override to policy_audit_log.
+    # "before" snapshot captures the prior lifecycle, verdict, and the
+    # recipe-recommended action (persisted in resolution_data at resolve
+    # time — see _persist_exception + ExecutionLog.outputs).
     exception_store.log_audit_event(
         tenant_id=tenant_id,
         policy_key="EXCEPTION_OVERRIDE",
-        previous_value={"lifecycle_state": record.lifecycle_state,
-                        "recommended_action": record.resolution_data.get("recommended_action")},
-        new_value={"resolved_action": req.action, "exception_id": exception_id},
-        changed_by=req.resolved_by or user.sub,
+        previous_value=prior_snapshot,
+        new_value={"resolved_action": req.action, "lifecycle_state": "RESOLVED"},
+        changed_by=user.sub,
         change_reason=req.notes,
     )
 
-    return updated.to_detail()
+    response = updated.to_detail()
+    if key is not None:
+        _idempotency_store(
+            tenant_id, exception_id, user.sub, key,
+            request_body, response.model_dump(),
+        )
+    return response
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/exceptions/{id}/escalate — Dedicated escalate routing
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/exceptions/{exception_id}/escalate",
+    response_model=ExceptionDetailResponse,
+    dependencies=[Depends(require_permission("exceptions:escalate"))],
+)
+async def escalate_exception(
+    exception_id: str,
+    req: EscalateRequest,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    tenant_id: str = Depends(get_tenant_id),
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> ExceptionDetailResponse:
+    """Escalate an exception into ESCALATED lifecycle (routing only).
+
+    Decoupled from Override: this endpoint changes routing without
+    asserting a resolution action. Eligible lifecycles are
+    ESCALATE_ELIGIBLE_STATES (PENDING_REVIEW, FAILED, BLOCKED). Already
+    ESCALATED (no-op) and RESOLVED (use Challenge) return 409.
+
+    Supports the optional Idempotency-Key header (same semantics as
+    /override).
+    """
+    record = _get_or_404(exception_id, tenant_id)
+    _require_state(record, ESCALATE_ELIGIBLE_STATES, "escalate")
+
+    key = _validate_idempotency_key(idempotency_key)
+    request_body = req.model_dump()
+    if key is not None:
+        cached = _idempotency_lookup(
+            tenant_id, exception_id, user.sub, key, request_body,
+        )
+        if cached is not None:
+            return ExceptionDetailResponse.model_validate(cached)
+
+    # Snapshot prior lifecycle before mutating the live record.
+    prior_lifecycle = record.lifecycle_state
+
+    # Append escalation metadata without overwriting prior resolution_data.
+    resolution_data = dict(record.resolution_data or {})
+    escalations = list(resolution_data.get("escalations") or [])
+    escalations.append({
+        "reason": req.reason,
+        "to_role": req.to_role,
+        "escalated_by": user.sub,
+        "escalated_at": datetime.now(timezone.utc).isoformat(),
+        "from_lifecycle_state": prior_lifecycle,
+    })
+    resolution_data["escalations"] = escalations
+
+    updated = exception_store.update(
+        exception_id,
+        tenant_id,
+        lifecycle_state="ESCALATED",
+        resolution_data=resolution_data,
+    )
+    if not updated:
+        raise ASOEError(
+            code="UPDATE_FAILED",
+            message="Failed to update exception.",
+            status_code=500,
+        )
+
+    exception_store.log_audit_event(
+        tenant_id=tenant_id,
+        policy_key="EXCEPTION_ESCALATED",
+        previous_value={
+            "lifecycle_state": prior_lifecycle,
+            "exception_id": exception_id,
+        },
+        new_value={
+            "lifecycle_state": "ESCALATED",
+            "reason": req.reason,
+            "to_role": req.to_role,
+        },
+        changed_by=user.sub,
+        change_reason=req.reason,
+    )
+
+    response = updated.to_detail()
+    if key is not None:
+        _idempotency_store(
+            tenant_id, exception_id, user.sub, key,
+            request_body, response.model_dump(),
+        )
+    return response
 
 
 # ---------------------------------------------------------------------------

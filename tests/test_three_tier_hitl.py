@@ -224,14 +224,14 @@ class TestYellowOverride:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "Verified with buyer — both POs are intentional",
-                "resolved_by": "manager@example.com",
             },
             headers=_auth(manager_token),
         )
         assert r.status_code == 200
         data = r.json()
         assert data["resolved_action"] == "ALLOW_BOTH"
-        assert data["resolved_by"] == "manager@example.com"
+        # Auditor identity is always derived from user.sub (test-user)
+        assert data["resolved_by"] == "test-user"
         assert data["lifecycle_state"] == "RESOLVED"
 
     def test_override_invalid_action_rejected(self, client, analyst_token, manager_token):
@@ -242,41 +242,39 @@ class TestYellowOverride:
             json={
                 "action": "YOLO",
                 "notes": "test",
-                "resolved_by": "manager@example.com",
             },
             headers=_auth(manager_token),
         )
         assert r.status_code == 422
         assert r.json()["error"]["code"] == "INVALID_ACTION"
 
-    def test_override_wrong_state_rejected(self, client, analyst_token, manager_token):
-        """Cannot override a RESOLVED exception (wrong state)."""
+    def test_override_on_resolved_accepted(self, client, analyst_token, manager_token):
+        """Option A: manager can Override a GREEN+RESOLVED exception."""
         exc_id = _create_resolved(client, analyst_token)
         r = client.patch(
             f"/api/v1/exceptions/{exc_id}/override",
             json={
                 "action": "ALLOW_BOTH",
-                "notes": "test",
-                "resolved_by": "manager@example.com",
+                "notes": "Reviewed post-execution — action refined",
             },
             headers=_auth(manager_token),
         )
-        assert r.status_code == 409
-        assert r.json()["error"]["code"] == "INVALID_STATE"
+        assert r.status_code == 200
+        assert r.json()["lifecycle_state"] == "RESOLVED"
 
-    def test_override_blocked_rejected(self, client, analyst_token, manager_token):
-        """Cannot override a BLOCKED exception (use admin-release instead)."""
+    def test_override_on_blocked_accepted(self, client, analyst_token, manager_token):
+        """Option A: manager can Override a RED+BLOCKED exception directly."""
         exc_id = _create_blocked(client, analyst_token)
         r = client.patch(
             f"/api/v1/exceptions/{exc_id}/override",
             json={
                 "action": "ALLOW_BOTH",
-                "notes": "test",
-                "resolved_by": "manager@example.com",
+                "notes": "Red verdict overridden with risk acknowledged",
             },
             headers=_auth(manager_token),
         )
-        assert r.status_code == 409
+        assert r.status_code == 200
+        assert r.json()["lifecycle_state"] == "RESOLVED"
 
     def test_override_requires_notes(self, client, analyst_token, manager_token):
         """Notes field is mandatory (SOX)."""
@@ -285,7 +283,6 @@ class TestYellowOverride:
             f"/api/v1/exceptions/{exc_id}/override",
             json={
                 "action": "ALLOW_BOTH",
-                "resolved_by": "manager@example.com",
                 # notes missing — should fail validation
             },
             headers=_auth(manager_token),
@@ -300,7 +297,6 @@ class TestYellowOverride:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "test",
-                "resolved_by": "analyst@example.com",
             },
             headers=_auth(analyst_token),
         )
@@ -314,7 +310,6 @@ class TestYellowOverride:
             json={
                 "action": "SUPERSEDE",
                 "notes": "Original PO superseded by revision",
-                "resolved_by": "manager@example.com",
             },
             headers=_auth(manager_token),
         )
@@ -338,7 +333,6 @@ class TestYellowOverride:
                 json={
                     "action": action,
                     "notes": f"Testing {action}",
-                    "resolved_by": "manager@example.com",
                 },
                 headers=_auth(manager_token),
             )
