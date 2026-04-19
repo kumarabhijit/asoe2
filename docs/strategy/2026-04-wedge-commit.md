@@ -109,7 +109,7 @@ Rationale for A: fastest path to answering "who is the buyer" (90 days, not 12 m
 
 ## 7. First design partner: CavinKare
 
-**Target contact:** Akash (COO / Head of Ops)
+**Target contact:** TBN (COO / Head of Ops)
 **Company:** CavinKare Pvt Ltd — Indian CPG, personal care + dairy + food, ~60k dealer footprint, pushing toward 25% e-commerce revenue
 **ERP:** SAP (to be confirmed on first call — version + module footprint)
 **Pain shape:**
@@ -122,7 +122,7 @@ Rationale for A: fastest path to answering "who is the buyer" (90 days, not 12 m
 
 **Approved intro email (COO persona, read-only posture):**
 
-> Hi Akash,
+> Hi TBN,
 >
 > As CavinKare pushes toward 25% e-com, your SAP-based order ops will absorb materially more exception volume — scheme disputes across your 60,000 dealers, cold-chain vs. ambient back-orders, pricing mismatches at modern-trade gates.
 >
@@ -146,7 +146,7 @@ Notes on email rationale:
 
 | Day | Commercial milestone | Product milestone |
 |---|---|---|
-| 7 | Akash (CavinKare) meeting scheduled; US target list drafted (20 names) | SAP read connector scoped against CavinKare's actual module footprint |
+| 7 | TBN (CavinKare) meeting scheduled; US target list drafted (20 names) | SAP read connector scoped against CavinKare's actual module footprint |
 | 30 | CavinKare discovery complete, scope document signed; 2 US prospects in active diligence | Exception detection engine v0 running on synthetic data |
 | 60 | CavinKare pilot LOI signed OR tripwire triggered (collapse to India-first) | CavinKare data connector live in sandbox; first exception digest delivered |
 | 90 | CavinKare paid pilot live; 1 US design-partner LOI signed (or pipeline decision) | First weekly exception digest to CavinKare ops team; US EDI parsers operational in staging |
