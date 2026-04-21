@@ -268,6 +268,11 @@ def _load_skill_text(intent: str) -> Optional[str]:
         "DUPLICATE_PO":           "duplicate-po_SKILL.md",
         "PRICE_HOLD_RELEASE":     "price-hold-release_SKILL.md",
         "EDI_MISMATCH":           "edi-mismatch_SKILL.md",
+        "BACK_ORDER":             "back-order-resolution_SKILL.md",
+        "OVER_MAX":               "over-max-trim_SKILL.md",
+        "MIN_ORDER_QTY":          "moq-round-up_SKILL.md",
+        "PALLET_CONFIG":          "pallet-alignment_SKILL.md",
+        "DELIVERY_DELAY":         "delivery-delay_SKILL.md",
     }
     filename = mapping.get(intent)
     if not filename:
@@ -319,6 +324,16 @@ def _intent_label(row: Dict[str, Any]) -> str:
         return "PRICE_HOLD_RELEASE"
     if evt_id.startswith("EVT-EDM-"):
         return "EDI_MISMATCH"
+    if evt_id.startswith("EVT-BO-"):
+        return "BACK_ORDER"
+    if evt_id.startswith("EVT-OM-"):
+        return "OVER_MAX"
+    if evt_id.startswith("EVT-MOQ-"):
+        return "MIN_ORDER_QTY"
+    if evt_id.startswith("EVT-PLT-"):
+        return "PALLET_CONFIG"
+    if evt_id.startswith("EVT-DD-"):
+        return "DELIVERY_DELAY"
     return "UNKNOWN"
 
 
@@ -421,6 +436,11 @@ def _render_sidebar() -> Optional[OrderEvent]:
             "EDI_850_DUPLICATE_PO",
             "EDI_850_PRICE_HOLD",
             "EDI_850_LINE_MISMATCH",
+            "BACK_ORDER_OOS",
+            "OVER_MAX_QTY",
+            "MIN_ORDER_QTY",
+            "PALLET_CONFIG_VIOLATION",
+            "DELIVERY_DELAY",
         ])
         sku         = st.text_input("sku",            value="SKU-001")
         po_price    = st.number_input("po_price",     value=90.0, step=0.01)
@@ -454,6 +474,37 @@ def _render_sidebar() -> Optional[OrderEvent]:
                 metadata["mismatch_sub_type"] = mismatch_sub_type
             metadata.setdefault("expected_value", "expected-x")
             metadata.setdefault("received_value", "received-y")
+        elif event_type == "BACK_ORDER_OOS":
+            metadata.update({
+                "ordered_qty": 100, "available_qty": 75,
+                "unit_price": float(po_price), "uom": "CS",
+            })
+        elif event_type == "OVER_MAX_QTY":
+            metadata.update({
+                "total_ordered": 130, "max_qty": 100,
+                "order_lines": [
+                    {"sku": sku, "description": sku, "qty": 130,
+                     "max_line_qty": 100, "is_even_layer_item": True},
+                ],
+            })
+        elif event_type == "MIN_ORDER_QTY":
+            metadata.update({
+                "ordered_qty": 40, "moq_qty": 48,
+                "unit_cost": float(po_price), "uom": "CS",
+            })
+        elif event_type == "PALLET_CONFIG_VIOLATION":
+            metadata["pallet_lines"] = [
+                {"sku": sku, "description": sku,
+                 "layer_qty": 24, "pallet_qty": 96,
+                 "ordered_qty": 100, "uom": "CS"},
+            ]
+        elif event_type == "DELIVERY_DELAY":
+            metadata.update({
+                "planned_date": "2026-04-20T00:00:00Z",
+                "projected_eta": "2026-04-23T00:00:00Z",
+                "days_late": 3,
+                "delay_category": "CARRIER_DELAY",
+            })
         return OrderEvent(
             order_id=order_id,
             event_type=event_type,

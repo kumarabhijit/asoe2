@@ -41,10 +41,13 @@ class TestGuardrail1_NodeIntentAgnostic:
     _NODES_PATH = Path(__file__).parent.parent / "orchestration" / "nodes.py"
 
     # Intent string literals that must NOT appear in if/elif comparisons
-    _INTENT_LITERALS = {
-        "CONTRACTUAL_CORRECTION", "CREDIT_BLOCK",
-        "MASS_PRICING_ERROR", "DUPLICATE_PO",
-    }
+    # inside orchestration nodes. Derived dynamically from AllowedIntent
+    # so new intents automatically get the same static-analysis check
+    # — no stale list that silently weakens the guardrail as vocabulary
+    # grows (addresses cross-repo review finding C5).
+    _INTENT_LITERALS = set(__import__(
+        "constraints.specs", fromlist=["AllowedIntent"],
+    ).AllowedIntent.__args__)
 
     def _get_node_function_names(self) -> list[str]:
         """Return all top-level function names in nodes.py."""

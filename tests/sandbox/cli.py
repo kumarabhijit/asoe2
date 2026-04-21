@@ -281,6 +281,16 @@ def _intent_label(row: Dict[str, Any]) -> str:
         # prefix-only label here is a hint, not an oracle — inspect
         # metadata.mismatch_sub_type for the actual routing.
         return "EDI_MISMATCH"
+    if evt_id.startswith("EVT-BO-"):
+        return "BACK_ORDER"
+    if evt_id.startswith("EVT-OM-"):
+        return "OVER_MAX"
+    if evt_id.startswith("EVT-MOQ-"):
+        return "MIN_ORDER_QTY"
+    if evt_id.startswith("EVT-PLT-"):
+        return "PALLET_CONFIG"
+    if evt_id.startswith("EVT-DD-"):
+        return "DELIVERY_DELAY"
     return "UNKNOWN"
 
 
@@ -642,6 +652,11 @@ def main() -> int:
             "DUPLICATE_PO": "EVT-DPO-",
             "PRICE_HOLD_RELEASE": "EVT-PHR-",
             "EDI_MISMATCH": "EVT-EDM-",
+            "BACK_ORDER": "EVT-BO-",
+            "OVER_MAX": "EVT-OM-",
+            "MIN_ORDER_QTY": "EVT-MOQ-",
+            "PALLET_CONFIG": "EVT-PLT-",
+            "DELIVERY_DELAY": "EVT-DD-",
         }
         prefix = intent_prefix_map.get(args.intent.upper())
         if not prefix:

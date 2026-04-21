@@ -64,6 +64,17 @@ class SkillLoader:
             if sub_type == "PRICE_MISMATCH":
                 return self.load_by_name("pricing-reconciliation_SKILL.md")
             return self.load_by_name("edi-mismatch_SKILL.md")
+        # OM-adjacent intents — each event type maps to exactly one skill.
+        if "BACK_ORDER" in upper or "OOS" in upper:
+            return self.load_by_name("back-order-resolution_SKILL.md")
+        if "OVER_MAX" in upper:
+            return self.load_by_name("over-max-trim_SKILL.md")
+        if "MIN_ORDER_QTY" in upper or "MOQ" in upper:
+            return self.load_by_name("moq-round-up_SKILL.md")
+        if "PALLET_CONFIG" in upper or "PALLET" in upper:
+            return self.load_by_name("pallet-alignment_SKILL.md")
+        if "DELIVERY_DELAY" in upper:
+            return self.load_by_name("delivery-delay_SKILL.md")
         if "PRICE" in upper or "EDI_850" in upper:
             return self.load_by_name("pricing-reconciliation_SKILL.md")
         return self.discover()[0]

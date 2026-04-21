@@ -175,3 +175,29 @@ class TestEdiMismatchRouting:
             metadata=None,
         )
         assert doc.name == "edi-mismatch"
+
+
+# ---------------------------------------------------------------------------
+# select_for_event — OM-adjacent intent routing (5 new intents)
+# ---------------------------------------------------------------------------
+
+class TestOMAdjacentIntentRouting:
+    def test_back_order_event_routes_to_back_order_skill(self):
+        doc = SkillLoader(SKILLS_ROOT).select_for_event("BACK_ORDER_OOS")
+        assert doc.name == "back-order-resolution"
+
+    def test_over_max_event_routes_to_trim_skill(self):
+        doc = SkillLoader(SKILLS_ROOT).select_for_event("OVER_MAX_QTY")
+        assert doc.name == "over-max-trim"
+
+    def test_moq_event_routes_to_round_up_skill(self):
+        doc = SkillLoader(SKILLS_ROOT).select_for_event("MIN_ORDER_QTY")
+        assert doc.name == "moq-round-up"
+
+    def test_pallet_config_event_routes_to_pallet_skill(self):
+        doc = SkillLoader(SKILLS_ROOT).select_for_event("PALLET_CONFIG_VIOLATION")
+        assert doc.name == "pallet-alignment"
+
+    def test_delivery_delay_event_routes_to_delay_skill(self):
+        doc = SkillLoader(SKILLS_ROOT).select_for_event("DELIVERY_DELAY")
+        assert doc.name == "delivery-delay"

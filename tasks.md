@@ -1054,3 +1054,108 @@ the pricing single-source-of-truth at classifier, skill, and UI
 rendering layers — a UI regression is blocked by the e2e contract
 test that asserts a PRICE_MISMATCH fixture lands under
 `CONTRACTUAL_CORRECTION`, not `EDI_MISMATCH`.
+
+---
+
+## PHASE 22 — UI-Backend Intent Parity: BACK_ORDER, OVER_MAX, MIN_ORDER_QTY, PALLET_CONFIG, DELIVERY_DELAY
+
+Closes the cross-repo contract drift flagged by the architecture
+review (C1): the asoe-ui repo had shipped 5 intents in Phase 8.10 that
+had no backend support. This phase brings the backend to parity —
+every intent asoe-ui classifies is now backend-classified, recipe-
+executed, shadow-audited, and covered by e2e tests.
+
+### 22.1 Contracts + policy
+- [x] `contracts/models.py::Intent` extended with `BACK_ORDER`,
+      `OVER_MAX`, `MIN_ORDER_QTY`, `PALLET_CONFIG`, `DELIVERY_DELAY`.
+- [x] `contracts/policy.py` — 8 new thresholds mapping to prototype
+      spec rule IDs (SD-OOS-001/002, SD-OM-001/002, SD-MOQ-001/002,
+      SD-PLT-001/002, SD-DELAY-001/002).
+
+### 22.2 Recipes
+- [x] `recipes/BackOrderResolutionRecipe.py` — classifies gap
+      (NO_GAP/MINOR_GAP/SEVERE_GAP); ranks resolution options
+      (ALT_DC, SUBSTITUTE, SPLIT_SHIPMENT, RESCHEDULE) on a weighted
+      composite score of service / revenue / logistics.
+- [x] `recipes/OverMaxTrimRecipe.py` — two-phase trim plan: per-line
+      ceiling trim, then proportional distribution across even-layer
+      lines; broken-layer lines get `action=SKIP` to preserve pallet
+      integrity.
+- [x] `recipes/MOQRoundUpRecipe.py` — three-way
+      ROUND_UP / ACCEPT_BELOW / ESCALATE; uplift-review gate catches
+      large-value round-ups even when shortfall is MINOR.
+- [x] `recipes/PalletAlignmentRecipe.py` — per-line fill-% detection
+      for BROKEN_LAYER vs PARTIAL_PALLET vs MIXED; recommends round-
+      down plan.
+- [x] `recipes/DeliveryDelayResolutionRecipe.py` — days-late
+      classification (ON_TIME / MINOR / SEVERE); option ranker
+      prefers EXPEDITE for MINOR, RESCHEDULE for SEVERE unless the
+      caller pins a recommended option.
+
+### 22.3 Constrained generation + registry
+- [x] `constraints/specs.py` — `AllowedIntent` + `AllowedRecipeName`
+      Literals extended.
+- [x] `recipes/registry.py` — 5 new `RecipeSpec` entries with
+      declared gateway dependencies where applicable.
+- [x] Prompt surfaces updated for Guidance, Outlines, and local LLM
+      backends.
+
+### 22.4 Classifier + skill routing
+- [x] `constraints/fallback_backend.py::classify_intent` — 5 new
+      event-type → intent branches (BACK_ORDER_OOS, OVER_MAX_QTY,
+      MIN_ORDER_QTY, PALLET_CONFIG_VIOLATION, DELIVERY_DELAY).
+- [x] 5 new `shadow_decision` helpers computing verdicts from
+      event metadata (gap_pct / exceedance / shortfall / fill% /
+      days_late). New `shadow_policy_hits` tag vocabulary
+      (BACK_ORDER_SEVERE_GAP, OVER_MAX_SEVERE_EXCEEDANCE, etc.).
+- [x] `skills/loader.py` — 5 new event-type → skill branches with
+      ordering preserved (DUPLICATE → PRICE_HOLD → LINE_MISMATCH →
+      OM-adjacent → generic).
+
+### 22.5 Skills + orchestration
+- [x] 5 new `skills/*.md` files following the canonical six-section
+      structure.
+- [x] `orchestration/nodes.py::validate_types` — 5 new `elif` arms
+      injecting policy thresholds into `RecipeInvocation.params`.
+      Explicit final `else` preserved.
+
+### 22.6 Golden-test dynamization
+- [x] `tests/test_constraints.py` intent_regex / recipe_name_regex
+      goldens refactored to derive from `AllowedIntent.__args__` /
+      `AllowedRecipeName.__args__` — no more brittle string goldens
+      that require a parallel sweep when vocabulary grows.
+- [x] `tests/test_registry.py::test_registry_size_matches_allowed_recipe_name_literal`
+      compares registry size against `len(AllowedRecipeName.__args__)`.
+- [x] `tests/test_executor.py::test_registered_names_returns_all`
+      iterates `AllowedRecipeName.__args__`.
+- [x] `tests/test_v1_guardrails.py::_INTENT_LITERALS` derived
+      dynamically from `AllowedIntent.__args__` — addresses
+      cross-repo review C5 (static-analysis guardrail had holes for
+      new intents).
+
+### 22.7 Tests
+- [x] Unit: every branch of each new recipe
+      (`tests/test_recipes.py`).
+- [x] Skill-loader: `TestOMAdjacentIntentRouting` for all 5 new event
+      types (`tests/test_skill_loader.py`).
+- [x] E2E: `tests/test_e2e_om_adjacent_intents.py` — 17 cases
+      covering health, resolve minor/severe branches, trace policy
+      hits, stats aggregation.
+
+### 22.8 Sandbox + docs
+- [x] `tests/sandbox/seed.py` — 8 new events (EVT-BO-001/002,
+      EVT-OM-001/002, EVT-MOQ-001/002, EVT-PLT-001, EVT-DD-001/002)
+      covering MINOR + SEVERE branches across the intents.
+- [x] `tests/sandbox/cli.py` — `_intent_label` prefix branches and
+      `intent_prefix_map` for `--intent` filter.
+- [x] `tests/sandbox/ui/app.py` — skill-text map, intent-label
+      branches, custom-event form event_type options with default
+      metadata per intent.
+- [x] `README.md` / `docs/AUDITOR_GUIDE.md` / `DESIGN.md` updated
+      with the 5 new intents + recipes + policy thresholds.
+
+✅ Outcome: asoe-ui's 11-intent mock-health vocabulary now matches
+the asoe2 backend reality. The `NEXT_PUBLIC_SHOW_PREVIEW_INTENTS`
+gate proposal (asoe-ui backlog) is no longer needed — kept as a
+design note in case a future wave of speculative UI outpaces backend
+again.

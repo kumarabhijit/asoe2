@@ -821,6 +821,183 @@ _EDI_EVENTS = [
             "note": "Exercises pydantic-validation FAIL_TO_HUMAN path.",
         }),
     },
+
+    # ======================================================================
+    # BACK_ORDER — gap_pct vs severe threshold
+    # ======================================================================
+    {
+        "event_id":    "EVT-BO-001",
+        "event_type":  "BACK_ORDER_OOS",
+        "order_id":    "PO-BO-001",
+        "retailer_id": "R-01",
+        "sku":         "SKU-301",
+        "po_price":    12.50,
+        "sap_price":   12.50,
+        "line_count":  1,
+        "dc_id":       "DC-EAST-01",
+        "metadata":    json.dumps({
+            "ordered_qty": 100, "available_qty": 75,
+            "unit_price": 12.50, "uom": "CS",
+            "note": "25% gap → MINOR_GAP / YELLOW.",
+        }),
+    },
+    {
+        "event_id":    "EVT-BO-002",
+        "event_type":  "BACK_ORDER_OOS",
+        "order_id":    "PO-BO-002",
+        "retailer_id": "R-02",
+        "sku":         "SKU-302",
+        "po_price":    8.00,
+        "sap_price":   8.00,
+        "line_count":  1,
+        "dc_id":       "DC-WEST-01",
+        "metadata":    json.dumps({
+            "ordered_qty": 200, "available_qty": 60,
+            "unit_price": 8.00, "uom": "CS",
+            "note": "70% gap → SEVERE_GAP / RED.",
+        }),
+    },
+
+    # ======================================================================
+    # OVER_MAX — exceedance vs severe threshold
+    # ======================================================================
+    {
+        "event_id":    "EVT-OM-001",
+        "event_type":  "OVER_MAX_QTY",
+        "order_id":    "PO-OM-001",
+        "retailer_id": "R-03",
+        "sku":         "SKU-401",
+        "po_price":    4.00,
+        "sap_price":   4.00,
+        "line_count":  1,
+        "dc_id":       "DC-MIDWEST-01",
+        "metadata":    json.dumps({
+            "total_ordered": 130, "max_qty": 100,
+            "order_lines": [
+                {"sku": "SKU-401", "description": "SKU-401", "qty": 130,
+                 "max_line_qty": 100, "is_even_layer_item": True},
+            ],
+            "note": "30% exceedance → MINOR / YELLOW.",
+        }),
+    },
+    {
+        "event_id":    "EVT-OM-002",
+        "event_type":  "OVER_MAX_QTY",
+        "order_id":    "PO-OM-002",
+        "retailer_id": "R-01",
+        "sku":         "SKU-402",
+        "po_price":    6.00,
+        "sap_price":   6.00,
+        "line_count":  1,
+        "dc_id":       "DC-EAST-01",
+        "metadata":    json.dumps({
+            "total_ordered": 170, "max_qty": 100,
+            "order_lines": [
+                {"sku": "SKU-402", "description": "SKU-402", "qty": 170,
+                 "max_line_qty": 100, "is_even_layer_item": True},
+            ],
+            "note": "70% exceedance → SEVERE / RED.",
+        }),
+    },
+
+    # ======================================================================
+    # MIN_ORDER_QTY — shortfall vs severe threshold
+    # ======================================================================
+    {
+        "event_id":    "EVT-MOQ-001",
+        "event_type":  "MIN_ORDER_QTY",
+        "order_id":    "PO-MOQ-001",
+        "retailer_id": "R-02",
+        "sku":         "SKU-501",
+        "po_price":    5.00,
+        "sap_price":   5.00,
+        "line_count":  1,
+        "dc_id":       "DC-WEST-01",
+        "metadata":    json.dumps({
+            "ordered_qty": 40, "moq_qty": 48,
+            "unit_cost": 5.00, "uom": "CS",
+            "note": "~17% shortfall → MINOR / YELLOW, round-up to 48.",
+        }),
+    },
+    {
+        "event_id":    "EVT-MOQ-002",
+        "event_type":  "MIN_ORDER_QTY",
+        "order_id":    "PO-MOQ-002",
+        "retailer_id": "R-03",
+        "sku":         "SKU-502",
+        "po_price":    12.00,
+        "sap_price":   12.00,
+        "line_count":  1,
+        "dc_id":       "DC-MIDWEST-01",
+        "metadata":    json.dumps({
+            "ordered_qty": 25, "moq_qty": 48,
+            "unit_cost": 12.00, "uom": "CS",
+            "note": "~48% shortfall → SEVERE / RED, KNMT waiver required.",
+        }),
+    },
+
+    # ======================================================================
+    # PALLET_CONFIG — broken layer
+    # ======================================================================
+    {
+        "event_id":    "EVT-PLT-001",
+        "event_type":  "PALLET_CONFIG_VIOLATION",
+        "order_id":    "PO-PLT-001",
+        "retailer_id": "R-01",
+        "sku":         "SKU-601",
+        "po_price":    9.00,
+        "sap_price":   9.00,
+        "line_count":  1,
+        "dc_id":       "DC-EAST-01",
+        "metadata":    json.dumps({
+            "pallet_lines": [
+                {"sku": "SKU-601", "description": "SKU-601",
+                 "layer_qty": 24, "pallet_qty": 96,
+                 "ordered_qty": 100, "uom": "CS"},
+            ],
+            "note": "100 cases → 1 pallet + 4 loose → BROKEN_LAYER / YELLOW.",
+        }),
+    },
+
+    # ======================================================================
+    # DELIVERY_DELAY — minor + severe
+    # ======================================================================
+    {
+        "event_id":    "EVT-DD-001",
+        "event_type":  "DELIVERY_DELAY",
+        "order_id":    "PO-DD-001",
+        "retailer_id": "R-02",
+        "sku":         "SKU-701",
+        "po_price":    15.00,
+        "sap_price":   15.00,
+        "line_count":  1,
+        "dc_id":       "DC-WEST-01",
+        "metadata":    json.dumps({
+            "planned_date": "2026-04-20T00:00:00Z",
+            "projected_eta": "2026-04-23T00:00:00Z",
+            "days_late": 3,
+            "delay_category": "CARRIER_DELAY",
+            "note": "3 days late → MINOR_DELAY / YELLOW.",
+        }),
+    },
+    {
+        "event_id":    "EVT-DD-002",
+        "event_type":  "DELIVERY_DELAY",
+        "order_id":    "PO-DD-002",
+        "retailer_id": "R-03",
+        "sku":         "SKU-702",
+        "po_price":    20.00,
+        "sap_price":   20.00,
+        "line_count":  1,
+        "dc_id":       "DC-MIDWEST-01",
+        "metadata":    json.dumps({
+            "planned_date": "2026-04-20T00:00:00Z",
+            "projected_eta": "2026-04-27T00:00:00Z",
+            "days_late": 7,
+            "delay_category": "CUSTOMS",
+            "note": "7 days late → SEVERE_DELAY / RED.",
+        }),
+    },
 ]
 
 

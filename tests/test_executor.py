@@ -283,12 +283,11 @@ class TestExecutorUnknownRecipeRejection:
 
     def test_registered_names_returns_all(self):
         names = RecipeExecutor.registered_names()
-        assert "PriceAdjustmentRecipe.py" in names
-        assert "CreditHoldReleaseRecipe.py" in names
-        assert "DuplicatePORecipe.py" in names
-        assert "PriceHoldReleaseRecipe.py" in names
-        assert "EdiMismatchRecipe.py" in names
-        assert len(names) == 5
+        # Every AllowedRecipeName Literal value must be registered.
+        from constraints.specs import AllowedRecipeName
+        for expected in AllowedRecipeName.__args__:
+            assert expected in names, f"Recipe {expected} missing from registry"
+        assert len(names) == len(AllowedRecipeName.__args__)
 
 
 # ---------------------------------------------------------------------------
