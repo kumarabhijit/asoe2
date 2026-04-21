@@ -38,14 +38,22 @@ from gateways.executor import GatewayExecutor
 from orchestration.utils import circuit_breaker, compute_discrepancy
 from hardening.explain_mode import build_explain_summary
 from contracts.policy import (
+    BACK_ORDER_SEVERE_GAP_PCT,
     CREDIT_AUTHORIZED_ROLES,
     CREDIT_EXPOSURE_TOLERANCE,
+    DELIVERY_DELAY_MINOR_DAYS,
+    DELIVERY_DELAY_SEVERE_DAYS,
     DUPLICATE_PO_AUTONOMY_LEVELS,
     DUPLICATE_PO_THRESHOLD_AUTO_BLOCK,
     DUPLICATE_PO_THRESHOLD_REVIEW_REQUIRED,
     DUPLICATE_PO_THRESHOLD_SOFT_FLAG,
     EDI_MISMATCH_AUTONOMY_LEVELS,
     MAX_DISCOUNT_ALLOWED,
+    MOQ_SEVERE_SHORTFALL_PCT,
+    MOQ_UPLIFT_REVIEW_PCT,
+    OVER_MAX_SEVERE_EXCEEDANCE_PCT,
+    PALLET_CONFIG_BROKEN_LAYER_FILL_PCT,
+    PALLET_CONFIG_MIN_FILL_PCT,
     PRICE_CONDITION_TYPE,
     PRICE_HOLD_HARD_BLOCK_PCT,
     PRICE_HOLD_TOLERANCE_PCT,
@@ -296,6 +304,77 @@ def validate_types(state: GraphState) -> GraphState:
                 "expected_value": state.event.metadata.get("expected_value"),
                 "received_value": state.event.metadata.get("received_value"),
                 "autonomy_levels": EDI_MISMATCH_AUTONOMY_LEVELS,
+            },
+        )
+    elif state.selected_recipe == "BackOrderResolutionRecipe.py":
+        meta = state.event.metadata
+        state.invocation = RecipeInvocation(
+            recipe_name=state.selected_recipe,
+            params={
+                "order_id": state.event.order_id,
+                "sku": state.event.sku or meta.get("sku") or "",
+                "ordered_qty": float(meta.get("ordered_qty") or 0.0),
+                "available_qty": float(meta.get("available_qty") or 0.0),
+                "unit_price": float(meta.get("unit_price") or 0.0),
+                "uom": meta.get("uom") or "CS",
+                "severe_gap_pct": BACK_ORDER_SEVERE_GAP_PCT,
+                "alternate_warehouses": meta.get("alternate_warehouses"),
+                "substitutes": meta.get("substitutes"),
+            },
+        )
+    elif state.selected_recipe == "OverMaxTrimRecipe.py":
+        meta = state.event.metadata
+        state.invocation = RecipeInvocation(
+            recipe_name=state.selected_recipe,
+            params={
+                "order_id": state.event.order_id,
+                "total_ordered": float(meta.get("total_ordered") or 0.0),
+                "max_qty": float(meta.get("max_qty") or 0.0),
+                "severe_exceedance_pct": OVER_MAX_SEVERE_EXCEEDANCE_PCT,
+                "order_lines": meta.get("order_lines"),
+                "unit_cost_per_line": meta.get("unit_cost_per_line"),
+            },
+        )
+    elif state.selected_recipe == "MOQRoundUpRecipe.py":
+        meta = state.event.metadata
+        state.invocation = RecipeInvocation(
+            recipe_name=state.selected_recipe,
+            params={
+                "order_id": state.event.order_id,
+                "sku": state.event.sku or meta.get("sku") or "",
+                "ordered_qty": float(meta.get("ordered_qty") or 0.0),
+                "moq_qty": float(meta.get("moq_qty") or 0.0),
+                "unit_cost": float(meta.get("unit_cost") or 0.0),
+                "uom": meta.get("uom") or "CS",
+                "severe_shortfall_pct": MOQ_SEVERE_SHORTFALL_PCT,
+                "uplift_review_pct": MOQ_UPLIFT_REVIEW_PCT,
+            },
+        )
+    elif state.selected_recipe == "PalletAlignmentRecipe.py":
+        meta = state.event.metadata
+        state.invocation = RecipeInvocation(
+            recipe_name=state.selected_recipe,
+            params={
+                "order_id": state.event.order_id,
+                "lines": meta.get("pallet_lines"),
+                "min_fill_pct": PALLET_CONFIG_MIN_FILL_PCT,
+                "broken_layer_fill_pct": PALLET_CONFIG_BROKEN_LAYER_FILL_PCT,
+            },
+        )
+    elif state.selected_recipe == "DeliveryDelayResolutionRecipe.py":
+        meta = state.event.metadata
+        state.invocation = RecipeInvocation(
+            recipe_name=state.selected_recipe,
+            params={
+                "order_id": state.event.order_id,
+                "planned_date": meta.get("planned_date") or "",
+                "projected_eta": meta.get("projected_eta") or "",
+                "minor_days": DELIVERY_DELAY_MINOR_DAYS,
+                "severe_days": DELIVERY_DELAY_SEVERE_DAYS,
+                "carrier": meta.get("carrier"),
+                "route": meta.get("route"),
+                "delay_category": meta.get("delay_category"),
+                "alternate_options": meta.get("alternate_options"),
             },
         )
     elif state.selected_recipe is not None:
