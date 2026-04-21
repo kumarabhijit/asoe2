@@ -92,6 +92,29 @@ def detect_edi_mismatch(
     classification = _CLASSIFICATION_BY_SUB_TYPE.get(sub_type)
 
     if classification is None:
+        # PRICE_MISMATCH is the one case we specifically route out at
+        # the classifier / skill-loader layers (preserves
+        # PriceAdjustmentRecipe's single-source-of-truth for pricing,
+        # CLAUDE.md §1). If the value ever reaches this recipe, a
+        # routing invariant has broken — return a dedicated error
+        # code so the failure is self-documenting in audit logs.
+        # Non-PRICE unknowns get the generic unknown-sub_type error.
+        if sub_type == "PRICE_MISMATCH":
+            error_code = "SUB_TYPE_ROUTING_ERROR"
+            reason = (
+                "PRICE_MISMATCH must be routed to CONTRACTUAL_CORRECTION / "
+                "PriceAdjustmentRecipe.py at classifier time — reaching "
+                "EdiMismatchRecipe with this sub_type indicates a routing "
+                "invariant break (constraints/fallback_backend.py:"
+                "classify_intent or skills/loader.py:select_for_event)."
+            )
+        else:
+            error_code = "UNKNOWN_SUB_TYPE"
+            reason = (
+                f"sub_type {sub_type!r} is not a recognised EDI mismatch "
+                f"sub_type; expected one of "
+                f"{sorted(_CLASSIFICATION_BY_SUB_TYPE)}"
+            )
         return {
             "status": "FAILED",
             "sub_type": sub_type,
@@ -102,11 +125,8 @@ def detect_edi_mismatch(
             "expected_value": expected_value,
             "received_value": received_value,
             "order_id": order_id,
-            "reason": (
-                f"sub_type {sub_type!r} is not a recognised EDI mismatch "
-                f"sub_type; expected one of "
-                f"{sorted(_CLASSIFICATION_BY_SUB_TYPE)}"
-            ),
+            "error_code": error_code,
+            "reason": reason,
         }
 
     status = _STATUS_BY_CLASSIFICATION[classification]
