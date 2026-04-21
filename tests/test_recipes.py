@@ -1143,3 +1143,271 @@ class TestEdiMismatchRecipe:
         assert "from contracts.policy" not in src, (
             "EdiMismatchRecipe must not import from contracts.policy"
         )
+
+
+# ---------------------------------------------------------------------------
+# BackOrderResolutionRecipe
+# ---------------------------------------------------------------------------
+
+from recipes.BackOrderResolutionRecipe import resolve_back_order
+
+
+class TestBackOrderResolutionRecipe:
+    def _call(self, *, ordered: float = 100.0, available: float = 50.0, **kw):
+        return resolve_back_order(
+            order_id="SO-BO-001", sku="SKU-1", ordered_qty=ordered,
+            available_qty=available, unit_price=10.0, uom="CS",
+            severe_gap_pct=0.50,
+            alternate_warehouses=kw.get("alternate_warehouses"),
+            substitutes=kw.get("substitutes"),
+        )
+
+    def test_no_gap_completes(self):
+        r = self._call(ordered=100, available=120)
+        assert r["status"] == "COMPLETE"
+        assert r["classification"] == "NO_GAP"
+        assert r["gap_qty"] == 0.0
+
+    def test_minor_gap_review_required(self):
+        r = self._call(ordered=100, available=75)  # 25% gap
+        assert r["status"] == "REVIEW_REQUIRED"
+        assert r["classification"] == "MINOR_GAP"
+        assert r["gap_qty"] == 25.0
+
+    def test_severe_gap_escalates(self):
+        r = self._call(ordered=100, available=40)  # 60% gap
+        assert r["status"] == "ESCALATE"
+        assert r["classification"] == "SEVERE_GAP"
+
+    def test_zero_ordered_fails(self):
+        r = self._call(ordered=0, available=0)
+        assert r["status"] == "FAILED"
+
+    def test_alt_dc_ranked_first_when_available(self):
+        r = self._call(
+            ordered=100, available=30,
+            alternate_warehouses=[
+                {"plant": "DC-W-01", "qty": 200, "eta_days": 2,
+                 "freight_delta_per_unit": 0.50},
+            ],
+        )
+        assert r["primary_option"]["type"] == "ALT_DC"
+
+    def test_reschedule_always_present_as_fallback(self):
+        r = self._call(ordered=100, available=30)
+        types = {o["type"] for o in r["resolution_options"]}
+        assert "RESCHEDULE" in types and "SPLIT_SHIPMENT" in types
+
+
+# ---------------------------------------------------------------------------
+# OverMaxTrimRecipe
+# ---------------------------------------------------------------------------
+
+from recipes.OverMaxTrimRecipe import trim_over_max
+
+
+class TestOverMaxTrimRecipe:
+    def _call(self, *, total_ordered: float = 150.0, max_qty: float = 100.0, lines=None, costs=None):
+        return trim_over_max(
+            order_id="SO-OM-001", total_ordered=total_ordered,
+            max_qty=max_qty, severe_exceedance_pct=0.50,
+            order_lines=lines, unit_cost_per_line=costs,
+        )
+
+    def test_no_exceedance_completes(self):
+        r = self._call(total_ordered=80, max_qty=100)
+        assert r["status"] == "COMPLETE"
+        assert r["classification"] == "NO_EXCEEDANCE"
+
+    def test_minor_exceedance_review_required(self):
+        r = self._call(total_ordered=130, max_qty=100)  # 30% over
+        assert r["status"] == "REVIEW_REQUIRED"
+        assert r["classification"] == "MINOR"
+        assert r["recommended_action"] == "TRIM_TO_MAX"
+
+    def test_severe_exceedance_escalates(self):
+        r = self._call(total_ordered=170, max_qty=100)  # 70% over
+        assert r["status"] == "ESCALATE"
+        assert r["classification"] == "SEVERE"
+        assert r["recommended_action"] == "ESCALATE"
+
+    def test_zero_ordered_fails(self):
+        r = self._call(total_ordered=0, max_qty=100)
+        assert r["status"] == "FAILED"
+
+    def test_line_over_own_max_gets_trim_action(self):
+        lines = [
+            {"sku": "A", "description": "A", "qty": 80, "max_line_qty": 60,
+             "is_even_layer_item": True},
+            {"sku": "B", "description": "B", "qty": 50, "max_line_qty": 50,
+             "is_even_layer_item": True},
+        ]
+        r = self._call(total_ordered=130, max_qty=100, lines=lines)
+        by_sku = {row["sku"]: row for row in r["trim_plan"]}
+        assert by_sku["A"]["action"] == "TRIM"
+        assert by_sku["A"]["trimmed_to"] == 60
+
+
+# ---------------------------------------------------------------------------
+# MOQRoundUpRecipe
+# ---------------------------------------------------------------------------
+
+from recipes.MOQRoundUpRecipe import round_up_moq
+
+
+class TestMOQRoundUpRecipe:
+    def _call(self, *, ordered: float = 20.0, moq: float = 48.0):
+        return round_up_moq(
+            order_id="SO-MOQ-001", sku="SKU-1",
+            ordered_qty=ordered, moq_qty=moq,
+            unit_cost=5.0, uom="CS",
+            severe_shortfall_pct=0.25,
+            uplift_review_pct=0.10,
+        )
+
+    def test_no_shortfall_completes(self):
+        r = self._call(ordered=50, moq=48)
+        assert r["status"] == "COMPLETE"
+        assert r["classification"] == "NO_SHORTFALL"
+
+    def test_minor_shortfall_round_up(self):
+        r = self._call(ordered=40, moq=48)  # 16.7% shortfall
+        assert r["status"] == "REVIEW_REQUIRED"
+        assert r["classification"] == "MINOR_SHORTFALL"
+        assert r["recommended_action"] == "ROUND_UP"
+        assert r["round_up_plan"]["action"] == "ROUND_UP"
+        assert r["round_up_plan"]["round_up_to"] == 48
+
+    def test_severe_shortfall_escalates(self):
+        r = self._call(ordered=25, moq=48)  # ~48% shortfall
+        assert r["status"] == "ESCALATE"
+        assert r["classification"] == "SEVERE_SHORTFALL"
+        assert r["recommended_action"] == "ESCALATE"
+
+    def test_zero_moq_fails(self):
+        r = self._call(ordered=10, moq=0)
+        assert r["status"] == "FAILED"
+
+
+# ---------------------------------------------------------------------------
+# PalletAlignmentRecipe
+# ---------------------------------------------------------------------------
+
+from recipes.PalletAlignmentRecipe import align_pallets
+
+
+class TestPalletAlignmentRecipe:
+    def _call(self, lines):
+        return align_pallets(
+            order_id="SO-PLT-001", lines=lines,
+            min_fill_pct=0.90, broken_layer_fill_pct=1.00,
+        )
+
+    def test_fully_aligned_completes(self):
+        # 3 full pallets, no loose
+        r = self._call([{
+            "sku": "A", "description": "A", "layer_qty": 24,
+            "pallet_qty": 96, "ordered_qty": 288, "uom": "CS",
+        }])
+        assert r["status"] == "COMPLETE"
+        assert r["classification"] == "NO_VIOLATION"
+
+    def test_broken_layer_review_required(self):
+        # 100 cases, 24/layer, 96/pallet → 1 pallet + 4 cases loose
+        r = self._call([{
+            "sku": "A", "description": "A", "layer_qty": 24,
+            "pallet_qty": 96, "ordered_qty": 100, "uom": "CS",
+        }])
+        assert r["status"] == "REVIEW_REQUIRED"
+        assert r["classification"] == "BROKEN_LAYER"
+        plan = r["suggested_plan"][0]
+        assert plan["suggested"] == 96  # round down to full pallet
+
+    def test_partial_pallet_review_required(self):
+        # 120 cases, 24/layer, 96/pallet → 1 pallet + full 1 layer (24).
+        # partial fill = 24/96 = 25%  < 90% threshold → PARTIAL_PALLET.
+        r = self._call([{
+            "sku": "A", "description": "A", "layer_qty": 24,
+            "pallet_qty": 96, "ordered_qty": 120, "uom": "CS",
+        }])
+        assert r["classification"] == "PARTIAL_PALLET"
+        plan = r["suggested_plan"][0]
+        assert plan["suggested"] == 96
+
+    def test_empty_lines_fails(self):
+        r = self._call([])
+        assert r["status"] == "FAILED"
+
+
+# ---------------------------------------------------------------------------
+# DeliveryDelayResolutionRecipe
+# ---------------------------------------------------------------------------
+
+from recipes.DeliveryDelayResolutionRecipe import resolve_delivery_delay
+
+
+class TestDeliveryDelayResolutionRecipe:
+    def _call(self, planned: str, eta: str, options=None):
+        return resolve_delivery_delay(
+            order_id="SO-DD-001", planned_date=planned,
+            projected_eta=eta, minor_days=2, severe_days=5,
+            alternate_options=options,
+        )
+
+    def test_on_time_completes(self):
+        r = self._call("2026-04-20T00:00:00Z", "2026-04-20T00:00:00Z")
+        assert r["status"] == "COMPLETE"
+        assert r["classification"] == "ON_TIME"
+
+    def test_minor_delay_review_required(self):
+        r = self._call("2026-04-20T00:00:00Z", "2026-04-23T00:00:00Z")  # 3 days
+        assert r["status"] == "REVIEW_REQUIRED"
+        assert r["classification"] == "MINOR_DELAY"
+        assert r["days_late"] == 3
+
+    def test_severe_delay_escalates(self):
+        r = self._call("2026-04-20T00:00:00Z", "2026-04-26T00:00:00Z")  # 6 days
+        assert r["status"] == "ESCALATE"
+        assert r["classification"] == "SEVERE_DELAY"
+
+    def test_invalid_date_fails(self):
+        r = self._call("not-a-date", "2026-04-22T00:00:00Z")
+        assert r["status"] == "FAILED"
+
+    def test_option_ranking_respects_recommended_pin(self):
+        r = self._call(
+            "2026-04-20T00:00:00Z", "2026-04-23T00:00:00Z",
+            options=[
+                {"id": "a", "type": "RESCHEDULE", "extra_cost": 0,
+                 "recommended": False},
+                {"id": "b", "type": "EXPEDITE", "extra_cost": 620,
+                 "recommended": True},
+            ],
+        )
+        assert r["primary_option"]["id"] == "b"
+
+    def test_severe_prefers_reschedule_over_expedite(self):
+        r = self._call(
+            "2026-04-20T00:00:00Z", "2026-04-27T00:00:00Z",  # 7 days
+            options=[
+                {"id": "a", "type": "EXPEDITE", "extra_cost": 100,
+                 "recommended": False},
+                {"id": "b", "type": "RESCHEDULE", "extra_cost": 0,
+                 "recommended": False},
+            ],
+        )
+        assert r["primary_option"]["type"] == "RESCHEDULE"
+
+# ---------------------------------------------------------------------------
+# Purity: none of the new recipes imports from contracts.policy
+# ---------------------------------------------------------------------------
+
+class TestNewRecipePurity:
+    def test_no_policy_imports(self):
+        import inspect
+        for fn in (resolve_back_order, trim_over_max, round_up_moq,
+                   align_pallets, resolve_delivery_delay):
+            src = inspect.getsource(inspect.getmodule(fn))
+            assert "from contracts.policy" not in src, (
+                f"{fn.__module__} must not import from contracts.policy"
+            )
