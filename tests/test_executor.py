@@ -286,7 +286,9 @@ class TestExecutorUnknownRecipeRejection:
         assert "PriceAdjustmentRecipe.py" in names
         assert "CreditHoldReleaseRecipe.py" in names
         assert "DuplicatePORecipe.py" in names
-        assert len(names) == 3
+        assert "PriceHoldReleaseRecipe.py" in names
+        assert "EdiMismatchRecipe.py" in names
+        assert len(names) == 5
 
 
 # ---------------------------------------------------------------------------

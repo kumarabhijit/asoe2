@@ -27,8 +27,14 @@ class TestRegistryCompleteness:
     def test_registry_contains_credit_recipe(self):
         assert "CreditHoldReleaseRecipe.py" in REGISTRY
 
-    def test_registry_has_exactly_three_recipes(self):
-        assert len(REGISTRY) == 3
+    def test_registry_contains_price_hold_release_recipe(self):
+        assert "PriceHoldReleaseRecipe.py" in REGISTRY
+
+    def test_registry_contains_edi_mismatch_recipe(self):
+        assert "EdiMismatchRecipe.py" in REGISTRY
+
+    def test_registry_has_exactly_five_recipes(self):
+        assert len(REGISTRY) == 5
 
     def test_registry_names_match_allowed_recipe_name_literal(self):
         """Registry keys must stay in sync with AllowedRecipeName in specs.py."""

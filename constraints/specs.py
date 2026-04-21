@@ -8,6 +8,8 @@ AllowedIntent = Literal[
     "CREDIT_BLOCK",
     "MASS_PRICING_ERROR",
     "DUPLICATE_PO",
+    "PRICE_HOLD_RELEASE",
+    "EDI_MISMATCH",
 ]
 
 AllowedShadowStatus = Literal["GREEN", "YELLOW", "RED"]
@@ -16,6 +18,34 @@ AllowedRecipeName = Literal[
     "PriceAdjustmentRecipe.py",
     "CreditHoldReleaseRecipe.py",
     "DuplicatePORecipe.py",
+    "PriceHoldReleaseRecipe.py",
+    "EdiMismatchRecipe.py",
+]
+
+# EDI 850 line-mismatch sub_type vocabulary. PRICE_MISMATCH is intentionally
+# absent — those events route to CONTRACTUAL_CORRECTION / PriceAdjustmentRecipe.py
+# at classifier time, keeping pricing a single source of truth (CLAUDE.md §1).
+AllowedEdiMismatchSubType = Literal[
+    "SKU_MISMATCH",
+    "QTY_MISMATCH",
+    "UOM_MISMATCH",
+    "SHIP_TO_MISMATCH",
+]
+
+# Recipe output classification for EdiMismatchRecipe. Machine-consumed by
+# apply_effects / executor status mapping. CLAUDE.md §3 requires Literal gating.
+AllowedEdiMismatchClassification = Literal[
+    "HARD_REJECT",
+    "REVIEW",
+    "ESCALATE",
+]
+
+# Recipe output action for PriceHoldReleaseRecipe. Machine-consumed by
+# apply_effects (OMS update_hold_flag payload) and trace pipeline.
+AllowedPriceHoldAction = Literal[
+    "AUTO_RELEASE",
+    "ESCALATE",
+    "HARD_BLOCK",
 ]
 
 AllowedResolutionAction = Literal[

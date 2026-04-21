@@ -47,6 +47,8 @@ class TestRecipeModuleIntegrity:
         "PriceAdjustmentRecipe",
         "CreditHoldReleaseRecipe",
         "DuplicatePORecipe",
+        "PriceHoldReleaseRecipe",
+        "EdiMismatchRecipe",
     ]
 
     def test_recipe_directory_exists(self):
