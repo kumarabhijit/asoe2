@@ -326,6 +326,92 @@ class TestValidateTypesNode:
         result = validate_types(state)
         assert result.invocation is None
 
+    # --- PriceHoldReleaseRecipe ---------------------------------------------
+
+    def _price_hold_state(self, po_price: float = 101.0) -> GraphState:
+        state = _state(po_price=po_price, sap_base_price=100.0)
+        state.event.metadata["price_hold_status"] = "HELD"
+        state.selected_recipe = "PriceHoldReleaseRecipe.py"
+        return state
+
+    def test_price_hold_release_builds_invocation(self):
+        result = validate_types(self._price_hold_state())
+        assert result.invocation is not None
+        assert result.invocation.recipe_name == "PriceHoldReleaseRecipe.py"
+
+    def test_price_hold_release_required_params_present(self):
+        result = validate_types(self._price_hold_state())
+        for param in (
+            "order_id", "line_item", "po_price", "sap_base_price",
+            "tolerance_pct", "hard_block_pct", "hold_status",
+        ):
+            assert param in result.invocation.params
+
+    def test_price_hold_release_thresholds_injected_from_policy(self):
+        result = validate_types(self._price_hold_state())
+        # Defaults sourced from contracts/policy.py
+        assert result.invocation.params["tolerance_pct"] == 0.02
+        assert result.invocation.params["hard_block_pct"] == 0.10
+
+    def test_price_hold_release_metadata_tolerance_override(self):
+        state = self._price_hold_state()
+        state.event.metadata["tolerance_pct"] = 0.05
+        result = validate_types(state)
+        assert result.invocation.params["tolerance_pct"] == 0.05
+
+    def test_price_hold_release_hold_status_from_gateway_preferred(self):
+        state = self._price_hold_state()
+        state.resolved_data["price_hold_status"] = "HELD"
+        result = validate_types(state)
+        assert result.invocation.params["hold_status"] == "HELD"
+
+    # --- EdiMismatchRecipe --------------------------------------------------
+
+    def _edi_state(self, sub_type: str = "SKU_MISMATCH") -> GraphState:
+        state = _state()
+        state.event.metadata["mismatch_sub_type"] = sub_type
+        state.event.metadata["expected_value"] = "SKU-001"
+        state.event.metadata["received_value"] = "SKU-002"
+        state.selected_recipe = "EdiMismatchRecipe.py"
+        return state
+
+    def test_edi_mismatch_builds_invocation(self):
+        result = validate_types(self._edi_state())
+        assert result.invocation is not None
+        assert result.invocation.recipe_name == "EdiMismatchRecipe.py"
+
+    def test_edi_mismatch_required_params_present(self):
+        result = validate_types(self._edi_state())
+        for param in (
+            "order_id", "sub_type", "expected_value",
+            "received_value", "autonomy_levels",
+        ):
+            assert param in result.invocation.params
+
+    def test_edi_mismatch_autonomy_levels_injected(self):
+        result = validate_types(self._edi_state())
+        al = result.invocation.params["autonomy_levels"]
+        assert al["SKU_MISMATCH"] == "L3"
+        assert al["SHIP_TO_MISMATCH"] == "L1"
+
+    def test_edi_mismatch_sub_type_passthrough(self):
+        for st in ("SKU_MISMATCH", "QTY_MISMATCH", "UOM_MISMATCH", "SHIP_TO_MISMATCH"):
+            result = validate_types(self._edi_state(sub_type=st))
+            assert result.invocation.params["sub_type"] == st
+
+    # --- explicit else trap -------------------------------------------------
+
+    def test_unknown_recipe_fails_to_human_with_named_reason(self):
+        """validate_types must not silently produce invocation=None for a
+        known-but-unwired recipe name — that was the original silent-failure
+        trap at the orchestration layer."""
+        state = _state()
+        state.selected_recipe = "NotARealRecipe.py"
+        result = validate_types(state)
+        assert result.invocation is None
+        assert result.final_status == TerminalStatus.FAIL_TO_HUMAN
+        assert "NotARealRecipe.py" in (result.explanation or "")
+
 
 # ---------------------------------------------------------------------------
 # execute_recipe
