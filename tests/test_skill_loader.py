@@ -105,3 +105,73 @@ class TestDiscover:
         docs = SkillLoader(SKILLS_ROOT).discover()
         for doc in docs:
             assert doc.name and doc.name != "unknown-skill"
+
+
+# ---------------------------------------------------------------------------
+# select_for_event — PRICE_HOLD_RELEASE routing (ordering matters)
+# ---------------------------------------------------------------------------
+
+class TestPriceHoldReleaseRouting:
+    def test_edi_850_price_hold_routes_to_price_hold_skill(self):
+        doc = SkillLoader(SKILLS_ROOT).select_for_event("EDI_850_PRICE_HOLD")
+        assert doc.name == "price-hold-release"
+
+    def test_price_hold_beats_price_fallback(self):
+        """PRICE_HOLD must be matched before the broader PRICE fallback;
+        otherwise the pricing-reconciliation skill would swallow the event."""
+        doc = SkillLoader(SKILLS_ROOT).select_for_event("EDI_850_PRICE_HOLD")
+        assert doc.name != "pricing-reconciliation"
+
+    def test_price_hold_case_insensitive(self):
+        doc = SkillLoader(SKILLS_ROOT).select_for_event("edi_850_price_hold")
+        assert doc.name == "price-hold-release"
+
+
+# ---------------------------------------------------------------------------
+# select_for_event — EDI_MISMATCH routing with sub_type fork
+# ---------------------------------------------------------------------------
+
+class TestEdiMismatchRouting:
+    def test_line_mismatch_without_sub_type_routes_to_edi_skill(self):
+        doc = SkillLoader(SKILLS_ROOT).select_for_event("EDI_850_LINE_MISMATCH")
+        assert doc.name == "edi-mismatch"
+
+    def test_sku_mismatch_routes_to_edi_skill(self):
+        doc = SkillLoader(SKILLS_ROOT).select_for_event(
+            "EDI_850_LINE_MISMATCH",
+            metadata={"mismatch_sub_type": "SKU_MISMATCH"},
+        )
+        assert doc.name == "edi-mismatch"
+
+    def test_qty_mismatch_routes_to_edi_skill(self):
+        doc = SkillLoader(SKILLS_ROOT).select_for_event(
+            "EDI_850_LINE_MISMATCH",
+            metadata={"mismatch_sub_type": "QTY_MISMATCH"},
+        )
+        assert doc.name == "edi-mismatch"
+
+    def test_ship_to_mismatch_routes_to_edi_skill(self):
+        doc = SkillLoader(SKILLS_ROOT).select_for_event(
+            "EDI_850_LINE_MISMATCH",
+            metadata={"mismatch_sub_type": "SHIP_TO_MISMATCH"},
+        )
+        assert doc.name == "edi-mismatch"
+
+    def test_price_mismatch_forks_to_pricing_skill(self):
+        """PRICE_MISMATCH sub_type must route to pricing-reconciliation so
+        the skill text matches the CONTRACTUAL_CORRECTION intent that the
+        classifier assigns (single source of truth for pricing)."""
+        doc = SkillLoader(SKILLS_ROOT).select_for_event(
+            "EDI_850_LINE_MISMATCH",
+            metadata={"mismatch_sub_type": "PRICE_MISMATCH"},
+        )
+        assert doc.name == "pricing-reconciliation"
+
+    def test_metadata_absent_defaults_to_edi_skill(self):
+        """When metadata is None (old callers), fallback must still pick the
+        EDI mismatch skill — never silently route to pricing."""
+        doc = SkillLoader(SKILLS_ROOT).select_for_event(
+            "EDI_850_LINE_MISMATCH",
+            metadata=None,
+        )
+        assert doc.name == "edi-mismatch"

@@ -27,6 +27,8 @@ class TestEnums:
             Intent.CREDIT_BLOCK,
             Intent.MASS_PRICING_ERROR,
             Intent.DUPLICATE_PO,
+            Intent.PRICE_HOLD_RELEASE,
+            Intent.EDI_MISMATCH,
             Intent.UNKNOWN,
         }
 

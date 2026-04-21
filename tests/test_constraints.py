@@ -120,7 +120,7 @@ class TestFallbackRecipeProposal:
 class TestGuidanceRegexBackend:
     def test_intent_regex_is_correct(self):
         g = GuidanceRegexBackend()
-        assert g.intent_regex() == r"CONTRACTUAL_CORRECTION|CREDIT_BLOCK|MASS_PRICING_ERROR|DUPLICATE_PO"
+        assert g.intent_regex() == r"CONTRACTUAL_CORRECTION|CREDIT_BLOCK|MASS_PRICING_ERROR|DUPLICATE_PO|PRICE_HOLD_RELEASE|EDI_MISMATCH"
 
     def test_shadow_verdict_regex_is_correct(self):
         g = GuidanceRegexBackend()
@@ -128,7 +128,7 @@ class TestGuidanceRegexBackend:
 
     def test_recipe_name_regex_is_correct(self):
         g = GuidanceRegexBackend()
-        assert g.recipe_name_regex() == r"PriceAdjustmentRecipe\.py|CreditHoldReleaseRecipe\.py|DuplicatePORecipe\.py"
+        assert g.recipe_name_regex() == r"PriceAdjustmentRecipe\.py|CreditHoldReleaseRecipe\.py|DuplicatePORecipe\.py|PriceHoldReleaseRecipe\.py|EdiMismatchRecipe\.py"
 
     def test_intent_regex_matches_all_allowed_values(self):
         pattern = re.compile(GuidanceRegexBackend().intent_regex())

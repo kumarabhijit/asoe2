@@ -105,3 +105,32 @@ instead of RESOLVED; a different manager+ must then POST to
 /exceptions/{id}/override/cosign to approve (applies the action) or reject
 (restores prior lifecycle). Standard SOX control under §404 — any single
 manager cannot unilaterally authorize a material change."""
+
+# ---------------------------------------------------------------------------
+# Price Hold Release thresholds
+# ---------------------------------------------------------------------------
+
+PRICE_HOLD_TOLERANCE_PCT: float = 0.02
+"""Absolute variance (decimal fraction) at or below which a held order may
+be auto-released without review. Variance is |po_price − sap_base_price| /
+sap_base_price."""
+
+PRICE_HOLD_HARD_BLOCK_PCT: float = 0.10
+"""Absolute variance above which a held order is hard-blocked (REJECTED)
+rather than escalated to manual review. Between tolerance and hard-block,
+the order is escalated (MANUAL_REVIEW_REQUIRED)."""
+
+# ---------------------------------------------------------------------------
+# EDI Mismatch autonomy levels (per sub_type)
+# ---------------------------------------------------------------------------
+
+EDI_MISMATCH_AUTONOMY_LEVELS: dict[str, str] = {
+    "SKU_MISMATCH": "L3",
+    "QTY_MISMATCH": "L2",
+    "UOM_MISMATCH": "L2",
+    "SHIP_TO_MISMATCH": "L1",
+}
+"""Maps EDI 850 line-mismatch sub_type → autonomy level. L1 = observe only,
+L2 = recommend (human must approve), L3 = act & inform. PRICE_MISMATCH is
+absent by design — those events are routed to CONTRACTUAL_CORRECTION /
+PriceAdjustmentRecipe.py at classifier time and never reach this recipe."""

@@ -42,7 +42,9 @@ def intent_prompt(event: Dict[str, Any]) -> str:
         "  - CONTRACTUAL_CORRECTION\n"
         "  - CREDIT_BLOCK\n"
         "  - MASS_PRICING_ERROR\n"
-        "  - DUPLICATE_PO\n\n"
+        "  - DUPLICATE_PO\n"
+        "  - PRICE_HOLD_RELEASE\n"
+        "  - EDI_MISMATCH\n\n"
         "Return JSON conforming to IntentDecision schema: "
         '{"intent": "<value>", "confidence": <0.0-1.0>, "rationale": "<string>"}'
     )
@@ -57,6 +59,8 @@ def recipe_prompt(intent: str) -> str:
         "  - PriceAdjustmentRecipe.py       (for CONTRACTUAL_CORRECTION)\n"
         "  - CreditHoldReleaseRecipe.py     (for CREDIT_BLOCK)\n"
         "  - DuplicatePORecipe.py           (for DUPLICATE_PO)\n"
+        "  - PriceHoldReleaseRecipe.py      (for PRICE_HOLD_RELEASE)\n"
+        "  - EdiMismatchRecipe.py           (for EDI_MISMATCH)\n"
         "  NOTE: MASS_PRICING_ERROR has no recipe — return null.\n\n"
         "Return JSON conforming to RecipeProposal schema: "
         '{"recipe_name": "<value>"}'
@@ -76,6 +80,9 @@ def shadow_prompt(intent: str, line_count: int, batch_variance: float) -> str:
         "  - line_count > 10                       → RED (mass update risk)\n"
         "  - batch_total_variance > 10000          → RED (circuit breaker)\n"
         "  - CREDIT_BLOCK                          → YELLOW (manual review)\n"
+        "  - PRICE_HOLD_RELEASE                    → GREEN/YELLOW/RED by |variance| vs tolerance\n"
+        "  - EDI_MISMATCH (SKU_MISMATCH)           → RED (hard reject)\n"
+        "  - EDI_MISMATCH (QTY/UOM/SHIP_TO)        → YELLOW (manual review)\n"
         "  - otherwise                             → GREEN\n\n"
         "Return JSON conforming to ShadowDecisionSchema: "
         '{"status": "<GREEN|YELLOW|RED>", "reasons": ["..."], "policy_hits": ["..."]}'

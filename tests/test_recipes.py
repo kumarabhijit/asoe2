@@ -914,3 +914,232 @@ class TestRecipePolicyDecoupling:
         assert not self._has_policy_import(mod), (
             "DuplicatePORecipe must not import from contracts.policy"
         )
+
+
+# ---------------------------------------------------------------------------
+# PriceHoldReleaseRecipe
+# ---------------------------------------------------------------------------
+
+from recipes.PriceHoldReleaseRecipe import execute_price_hold_release
+
+
+class TestPriceHoldReleaseRecipe:
+    def _call(self, *, po_price: float, sap_base_price: float = 100.0,
+              tolerance: float = 0.02, hard_block: float = 0.10,
+              hold_status: str = "HELD"):
+        return execute_price_hold_release(
+            order_id="SO-9001", line_item=1,
+            po_price=po_price, sap_base_price=sap_base_price,
+            tolerance_pct=tolerance, hard_block_pct=hard_block,
+            hold_status=hold_status,
+        )
+
+    # -- auto-release (within tolerance) -------------------------------------
+
+    def test_variance_at_zero_auto_releases(self):
+        r = self._call(po_price=100.0)
+        assert r["status"] == "RELEASED"
+        assert r["action"] == "AUTO_RELEASE"
+        assert r["variance_pct"] == 0.0
+
+    def test_variance_within_tolerance_auto_releases(self):
+        r = self._call(po_price=101.5)  # 1.5% variance
+        assert r["status"] == "RELEASED"
+        assert r["action"] == "AUTO_RELEASE"
+
+    def test_variance_at_tolerance_boundary_auto_releases(self):
+        r = self._call(po_price=102.0)  # exactly 2%
+        assert r["status"] == "RELEASED"
+
+    # -- escalate (between tolerance and hard_block) -------------------------
+
+    def test_variance_above_tolerance_escalates(self):
+        r = self._call(po_price=105.0)  # 5% variance
+        assert r["status"] == "REVIEW_REQUIRED"
+        assert r["action"] == "ESCALATE"
+
+    def test_variance_at_hard_block_boundary_escalates(self):
+        r = self._call(po_price=110.0)  # exactly 10%
+        assert r["status"] == "REVIEW_REQUIRED"
+        assert r["action"] == "ESCALATE"
+
+    def test_negative_variance_escalates_by_absolute_value(self):
+        r = self._call(po_price=95.0)  # -5% — abs value triggers escalate
+        assert r["status"] == "REVIEW_REQUIRED"
+        assert r["action"] == "ESCALATE"
+        assert r["variance_pct"] == -0.05
+
+    # -- hard-block (above hard_block) ---------------------------------------
+
+    def test_variance_above_hard_block_rejects(self):
+        r = self._call(po_price=115.0)  # 15% variance
+        assert r["status"] == "REJECTED"
+        assert r["action"] == "HARD_BLOCK"
+
+    def test_large_negative_variance_rejects(self):
+        r = self._call(po_price=50.0)  # -50%
+        assert r["status"] == "REJECTED"
+        assert r["action"] == "HARD_BLOCK"
+
+    # -- failure cases -------------------------------------------------------
+
+    def test_hold_status_not_held_returns_failed(self):
+        r = self._call(po_price=100.0, hold_status="RELEASED")
+        assert r["status"] == "FAILED"
+        assert "HELD" in r["reason"]
+
+    def test_tolerance_not_less_than_hard_block_raises(self):
+        import pytest
+        with pytest.raises(AssertionError):
+            execute_price_hold_release(
+                order_id="SO-9002", line_item=1,
+                po_price=100.0, sap_base_price=100.0,
+                tolerance_pct=0.10, hard_block_pct=0.05,
+                hold_status="HELD",
+            )
+
+    # -- payload shape --------------------------------------------------------
+
+    def test_payload_contains_action_and_variance(self):
+        r = self._call(po_price=101.0)
+        payload = r["payload"]
+        assert payload["OrderID"] == "SO-9001"
+        assert payload["Action"] == "AUTO_RELEASE"
+        assert payload["VariancePct"] == 0.01
+
+    def test_requester_role_passed_through(self):
+        r = execute_price_hold_release(
+            order_id="SO-9001", line_item=1,
+            po_price=100.0, sap_base_price=100.0,
+            tolerance_pct=0.02, hard_block_pct=0.10,
+            hold_status="HELD",
+            requester_role="ORDER_MANAGER",
+        )
+        assert r["payload"]["RequesterRole"] == "ORDER_MANAGER"
+
+    # -- purity --------------------------------------------------------------
+
+    def test_no_policy_import(self):
+        import inspect
+        mod = inspect.getmodule(execute_price_hold_release)
+        src = inspect.getsource(mod)
+        assert "from contracts.policy" not in src, (
+            "PriceHoldReleaseRecipe must not import from contracts.policy"
+        )
+
+
+# ---------------------------------------------------------------------------
+# EdiMismatchRecipe
+# ---------------------------------------------------------------------------
+
+from recipes.EdiMismatchRecipe import detect_edi_mismatch
+
+
+class TestEdiMismatchRecipe:
+    _AUTONOMY = {
+        "SKU_MISMATCH": "L3",
+        "QTY_MISMATCH": "L2",
+        "UOM_MISMATCH": "L2",
+        "SHIP_TO_MISMATCH": "L1",
+    }
+
+    def _call(self, sub_type: str, *, expected="x", received="y"):
+        return detect_edi_mismatch(
+            order_id="SO-EDM-1",
+            sub_type=sub_type,
+            expected_value=expected,
+            received_value=received,
+            autonomy_levels=self._AUTONOMY,
+        )
+
+    # -- SKU_MISMATCH → hard reject -----------------------------------------
+
+    def test_sku_mismatch_hard_rejects(self):
+        r = self._call("SKU_MISMATCH", expected="SKU-001", received="SKU-002")
+        assert r["status"] == "REJECTED"
+        assert r["classification"] == "HARD_REJECT"
+        assert r["recommended_action"] == "BLOCK_AND_NOTIFY"
+
+    def test_sku_mismatch_has_notification_template(self):
+        r = self._call("SKU_MISMATCH")
+        assert r["notification_template"] == "edi_line_mismatch_blocked"
+
+    def test_sku_mismatch_autonomy_level(self):
+        r = self._call("SKU_MISMATCH")
+        assert r["autonomy_level"] == "L3"
+
+    # -- QTY_MISMATCH / UOM_MISMATCH → review ------------------------------
+
+    def test_qty_mismatch_requires_review(self):
+        r = self._call("QTY_MISMATCH", expected=10, received=12)
+        assert r["status"] == "REVIEW_REQUIRED"
+        assert r["classification"] == "REVIEW"
+        assert r["recommended_action"] == "REQUEST_BUYER_CONFIRMATION"
+
+    def test_uom_mismatch_requires_review(self):
+        r = self._call("UOM_MISMATCH", expected="EA", received="CS")
+        assert r["status"] == "REVIEW_REQUIRED"
+        assert r["classification"] == "REVIEW"
+
+    def test_qty_mismatch_autonomy_level(self):
+        r = self._call("QTY_MISMATCH")
+        assert r["autonomy_level"] == "L2"
+
+    # -- SHIP_TO_MISMATCH → escalate ----------------------------------------
+
+    def test_ship_to_mismatch_escalates(self):
+        r = self._call("SHIP_TO_MISMATCH", expected="W-01", received="W-02")
+        assert r["status"] == "REVIEW_REQUIRED"
+        assert r["classification"] == "ESCALATE"
+        assert r["recommended_action"] == "ESCALATE"
+
+    def test_ship_to_mismatch_no_notification(self):
+        r = self._call("SHIP_TO_MISMATCH")
+        assert r["notification_template"] is None
+
+    def test_ship_to_mismatch_autonomy_l1(self):
+        r = self._call("SHIP_TO_MISMATCH")
+        assert r["autonomy_level"] == "L1"
+
+    # -- unknown sub_type → FAILED (routes to FAIL_TO_HUMAN upstream) ------
+
+    def test_unknown_sub_type_returns_failed(self):
+        r = self._call("WEIRD_SUB_TYPE")
+        assert r["status"] == "FAILED"
+        assert r["classification"] is None
+        assert "WEIRD_SUB_TYPE" in r["reason"]
+
+    def test_price_mismatch_never_reaches_recipe(self):
+        # PRICE_MISMATCH is routed to CONTRACTUAL_CORRECTION at classifier
+        # time. If it ever reaches this recipe (a routing bug), we fail
+        # explicitly rather than silently classifying.
+        r = self._call("PRICE_MISMATCH")
+        assert r["status"] == "FAILED"
+
+    # -- echoes preserved for audit -----------------------------------------
+
+    def test_expected_received_echoed(self):
+        r = self._call("QTY_MISMATCH", expected=10, received=12)
+        assert r["expected_value"] == 10
+        assert r["received_value"] == 12
+
+    # -- coverage guarantee (CLAUDE.md §3) ----------------------------------
+
+    def test_every_accepted_sub_type_has_a_branch(self):
+        from recipes.EdiMismatchRecipe import _CLASSIFICATION_BY_SUB_TYPE
+        for sub_type in _CLASSIFICATION_BY_SUB_TYPE:
+            r = self._call(sub_type)
+            assert r["status"] != "FAILED", (
+                f"Accepted sub_type {sub_type!r} must not return FAILED"
+            )
+            assert r["classification"] is not None
+
+    # -- purity --------------------------------------------------------------
+
+    def test_no_policy_import(self):
+        import inspect
+        mod = inspect.getmodule(detect_edi_mismatch)
+        src = inspect.getsource(mod)
+        assert "from contracts.policy" not in src, (
+            "EdiMismatchRecipe must not import from contracts.policy"
+        )

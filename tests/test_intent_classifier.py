@@ -20,7 +20,14 @@ from constraints.specs import IntentDecision
 from skills.intent_classifier import IntentClassifier
 
 
-ALLOWED_INTENTS = {"CONTRACTUAL_CORRECTION", "CREDIT_BLOCK", "MASS_PRICING_ERROR"}
+ALLOWED_INTENTS = {
+    "CONTRACTUAL_CORRECTION",
+    "CREDIT_BLOCK",
+    "MASS_PRICING_ERROR",
+    "DUPLICATE_PO",
+    "PRICE_HOLD_RELEASE",
+    "EDI_MISMATCH",
+}
 
 
 # ---------------------------------------------------------------------------

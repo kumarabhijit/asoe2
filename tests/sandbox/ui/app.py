@@ -266,6 +266,8 @@ def _load_skill_text(intent: str) -> Optional[str]:
         "CREDIT_BLOCK":           "pricing-reconciliation_SKILL.md",
         "MASS_PRICING_ERROR":     "pricing-reconciliation_SKILL.md",
         "DUPLICATE_PO":           "duplicate-po_SKILL.md",
+        "PRICE_HOLD_RELEASE":     "price-hold-release_SKILL.md",
+        "EDI_MISMATCH":           "edi-mismatch_SKILL.md",
     }
     filename = mapping.get(intent)
     if not filename:
@@ -313,6 +315,10 @@ def _intent_label(row: Dict[str, Any]) -> str:
         return "MASS_PRICING_ERROR"
     if evt_id.startswith("EVT-DPO-"):
         return "DUPLICATE_PO"
+    if evt_id.startswith("EVT-PHR-"):
+        return "PRICE_HOLD_RELEASE"
+    if evt_id.startswith("EVT-EDM-"):
+        return "EDI_MISMATCH"
     return "UNKNOWN"
 
 
@@ -413,12 +419,24 @@ def _render_sidebar() -> Optional[OrderEvent]:
         event_type  = st.selectbox("event_type", [
             "EDI_850_PRICE_MISMATCH",
             "EDI_850_DUPLICATE_PO",
+            "EDI_850_PRICE_HOLD",
+            "EDI_850_LINE_MISMATCH",
         ])
         sku         = st.text_input("sku",            value="SKU-001")
         po_price    = st.number_input("po_price",     value=90.0, step=0.01)
         sap_price   = st.number_input("sap_price",    value=100.0, step=0.01)
         retailer_id = st.text_input("retailer_id",    value="R-01")
         line_count  = st.number_input("line_count",   value=1, min_value=1, step=1)
+        # Sub-type chooser for line mismatches; includes PRICE_MISMATCH so
+        # the routing fork to CONTRACTUAL_CORRECTION can be demonstrated.
+        mismatch_sub_type = st.selectbox("mismatch_sub_type", [
+            "(none)",
+            "SKU_MISMATCH",
+            "QTY_MISMATCH",
+            "UOM_MISMATCH",
+            "SHIP_TO_MISMATCH",
+            "PRICE_MISMATCH",
+        ])
         submitted   = st.form_submit_button("▶  Run event", type="primary")
 
     if submitted:
@@ -429,6 +447,13 @@ def _render_sidebar() -> Optional[OrderEvent]:
                 "amount": 1.0, "timestamp": 0.5, "ship_to": 1.0,
                 "channel": 1.0, "delivery_date": 1.0,
             }
+        elif event_type == "EDI_850_PRICE_HOLD":
+            metadata["price_hold_status"] = "HELD"
+        elif event_type == "EDI_850_LINE_MISMATCH":
+            if mismatch_sub_type and mismatch_sub_type != "(none)":
+                metadata["mismatch_sub_type"] = mismatch_sub_type
+            metadata.setdefault("expected_value", "expected-x")
+            metadata.setdefault("received_value", "received-y")
         return OrderEvent(
             order_id=order_id,
             event_type=event_type,

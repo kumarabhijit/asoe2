@@ -6,7 +6,9 @@ from typing import Any, Callable, Dict, Tuple
 from contracts.models import GatewayDependency, GatewayEffect
 from recipes.CreditHoldReleaseRecipe import release_credit_hold
 from recipes.DuplicatePORecipe import detect_duplicate_po
+from recipes.EdiMismatchRecipe import detect_edi_mismatch
 from recipes.PriceAdjustmentRecipe import execute_price_correction
+from recipes.PriceHoldReleaseRecipe import execute_price_hold_release
 
 
 @dataclass(frozen=True)
@@ -63,6 +65,56 @@ REGISTRY = {
                     "template": "notification_template",
                     "po_number": "incoming_po_number",
                     "customer_id": "customer_id",
+                },
+            ),
+        ),
+    ),
+    "PriceHoldReleaseRecipe.py": RecipeSpec(
+        name="PriceHoldReleaseRecipe.py",
+        func=execute_price_hold_release,
+        required_params=(
+            "order_id", "line_item", "po_price", "sap_base_price",
+            "tolerance_pct", "hard_block_pct", "hold_status",
+        ),
+        allowed_intents=("PRICE_HOLD_RELEASE",),
+        expected_metadata_keys=("price_hold_status",),
+        dependencies=(
+            GatewayDependency(
+                gateway_name="oms",
+                operation="get_price_hold_status",
+                params_from_state={"order_id": "event.order_id"},
+                result_key="price_hold_status",
+            ),
+        ),
+        effects=(
+            GatewayEffect(
+                gateway_name="oms",
+                operation="update_hold_flag",
+                params_from_output={
+                    "order_id": "order_id",
+                    "action": "action",
+                },
+            ),
+        ),
+    ),
+    "EdiMismatchRecipe.py": RecipeSpec(
+        name="EdiMismatchRecipe.py",
+        func=detect_edi_mismatch,
+        required_params=(
+            "order_id", "sub_type", "expected_value",
+            "received_value", "autonomy_levels",
+        ),
+        allowed_intents=("EDI_MISMATCH",),
+        expected_metadata_keys=(
+            "mismatch_sub_type", "expected_value", "received_value",
+        ),
+        effects=(
+            GatewayEffect(
+                gateway_name="buyer_notification",
+                operation="send",
+                params_from_output={
+                    "template": "notification_template",
+                    "order_id": "order_id",
                 },
             ),
         ),

@@ -44,8 +44,11 @@ from contracts.policy import (
     DUPLICATE_PO_THRESHOLD_AUTO_BLOCK,
     DUPLICATE_PO_THRESHOLD_REVIEW_REQUIRED,
     DUPLICATE_PO_THRESHOLD_SOFT_FLAG,
+    EDI_MISMATCH_AUTONOMY_LEVELS,
     MAX_DISCOUNT_ALLOWED,
     PRICE_CONDITION_TYPE,
+    PRICE_HOLD_HARD_BLOCK_PCT,
+    PRICE_HOLD_TOLERANCE_PCT,
 )
 
 
@@ -140,7 +143,10 @@ def classify(state: GraphState) -> GraphState:
 
 def load_skill(state: GraphState) -> GraphState:
     loader = SkillLoader("skills")
-    state.skill = loader.select_for_event(state.event.event_type)
+    state.skill = loader.select_for_event(
+        state.event.event_type,
+        metadata=state.event.metadata,
+    )
     return state
 
 
@@ -254,6 +260,55 @@ def validate_types(state: GraphState) -> GraphState:
                 "line_items_identical": matched_details.get("line_items_identical", None),
                 "autonomy_levels": DUPLICATE_PO_AUTONOMY_LEVELS,
             },
+        )
+    elif state.selected_recipe == "PriceHoldReleaseRecipe.py":
+        # Optional per-event tolerance override via metadata.tolerance_pct.
+        tolerance = state.event.metadata.get(
+            "tolerance_pct", PRICE_HOLD_TOLERANCE_PCT
+        )
+        # Prefer the live gateway result (oms/get_price_hold_status returns
+        # {"status": "HELD"}); fall back to metadata when the gateway response
+        # lacks that key — matches the DuplicatePO resolved_data pattern.
+        gateway_result = state.resolved_data.get("price_hold_status", {})
+        hold_status = (
+            gateway_result.get("status")
+            if isinstance(gateway_result, dict) else None
+        ) or state.event.metadata.get("price_hold_status", "HELD")
+        state.invocation = RecipeInvocation(
+            recipe_name=state.selected_recipe,
+            params={
+                "order_id": state.event.order_id,
+                "line_item": state.event.line_item,
+                "po_price": state.event.po_price,
+                "sap_base_price": state.event.sap_base_price,
+                "tolerance_pct": tolerance,
+                "hard_block_pct": PRICE_HOLD_HARD_BLOCK_PCT,
+                "hold_status": hold_status,
+                "requester_role": state.event.requester_role,
+            },
+        )
+    elif state.selected_recipe == "EdiMismatchRecipe.py":
+        state.invocation = RecipeInvocation(
+            recipe_name=state.selected_recipe,
+            params={
+                "order_id": state.event.order_id,
+                "sub_type": state.event.metadata.get("mismatch_sub_type"),
+                "expected_value": state.event.metadata.get("expected_value"),
+                "received_value": state.event.metadata.get("received_value"),
+                "autonomy_levels": EDI_MISMATCH_AUTONOMY_LEVELS,
+            },
+        )
+    elif state.selected_recipe is not None:
+        # Explicit failure — a known recipe name with no validate_types branch
+        # is a routing bug, not a business exception. Route FAIL_TO_HUMAN with
+        # the offending recipe name instead of silently producing
+        # state.invocation=None and letting execute_recipe emit a generic error.
+        # selected_recipe=None is already handled upstream by select_recipe.
+        state.final_status = TerminalStatus.FAIL_TO_HUMAN
+        state.explanation = (
+            f"validate_types has no branch for selected_recipe="
+            f"{state.selected_recipe!r}; refusing to execute an unvalidated "
+            f"invocation."
         )
     return state
 
