@@ -654,6 +654,173 @@ _EDI_EVENTS = [
             "note": "EC08 — batch PO 3 of 3, no existing match",
         }),
     },
+
+    # ======================================================================
+    # PRICE_HOLD_RELEASE — variance vs tolerance/hard_block thresholds
+    # ======================================================================
+
+    # PHR-001: 1% variance -> AUTO_RELEASE (within 2% tolerance)
+    {
+        "event_id":    "EVT-PHR-001",
+        "event_type":  "EDI_850_PRICE_HOLD",
+        "order_id":    "PO-PHR-001",
+        "retailer_id": "R-01",
+        "sku":         "SKU-101",
+        "po_price":    101.0,
+        "sap_price":   100.0,
+        "line_count":  1,
+        "dc_id":       "DC-EAST-01",
+        "metadata":    json.dumps({
+            "price_hold_status": "HELD",
+            "note": "1% variance — auto-release branch",
+        }),
+    },
+    # PHR-002: 5% variance -> ESCALATE (tolerance < variance <= hard_block)
+    {
+        "event_id":    "EVT-PHR-002",
+        "event_type":  "EDI_850_PRICE_HOLD",
+        "order_id":    "PO-PHR-002",
+        "retailer_id": "R-02",
+        "sku":         "SKU-102",
+        "po_price":    105.0,
+        "sap_price":   100.0,
+        "line_count":  1,
+        "dc_id":       "DC-WEST-01",
+        "metadata":    json.dumps({
+            "price_hold_status": "HELD",
+            "note": "5% variance — manager escalation branch",
+        }),
+    },
+    # PHR-003: 15% variance -> HARD_BLOCK (exceeds hard_block ceiling)
+    {
+        "event_id":    "EVT-PHR-003",
+        "event_type":  "EDI_850_PRICE_HOLD",
+        "order_id":    "PO-PHR-003",
+        "retailer_id": "R-03",
+        "sku":         "SKU-103",
+        "po_price":    115.0,
+        "sap_price":   100.0,
+        "line_count":  1,
+        "dc_id":       "DC-MIDWEST-01",
+        "metadata":    json.dumps({
+            "price_hold_status": "HELD",
+            "note": "15% variance — hard-block / admin-release branch",
+        }),
+    },
+
+    # ======================================================================
+    # EDI_MISMATCH — sub_type-driven classification
+    # Different retailers per event to stress by_intent × by_tenant stats.
+    # ======================================================================
+
+    # EDM-001: SKU mismatch -> HARD_REJECT
+    {
+        "event_id":    "EVT-EDM-001",
+        "event_type":  "EDI_850_LINE_MISMATCH",
+        "order_id":    "PO-EDM-001",
+        "retailer_id": "R-01",
+        "sku":         "SKU-201",
+        "po_price":    100.0,
+        "sap_price":   100.0,
+        "line_count":  1,
+        "dc_id":       "DC-EAST-01",
+        "metadata":    json.dumps({
+            "mismatch_sub_type": "SKU_MISMATCH",
+            "expected_value":    "SKU-201",
+            "received_value":    "SKU-999",
+        }),
+    },
+    # EDM-002: Quantity mismatch -> REVIEW
+    {
+        "event_id":    "EVT-EDM-002",
+        "event_type":  "EDI_850_LINE_MISMATCH",
+        "order_id":    "PO-EDM-002",
+        "retailer_id": "R-02",
+        "sku":         "SKU-202",
+        "po_price":    50.0,
+        "sap_price":   50.0,
+        "line_count":  1,
+        "dc_id":       "DC-WEST-01",
+        "metadata":    json.dumps({
+            "mismatch_sub_type": "QTY_MISMATCH",
+            "expected_value":    120,
+            "received_value":    144,
+        }),
+    },
+    # EDM-003: UoM mismatch -> REVIEW
+    {
+        "event_id":    "EVT-EDM-003",
+        "event_type":  "EDI_850_LINE_MISMATCH",
+        "order_id":    "PO-EDM-003",
+        "retailer_id": "R-03",
+        "sku":         "SKU-203",
+        "po_price":    12.0,
+        "sap_price":   12.0,
+        "line_count":  1,
+        "dc_id":       "DC-MIDWEST-01",
+        "metadata":    json.dumps({
+            "mismatch_sub_type": "UOM_MISMATCH",
+            "expected_value":    "EA",
+            "received_value":    "CS",
+        }),
+    },
+    # EDM-004: Ship-to mismatch -> ESCALATE
+    {
+        "event_id":    "EVT-EDM-004",
+        "event_type":  "EDI_850_LINE_MISMATCH",
+        "order_id":    "PO-EDM-004",
+        "retailer_id": "R-01",
+        "sku":         "SKU-204",
+        "po_price":    80.0,
+        "sap_price":   80.0,
+        "line_count":  1,
+        "dc_id":       "DC-EAST-01",
+        "metadata":    json.dumps({
+            "mismatch_sub_type": "SHIP_TO_MISMATCH",
+            "expected_value":    "W-01",
+            "received_value":    "W-02",
+        }),
+    },
+    # EDM-005: PRICE_MISMATCH -> re-routed by classifier to
+    # CONTRACTUAL_CORRECTION / PriceAdjustmentRecipe.py (pricing single
+    # source of truth, CLAUDE.md §1). Lands as CONTRACTUAL_CORRECTION, NOT
+    # EDI_MISMATCH — useful to demonstrate the routing fork in the sandbox.
+    {
+        "event_id":    "EVT-EDM-005",
+        "event_type":  "EDI_850_LINE_MISMATCH",
+        "order_id":    "PO-EDM-005",
+        "retailer_id": "R-02",
+        "sku":         "SKU-205",
+        "po_price":    95.0,
+        "sap_price":   100.0,
+        "line_count":  1,
+        "dc_id":       "DC-WEST-01",
+        "metadata":    json.dumps({
+            "mismatch_sub_type": "PRICE_MISMATCH",
+            "expected_value":    100.0,
+            "received_value":    95.0,
+            "note": "Routes to CONTRACTUAL_CORRECTION at classifier time.",
+        }),
+    },
+    # EDM-006: invalid sub_type -> recipe returns FAILED -> FAIL_TO_HUMAN.
+    # Demonstrates the constrained-generation guarantee at the sandbox level.
+    {
+        "event_id":    "EVT-EDM-006",
+        "event_type":  "EDI_850_LINE_MISMATCH",
+        "order_id":    "PO-EDM-006",
+        "retailer_id": "R-03",
+        "sku":         "SKU-206",
+        "po_price":    40.0,
+        "sap_price":   40.0,
+        "line_count":  1,
+        "dc_id":       "DC-MIDWEST-01",
+        "metadata":    json.dumps({
+            "mismatch_sub_type": "BAD_VALUE_NOT_IN_LITERAL",
+            "expected_value":    "foo",
+            "received_value":    "bar",
+            "note": "Exercises pydantic-validation FAIL_TO_HUMAN path.",
+        }),
+    },
 ]
 
 

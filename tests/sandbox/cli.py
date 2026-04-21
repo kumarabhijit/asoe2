@@ -273,6 +273,14 @@ def _intent_label(row: Dict[str, Any]) -> str:
         return "MASS_PRICING_ERROR"
     if evt_id.startswith("EVT-DPO-"):
         return "DUPLICATE_PO"
+    if evt_id.startswith("EVT-PHR-"):
+        return "PRICE_HOLD_RELEASE"
+    if evt_id.startswith("EVT-EDM-"):
+        # EVT-EDM-005 demonstrates the PRICE_MISMATCH fork at classifier
+        # time; it lands as CONTRACTUAL_CORRECTION, not EDI_MISMATCH. The
+        # prefix-only label here is a hint, not an oracle — inspect
+        # metadata.mismatch_sub_type for the actual routing.
+        return "EDI_MISMATCH"
     return "UNKNOWN"
 
 
@@ -632,6 +640,8 @@ def main() -> int:
             "CREDIT_BLOCK": "EVT-CB-",
             "MASS_PRICING_ERROR": "EVT-MPE-",
             "DUPLICATE_PO": "EVT-DPO-",
+            "PRICE_HOLD_RELEASE": "EVT-PHR-",
+            "EDI_MISMATCH": "EVT-EDM-",
         }
         prefix = intent_prefix_map.get(args.intent.upper())
         if not prefix:
