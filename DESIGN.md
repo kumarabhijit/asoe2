@@ -19,11 +19,16 @@ skills/
   *.md               # Skill definition files (loaded verbatim, never summarised)
 
 recipes/
-  PriceAdjustmentRecipe.py   # CONTRACTUAL_CORRECTION / MASS_PRICING_ERROR
-  CreditHoldReleaseRecipe.py # CREDIT_BLOCK
-  DuplicatePORecipe.py       # DUPLICATE_PO
-  PriceHoldReleaseRecipe.py  # PRICE_HOLD_RELEASE — EDI 850 pricing-block disposition
-  EdiMismatchRecipe.py       # EDI_MISMATCH — SKU/QTY/UOM/SHIP_TO sub_type classification
+  PriceAdjustmentRecipe.py      # CONTRACTUAL_CORRECTION / MASS_PRICING_ERROR
+  CreditHoldReleaseRecipe.py    # CREDIT_BLOCK
+  DuplicatePORecipe.py          # DUPLICATE_PO
+  PriceHoldReleaseRecipe.py     # PRICE_HOLD_RELEASE — EDI 850 pricing-block disposition
+  EdiMismatchRecipe.py          # EDI_MISMATCH — SKU/QTY/UOM/SHIP_TO sub_type classification
+  BackOrderResolutionRecipe.py  # BACK_ORDER — OOS gap classification + ranked resolution options
+  OverMaxTrimRecipe.py          # OVER_MAX — per-line trim plan for contract-max exceedance
+  MOQRoundUpRecipe.py           # MIN_ORDER_QTY — round-up / accept-below / escalate decision
+  PalletAlignmentRecipe.py      # PALLET_CONFIG — broken-layer / partial-pallet alignment
+  DeliveryDelayResolutionRecipe.py # DELIVERY_DELAY — severity + ranked expedite/split/reschedule
   registry.py        # Recipe registry (name → spec mapping)
   executor.py        # RecipeExecutor — dispatches to registered recipes
 
@@ -182,9 +187,9 @@ If `OutlinesConstrainedBackend` fails to initialise (missing `outlines` package)
 
 | Schema | Constrained field | Allowed values |
 |---|---|---|
-| `IntentDecision` | `AllowedIntent` | `CONTRACTUAL_CORRECTION`, `CREDIT_BLOCK`, `MASS_PRICING_ERROR`, `DUPLICATE_PO`, `PRICE_HOLD_RELEASE`, `EDI_MISMATCH` |
+| `IntentDecision` | `AllowedIntent` | `CONTRACTUAL_CORRECTION`, `CREDIT_BLOCK`, `MASS_PRICING_ERROR`, `DUPLICATE_PO`, `PRICE_HOLD_RELEASE`, `EDI_MISMATCH`, `BACK_ORDER`, `OVER_MAX`, `MIN_ORDER_QTY`, `PALLET_CONFIG`, `DELIVERY_DELAY` |
 | `ShadowDecision` | `AllowedShadowStatus` | `GREEN`, `YELLOW`, `RED` |
-| `RecipeProposal` | `AllowedRecipeName` | `PriceAdjustmentRecipe.py`, `CreditHoldReleaseRecipe.py`, `DuplicatePORecipe.py`, `PriceHoldReleaseRecipe.py`, `EdiMismatchRecipe.py` |
+| `RecipeProposal` | `AllowedRecipeName` | `PriceAdjustmentRecipe.py`, `CreditHoldReleaseRecipe.py`, `DuplicatePORecipe.py`, `PriceHoldReleaseRecipe.py`, `EdiMismatchRecipe.py`, `BackOrderResolutionRecipe.py`, `OverMaxTrimRecipe.py`, `MOQRoundUpRecipe.py`, `PalletAlignmentRecipe.py`, `DeliveryDelayResolutionRecipe.py` |
 | _(recipe output)_ | `AllowedResolutionAction` | `BLOCK_AND_NOTIFY`, `MERGE`, `SUPERSEDE`, `ALLOW_BOTH`, `ESCALATE`, `REQUEST_BUYER_CONFIRMATION` |
 | _(EdiMismatchRecipe input)_ | `AllowedEdiMismatchSubType` | `SKU_MISMATCH`, `QTY_MISMATCH`, `UOM_MISMATCH`, `SHIP_TO_MISMATCH` (PRICE_MISMATCH routed out at classifier time) |
 | _(EdiMismatchRecipe output)_ | `AllowedEdiMismatchClassification` | `HARD_REJECT`, `REVIEW`, `ESCALATE` |

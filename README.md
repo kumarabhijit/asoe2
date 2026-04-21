@@ -139,7 +139,9 @@ When an exception event arrives from the OMS or ERP layer (e.g. PO price ≠ SAP
 
 1. **Classifies intent** — constrained to `CONTRACTUAL_CORRECTION`,
    `CREDIT_BLOCK`, `MASS_PRICING_ERROR`, `DUPLICATE_PO`, `PRICE_HOLD_RELEASE`,
-   or `EDI_MISMATCH` (no free-form text enters state transitions)
+   `EDI_MISMATCH`, `BACK_ORDER`, `OVER_MAX`, `MIN_ORDER_QTY`,
+   `PALLET_CONFIG`, or `DELIVERY_DELAY` (no free-form text enters state
+   transitions)
 2. **Audits via Compliance Shadow** — returns `GREEN` / `YELLOW` / `RED`; halts
    on anything other than `GREEN`
 3. **Selects a deterministic recipe** — constrained to registered names only

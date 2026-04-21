@@ -39,7 +39,7 @@ for human-facing explanations.
 |---|---|
 | **Where** | `orchestration/nodes.py` → `classify()` → `backend.classify_intent()` |
 | **Schema** | `constraints/specs.py` → `IntentDecision` |
-| **Allowed values** | `CONTRACTUAL_CORRECTION`, `CREDIT_BLOCK`, `MASS_PRICING_ERROR`, `DUPLICATE_PO`, `PRICE_HOLD_RELEASE`, `EDI_MISMATCH` |
+| **Allowed values** | `CONTRACTUAL_CORRECTION`, `CREDIT_BLOCK`, `MASS_PRICING_ERROR`, `DUPLICATE_PO`, `PRICE_HOLD_RELEASE`, `EDI_MISMATCH`, `BACK_ORDER`, `OVER_MAX`, `MIN_ORDER_QTY`, `PALLET_CONFIG`, `DELIVERY_DELAY` |
 | **Enforcement** | `AllowedIntent` Pydantic `Literal` type; Pydantic raises `ValidationError` on any other value |
 | **Routing fork** | `EDI_850_LINE_MISMATCH` events whose `metadata.mismatch_sub_type == "PRICE_MISMATCH"` are classified as `CONTRACTUAL_CORRECTION` (not `EDI_MISMATCH`), preserving `PriceAdjustmentRecipe.py` as the single source of truth for pricing. Enforced in `constraints/fallback_backend.py:classify_intent` and mirrored in `skills/loader.py:select_for_event`. |
 | **Backend** | `DeterministicFallbackBackend` (no LLM in CI/test) or `OutlinesConstrainedBackend` (production Outlines regex) |
@@ -82,7 +82,7 @@ Enforcement logs are emitted at `INFO` for `GREEN` and `WARNING` for `YELLOW` / 
 |---|---|
 | **Where** | `orchestration/nodes.py` → `select_recipe()` → `backend.propose_recipe()` |
 | **Schema** | `constraints/specs.py` → `RecipeProposal` |
-| **Allowed values** | `PriceAdjustmentRecipe.py`, `CreditHoldReleaseRecipe.py`, `DuplicatePORecipe.py`, `PriceHoldReleaseRecipe.py`, `EdiMismatchRecipe.py` |
+| **Allowed values** | `PriceAdjustmentRecipe.py`, `CreditHoldReleaseRecipe.py`, `DuplicatePORecipe.py`, `PriceHoldReleaseRecipe.py`, `EdiMismatchRecipe.py`, `BackOrderResolutionRecipe.py`, `OverMaxTrimRecipe.py`, `MOQRoundUpRecipe.py`, `PalletAlignmentRecipe.py`, `DeliveryDelayResolutionRecipe.py` |
 | **Enforcement** | `AllowedRecipeName` Pydantic `Literal`; recipe registry (`recipes/registry.py`) as defence-in-depth |
 
 An unregistered recipe name causes a `ValidationError` at the `RecipeProposal`
@@ -123,6 +123,14 @@ node, or utility may hardcode a threshold value.
 | `PRICE_HOLD_TOLERANCE_PCT` | `0.02` (2%) | `PriceHoldReleaseRecipe` as `tolerance_pct` param |
 | `PRICE_HOLD_HARD_BLOCK_PCT` | `0.10` (10%) | `PriceHoldReleaseRecipe` as `hard_block_pct` param |
 | `EDI_MISMATCH_AUTONOMY_LEVELS` | `{SKU: L3, QTY: L2, UOM: L2, SHIP_TO: L1}` | `EdiMismatchRecipe` as `autonomy_levels` param |
+| `BACK_ORDER_SEVERE_GAP_PCT` | `0.50` (50%) | `BackOrderResolutionRecipe` as `severe_gap_pct` param (SD-OOS-002) |
+| `OVER_MAX_SEVERE_EXCEEDANCE_PCT` | `0.50` (50%) | `OverMaxTrimRecipe` as `severe_exceedance_pct` param (SD-OM-002) |
+| `MOQ_SEVERE_SHORTFALL_PCT` | `0.25` (25%) | `MOQRoundUpRecipe` as `severe_shortfall_pct` param (SD-MOQ-002) |
+| `MOQ_UPLIFT_REVIEW_PCT` | `0.10` (10%) | `MOQRoundUpRecipe` as `uplift_review_pct` param |
+| `PALLET_CONFIG_MIN_FILL_PCT` | `0.90` (90%) | `PalletAlignmentRecipe` as `min_fill_pct` param (SD-PLT-002) |
+| `PALLET_CONFIG_BROKEN_LAYER_FILL_PCT` | `1.00` (100%) | `PalletAlignmentRecipe` as `broken_layer_fill_pct` param (SD-PLT-001) |
+| `DELIVERY_DELAY_MINOR_DAYS` | `2` | `DeliveryDelayResolutionRecipe` as `minor_days` param (SD-DELAY-001) |
+| `DELIVERY_DELAY_SEVERE_DAYS` | `5` | `DeliveryDelayResolutionRecipe` as `severe_days` param (SD-DELAY-002) |
 | `MASS_UPDATE_LINE_COUNT_THRESHOLD` | `10` | `constraints/fallback_backend.py` |
 | `CIRCUIT_BREAKER_MAX_UPDATES` | `50` | `orchestration/utils.py` |
 | `CIRCUIT_BREAKER_MAX_VARIANCE` | `10_000.0` | `orchestration/utils.py`, `constraints/fallback_backend.py` |
