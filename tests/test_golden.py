@@ -250,8 +250,15 @@ class TestGoldenDuplicatePO:
 class TestGoldenConstrainedVocabulary:
     """Every constrained field must use only the permitted vocabulary."""
 
-    ALLOWED_INTENTS = {"CONTRACTUAL_CORRECTION", "CREDIT_BLOCK", "MASS_PRICING_ERROR", "DUPLICATE_PO"}
-    ALLOWED_RECIPES = {"PriceAdjustmentRecipe.py", "CreditHoldReleaseRecipe.py", "DuplicatePORecipe.py", None}
+    ALLOWED_INTENTS = {
+        "CONTRACTUAL_CORRECTION", "CREDIT_BLOCK", "MASS_PRICING_ERROR",
+        "DUPLICATE_PO", "PRICE_HOLD_RELEASE", "EDI_MISMATCH",
+    }
+    ALLOWED_RECIPES = {
+        "PriceAdjustmentRecipe.py", "CreditHoldReleaseRecipe.py",
+        "DuplicatePORecipe.py", "PriceHoldReleaseRecipe.py",
+        "EdiMismatchRecipe.py", None,
+    }
     ALLOWED_VERDICTS = {"GREEN", "YELLOW", "RED"}
     ALLOWED_STATUSES = {s.value for s in TerminalStatus}
 
