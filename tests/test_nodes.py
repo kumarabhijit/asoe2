@@ -361,7 +361,8 @@ class TestValidateTypesNode:
 
     def test_price_hold_release_hold_status_from_gateway_preferred(self):
         state = self._price_hold_state()
-        state.resolved_data["price_hold_status"] = "HELD"
+        # Gateway data shape matches oms.get_price_hold_status response.
+        state.resolved_data["price_hold_status"] = {"status": "HELD"}
         result = validate_types(state)
         assert result.invocation.params["hold_status"] == "HELD"
 

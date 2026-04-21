@@ -266,12 +266,14 @@ def validate_types(state: GraphState) -> GraphState:
         tolerance = state.event.metadata.get(
             "tolerance_pct", PRICE_HOLD_TOLERANCE_PCT
         )
-        # Prefer the live gateway result; fall back to event metadata so the
-        # recipe is still callable in unit tests that stub out dependencies.
+        # Prefer the live gateway result (oms/get_price_hold_status returns
+        # {"status": "HELD"}); fall back to metadata when the gateway response
+        # lacks that key — matches the DuplicatePO resolved_data pattern.
+        gateway_result = state.resolved_data.get("price_hold_status", {})
         hold_status = (
-            state.resolved_data.get("price_hold_status")
-            or state.event.metadata.get("price_hold_status", "HELD")
-        )
+            gateway_result.get("status")
+            if isinstance(gateway_result, dict) else None
+        ) or state.event.metadata.get("price_hold_status", "HELD")
         state.invocation = RecipeInvocation(
             recipe_name=state.selected_recipe,
             params={
