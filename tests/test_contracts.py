@@ -29,6 +29,11 @@ class TestEnums:
             Intent.DUPLICATE_PO,
             Intent.PRICE_HOLD_RELEASE,
             Intent.EDI_MISMATCH,
+            Intent.BACK_ORDER,
+            Intent.OVER_MAX,
+            Intent.MIN_ORDER_QTY,
+            Intent.PALLET_CONFIG,
+            Intent.DELIVERY_DELAY,
             Intent.UNKNOWN,
         }
 

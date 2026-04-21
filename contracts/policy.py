@@ -134,3 +134,69 @@ EDI_MISMATCH_AUTONOMY_LEVELS: dict[str, str] = {
 L2 = recommend (human must approve), L3 = act & inform. PRICE_MISMATCH is
 absent by design — those events are routed to CONTRACTUAL_CORRECTION /
 PriceAdjustmentRecipe.py at classifier time and never reach this recipe."""
+
+# ---------------------------------------------------------------------------
+# Back-Order (OOS) thresholds
+# Per prototype spec SD-OOS-001 (<50% gap) and SD-OOS-002 (>=50% gap).
+# ---------------------------------------------------------------------------
+
+BACK_ORDER_SEVERE_GAP_PCT: float = 0.50
+"""Gap percentage at or above which a back-order is classified SEVERE.
+SD-OOS-002 rule. Below this, the recipe can recommend split-shipment or
+alternate-DC fulfilment; at/above, escalation to a buyer decision is
+mandatory."""
+
+# ---------------------------------------------------------------------------
+# Over-Max quantity thresholds
+# Per prototype spec SD-OM-001 (exceeds contract) and SD-OM-002 (>50%).
+# ---------------------------------------------------------------------------
+
+OVER_MAX_SEVERE_EXCEEDANCE_PCT: float = 0.50
+"""Exceedance percentage above contract max at/above which an order is
+SEVERE. SD-OM-002 rule. Below this, automated trim-to-max is permitted;
+at/above, sales-manager review is required before any trim action."""
+
+# ---------------------------------------------------------------------------
+# Minimum Order Quantity thresholds
+# Per prototype spec SD-MOQ-001 (<25% shortfall) and SD-MOQ-002 (>=25%).
+# ---------------------------------------------------------------------------
+
+MOQ_SEVERE_SHORTFALL_PCT: float = 0.25
+"""Shortfall percentage at/above which a MOQ shortfall is SEVERE.
+SD-MOQ-002 rule. Below this, automated round-up to MOQ is permitted;
+at/above, the order needs a KNMT waiver or sales-manager escalation."""
+
+MOQ_UPLIFT_REVIEW_PCT: float = 0.10
+"""Round-up uplift at/above which operator sign-off is required even if
+the underlying shortfall is below SEVERE. Prevents silent large-value
+upsizes from slipping through the automated path."""
+
+# ---------------------------------------------------------------------------
+# Pallet configuration thresholds
+# Per prototype specs SD-PLT-001 (broken layer) and SD-PLT-002 (partial).
+# ---------------------------------------------------------------------------
+
+PALLET_CONFIG_MIN_FILL_PCT: float = 0.90
+"""Pallet fill percentage below which the recipe flags a partial-pallet
+violation (SD-PLT-002). Used by PalletAlignmentRecipe to decide whether
+to suggest round-down to full layers or accept the partial pallet."""
+
+PALLET_CONFIG_BROKEN_LAYER_FILL_PCT: float = 1.00
+"""Fill percentage above which a row is considered to have a broken
+layer overage (SD-PLT-001 — ordered qty spans partial layer(s)). Only
+round-down alignment is safe above this ratio."""
+
+# ---------------------------------------------------------------------------
+# Delivery delay thresholds
+# Per prototype specs SD-DELAY-001 (2-4 days) and SD-DELAY-002 (>=5 days).
+# ---------------------------------------------------------------------------
+
+DELIVERY_DELAY_MINOR_DAYS: int = 2
+"""Minimum days-late threshold for a MINOR delay (SD-DELAY-001).
+Below this the recipe short-circuits with no action needed."""
+
+DELIVERY_DELAY_SEVERE_DAYS: int = 5
+"""Days-late threshold at/above which a delivery delay is classified
+SEVERE (SD-DELAY-002). Below this the recipe can recommend expedite /
+split-ship; at/above, reschedule-to-later-window plus buyer notification
+is required."""

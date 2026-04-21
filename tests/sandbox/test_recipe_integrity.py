@@ -170,7 +170,9 @@ class TestConstrainedOutputs:
         expected = {
             "CONTRACTUAL_CORRECTION", "CREDIT_BLOCK",
             "MASS_PRICING_ERROR", "DUPLICATE_PO",
-            "PRICE_HOLD_RELEASE", "EDI_MISMATCH", "UNKNOWN",
+            "PRICE_HOLD_RELEASE", "EDI_MISMATCH",
+            "BACK_ORDER", "OVER_MAX", "MIN_ORDER_QTY",
+            "PALLET_CONFIG", "DELIVERY_DELAY", "UNKNOWN",
         }
         assert allowed == expected
 
