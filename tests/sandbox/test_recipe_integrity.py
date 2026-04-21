@@ -167,7 +167,8 @@ class TestConstrainedOutputs:
         allowed = {e.value for e in Intent}
         expected = {
             "CONTRACTUAL_CORRECTION", "CREDIT_BLOCK",
-            "MASS_PRICING_ERROR", "DUPLICATE_PO", "UNKNOWN",
+            "MASS_PRICING_ERROR", "DUPLICATE_PO",
+            "PRICE_HOLD_RELEASE", "EDI_MISMATCH", "UNKNOWN",
         }
         assert allowed == expected
 
