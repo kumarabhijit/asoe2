@@ -10,6 +10,11 @@ AllowedIntent = Literal[
     "DUPLICATE_PO",
     "PRICE_HOLD_RELEASE",
     "EDI_MISMATCH",
+    "BACK_ORDER",
+    "OVER_MAX",
+    "MIN_ORDER_QTY",
+    "PALLET_CONFIG",
+    "DELIVERY_DELAY",
 ]
 
 AllowedShadowStatus = Literal["GREEN", "YELLOW", "RED"]
@@ -20,6 +25,11 @@ AllowedRecipeName = Literal[
     "DuplicatePORecipe.py",
     "PriceHoldReleaseRecipe.py",
     "EdiMismatchRecipe.py",
+    "BackOrderResolutionRecipe.py",
+    "OverMaxTrimRecipe.py",
+    "MOQRoundUpRecipe.py",
+    "PalletAlignmentRecipe.py",
+    "DeliveryDelayResolutionRecipe.py",
 ]
 
 # EDI 850 line-mismatch sub_type vocabulary. PRICE_MISMATCH is intentionally

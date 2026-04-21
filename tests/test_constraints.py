@@ -120,7 +120,12 @@ class TestFallbackRecipeProposal:
 class TestGuidanceRegexBackend:
     def test_intent_regex_is_correct(self):
         g = GuidanceRegexBackend()
-        assert g.intent_regex() == r"CONTRACTUAL_CORRECTION|CREDIT_BLOCK|MASS_PRICING_ERROR|DUPLICATE_PO|PRICE_HOLD_RELEASE|EDI_MISMATCH"
+        # Dynamic check — derives expected from AllowedIntent.__args__ so
+        # the assertion stays correct as new intents are added. The regex
+        # must list every AllowedIntent value separated by `|`.
+        from constraints.specs import AllowedIntent
+        expected = "|".join(AllowedIntent.__args__)
+        assert g.intent_regex() == expected
 
     def test_shadow_verdict_regex_is_correct(self):
         g = GuidanceRegexBackend()
@@ -128,7 +133,10 @@ class TestGuidanceRegexBackend:
 
     def test_recipe_name_regex_is_correct(self):
         g = GuidanceRegexBackend()
-        assert g.recipe_name_regex() == r"PriceAdjustmentRecipe\.py|CreditHoldReleaseRecipe\.py|DuplicatePORecipe\.py|PriceHoldReleaseRecipe\.py|EdiMismatchRecipe\.py"
+        # Dynamic check — derives expected from AllowedRecipeName.__args__.
+        from constraints.specs import AllowedRecipeName
+        expected = "|".join(r.replace(".", r"\.") for r in AllowedRecipeName.__args__)
+        assert g.recipe_name_regex() == expected
 
     def test_intent_regex_matches_all_allowed_values(self):
         pattern = re.compile(GuidanceRegexBackend().intent_regex())

@@ -49,6 +49,11 @@ class TestRecipeModuleIntegrity:
         "DuplicatePORecipe",
         "PriceHoldReleaseRecipe",
         "EdiMismatchRecipe",
+        "BackOrderResolutionRecipe",
+        "OverMaxTrimRecipe",
+        "MOQRoundUpRecipe",
+        "PalletAlignmentRecipe",
+        "DeliveryDelayResolutionRecipe",
     ]
 
     def test_recipe_directory_exists(self):

@@ -4,9 +4,14 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Tuple
 
 from contracts.models import GatewayDependency, GatewayEffect
+from recipes.BackOrderResolutionRecipe import resolve_back_order
 from recipes.CreditHoldReleaseRecipe import release_credit_hold
+from recipes.DeliveryDelayResolutionRecipe import resolve_delivery_delay
 from recipes.DuplicatePORecipe import detect_duplicate_po
 from recipes.EdiMismatchRecipe import detect_edi_mismatch
+from recipes.MOQRoundUpRecipe import round_up_moq
+from recipes.OverMaxTrimRecipe import trim_over_max
+from recipes.PalletAlignmentRecipe import align_pallets
 from recipes.PriceAdjustmentRecipe import execute_price_correction
 from recipes.PriceHoldReleaseRecipe import execute_price_hold_release
 
@@ -118,6 +123,80 @@ REGISTRY = {
                 },
             ),
         ),
+    ),
+    "BackOrderResolutionRecipe.py": RecipeSpec(
+        name="BackOrderResolutionRecipe.py",
+        func=resolve_back_order,
+        required_params=(
+            "order_id", "sku", "ordered_qty", "available_qty",
+            "unit_price", "uom", "severe_gap_pct",
+        ),
+        allowed_intents=("BACK_ORDER",),
+        expected_metadata_keys=(
+            "ordered_qty", "available_qty", "unit_price",
+        ),
+        dependencies=(
+            GatewayDependency(
+                gateway_name="oms",
+                operation="get_inventory_snapshot",
+                params_from_state={
+                    "order_id": "event.order_id",
+                    "sku": "event.sku",
+                },
+                result_key="inventory_snapshot",
+            ),
+        ),
+        effects=(
+            GatewayEffect(
+                gateway_name="buyer_notification",
+                operation="send",
+                params_from_output={
+                    "template": "backorder_template",
+                    "order_id": "order_id",
+                },
+            ),
+        ),
+    ),
+    "OverMaxTrimRecipe.py": RecipeSpec(
+        name="OverMaxTrimRecipe.py",
+        func=trim_over_max,
+        required_params=(
+            "order_id", "total_ordered", "max_qty",
+            "severe_exceedance_pct",
+        ),
+        allowed_intents=("OVER_MAX",),
+        expected_metadata_keys=("max_qty", "order_lines"),
+    ),
+    "MOQRoundUpRecipe.py": RecipeSpec(
+        name="MOQRoundUpRecipe.py",
+        func=round_up_moq,
+        required_params=(
+            "order_id", "sku", "ordered_qty", "moq_qty",
+            "unit_cost", "uom", "severe_shortfall_pct",
+            "uplift_review_pct",
+        ),
+        allowed_intents=("MIN_ORDER_QTY",),
+        expected_metadata_keys=("moq_qty", "unit_cost"),
+    ),
+    "PalletAlignmentRecipe.py": RecipeSpec(
+        name="PalletAlignmentRecipe.py",
+        func=align_pallets,
+        required_params=(
+            "order_id", "lines", "min_fill_pct",
+            "broken_layer_fill_pct",
+        ),
+        allowed_intents=("PALLET_CONFIG",),
+        expected_metadata_keys=("pallet_lines",),
+    ),
+    "DeliveryDelayResolutionRecipe.py": RecipeSpec(
+        name="DeliveryDelayResolutionRecipe.py",
+        func=resolve_delivery_delay,
+        required_params=(
+            "order_id", "planned_date", "projected_eta",
+            "minor_days", "severe_days",
+        ),
+        allowed_intents=("DELIVERY_DELAY",),
+        expected_metadata_keys=("planned_date", "projected_eta"),
     ),
 }
 

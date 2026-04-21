@@ -33,8 +33,27 @@ class TestRegistryCompleteness:
     def test_registry_contains_edi_mismatch_recipe(self):
         assert "EdiMismatchRecipe.py" in REGISTRY
 
-    def test_registry_has_exactly_five_recipes(self):
-        assert len(REGISTRY) == 5
+    def test_registry_contains_back_order_recipe(self):
+        assert "BackOrderResolutionRecipe.py" in REGISTRY
+
+    def test_registry_contains_over_max_recipe(self):
+        assert "OverMaxTrimRecipe.py" in REGISTRY
+
+    def test_registry_contains_moq_recipe(self):
+        assert "MOQRoundUpRecipe.py" in REGISTRY
+
+    def test_registry_contains_pallet_config_recipe(self):
+        assert "PalletAlignmentRecipe.py" in REGISTRY
+
+    def test_registry_contains_delivery_delay_recipe(self):
+        assert "DeliveryDelayResolutionRecipe.py" in REGISTRY
+
+    def test_registry_size_matches_allowed_recipe_name_literal(self):
+        """Registry size stays aligned with AllowedRecipeName. Dynamic
+        derivation makes this resilient to future vocabulary expansions
+        without requiring a count update."""
+        from constraints.specs import AllowedRecipeName
+        assert len(REGISTRY) == len(AllowedRecipeName.__args__)
 
     def test_registry_names_match_allowed_recipe_name_literal(self):
         """Registry keys must stay in sync with AllowedRecipeName in specs.py."""

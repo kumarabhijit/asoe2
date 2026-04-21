@@ -101,7 +101,9 @@ class LocalHFBackend:
             f"credit_limit={state.event.credit_limit}; "
             f"current_exposure={state.event.current_exposure}. "
             "Allowed intents: CONTRACTUAL_CORRECTION, CREDIT_BLOCK, "
-            "MASS_PRICING_ERROR, DUPLICATE_PO, PRICE_HOLD_RELEASE, EDI_MISMATCH."
+            "MASS_PRICING_ERROR, DUPLICATE_PO, PRICE_HOLD_RELEASE, "
+            "EDI_MISMATCH, BACK_ORDER, OVER_MAX, MIN_ORDER_QTY, "
+            "PALLET_CONFIG, DELIVERY_DELAY."
         )
 
     @staticmethod
@@ -111,7 +113,10 @@ class LocalHFBackend:
             f"intent={state.intent.value}. "
             "Allowed recipes: PriceAdjustmentRecipe.py, "
             "CreditHoldReleaseRecipe.py, DuplicatePORecipe.py, "
-            "PriceHoldReleaseRecipe.py, EdiMismatchRecipe.py."
+            "PriceHoldReleaseRecipe.py, EdiMismatchRecipe.py, "
+            "BackOrderResolutionRecipe.py, OverMaxTrimRecipe.py, "
+            "MOQRoundUpRecipe.py, PalletAlignmentRecipe.py, "
+            "DeliveryDelayResolutionRecipe.py."
         )
 
     @staticmethod
