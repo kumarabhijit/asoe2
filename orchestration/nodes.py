@@ -140,7 +140,10 @@ def classify(state: GraphState) -> GraphState:
 
 def load_skill(state: GraphState) -> GraphState:
     loader = SkillLoader("skills")
-    state.skill = loader.select_for_event(state.event.event_type)
+    state.skill = loader.select_for_event(
+        state.event.event_type,
+        metadata=state.event.metadata,
+    )
     return state
 
 

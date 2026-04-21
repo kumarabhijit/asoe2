@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List, Optional
 
 from contracts.models import SkillDocument
 
@@ -33,10 +33,37 @@ class SkillLoader:
             docs.append(self._parse(path.read_text(encoding="utf-8")))
         return docs
 
-    def select_for_event(self, event_type: str) -> SkillDocument:
+    def select_for_event(
+        self,
+        event_type: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> SkillDocument:
+        """Select the skill file matching an event's semantic category.
+
+        For ``EDI_850_LINE_MISMATCH`` the ``metadata.mismatch_sub_type``
+        refines the routing: ``PRICE_MISMATCH`` loads the
+        pricing-reconciliation skill (handed off to CONTRACTUAL_CORRECTION),
+        every other sub_type loads ``edi-mismatch_SKILL.md``.
+
+        ``metadata`` is optional so existing call sites that only have the
+        event_type string keep working; when absent, the router falls back
+        to the coarser event-type match.
+        """
         upper = event_type.upper()
         if "DUPLICATE" in upper:
             return self.load_by_name("duplicate-po_SKILL.md")
+        # Check PRICE_HOLD before the broader PRICE/EDI_850 fork — the
+        # pricing-reconciliation skill would otherwise swallow held-order
+        # events whose intent is PRICE_HOLD_RELEASE, not CONTRACTUAL_CORRECTION.
+        if "PRICE_HOLD" in upper:
+            return self.load_by_name("price-hold-release_SKILL.md")
+        # Line-mismatch events fork on metadata.mismatch_sub_type so the
+        # PRICE_MISMATCH deferral to the pricing path loads a coherent skill.
+        if "LINE_MISMATCH" in upper or "EDI_MISMATCH" in upper:
+            sub_type = (metadata or {}).get("mismatch_sub_type")
+            if sub_type == "PRICE_MISMATCH":
+                return self.load_by_name("pricing-reconciliation_SKILL.md")
+            return self.load_by_name("edi-mismatch_SKILL.md")
         if "PRICE" in upper or "EDI_850" in upper:
             return self.load_by_name("pricing-reconciliation_SKILL.md")
         return self.discover()[0]
