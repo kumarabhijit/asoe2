@@ -270,6 +270,20 @@ def validate_types(state: GraphState) -> GraphState:
             },
         )
     elif state.selected_recipe == "PriceHoldReleaseRecipe.py":
+        # Defensive input validation — close the review-flagged
+        # ZeroDivisionError path before invocation. The recipe
+        # computes variance as (po - sap) / sap, so a zero or
+        # negative sap_base_price would raise at execution time.
+        # Catch it here and route to FAIL_TO_HUMAN with a named
+        # reason; don't rely on a generic executor-level catch.
+        if state.event.sap_base_price <= 0:
+            state.final_status = TerminalStatus.FAIL_TO_HUMAN
+            state.explanation = (
+                f"PriceHoldReleaseRecipe requires sap_base_price > 0; "
+                f"got {state.event.sap_base_price!r}. Order cannot be "
+                f"classified deterministically; routing to human review."
+            )
+            return state
         # Optional per-event tolerance override via metadata.tolerance_pct.
         tolerance = state.event.metadata.get(
             "tolerance_pct", PRICE_HOLD_TOLERANCE_PCT

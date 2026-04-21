@@ -366,6 +366,27 @@ class TestValidateTypesNode:
         result = validate_types(state)
         assert result.invocation.params["hold_status"] == "HELD"
 
+    def test_price_hold_release_zero_sap_base_price_fails_to_human(self):
+        """Guard against the ZeroDivisionError path in the recipe
+        (review finding H3). An sap_base_price of 0 or negative would
+        raise at execution; validate_types short-circuits to
+        FAIL_TO_HUMAN with a named reason before invocation."""
+        state = _state(po_price=100.0, sap_base_price=0.0)
+        state.event.metadata["price_hold_status"] = "HELD"
+        state.selected_recipe = "PriceHoldReleaseRecipe.py"
+        result = validate_types(state)
+        assert result.invocation is None
+        assert result.final_status == TerminalStatus.FAIL_TO_HUMAN
+        assert "sap_base_price" in (result.explanation or "")
+
+    def test_price_hold_release_negative_sap_base_price_fails_to_human(self):
+        state = _state(po_price=100.0, sap_base_price=-5.0)
+        state.event.metadata["price_hold_status"] = "HELD"
+        state.selected_recipe = "PriceHoldReleaseRecipe.py"
+        result = validate_types(state)
+        assert result.invocation is None
+        assert result.final_status == TerminalStatus.FAIL_TO_HUMAN
+
     # --- EdiMismatchRecipe --------------------------------------------------
 
     def _edi_state(self, sub_type: str = "SKU_MISMATCH") -> GraphState:

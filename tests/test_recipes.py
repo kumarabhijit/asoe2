@@ -1107,14 +1107,18 @@ class TestEdiMismatchRecipe:
         r = self._call("WEIRD_SUB_TYPE")
         assert r["status"] == "FAILED"
         assert r["classification"] is None
+        assert r["error_code"] == "UNKNOWN_SUB_TYPE"
         assert "WEIRD_SUB_TYPE" in r["reason"]
 
     def test_price_mismatch_never_reaches_recipe(self):
         # PRICE_MISMATCH is routed to CONTRACTUAL_CORRECTION at classifier
         # time. If it ever reaches this recipe (a routing bug), we fail
-        # explicitly rather than silently classifying.
+        # explicitly with a differentiated error code that names the
+        # routing invariant (review finding M5).
         r = self._call("PRICE_MISMATCH")
         assert r["status"] == "FAILED"
+        assert r["error_code"] == "SUB_TYPE_ROUTING_ERROR"
+        assert "routed to CONTRACTUAL_CORRECTION" in r["reason"]
 
     # -- echoes preserved for audit -----------------------------------------
 
