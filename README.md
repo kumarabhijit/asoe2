@@ -138,7 +138,8 @@ ASOE classifies the exception, audits the proposed action through a Compliance S
 When an exception event arrives from the OMS or ERP layer (e.g. PO price ≠ SAP base price, duplicate PO detected, credit hold triggered), ASOE:
 
 1. **Classifies intent** — constrained to `CONTRACTUAL_CORRECTION`,
-   `CREDIT_BLOCK`, `MASS_PRICING_ERROR`, or `DUPLICATE_PO` (no free-form text enters state transitions)
+   `CREDIT_BLOCK`, `MASS_PRICING_ERROR`, `DUPLICATE_PO`, `PRICE_HOLD_RELEASE`,
+   or `EDI_MISMATCH` (no free-form text enters state transitions)
 2. **Audits via Compliance Shadow** — returns `GREEN` / `YELLOW` / `RED`; halts
    on anything other than `GREEN`
 3. **Selects a deterministic recipe** — constrained to registered names only
@@ -291,7 +292,7 @@ Expected: **1021 passed, 0 failed**.
 | Test group | Count | What it covers |
 |---|---|---|
 | Core tests (`tests/test_*.py`) | 772 | Contracts, constraints, recipes, orchestration, shadow, API, DB, WebSocket, workflows, guardrails |
-| E2E data-flow (`tests/test_e2e_*.py`, `tests/test_three_tier_hitl.py`) | 73 | Full pipeline for DUPLICATE_PO, CONTRACTUAL_CORRECTION, CREDIT_BLOCK, MASS_PRICING_ERROR; HITL disposition + escalate + cosign |
+| E2E data-flow (`tests/test_e2e_*.py`, `tests/test_three_tier_hitl.py`) | 98 | Full pipeline for DUPLICATE_PO, CONTRACTUAL_CORRECTION, CREDIT_BLOCK, MASS_PRICING_ERROR, PRICE_HOLD_RELEASE, EDI_MISMATCH (incl. PRICE_MISMATCH classifier fork); HITL disposition + escalate + cosign |
 | Sandbox integration (`tests/sandbox/test_*.py`) | 127 | Full API integration, auth flow, DB persistence, WebSocket events, compliance simulation, recipe integrity |
 | PostgreSQL integration (`tests/test_postgres.py`) | 35 | Real PostgreSQL: schema migration, RLS tenant isolation, SOX immutability trigger, JSONB round-trips, UUID columns, repository CRUD, DatabaseBackedStore |
 
@@ -1147,6 +1148,8 @@ constrained vocabulary:
        "CREDIT_BLOCK",
        "MASS_PRICING_ERROR",
        "DUPLICATE_PO",
+       "PRICE_HOLD_RELEASE",
+       "EDI_MISMATCH",
        "YOUR_NEW_INTENT",   # ← add here
    ]
    ```
@@ -1159,6 +1162,8 @@ constrained vocabulary:
        CREDIT_BLOCK           = "CREDIT_BLOCK"
        MASS_PRICING_ERROR     = "MASS_PRICING_ERROR"
        DUPLICATE_PO           = "DUPLICATE_PO"
+       PRICE_HOLD_RELEASE     = "PRICE_HOLD_RELEASE"
+       EDI_MISMATCH           = "EDI_MISMATCH"
        YOUR_NEW_INTENT        = "YOUR_NEW_INTENT"   # ← add here
        UNKNOWN                = "UNKNOWN"
    ```
@@ -1167,7 +1172,10 @@ constrained vocabulary:
 
    ```python
    def intent_regex(self) -> str:
-       return r"CONTRACTUAL_CORRECTION|CREDIT_BLOCK|MASS_PRICING_ERROR|DUPLICATE_PO|YOUR_NEW_INTENT"
+       return (
+           r"CONTRACTUAL_CORRECTION|CREDIT_BLOCK|MASS_PRICING_ERROR|"
+           r"DUPLICATE_PO|PRICE_HOLD_RELEASE|EDI_MISMATCH|YOUR_NEW_INTENT"
+       )
    ```
 
 4. **`constraints/fallback_backend.py`** — add a classification branch in

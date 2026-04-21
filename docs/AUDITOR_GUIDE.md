@@ -39,8 +39,9 @@ for human-facing explanations.
 |---|---|
 | **Where** | `orchestration/nodes.py` → `classify()` → `backend.classify_intent()` |
 | **Schema** | `constraints/specs.py` → `IntentDecision` |
-| **Allowed values** | `CONTRACTUAL_CORRECTION`, `CREDIT_BLOCK`, `MASS_PRICING_ERROR`, `DUPLICATE_PO` |
+| **Allowed values** | `CONTRACTUAL_CORRECTION`, `CREDIT_BLOCK`, `MASS_PRICING_ERROR`, `DUPLICATE_PO`, `PRICE_HOLD_RELEASE`, `EDI_MISMATCH` |
 | **Enforcement** | `AllowedIntent` Pydantic `Literal` type; Pydantic raises `ValidationError` on any other value |
+| **Routing fork** | `EDI_850_LINE_MISMATCH` events whose `metadata.mismatch_sub_type == "PRICE_MISMATCH"` are classified as `CONTRACTUAL_CORRECTION` (not `EDI_MISMATCH`), preserving `PriceAdjustmentRecipe.py` as the single source of truth for pricing. Enforced in `constraints/fallback_backend.py:classify_intent` and mirrored in `skills/loader.py:select_for_event`. |
 | **Backend** | `DeterministicFallbackBackend` (no LLM in CI/test) or `OutlinesConstrainedBackend` (production Outlines regex) |
 | **Fallback chain** | Custom backend → `OutlinesConstrainedBackend` → `DeterministicFallbackBackend` (graceful degradation with `logger.warning()` on each failure) |
 
@@ -81,7 +82,7 @@ Enforcement logs are emitted at `INFO` for `GREEN` and `WARNING` for `YELLOW` / 
 |---|---|
 | **Where** | `orchestration/nodes.py` → `select_recipe()` → `backend.propose_recipe()` |
 | **Schema** | `constraints/specs.py` → `RecipeProposal` |
-| **Allowed values** | `PriceAdjustmentRecipe.py`, `CreditHoldReleaseRecipe.py`, `DuplicatePORecipe.py` |
+| **Allowed values** | `PriceAdjustmentRecipe.py`, `CreditHoldReleaseRecipe.py`, `DuplicatePORecipe.py`, `PriceHoldReleaseRecipe.py`, `EdiMismatchRecipe.py` |
 | **Enforcement** | `AllowedRecipeName` Pydantic `Literal`; recipe registry (`recipes/registry.py`) as defence-in-depth |
 
 An unregistered recipe name causes a `ValidationError` at the `RecipeProposal`
@@ -119,6 +120,9 @@ node, or utility may hardcode a threshold value.
 | `DUPLICATE_PO_THRESHOLD_AUTO_BLOCK` | `0.90` | `DuplicatePORecipe` as param |
 | `DUPLICATE_PO_THRESHOLD_REVIEW_REQUIRED` | `0.70` | `DuplicatePORecipe` as param |
 | `DUPLICATE_PO_THRESHOLD_SOFT_FLAG` | `0.50` | `DuplicatePORecipe` as param |
+| `PRICE_HOLD_TOLERANCE_PCT` | `0.02` (2%) | `PriceHoldReleaseRecipe` as `tolerance_pct` param |
+| `PRICE_HOLD_HARD_BLOCK_PCT` | `0.10` (10%) | `PriceHoldReleaseRecipe` as `hard_block_pct` param |
+| `EDI_MISMATCH_AUTONOMY_LEVELS` | `{SKU: L3, QTY: L2, UOM: L2, SHIP_TO: L1}` | `EdiMismatchRecipe` as `autonomy_levels` param |
 | `MASS_UPDATE_LINE_COUNT_THRESHOLD` | `10` | `constraints/fallback_backend.py` |
 | `CIRCUIT_BREAKER_MAX_UPDATES` | `50` | `orchestration/utils.py` |
 | `CIRCUIT_BREAKER_MAX_VARIANCE` | `10_000.0` | `orchestration/utils.py`, `constraints/fallback_backend.py` |

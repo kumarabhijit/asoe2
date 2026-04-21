@@ -944,3 +944,113 @@ The next step is **data only** (no schema / API / UI work):
 
 🕰️  Owner: product/compliance jointly; ML engineering consumes the
     resulting signal.
+
+---
+
+## PHASE 21 — OM Coverage Expansion: PRICE_HOLD_RELEASE + EDI_MISMATCH
+
+Moves Order Management coverage from *Partial* (the 4 canonical
+intents described real OM exception classes only by approximation) to
+*Complete* by adding two first-class intents that no existing intent
+could express without overloading semantics.
+
+- Price Hold Release: distinct from CONTRACTUAL_CORRECTION — the
+  latter *changes* a price; this one decides whether to *release* an
+  order currently held because the PO price is outside tolerance of
+  the SAP base.
+- EDI Mismatch: distinct from DUPLICATE_PO — DUPLICATE is one
+  sub-type of EDI 850 variance; SKU / QTY / UOM / SHIP_TO mismatches
+  are their own classes with their own resolution paths. See
+  `docs/adr/ADR-024-om-coverage-expansion.md` for the decision
+  rationale and the single-source-of-truth invariant that shaped the
+  PRICE_MISMATCH routing fork.
+
+### 21.1 Contracts + policy
+- [x] Extend `Intent` enum in `contracts/models.py` with
+      `PRICE_HOLD_RELEASE` and `EDI_MISMATCH`.
+- [x] Add policy thresholds to `contracts/policy.py`:
+      `PRICE_HOLD_TOLERANCE_PCT` (0.02), `PRICE_HOLD_HARD_BLOCK_PCT`
+      (0.10), `EDI_MISMATCH_AUTONOMY_LEVELS` (L1/L2/L3 per sub_type).
+
+### 21.2 Recipes
+- [x] `recipes/PriceHoldReleaseRecipe.py` — three-branch decision
+      (AUTO_RELEASE / ESCALATE / HARD_BLOCK) keyed on
+      `|variance_pct|` vs tolerance / hard_block thresholds. Pure
+      function, no I/O, no imports from `contracts.policy`.
+- [x] `recipes/EdiMismatchRecipe.py` — sub_type → classification
+      mapping (SKU=HARD_REJECT, QTY/UOM=REVIEW, SHIP_TO=ESCALATE).
+      `PRICE_MISMATCH` deliberately absent from the accepted
+      vocabulary — routed at classifier time (see §21.4).
+
+### 21.3 Constrained generation
+- [x] `constraints/specs.py` — extend `AllowedIntent` and
+      `AllowedRecipeName`; add `AllowedEdiMismatchSubType`,
+      `AllowedEdiMismatchClassification`, `AllowedPriceHoldAction`.
+      CLAUDE.md §3 requires every machine-consumed output field to be
+      Literal-gated.
+
+### 21.4 Classifier + skill routing fork (PRICE_MISMATCH → CONTRACTUAL_CORRECTION)
+- [x] `constraints/fallback_backend.py:classify_intent` inspects
+      `event.metadata.mismatch_sub_type`; when it equals
+      `"PRICE_MISMATCH"` the event is classified as
+      `CONTRACTUAL_CORRECTION` so `PriceAdjustmentRecipe.py` handles
+      pricing — preserving the single source of truth for price
+      corrections (CLAUDE.md §1). `PRICE_MISMATCH` is therefore
+      statically unreachable inside `EdiMismatchRecipe`.
+- [x] `skills/loader.py:select_for_event` mirrors the fork at the
+      skill layer so skill text matches the assigned intent.
+
+### 21.5 Skills + registry + orchestration
+- [x] `skills/price-hold-release_SKILL.md`, `skills/edi-mismatch_SKILL.md`.
+- [x] `recipes/registry.py` — two new `RecipeSpec` entries with
+      gateway dependencies (`oms/get_price_hold_status`) and effects
+      (`oms/update_hold_flag`, `buyer_notification/send`).
+- [x] `orchestration/nodes.py:validate_types` — two new `elif` arms
+      plus an explicit final `else` that FAIL_TO_HUMAN-s on an
+      unwired-but-known recipe name (closes the silent-trap the old
+      fall-through behaviour represented).
+
+### 21.6 Observability
+- [x] Shadow policy-hit vocabulary added to
+      `constraints/fallback_backend.py`: `PRICE_HOLD_TOLERANCE_OK`,
+      `PRICE_HOLD_TOLERANCE_ESCALATE`, `PRICE_HOLD_HARD_BLOCK`,
+      `EDI_SKU_MISMATCH_HARD_REJECT`, `EDI_QTY_MISMATCH_REVIEW`,
+      `EDI_UOM_MISMATCH_REVIEW`, `EDI_SHIP_TO_ESCALATE`. Visible on
+      `TraceRecord.shadow_policy_hits` and the
+      `/api/v1/exceptions/{id}/trace` response.
+
+### 21.7 Tests
+- [x] Unit: every branch of both recipes.
+- [x] Validate-types: every new `elif` arm + the explicit `else` trap.
+- [x] E2E: `tests/test_e2e_price_hold_release.py` (3 action branches +
+      disposition + trace shape), `tests/test_e2e_edi_mismatch.py`
+      (4 sub_type branches + PRICE_MISMATCH routing assertion + trace
+      shape + stats aggregation).
+- [x] Registry / skill-loader / intent-classifier fitness tests.
+
+### 21.8 Sandbox
+- [x] `tests/sandbox/seed.py` — 9 new events (3 PHR branches +
+      4 EDM sub_types + PRICE_MISMATCH routing demo + invalid
+      sub_type).
+- [x] CLI: `--intent PRICE_HOLD_RELEASE`, `--intent EDI_MISMATCH`
+      filter maps + `_intent_label` prefix branches.
+- [x] Sandbox UI: skill-text map, `_intent_label`, custom-event form
+      selector (incl. `mismatch_sub_type` dropdown that demonstrates
+      the routing fork).
+
+### 21.9 UI integration (asoe-ui, tracked separately)
+- [x] `src/types/exceptions.ts` — `PriceHoldAnalysisData`,
+      `EdiMismatchAnalysisData` + optional fields on `OrderAnalysis`.
+- [x] `src/app/exceptions/PriceHoldSection.tsx`,
+      `EdiMismatchSection.tsx` — data-presence enrichment, wired in
+      `ExceptionDetailPanel`.
+- [x] `src/config/erp-label-map.ts`, `src/hooks/useErpProfile.ts` —
+      vendor-specific display labels (SAP / Oracle / Salesforce /
+      GENERIC) driven by `NEXT_PUBLIC_ASOE_ERP_VENDOR`. Default set
+      to `SAP` in `next.config.mjs`. Canonical backend codes unchanged.
+
+✅ Outcome: OM coverage Complete. PRICE_MISMATCH routing fork protects
+the pricing single-source-of-truth at classifier, skill, and UI
+rendering layers — a UI regression is blocked by the e2e contract
+test that asserts a PRICE_MISMATCH fixture lands under
+`CONTRACTUAL_CORRECTION`, not `EDI_MISMATCH`.

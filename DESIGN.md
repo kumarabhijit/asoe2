@@ -22,6 +22,8 @@ recipes/
   PriceAdjustmentRecipe.py   # CONTRACTUAL_CORRECTION / MASS_PRICING_ERROR
   CreditHoldReleaseRecipe.py # CREDIT_BLOCK
   DuplicatePORecipe.py       # DUPLICATE_PO
+  PriceHoldReleaseRecipe.py  # PRICE_HOLD_RELEASE — EDI 850 pricing-block disposition
+  EdiMismatchRecipe.py       # EDI_MISMATCH — SKU/QTY/UOM/SHIP_TO sub_type classification
   registry.py        # Recipe registry (name → spec mapping)
   executor.py        # RecipeExecutor — dispatches to registered recipes
 
@@ -137,6 +139,21 @@ Each recipe declares a `RecipeSpec` that the orchestration layer uses to validat
 - Effects: `buyer_notification` (notification gateway)
 - Resolution actions: `BLOCK_AND_NOTIFY`, `MERGE`, `SUPERSEDE`, `ALLOW_BOTH`, `ESCALATE`, `REQUEST_BUYER_CONFIRMATION`
 
+**PriceHoldReleaseRecipe.py:**
+- Allowed intents: `PRICE_HOLD_RELEASE`
+- Required params: `order_id`, `line_item`, `po_price`, `sap_base_price`, `tolerance_pct`, `hard_block_pct`, `hold_status`
+- Dependencies: `get_price_hold_status` (OMS gateway)
+- Effects: `update_hold_flag` (OMS gateway)
+- Recipe actions (constrained via `AllowedPriceHoldAction`): `AUTO_RELEASE` (variance within tolerance), `ESCALATE` (variance above tolerance, within hard-block), `HARD_BLOCK` (variance above hard-block)
+
+**EdiMismatchRecipe.py:**
+- Allowed intents: `EDI_MISMATCH`
+- Required params: `order_id`, `sub_type`, `expected_value`, `received_value`, `autonomy_levels`
+- Dependencies: none (pure classification — no I/O)
+- Effects: `buyer_notification` (notification gateway)
+- Accepted sub_types (constrained via `AllowedEdiMismatchSubType`): `SKU_MISMATCH`, `QTY_MISMATCH`, `UOM_MISMATCH`, `SHIP_TO_MISMATCH`. `PRICE_MISMATCH` is intentionally excluded — routed to `CONTRACTUAL_CORRECTION` / `PriceAdjustmentRecipe.py` at classifier time to preserve the pricing single-source-of-truth (CLAUDE.md §1).
+- Classification vocabulary (constrained via `AllowedEdiMismatchClassification`): `HARD_REJECT`, `REVIEW`, `ESCALATE`
+
 ---
 
 ## 2. Constraint Backend Chain
@@ -165,10 +182,13 @@ If `OutlinesConstrainedBackend` fails to initialise (missing `outlines` package)
 
 | Schema | Constrained field | Allowed values |
 |---|---|---|
-| `IntentDecision` | `AllowedIntent` | `CONTRACTUAL_CORRECTION`, `CREDIT_BLOCK`, `MASS_PRICING_ERROR`, `DUPLICATE_PO` |
+| `IntentDecision` | `AllowedIntent` | `CONTRACTUAL_CORRECTION`, `CREDIT_BLOCK`, `MASS_PRICING_ERROR`, `DUPLICATE_PO`, `PRICE_HOLD_RELEASE`, `EDI_MISMATCH` |
 | `ShadowDecision` | `AllowedShadowStatus` | `GREEN`, `YELLOW`, `RED` |
-| `RecipeProposal` | `AllowedRecipeName` | `PriceAdjustmentRecipe.py`, `CreditHoldReleaseRecipe.py`, `DuplicatePORecipe.py` |
+| `RecipeProposal` | `AllowedRecipeName` | `PriceAdjustmentRecipe.py`, `CreditHoldReleaseRecipe.py`, `DuplicatePORecipe.py`, `PriceHoldReleaseRecipe.py`, `EdiMismatchRecipe.py` |
 | _(recipe output)_ | `AllowedResolutionAction` | `BLOCK_AND_NOTIFY`, `MERGE`, `SUPERSEDE`, `ALLOW_BOTH`, `ESCALATE`, `REQUEST_BUYER_CONFIRMATION` |
+| _(EdiMismatchRecipe input)_ | `AllowedEdiMismatchSubType` | `SKU_MISMATCH`, `QTY_MISMATCH`, `UOM_MISMATCH`, `SHIP_TO_MISMATCH` (PRICE_MISMATCH routed out at classifier time) |
+| _(EdiMismatchRecipe output)_ | `AllowedEdiMismatchClassification` | `HARD_REJECT`, `REVIEW`, `ESCALATE` |
+| _(PriceHoldReleaseRecipe output)_ | `AllowedPriceHoldAction` | `AUTO_RELEASE`, `ESCALATE`, `HARD_BLOCK` |
 
 ---
 
