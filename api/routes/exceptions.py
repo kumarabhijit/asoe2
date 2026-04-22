@@ -174,6 +174,16 @@ def _persist_exception(
     tenant_id: str, state: GraphState, trace_id: Optional[str],
 ) -> str:
     """Store exception record and trace data. Returns exception_id."""
+    # Verdict Pillar 1: persist gateway context alongside recipe output.
+    # Prefer the explicit `state.enrichment_context` when populated
+    # (graph nodes that have been migrated); fall back to
+    # `state.resolved_data` so pre-migration gateway callsites still
+    # contribute evidence to the audit trail. Copy so later mutation
+    # of the graph state doesn't leak into the persisted record.
+    ctx = dict(state.enrichment_context) if state.enrichment_context else {}
+    if not ctx and state.resolved_data:
+        ctx = dict(state.resolved_data)
+
     record = exception_store.create(
         tenant_id=tenant_id,
         order_id=state.event.order_id,
@@ -187,6 +197,7 @@ def _persist_exception(
         # Capture the source event so a future re-analysis can replay it
         # through the graph without relying on external state reconstruction.
         original_event=state.event.model_dump(mode="json"),
+        enrichment_context=ctx,
     )
 
     trace_data = {

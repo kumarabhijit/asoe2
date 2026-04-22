@@ -333,6 +333,17 @@ class GraphState(BaseModel):
     # Gateway integration (Phase 7)
     resolved_data: Dict[str, Any] = Field(default_factory=dict)
     effect_results: List[GatewayResponse] = Field(default_factory=list)
+    # Verdict Pillar 1 (2026-04-22 compliance workshop): audit-bearing
+    # upstream context — gateway-fetched evidence (matched POs,
+    # warehouse snapshots, contract refs, SAP doc numbers) that the
+    # operator reviews to authorise an action. Distinct from
+    # `resolved_data` (transient recipe input) in both semantics and
+    # lifetime: this bag survives to `ExceptionRecord.enrichment_context`
+    # and is consumed by the `build_analysis` composition node to
+    # populate Layer-2 evidence on the UI. Empty means "not fetched
+    # for this resolution path" — the UI must render "Context Not
+    # Required for Resolution", never a dash (workshop §Pillar 3).
+    enrichment_context: Dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _explanation_for_terminal_state(self) -> "GraphState":
