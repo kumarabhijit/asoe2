@@ -71,9 +71,44 @@ def _register_oms_stub():
                 gateway_name="oms",
                 operation="get_matched_po_details",
                 status="SUCCESS",
+                # Verdict Pillar 1 (T2): payload carries every
+                # audit-bearing subfield required by
+                # DuplicateDetectionData (registry: original_order +
+                # duplicate_order OrderSnapshot pair, days_between,
+                # cancellation_target). Recipe-input booleans
+                # (has_revision_indicator, line_items_identical) are
+                # alongside.
                 data={
                     "has_revision_indicator": False,
                     "line_items_identical": True,
+                    "days_between": 1,
+                    "cancellation_target": "SO-DUP-002",
+                    "detection_method": "po_number+customer+lines",
+                    "customer_id": "R-10",
+                    "matching_fields": ["po_number", "customer_id", "line_items"],
+                    "differing_fields": [],
+                    "original_order": {
+                        "so_number": "SO-DUP-001",
+                        "po_number": "PO-4000",
+                        "created_date": "2026-04-20",
+                        "total_value": 1000.0,
+                        "line_count": 1,
+                        "status": "OPEN",
+                        "lines": [
+                            {"sku": "SKU-A", "description": "Widget", "qty": 10.0, "unit_price": 100.0},
+                        ],
+                    },
+                    "duplicate_order": {
+                        "so_number": "SO-DUP-002",
+                        "po_number": "PO-4001",
+                        "created_date": "2026-04-21",
+                        "total_value": 1000.0,
+                        "line_count": 1,
+                        "status": "OPEN",
+                        "lines": [
+                            {"sku": "SKU-A", "description": "Widget", "qty": 10.0, "unit_price": 100.0},
+                        ],
+                    },
                 },
             ),
         },

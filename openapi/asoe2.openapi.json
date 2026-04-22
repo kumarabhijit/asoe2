@@ -154,6 +154,16 @@
             "title": "Diagnosis",
             "type": "string"
           },
+          "duplicate_detection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DuplicateDetectionData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "edi_mismatch_analysis": {
             "anyOf": [
               {
@@ -175,6 +185,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/MOQAnalysisData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "order_comparison": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrderComparisonData"
               },
               {
                 "type": "null"
@@ -316,6 +336,81 @@
           "challenge_reason"
         ],
         "title": "ChallengeRequest",
+        "type": "object"
+      },
+      "ComparisonLineItem": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "number"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          },
+          "unit_price": {
+            "title": "Unit Price",
+            "type": "number"
+          }
+        },
+        "required": [
+          "sku",
+          "qty",
+          "unit_price"
+        ],
+        "title": "ComparisonLineItem",
+        "type": "object"
+      },
+      "ComparisonOrder": {
+        "additionalProperties": false,
+        "properties": {
+          "created_date": {
+            "title": "Created Date",
+            "type": "string"
+          },
+          "customer": {
+            "default": "",
+            "title": "Customer",
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ComparisonLineItem"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "po_number": {
+            "title": "Po Number",
+            "type": "string"
+          },
+          "so_number": {
+            "title": "So Number",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "total_value": {
+            "title": "Total Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "so_number",
+          "po_number",
+          "created_date",
+          "total_value",
+          "status"
+        ],
+        "title": "ComparisonOrder",
         "type": "object"
       },
       "CosignRequest": {
@@ -469,6 +564,60 @@
           "reason_tag"
         ],
         "title": "DispositionRequest",
+        "type": "object"
+      },
+      "DuplicateDetectionData": {
+        "additionalProperties": false,
+        "description": "DuplicatePORecipe \u2192 UI `duplicate_detection`.\n\nRegistry-classified fields (2026-04-22 workshop):\n\n  * audit-bearing (gateway): original_order, duplicate_order\n    (OrderSnapshot pair from oms/get_matched_po_details).\n  * audit-bearing (control): days_between, cancellation_target,\n    autonomy_applied.\n  * audit-bearing (recipe-output): confidence, recommended_action.\n  * contextual: detection_method (regenerable from signal_scores).\n\nNo grandfather clause: every audit-bearing field must persist\nend-to-end. Empty enrichment_context routes to\nAUDIT_CONTEXT_MISSING via the build_analysis composer.\n\nSources:\n  * `record.enrichment_context[\"matched_po_details\"]` \u2014 gateway\n    OrderSnapshot pair + days_between + detection_method +\n    cancellation_target.\n  * `record.resolution_data` \u2014 recipe composite_score (\u2192\n    confidence), recommended_action, autonomy_level.",
+        "properties": {
+          "autonomy_applied": {
+            "title": "Autonomy Applied",
+            "type": "string"
+          },
+          "cancellation_target": {
+            "title": "Cancellation Target",
+            "type": "string"
+          },
+          "confidence": {
+            "title": "Confidence",
+            "type": "number"
+          },
+          "days_between": {
+            "title": "Days Between",
+            "type": "integer"
+          },
+          "detection_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detection Method"
+          },
+          "duplicate_order": {
+            "$ref": "#/components/schemas/OrderSnapshot"
+          },
+          "original_order": {
+            "$ref": "#/components/schemas/OrderSnapshot"
+          },
+          "recommended_action": {
+            "title": "Recommended Action",
+            "type": "string"
+          }
+        },
+        "required": [
+          "original_order",
+          "duplicate_order",
+          "days_between",
+          "confidence",
+          "recommended_action",
+          "cancellation_target",
+          "autonomy_applied"
+        ],
+        "title": "DuplicateDetectionData",
         "type": "object"
       },
       "EdiMismatchAnalysisData": {
@@ -1229,6 +1378,75 @@
           "sku"
         ],
         "title": "MOQAnalysisData",
+        "type": "object"
+      },
+      "OrderComparisonData": {
+        "additionalProperties": false,
+        "description": "Synthesised side-by-side comparison from the same\n`matched_po_details` payload that drives DuplicateDetectionData.\nNo dedicated recipe or gateway \u2014 single source of truth (R5).\n\nPer the registry (OrderComparisonData entry, \"Synthesised from\nDuplicateDetection; same attestation target\"), enforcement of\naudit-bearing coverage is delegated to DuplicateDetectionData.\nThis adapter is best-effort \u2014 projects what's present in\nmatched_po_details.",
+        "properties": {
+          "differing_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Differing Fields",
+            "type": "array"
+          },
+          "matching_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Matching Fields",
+            "type": "array"
+          },
+          "orders": {
+            "items": {
+              "$ref": "#/components/schemas/ComparisonOrder"
+            },
+            "title": "Orders",
+            "type": "array"
+          }
+        },
+        "title": "OrderComparisonData",
+        "type": "object"
+      },
+      "OrderSnapshot": {
+        "additionalProperties": false,
+        "description": "One side of a matched-PO pair from the OMS get_matched_po_details\ngateway. All subfields are audit-bearing per the\nDuplicateDetectionData.original_order / duplicate_order entries\nin compliance/audit_bearing_registry.yaml.",
+        "properties": {
+          "created_date": {
+            "title": "Created Date",
+            "type": "string"
+          },
+          "line_count": {
+            "title": "Line Count",
+            "type": "integer"
+          },
+          "po_number": {
+            "title": "Po Number",
+            "type": "string"
+          },
+          "so_number": {
+            "title": "So Number",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "total_value": {
+            "title": "Total Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "so_number",
+          "po_number",
+          "created_date",
+          "total_value",
+          "line_count",
+          "status"
+        ],
+        "title": "OrderSnapshot",
         "type": "object"
       },
       "OverMaxAnalysisData": {

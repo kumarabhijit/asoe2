@@ -33,9 +33,14 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 from api.schemas import (
     AlternateDeliveryOption,
+    ComparisonLineItem,
+    ComparisonOrder,
     DeliveryDelayAnalysisData,
+    DuplicateDetectionData,
     EdiMismatchAnalysisData,
     MOQAnalysisData,
+    OrderComparisonData,
+    OrderSnapshot,
     OverMaxAnalysisData,
     OverMaxLine,
     PalletAnalysisData,
@@ -49,6 +54,10 @@ from api.store import ExceptionRecord
 from contracts.policy import (
     DELIVERY_DELAY_MINOR_DAYS,
     DELIVERY_DELAY_SEVERE_DAYS,
+    DUPLICATE_PO_AUTONOMY_LEVELS,
+    DUPLICATE_PO_THRESHOLD_AUTO_BLOCK,
+    DUPLICATE_PO_THRESHOLD_REVIEW_REQUIRED,
+    DUPLICATE_PO_THRESHOLD_SOFT_FLAG,
     EDI_MISMATCH_AUTONOMY_LEVELS,
     MOQ_SEVERE_SHORTFALL_PCT,
     MOQ_UPLIFT_REVIEW_PCT,
@@ -59,6 +68,7 @@ from contracts.policy import (
     PRICE_HOLD_TOLERANCE_PCT,
 )
 from recipes.DeliveryDelayResolutionRecipe import resolve_delivery_delay
+from recipes.DuplicatePORecipe import detect_duplicate_po
 from recipes.EdiMismatchRecipe import detect_edi_mismatch
 from recipes.MOQRoundUpRecipe import round_up_moq
 from recipes.OverMaxTrimRecipe import trim_over_max
@@ -679,6 +689,192 @@ def adapt_pallet(record: ExceptionRecord) -> Optional[PalletAnalysisData]:
     return _pallet_from_outputs(synthetic)
 
 
+# ─── Duplicate-PO adapters (T2) ─────────────────────────────────────────
+#
+# DuplicatePO is unique among the recipes shipped so far: gateway
+# evidence (the matched OrderSnapshot pair from
+# oms/get_matched_po_details) is the audit-bearing source of truth.
+# The recipe itself produces only classification + recommended_action
+# — the operator-facing OrderSnapshot pair, days_between, and
+# cancellation_target live in `record.enrichment_context`
+# (Verdict Pillar 1). The composer enforces audit-bearing coverage
+# against DuplicateDetectionData; OrderComparisonData is synthesised
+# from the same payload (registry: "Synthesised from DuplicateDetection;
+# same attestation target") and carried as a SECONDARY adapter.
+
+def _format_autonomy(level: Any, action: Any) -> str:
+    """Format the autonomy_applied display string ("L1 — BLOCK_AND_NOTIFY").
+
+    Mirrors the convention used in the EDI mismatch synthesis path —
+    operator-readable, attribution-friendly. Returns "" when the
+    recipe didn't emit a level.
+    """
+    if not level:
+        return ""
+    if action:
+        return f"{level} — {action}"
+    return str(level)
+
+
+def _order_snapshot(payload: Optional[Dict[str, Any]]) -> Optional[OrderSnapshot]:
+    """Coerce a gateway snapshot dict into the typed model. Returns
+    None when any audit-bearing subfield is missing — the composer
+    then routes to AUDIT_CONTEXT_MISSING."""
+    if not payload:
+        return None
+    required = ("so_number", "po_number", "created_date",
+                "total_value", "line_count", "status")
+    if any(payload.get(f) in (None, "") for f in required):
+        return None
+    try:
+        return OrderSnapshot(
+            so_number=str(payload["so_number"]),
+            po_number=str(payload["po_number"]),
+            created_date=str(payload["created_date"]),
+            total_value=_as_float(payload["total_value"]),
+            line_count=int(payload["line_count"]),
+            status=str(payload["status"]),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _synthesize_duplicate_outputs(
+    record: ExceptionRecord, matched: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Run DuplicatePORecipe synthetically to fill recipe-output fields
+    on the explain / shadow-gated path. The recipe is pure (no side
+    effects), so calling it from the adapter is safe and matches the
+    pattern used by adapt_price_hold and adapt_pallet."""
+    event = record.original_event or {}
+    metadata = event.get("metadata") or {}
+    signal_scores = metadata.get("signal_scores") or {}
+    if not isinstance(signal_scores, dict):
+        return {}
+    try:
+        return detect_duplicate_po(
+            incoming_po_number=str(event.get("order_id", "")),
+            customer_id=str(event.get("retailer_id", "") or ""),
+            signal_scores={k: _as_float(v) for k, v in signal_scores.items()},
+            threshold_auto_block=DUPLICATE_PO_THRESHOLD_AUTO_BLOCK,
+            threshold_review_required=DUPLICATE_PO_THRESHOLD_REVIEW_REQUIRED,
+            threshold_soft_flag=DUPLICATE_PO_THRESHOLD_SOFT_FLAG,
+            original_fulfilled=(matched.get("original_fulfilled")
+                                if isinstance(matched.get("original_fulfilled"), bool)
+                                else None),
+            has_revision_indicator=matched.get("has_revision_indicator"),
+            line_items_identical=matched.get("line_items_identical"),
+            autonomy_levels=DUPLICATE_PO_AUTONOMY_LEVELS,
+        )
+    except (TypeError, ValueError):
+        return {}
+
+
+def adapt_duplicate(record: ExceptionRecord) -> Optional[DuplicateDetectionData]:
+    """Project DuplicatePORecipe into DuplicateDetectionData.
+
+    Two source bags:
+      * `record.enrichment_context["matched_po_details"]` — gateway
+        snapshot pair + days_between + cancellation_target +
+        detection_method. Audit-bearing per
+        compliance/audit_bearing_registry.yaml::DuplicateDetectionData.
+      * `record.resolution_data` — recipe composite_score (→
+        confidence × 100), recommended_action, autonomy_level.
+
+    Source paths, in order of preference:
+      1. resolution_data has recipe output → use it (live GREEN path).
+      2. resolution_data empty → synthesize via pure recipe call so
+         explain mode + shadow-gated records still get audit-complete
+         projections (mirrors adapt_price_hold's pattern).
+
+    Returns None when the gateway evidence (matched OrderSnapshot pair)
+    is absent — Pillar 2 then routes to AUDIT_CONTEXT_MISSING via
+    build_analysis. No grandfather clause in this engagement.
+    """
+    matched = (record.enrichment_context or {}).get("matched_po_details") or {}
+    original = _order_snapshot(matched.get("original_order"))
+    duplicate = _order_snapshot(matched.get("duplicate_order"))
+    if original is None or duplicate is None:
+        return None
+
+    outputs = record.resolution_data or {}
+    if not outputs.get("recommended_action"):
+        outputs = _synthesize_duplicate_outputs(record, matched)
+
+    try:
+        return DuplicateDetectionData(
+            original_order=original,
+            duplicate_order=duplicate,
+            detection_method=matched.get("detection_method"),
+            days_between=int(matched.get("days_between") or 0),
+            confidence=_as_float(outputs.get("composite_score")) * 100.0,
+            recommended_action=str(outputs.get("recommended_action") or ""),
+            cancellation_target=str(matched.get("cancellation_target") or ""),
+            autonomy_applied=_format_autonomy(
+                outputs.get("autonomy_level"),
+                outputs.get("recommended_action"),
+            ),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _comparison_order(
+    payload: Optional[Dict[str, Any]], customer: str,
+) -> Optional[ComparisonOrder]:
+    if not payload:
+        return None
+    try:
+        lines = [
+            ComparisonLineItem(
+                sku=str(li.get("sku", "")),
+                description=str(li.get("description", "") or ""),
+                qty=_as_float(li.get("qty")),
+                unit_price=_as_float(li.get("unit_price")),
+            )
+            for li in (payload.get("lines") or [])
+            if li.get("sku")
+        ]
+        return ComparisonOrder(
+            so_number=str(payload.get("so_number", "")),
+            po_number=str(payload.get("po_number", "")),
+            created_date=str(payload.get("created_date", "")),
+            customer=customer,
+            lines=lines,
+            total_value=_as_float(payload.get("total_value")),
+            status=str(payload.get("status", "")),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def adapt_order_comparison(
+    record: ExceptionRecord,
+) -> Optional[OrderComparisonData]:
+    """Synthesise side-by-side comparison from `matched_po_details`.
+
+    Single source of truth (R5) — re-projects the same gateway payload
+    that drives DuplicateDetectionData. No separate recipe.
+
+    Returns None when no matched-PO snapshot pair is present.
+    """
+    matched = (record.enrichment_context or {}).get("matched_po_details") or {}
+    customer = str(
+        matched.get("customer_id")
+        or (record.original_event or {}).get("retailer_id")
+        or ""
+    )
+    orig = _comparison_order(matched.get("original_order"), customer)
+    dup = _comparison_order(matched.get("duplicate_order"), customer)
+    if orig is None or dup is None:
+        return None
+    return OrderComparisonData(
+        orders=[orig, dup],
+        matching_fields=list(matched.get("matching_fields") or []),
+        differing_fields=list(matched.get("differing_fields") or []),
+    )
+
+
 # Recipe-name → (target field on AnalysisResponse, adapter function).
 #
 # The endpoint looks up by `record.selected_recipe`. Absent recipe name
@@ -696,6 +892,23 @@ ANALYSIS_ADAPTERS: Dict[
     "OverMaxTrimRecipe.py": ("overmax_analysis", adapt_overmax),
     "MOQRoundUpRecipe.py": ("moq_analysis", adapt_moq),
     "PalletAlignmentRecipe.py": ("pallet_analysis", adapt_pallet),
+    "DuplicatePORecipe.py": ("duplicate_detection", adapt_duplicate),
+}
+
+
+# Recipe-name → list of (field, adapter) pairs for derived projections.
+# The composer enforces audit-bearing coverage against the PRIMARY
+# (`ANALYSIS_ADAPTERS`); secondaries are best-effort projections that
+# share the primary's attestation target. Use this when a single
+# gateway payload powers multiple UI sections — e.g. matched_po_details
+# drives both `duplicate_detection` (primary) and `order_comparison`
+# (secondary, registry rationale: "same attestation target").
+SECONDARY_ANALYSIS_ADAPTERS: Dict[
+    str, Tuple[Tuple[str, Callable[[ExceptionRecord], Any]], ...]
+] = {
+    "DuplicatePORecipe.py": (
+        ("order_comparison", adapt_order_comparison),
+    ),
 }
 
 
@@ -711,6 +924,7 @@ INTENT_TO_RECIPE_NAME: Dict[str, str] = {
     "OVER_MAX": "OverMaxTrimRecipe.py",
     "MIN_ORDER_QTY": "MOQRoundUpRecipe.py",
     "PALLET_CONFIG": "PalletAlignmentRecipe.py",
+    "DUPLICATE_PO": "DuplicatePORecipe.py",
 }
 
 

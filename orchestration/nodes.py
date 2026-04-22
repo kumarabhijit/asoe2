@@ -415,7 +415,9 @@ def explain_only(state: GraphState) -> GraphState:
 
     Composes a human-readable summary of what WOULD have been executed and
     sets final_status=MANUAL_REVIEW_REQUIRED.  No recipe logic runs, no
-    SAP/ERP writes, no MCP calls.
+    SAP/ERP writes, no MCP calls. Gateway READS (resolve_dependencies)
+    do run earlier in the explain graph so the audit context the
+    explanation references matches the live path.
 
     The Compliance Shadow and circuit breaker both run before this node, so
     the explanation includes the real shadow verdict.

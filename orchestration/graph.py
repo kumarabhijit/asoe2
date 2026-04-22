@@ -109,14 +109,23 @@ def build_graph():
 def build_explain_graph():
     """Build the explain-mode graph.
 
-    Identical to build_graph() except execute_recipe is replaced with
-    explain_only.  The full reasoning and compliance pipeline still runs;
-    only the final SAP-writing step is suppressed.
+    Identical to build_graph() except execute_recipe / apply_effects
+    are replaced with explain_only — the recipe doesn't run and no
+    side effects fire. Gateway READ dependencies (resolve_dependencies)
+    DO run in explain mode so the audit-bearing field registry is
+    enforced against the same evidence the live path would see;
+    otherwise dry-runs would always route to AUDIT_CONTEXT_MISSING
+    even when the production path would succeed.
     """
     graph = StateGraph(GraphState)
     _add_common_nodes_and_edges(graph)
+    graph.add_node("resolve_dependencies", nodes.resolve_dependencies)
     graph.add_node("explain_only", nodes.explain_only)
-    graph.add_edge("validate_types", "explain_only")
+    graph.add_edge("validate_types", "resolve_dependencies")
+    graph.add_conditional_edges(
+        "resolve_dependencies", route_after_gate,
+        {"terminal": "build_analysis", "continue": "explain_only"},
+    )
     # Verdict Pillar 2: explain-mode also runs through build_analysis
     # so dry-run traces exhibit the same AUDIT_CONTEXT_MISSING
     # behaviour as live executions.

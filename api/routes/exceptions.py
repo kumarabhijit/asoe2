@@ -47,7 +47,11 @@ from api.deps import (
     require_permission,
     require_role,
 )
-from api.analysis_adapters import ANALYSIS_ADAPTERS, resolve_adapter_key
+from api.analysis_adapters import (
+    ANALYSIS_ADAPTERS,
+    SECONDARY_ANALYSIS_ADAPTERS,
+    resolve_adapter_key,
+)
 from api.analysis_composer import compose as compose_analysis
 from api.errors import ASOEError
 from api.schemas import (
@@ -1530,6 +1534,16 @@ async def get_analysis(
             # handles that at the classifier level).
             if composed.is_complete:
                 extras[field_name] = composed.projection
+                # Secondary projections share the primary's attestation
+                # target (registry rationale "same attestation target").
+                # Only surface when the primary cleared audit coverage
+                # — they ride on its enforcement.
+                for sec_field, sec_adapter in SECONDARY_ANALYSIS_ADAPTERS.get(
+                    adapter_key, ()
+                ):
+                    sec_proj = sec_adapter(record)
+                    if sec_proj is not None:
+                        extras[sec_field] = sec_proj
 
     return AnalysisResponse(
         diagnosis=diagnosis,
