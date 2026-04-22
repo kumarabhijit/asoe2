@@ -171,6 +171,16 @@
             "title": "Lines",
             "type": "array"
           },
+          "overmax_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OverMaxAnalysisData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "price_hold_analysis": {
             "anyOf": [
               {
@@ -1078,6 +1088,139 @@
         "title": "MFAVerifyRequest",
         "type": "object"
       },
+      "OverMaxAnalysisData": {
+        "additionalProperties": false,
+        "description": "OverMaxTrimRecipe \u2192 UI `overmax_analysis`.\n\nRegistry-classified fields (2026-04-22 workshop):\n  * audit-bearing: total_ordered, max_qty, excess_qty,\n    exceedance_pct, uom, at_risk, order_lines, trim_plan.\n  * audit-bearing (grandfathered until 2026-07-21 \u2014 gateway gap):\n    contract_ref, block_status, block_reason.\n\nThe recipe computes excess_qty / exceedance_pct / trim_plan /\nat_risk from event metadata; the SAP block + contract gateway\nthat would supply contract_ref / block_status / block_reason\nis not yet wired (overmax_gateway_gap clause).",
+        "properties": {
+          "at_risk": {
+            "default": 0.0,
+            "title": "At Risk",
+            "type": "number"
+          },
+          "block_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Block Reason"
+          },
+          "block_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Block Status"
+          },
+          "contract_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Ref"
+          },
+          "exceedance_pct": {
+            "title": "Exceedance Pct",
+            "type": "number"
+          },
+          "excess_qty": {
+            "title": "Excess Qty",
+            "type": "number"
+          },
+          "max_qty": {
+            "title": "Max Qty",
+            "type": "number"
+          },
+          "order_lines": {
+            "items": {
+              "$ref": "#/components/schemas/OverMaxLine"
+            },
+            "title": "Order Lines",
+            "type": "array"
+          },
+          "total_ordered": {
+            "title": "Total Ordered",
+            "type": "number"
+          },
+          "trim_plan": {
+            "items": {
+              "$ref": "#/components/schemas/TrimPlanLine"
+            },
+            "title": "Trim Plan",
+            "type": "array"
+          },
+          "uom": {
+            "default": "",
+            "title": "Uom",
+            "type": "string"
+          }
+        },
+        "required": [
+          "total_ordered",
+          "max_qty",
+          "excess_qty",
+          "exceedance_pct"
+        ],
+        "title": "OverMaxAnalysisData",
+        "type": "object"
+      },
+      "OverMaxLine": {
+        "additionalProperties": false,
+        "description": "One affected order line in an OVER_MAX exception.",
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "excess": {
+            "default": 0.0,
+            "title": "Excess",
+            "type": "number"
+          },
+          "is_even_layer_item": {
+            "default": false,
+            "title": "Is Even Layer Item",
+            "type": "boolean"
+          },
+          "max_line_qty": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Line Qty"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "number"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sku",
+          "qty"
+        ],
+        "title": "OverMaxLine",
+        "type": "object"
+      },
       "PolicyOverrideResponse": {
         "description": "Response for policy update.",
         "properties": {
@@ -1838,6 +1981,51 @@
           "event_id"
         ],
         "title": "TraceResponse",
+        "type": "object"
+      },
+      "TrimPlanLine": {
+        "additionalProperties": false,
+        "description": "One row in OverMaxTrimRecipe's trim plan.",
+        "properties": {
+          "action": {
+            "default": "TRIM",
+            "enum": [
+              "TRIM",
+              "SKIP",
+              "OK"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "delta": {
+            "default": 0.0,
+            "title": "Delta",
+            "type": "number"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "ordered": {
+            "title": "Ordered",
+            "type": "number"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          },
+          "trimmed_to": {
+            "title": "Trimmed To",
+            "type": "number"
+          }
+        },
+        "required": [
+          "sku",
+          "ordered",
+          "trimmed_to"
+        ],
+        "title": "TrimPlanLine",
         "type": "object"
       },
       "UserProfile": {

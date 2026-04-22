@@ -35,18 +35,23 @@ from api.schemas import (
     AlternateDeliveryOption,
     DeliveryDelayAnalysisData,
     EdiMismatchAnalysisData,
+    OverMaxAnalysisData,
+    OverMaxLine,
     PriceHoldAnalysisData,
+    TrimPlanLine,
 )
 from api.store import ExceptionRecord
 from contracts.policy import (
     DELIVERY_DELAY_MINOR_DAYS,
     DELIVERY_DELAY_SEVERE_DAYS,
     EDI_MISMATCH_AUTONOMY_LEVELS,
+    OVER_MAX_SEVERE_EXCEEDANCE_PCT,
     PRICE_HOLD_HARD_BLOCK_PCT,
     PRICE_HOLD_TOLERANCE_PCT,
 )
 from recipes.DeliveryDelayResolutionRecipe import resolve_delivery_delay
 from recipes.EdiMismatchRecipe import detect_edi_mismatch
+from recipes.OverMaxTrimRecipe import trim_over_max
 from recipes.PriceHoldReleaseRecipe import execute_price_hold_release
 
 
@@ -327,6 +332,129 @@ def adapt_delivery_delay(
     return _delivery_delay_from_outputs(synthetic, event)
 
 
+def _coerce_overmax_line(raw: Any) -> Optional[OverMaxLine]:
+    if not isinstance(raw, dict) or "sku" not in raw:
+        return None
+    try:
+        return OverMaxLine(
+            sku=str(raw["sku"]),
+            description=str(raw.get("description") or ""),
+            qty=_as_float(raw.get("qty")),
+            max_line_qty=(
+                _as_float(raw.get("max_line_qty"))
+                if raw.get("max_line_qty") is not None else None
+            ),
+            excess=_as_float(raw.get("excess")),
+            is_even_layer_item=bool(raw.get("is_even_layer_item", False)),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_trim_plan_line(raw: Any) -> Optional[TrimPlanLine]:
+    if not isinstance(raw, dict) or "sku" not in raw:
+        return None
+    action = raw.get("action")
+    if action not in ("TRIM", "SKIP", "OK"):
+        action = "TRIM"
+    try:
+        return TrimPlanLine(
+            sku=str(raw["sku"]),
+            description=str(raw.get("description") or ""),
+            ordered=_as_float(raw.get("ordered")),
+            trimmed_to=_as_float(raw.get("trimmed_to")),
+            delta=_as_float(raw.get("delta")),
+            action=action,
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _overmax_from_outputs(
+    outputs: Dict[str, Any], event: Dict[str, Any],
+) -> Optional[OverMaxAnalysisData]:
+    metadata = event.get("metadata") or {}
+    total_ordered = _as_float(metadata.get("total_ordered"))
+    max_qty = _as_float(metadata.get("max_qty"))
+    if total_ordered <= 0 or max_qty <= 0:
+        return None
+    excess_qty = outputs.get("excess_qty")
+    exceedance_pct = outputs.get("exceedance_pct")
+    if excess_qty is None or exceedance_pct is None:
+        return None
+
+    raw_lines = metadata.get("order_lines") or []
+    order_lines: List[OverMaxLine] = []
+    for r in raw_lines:
+        m = _coerce_overmax_line(r)
+        if m is not None:
+            order_lines.append(m)
+
+    raw_plan = outputs.get("trim_plan") or []
+    trim_plan: List[TrimPlanLine] = []
+    for r in raw_plan:
+        m = _coerce_trim_plan_line(r)
+        if m is not None:
+            trim_plan.append(m)
+
+    try:
+        return OverMaxAnalysisData(
+            total_ordered=total_ordered,
+            max_qty=max_qty,
+            excess_qty=_as_float(excess_qty),
+            exceedance_pct=_as_float(exceedance_pct),
+            uom=str(metadata.get("uom") or ""),
+            at_risk=_as_float(outputs.get("at_risk")),
+            order_lines=order_lines,
+            trim_plan=trim_plan,
+            # Grandfathered fields — populated when SAP gateway
+            # lands. Optional in the model so coverage doesn't fail
+            # while the overmax_gateway_gap clause is active.
+            contract_ref=metadata.get("contract_ref"),
+            block_status=metadata.get("block_status"),
+            block_reason=metadata.get("block_reason"),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def adapt_overmax(record: ExceptionRecord) -> Optional[OverMaxAnalysisData]:
+    """Project an OverMaxTrimRecipe resolution into OverMaxAnalysisData.
+
+    Three-path lookup mirroring the other adapters: recipe output,
+    synthetic invocation when shadow gated, defensive None on missing
+    event metadata.
+    """
+    outputs = record.resolution_data or {}
+    event = record.original_event or {}
+    status = outputs.get("status")
+
+    if status and status != "FAILED":
+        projection = _overmax_from_outputs(outputs, event)
+        if projection is not None:
+            return projection
+
+    metadata = event.get("metadata") or {}
+    total_ordered = _as_float(metadata.get("total_ordered"))
+    max_qty = _as_float(metadata.get("max_qty"))
+    if total_ordered <= 0 or max_qty <= 0:
+        return None
+    try:
+        synthetic = trim_over_max(
+            order_id=str(event.get("order_id", "")),
+            total_ordered=total_ordered,
+            max_qty=max_qty,
+            severe_exceedance_pct=OVER_MAX_SEVERE_EXCEEDANCE_PCT,
+            order_lines=metadata.get("order_lines"),
+            unit_cost_per_line=metadata.get("unit_cost_per_line"),
+        )
+    except (TypeError, ValueError):
+        return None
+    if synthetic.get("status") == "FAILED":
+        return None
+    return _overmax_from_outputs(synthetic, event)
+
+
 # Recipe-name → (target field on AnalysisResponse, adapter function).
 #
 # The endpoint looks up by `record.selected_recipe`. Absent recipe name
@@ -341,6 +469,7 @@ ANALYSIS_ADAPTERS: Dict[
     "DeliveryDelayResolutionRecipe.py": (
         "delivery_delay_analysis", adapt_delivery_delay,
     ),
+    "OverMaxTrimRecipe.py": ("overmax_analysis", adapt_overmax),
 }
 
 
@@ -353,6 +482,7 @@ INTENT_TO_RECIPE_NAME: Dict[str, str] = {
     "PRICE_HOLD_RELEASE": "PriceHoldReleaseRecipe.py",
     "EDI_MISMATCH": "EdiMismatchRecipe.py",
     "DELIVERY_DELAY": "DeliveryDelayResolutionRecipe.py",
+    "OVER_MAX": "OverMaxTrimRecipe.py",
 }
 
 

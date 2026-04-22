@@ -570,6 +570,64 @@ class DeliveryDelayAnalysisData(BaseModel):
     rule_id: Optional[str] = None
 
 
+class OverMaxLine(BaseModel):
+    """One affected order line in an OVER_MAX exception."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sku: str
+    description: str = ""
+    qty: float
+    max_line_qty: Optional[float] = None
+    excess: float = 0.0
+    is_even_layer_item: bool = False
+
+
+class TrimPlanLine(BaseModel):
+    """One row in OverMaxTrimRecipe's trim plan."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sku: str
+    description: str = ""
+    ordered: float
+    trimmed_to: float
+    delta: float = 0.0
+    action: Literal["TRIM", "SKIP", "OK"] = "TRIM"
+
+
+class OverMaxAnalysisData(BaseModel):
+    """OverMaxTrimRecipe → UI `overmax_analysis`.
+
+    Registry-classified fields (2026-04-22 workshop):
+      * audit-bearing: total_ordered, max_qty, excess_qty,
+        exceedance_pct, uom, at_risk, order_lines, trim_plan.
+      * audit-bearing (grandfathered until 2026-07-21 — gateway gap):
+        contract_ref, block_status, block_reason.
+
+    The recipe computes excess_qty / exceedance_pct / trim_plan /
+    at_risk from event metadata; the SAP block + contract gateway
+    that would supply contract_ref / block_status / block_reason
+    is not yet wired (overmax_gateway_gap clause).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    total_ordered: float
+    max_qty: float
+    excess_qty: float
+    exceedance_pct: float
+    uom: str = ""
+    at_risk: float = 0.0
+    order_lines: List[OverMaxLine] = Field(default_factory=list)
+    trim_plan: List[TrimPlanLine] = Field(default_factory=list)
+    # Grandfathered audit-bearing — populated when the SAP contract
+    # gateway lands.
+    contract_ref: Optional[str] = None
+    block_status: Optional[str] = None
+    block_reason: Optional[str] = None
+
+
 class AnalysisResponse(BaseModel):
     """GET /api/v1/exceptions/{id}/analysis"""
 
@@ -586,3 +644,4 @@ class AnalysisResponse(BaseModel):
     price_hold_analysis: Optional[PriceHoldAnalysisData] = None
     edi_mismatch_analysis: Optional[EdiMismatchAnalysisData] = None
     delivery_delay_analysis: Optional[DeliveryDelayAnalysisData] = None
+    overmax_analysis: Optional[OverMaxAnalysisData] = None

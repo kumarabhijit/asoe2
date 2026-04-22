@@ -577,6 +577,24 @@ grandfather_clauses:
     owner: backend
     tracking_issue: TBD
 
+  overmax_gateway_gap:
+    fields:
+      - OverMaxAnalysisData.contract_ref
+      - OverMaxAnalysisData.block_status
+      - OverMaxAnalysisData.block_reason
+    opened: 2026-04-22
+    deadline: 2026-07-21
+    rationale: >-
+      OverMaxTrimRecipe receives total_ordered / max_qty /
+      order_lines from event metadata but the SAP contract /
+      block-status gateway is not wired. Compliance approves a
+      90-day clause: the composition node treats these three
+      fields as contextual until the deadline. Post-deadline,
+      missing values route OVER_MAX exceptions to
+      AUDIT_CONTEXT_MISSING.
+    owner: backend
+    tracking_issue: TBD
+
   delivery_delay_financial_gap:
     fields:
       - DeliveryDelayAnalysisData.at_risk

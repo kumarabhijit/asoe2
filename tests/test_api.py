@@ -1144,3 +1144,83 @@ class TestAnalysis:
             headers=_auth(analyst_token),
         ).json()
         assert trace.get("audit_context_missing_fields") == []
+
+    # -----------------------------------------------------------------
+    # L2d.overmax — adapter end-to-end. Recipe computes excess_qty,
+    # exceedance_pct, at_risk, trim_plan from event metadata.
+    # contract_ref/block_status/block_reason are grandfathered.
+    # -----------------------------------------------------------------
+
+    def _create_overmax(
+        self, client, token, *, total_ordered: float, max_qty: float,
+    ) -> str:
+        event = {
+            "order_id": f"PO-OM-{int(total_ordered)}",
+            "line_item": 1,
+            "po_price": 10.0,
+            "sap_base_price": 10.0,
+            "event_type": "OVER_MAX_QTY",
+            "retailer_id": "R-30",
+            "line_count": 2,
+            "metadata": {
+                "total_ordered": total_ordered,
+                "max_qty": max_qty,
+                "uom": "CASE",
+                "order_lines": [
+                    {
+                        "sku": "SKU-A", "description": "Widget A",
+                        "qty": total_ordered / 2,
+                        "max_line_qty": max_qty / 2,
+                        "is_even_layer_item": True,
+                    },
+                    {
+                        "sku": "SKU-B", "description": "Widget B",
+                        "qty": total_ordered / 2,
+                        "max_line_qty": max_qty / 2,
+                        "is_even_layer_item": True,
+                    },
+                ],
+                "unit_cost_per_line": {"SKU-A": 12.0, "SKU-B": 18.0},
+            },
+        }
+        r = client.post(
+            "/api/v1/exceptions/resolve", json=event, headers=_auth(token),
+        )
+        assert r.status_code == 200, r.text
+        return r.json()["exception_id"]
+
+    def test_analysis_carries_overmax_minor_branch(
+        self, client, analyst_token,
+    ):
+        # 110 vs 100 ceiling = 10% exceedance → MINOR (under SEVERE
+        # threshold of 50%). Shadow YELLOW → adapter synthesises.
+        exc_id = self._create_overmax(
+            client, analyst_token, total_ordered=110.0, max_qty=100.0,
+        )
+        data = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        ).json()
+        om = data.get("overmax_analysis")
+        assert om is not None
+        assert om["total_ordered"] == 110.0
+        assert om["max_qty"] == 100.0
+        assert om["excess_qty"] == 10.0
+        assert om["exceedance_pct"] == 0.1
+        assert om["uom"] == "CASE"
+        assert len(om["order_lines"]) == 2
+        assert len(om["trim_plan"]) >= 1
+        # Grandfathered fields absent — clause is active.
+        assert om.get("contract_ref") is None
+
+    def test_trace_for_overmax_has_no_audit_gap(
+        self, client, analyst_token,
+    ):
+        exc_id = self._create_overmax(
+            client, analyst_token, total_ordered=110.0, max_qty=100.0,
+        )
+        trace = client.get(
+            f"/api/v1/exceptions/{exc_id}/trace",
+            headers=_auth(analyst_token),
+        ).json()
+        assert trace.get("audit_context_missing_fields") == []
