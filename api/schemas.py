@@ -433,6 +433,75 @@ class LineAnalysis(BaseModel):
     waterfall: List[PricingWaterfallStep] = Field(default_factory=list)
 
 
+# ---------------------------------------------------------------------------
+# Analysis enrichment payloads (review L2)
+#
+# Each enrichment type mirrors one recipe's output shape as projected into
+# a UI-consumable schema. The adapter in `api/analysis_adapters.py` maps
+# `record.resolution_data` + `record.original_event` + policy constants
+# into these models; the /analysis endpoint then surfaces them as optional
+# fields on AnalysisResponse. Field names intentionally match the UI's
+# `OrderAnalysis` interface (`src/types/exceptions.ts`) so the
+# data-presence rendering pattern on the UI side needs zero changes.
+#
+# IMPORTANT: these Pydantic classes are NOT a second source of truth for
+# recipe output. Recipes continue to return plain dicts; the adapter is
+# the single projection point. Adding a new enrichment => add (a) a
+# Pydantic model here, (b) an adapter function, (c) an optional field
+# below on AnalysisResponse. No recipe changes.
+# ---------------------------------------------------------------------------
+
+
+class PriceHoldAnalysisData(BaseModel):
+    """PriceHoldReleaseRecipe → UI `price_hold_analysis`.
+
+    `hold_status` is a two-valued projection of the recipe's four-valued
+    `status`: "RELEASED" when the hold was lifted, "HELD" otherwise (the
+    recipe's REVIEW_REQUIRED, REJECTED, and FAILED outcomes all leave the
+    hold in place). Other fields mirror the recipe output or the event
+    inputs (po_price / sap_base_price) / policy constants
+    (tolerance_pct / hard_block_pct).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    hold_status: Literal["HELD", "RELEASED"]
+    po_price: float
+    sap_base_price: float
+    variance_pct: float
+    tolerance_pct: float
+    hard_block_pct: float
+    action: Literal["AUTO_RELEASE", "ESCALATE", "HARD_BLOCK"]
+    reason: str
+
+
+class EdiMismatchAnalysisData(BaseModel):
+    """EdiMismatchRecipe → UI `edi_mismatch_analysis`.
+
+    `sub_type` is intentionally untyped-string (not a Literal) so the UI
+    can render new sub_types added in the recipe without a contract
+    bump. `expected_value` / `received_value` are `Any` because EDI 850
+    line fields are heterogeneous (SKU strings, qty integers, ship-to
+    dicts).
+
+    Note: PRICE_MISMATCH never reaches this recipe — the classifier
+    routes it to CONTRACTUAL_CORRECTION / PriceAdjustmentRecipe.py to
+    preserve the single-source-of-truth invariant. The adapter returns
+    None for FAILED recipe outputs, so PRICE_MISMATCH routing-error
+    records never surface this field.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    sub_type: str
+    classification: Literal["HARD_REJECT", "REVIEW", "ESCALATE"]
+    recommended_action: str
+    autonomy_level: Literal["L1", "L2", "L3"]
+    expected_value: Any = None
+    received_value: Any = None
+    notification_template: Optional[str] = None
+
+
 class AnalysisResponse(BaseModel):
     """GET /api/v1/exceptions/{id}/analysis"""
 
@@ -441,3 +510,10 @@ class AnalysisResponse(BaseModel):
     risk: str
     resolution: str
     lines: List[LineAnalysis] = Field(default_factory=list)
+
+    # Data-presence enrichment fields (review L2). Populated by
+    # `api.analysis_adapters.ANALYSIS_ADAPTERS` keyed on
+    # `record.selected_recipe`. Absent when the recipe output is
+    # malformed, FAILED, or the record has no recipe yet.
+    price_hold_analysis: Optional[PriceHoldAnalysisData] = None
+    edi_mismatch_analysis: Optional[EdiMismatchAnalysisData] = None

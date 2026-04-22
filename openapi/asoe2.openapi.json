@@ -93,12 +93,32 @@
             "title": "Diagnosis",
             "type": "string"
           },
+          "edi_mismatch_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EdiMismatchAnalysisData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "lines": {
             "items": {
               "$ref": "#/components/schemas/LineAnalysis"
             },
             "title": "Lines",
             "type": "array"
+          },
+          "price_hold_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PriceHoldAnalysisData"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "resolution": {
             "title": "Resolution",
@@ -250,6 +270,63 @@
           "reason_tag"
         ],
         "title": "DispositionRequest",
+        "type": "object"
+      },
+      "EdiMismatchAnalysisData": {
+        "additionalProperties": false,
+        "description": "EdiMismatchRecipe \u2192 UI `edi_mismatch_analysis`.\n\n`sub_type` is intentionally untyped-string (not a Literal) so the UI\ncan render new sub_types added in the recipe without a contract\nbump. `expected_value` / `received_value` are `Any` because EDI 850\nline fields are heterogeneous (SKU strings, qty integers, ship-to\ndicts).\n\nNote: PRICE_MISMATCH never reaches this recipe \u2014 the classifier\nroutes it to CONTRACTUAL_CORRECTION / PriceAdjustmentRecipe.py to\npreserve the single-source-of-truth invariant. The adapter returns\nNone for FAILED recipe outputs, so PRICE_MISMATCH routing-error\nrecords never surface this field.",
+        "properties": {
+          "autonomy_level": {
+            "enum": [
+              "L1",
+              "L2",
+              "L3"
+            ],
+            "title": "Autonomy Level",
+            "type": "string"
+          },
+          "classification": {
+            "enum": [
+              "HARD_REJECT",
+              "REVIEW",
+              "ESCALATE"
+            ],
+            "title": "Classification",
+            "type": "string"
+          },
+          "expected_value": {
+            "title": "Expected Value"
+          },
+          "notification_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notification Template"
+          },
+          "received_value": {
+            "title": "Received Value"
+          },
+          "recommended_action": {
+            "title": "Recommended Action",
+            "type": "string"
+          },
+          "sub_type": {
+            "title": "Sub Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sub_type",
+          "classification",
+          "recommended_action",
+          "autonomy_level"
+        ],
+        "title": "EdiMismatchAnalysisData",
         "type": "object"
       },
       "EscalateRequest": {
@@ -897,6 +974,65 @@
           "value"
         ],
         "title": "PolicyUpdateRequest",
+        "type": "object"
+      },
+      "PriceHoldAnalysisData": {
+        "additionalProperties": false,
+        "description": "PriceHoldReleaseRecipe \u2192 UI `price_hold_analysis`.\n\n`hold_status` is a two-valued projection of the recipe's four-valued\n`status`: \"RELEASED\" when the hold was lifted, \"HELD\" otherwise (the\nrecipe's REVIEW_REQUIRED, REJECTED, and FAILED outcomes all leave the\nhold in place). Other fields mirror the recipe output or the event\ninputs (po_price / sap_base_price) / policy constants\n(tolerance_pct / hard_block_pct).",
+        "properties": {
+          "action": {
+            "enum": [
+              "AUTO_RELEASE",
+              "ESCALATE",
+              "HARD_BLOCK"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "hard_block_pct": {
+            "title": "Hard Block Pct",
+            "type": "number"
+          },
+          "hold_status": {
+            "enum": [
+              "HELD",
+              "RELEASED"
+            ],
+            "title": "Hold Status",
+            "type": "string"
+          },
+          "po_price": {
+            "title": "Po Price",
+            "type": "number"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "sap_base_price": {
+            "title": "Sap Base Price",
+            "type": "number"
+          },
+          "tolerance_pct": {
+            "title": "Tolerance Pct",
+            "type": "number"
+          },
+          "variance_pct": {
+            "title": "Variance Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "hold_status",
+          "po_price",
+          "sap_base_price",
+          "variance_pct",
+          "tolerance_pct",
+          "hard_block_pct",
+          "action",
+          "reason"
+        ],
+        "title": "PriceHoldAnalysisData",
         "type": "object"
       },
       "PricingWaterfallStep": {

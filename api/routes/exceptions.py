@@ -47,6 +47,7 @@ from api.deps import (
     require_permission,
     require_role,
 )
+from api.analysis_adapters import ANALYSIS_ADAPTERS, resolve_adapter_key
 from api.errors import ASOEError
 from api.schemas import (
     AdminReleaseRequest,
@@ -1478,10 +1479,24 @@ async def get_analysis(
         if record.final_status:
             resolution = record.final_status
 
+    # Enrichment projection (review L2). Consult the adapter registry
+    # by `selected_recipe`, or fall back to an intent→recipe mapping
+    # when the record was shadow-gated before select_recipe ran. The
+    # adapter returns None for degenerate inputs; None serializes as
+    # an absent field, preserving the UI's data-presence pattern.
+    extras: Dict[str, Any] = {}
+    adapter_key = resolve_adapter_key(record)
+    if adapter_key and adapter_key in ANALYSIS_ADAPTERS:
+        field_name, adapter = ANALYSIS_ADAPTERS[adapter_key]
+        projected = adapter(record)
+        if projected is not None:
+            extras[field_name] = projected
+
     return AnalysisResponse(
         diagnosis=diagnosis,
         confidence=confidence,
         risk=risk,
         resolution=resolution,
         lines=lines,
+        **extras,
     )

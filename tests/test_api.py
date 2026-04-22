@@ -899,3 +899,149 @@ class TestAnalysis:
             headers=_auth(viewer_token),
         )
         assert r.status_code == 403
+
+    # -----------------------------------------------------------------
+    # Review L2 — enrichment adapter: recipe output → typed analysis
+    # field. Proves the adapter registry projects the expected shape
+    # end-to-end (POST /resolve → GET /analysis) for every wired
+    # recipe. Adding a new adapter = add a case here.
+    # -----------------------------------------------------------------
+
+    def _create_phr(self, client, token, *, po_price: float) -> str:
+        """Post an EDI_850_PRICE_HOLD event and return its exception_id."""
+        event = {
+            "order_id": f"PHR-{int(po_price * 100)}",
+            "line_item": 1,
+            "po_price": po_price,
+            "sap_base_price": 100.0,
+            "event_type": "EDI_850_PRICE_HOLD",
+            "retailer_id": "R-10",
+            "line_count": 1,
+            "metadata": {"price_hold_status": "HELD"},
+        }
+        r = client.post(
+            "/api/v1/exceptions/resolve", json=event, headers=_auth(token),
+        )
+        assert r.status_code == 200, r.text
+        return r.json()["exception_id"]
+
+    def test_analysis_carries_price_hold_enrichment(self, client, analyst_token):
+        exc_id = self._create_phr(client, analyst_token, po_price=101.0)
+        r = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data.get("price_hold_analysis") is not None
+        phr = data["price_hold_analysis"]
+        # AUTO_RELEASE branch: 1% variance < 2% tolerance
+        assert phr["hold_status"] == "RELEASED"
+        assert phr["action"] == "AUTO_RELEASE"
+        assert phr["po_price"] == 101.0
+        assert phr["sap_base_price"] == 100.0
+        assert phr["variance_pct"] == pytest.approx(0.01, abs=1e-6)
+        assert phr["tolerance_pct"] > 0
+        assert phr["hard_block_pct"] > phr["tolerance_pct"]
+        assert phr["reason"]  # non-empty human-readable string
+
+    def test_analysis_price_hold_escalate_branch(self, client, analyst_token):
+        # 5% variance — above 2% tolerance, below 10% hard-block → ESCALATE.
+        # Hold remains in place (status=REVIEW_REQUIRED maps to hold_status=HELD).
+        exc_id = self._create_phr(client, analyst_token, po_price=105.0)
+        r = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        )
+        data = r.json()
+        phr = data["price_hold_analysis"]
+        assert phr["hold_status"] == "HELD"
+        assert phr["action"] == "ESCALATE"
+
+    def test_analysis_price_hold_hard_block_branch(self, client, analyst_token):
+        # 15% variance → HARD_BLOCK. Status=REJECTED maps to hold_status=HELD.
+        exc_id = self._create_phr(client, analyst_token, po_price=115.0)
+        r = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        )
+        data = r.json()
+        phr = data["price_hold_analysis"]
+        assert phr["hold_status"] == "HELD"
+        assert phr["action"] == "HARD_BLOCK"
+
+    def _create_edi_mismatch(self, client, token, *, sub_type: str) -> str:
+        event = {
+            "order_id": f"EDI-{sub_type}",
+            "line_item": 1,
+            "po_price": 100.0,
+            "sap_base_price": 100.0,
+            "event_type": "EDI_850_LINE_MISMATCH",
+            "retailer_id": "R-20",
+            "line_count": 1,
+            "metadata": {
+                "mismatch_sub_type": sub_type,
+                "expected_value": "SKU-A",
+                "received_value": "SKU-B",
+            },
+        }
+        r = client.post(
+            "/api/v1/exceptions/resolve", json=event, headers=_auth(token),
+        )
+        assert r.status_code == 200, r.text
+        return r.json()["exception_id"]
+
+    def test_analysis_carries_edi_mismatch_enrichment(self, client, analyst_token):
+        exc_id = self._create_edi_mismatch(client, analyst_token, sub_type="QTY_MISMATCH")
+        r = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        )
+        assert r.status_code == 200
+        edi = r.json().get("edi_mismatch_analysis")
+        assert edi is not None
+        assert edi["sub_type"] == "QTY_MISMATCH"
+        assert edi["classification"] == "REVIEW"
+        assert edi["recommended_action"] == "REQUEST_BUYER_CONFIRMATION"
+        assert edi["autonomy_level"] in {"L1", "L2", "L3"}
+        assert edi["notification_template"] == "edi_line_mismatch_inquiry"
+
+    def test_analysis_edi_sku_mismatch_hard_reject(self, client, analyst_token):
+        exc_id = self._create_edi_mismatch(client, analyst_token, sub_type="SKU_MISMATCH")
+        data = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        ).json()
+        edi = data["edi_mismatch_analysis"]
+        assert edi["classification"] == "HARD_REJECT"
+        assert edi["recommended_action"] == "BLOCK_AND_NOTIFY"
+
+    def test_analysis_edi_price_mismatch_does_not_surface(self, client, analyst_token):
+        # PRICE_MISMATCH routes at classifier time to CONTRACTUAL_CORRECTION
+        # (PriceAdjustmentRecipe, not EdiMismatchRecipe). No PriceAdjustment
+        # adapter is wired yet, so neither enrichment field appears.
+        exc_id = self._create_edi_mismatch(
+            client, analyst_token, sub_type="PRICE_MISMATCH",
+        )
+        data = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        ).json()
+        assert data.get("edi_mismatch_analysis") is None
+        # Classifier fork verification — intent landed as CONTRACTUAL_CORRECTION.
+        detail = client.get(
+            f"/api/v1/exceptions/{exc_id}", headers=_auth(analyst_token),
+        ).json()
+        assert detail["intent"] == "CONTRACTUAL_CORRECTION"
+
+    def test_analysis_omits_enrichment_when_no_recipe(self, client, analyst_token):
+        # Baseline /resolve event carries no recipe-specific intent, so
+        # neither enrichment field should appear. Protects the data-presence
+        # pattern — absent ≠ null ≠ partial.
+        exc_id = self._create_exception(client, analyst_token)
+        data = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        ).json()
+        assert data.get("price_hold_analysis") is None
+        assert data.get("edi_mismatch_analysis") is None
