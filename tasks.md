@@ -1159,3 +1159,77 @@ the asoe2 backend reality. The `NEXT_PUBLIC_SHOW_PREVIEW_INTENTS`
 gate proposal (asoe-ui backlog) is no longer needed — kept as a
 design note in case a future wave of speculative UI outpaces backend
 again.
+
+## PHASE 23 — Verdict three-pillar architecture: enrichment composer + registry enforcement
+
+Closes the cross-repo Verdict (2026-04-22 compliance workshop).
+Recipes stay execution-only; a new graph node assembles the
+analysis payload; a registry classifies every UI field by
+audit-bearing / conditional / contextual; the UI renders honestly
+without dashes.
+
+### 23.1 Compliance registry + enforcement
+- [x] `compliance/audit_bearing_registry.yaml` — 107 fields
+      classified across 8 `*AnalysisData` classes, with
+      conditional predicates and grandfather clauses.
+- [x] `.github/CODEOWNERS` routes `compliance/**` to
+      `@compliance-team` (Dana's mandate #1).
+- [x] `tests/test_audit_registry_coverage.py` (8 fitness tests)
+      blocks silent schema additions.
+
+### 23.2 Pillar 1 — enrichment_context persistence
+- [x] `GraphState.enrichment_context: Dict[str, Any]` field.
+- [x] `ExceptionRecord.enrichment_context` attribute persisted via
+      `api/store.py` (in-memory + DB store).
+- [x] `_persist_exception` bridge: prefer explicit context, fall
+      back to legacy `state.resolved_data` for non-breaking
+      rollout.
+
+### 23.3 Pillar 2 — CQRS read model + AUDIT_CONTEXT_MISSING terminal
+- [x] `TerminalStatus.AUDIT_CONTEXT_MISSING` distinct from
+      FAIL_TO_HUMAN (Dana's mandate #2).
+- [x] `api/analysis_composer.py` — pure registry-aware projection
+      with grandfather-clause date check.
+- [x] `orchestration/nodes.py::build_analysis` — terminal node on
+      every graph path; routes to AUDIT_CONTEXT_MISSING on coverage
+      failure.
+- [x] `orchestration/graph.py` — every `terminal: END` edge
+      replaced with `terminal: build_analysis → END`.
+- [x] `/analysis` endpoint consumes the composer; suppresses
+      partial projections so the UI never receives half-truth.
+- [x] `TraceResponse.audit_context_missing_{class,fields}` —
+      structured trace surface so auditors don't regex prose.
+
+### 23.4 Adapter chain (six of ten enrichment sections)
+- [x] `adapt_price_hold` (PriceHoldReleaseRecipe → price_hold_analysis).
+- [x] `adapt_edi_mismatch` (EdiMismatchRecipe → edi_mismatch_analysis).
+- [x] `adapt_delivery_delay` (DeliveryDelayResolutionRecipe →
+      delivery_delay_analysis). Grandfather: at_risk, sla_deadline.
+- [x] `adapt_overmax` (OverMaxTrimRecipe → overmax_analysis).
+      Grandfather: contract_ref, block_status, block_reason,
+      order_lines, trim_plan, uom.
+- [x] `adapt_moq` (MOQRoundUpRecipe → moq_analysis). Grandfather:
+      moq_source, channel, contract_ref, block_status.
+- [x] `adapt_pallet` (PalletAlignmentRecipe → pallet_analysis).
+      No grandfather — recipe + UI shapes are 1:1.
+
+### 23.5 Remaining adapters (gateway-dependent — out of this phase)
+- [ ] `adapt_price` (PriceAdjustmentRecipe → price_analysis).
+      Blocked on price_analysis_gateway_gap clause + 2026-06-21
+      deadline.
+- [ ] `adapt_duplicate` (DuplicatePORecipe → duplicate_detection).
+      Blocked on persisting matched_po_details on the record.
+- [ ] `adapt_order_comparison` — synthesised from duplicate; lands
+      after adapt_duplicate.
+- [ ] `adapt_back_order` (BackOrderResolutionRecipe →
+      backorder_analysis). Blocked on persisting warehouse snapshots.
+
+### 23.6 CLAUDE.md guardrails
+- [x] Guardrail 6: "UI richness is a strict product commitment";
+      do not prune `*AnalysisData` classes; `build_analysis` is
+      sole assembler. Cited in code review as reason code 'G6'.
+
+✅ Outcome: 6 of 10 enrichment sections backend-backed end-to-end
+with Pillar 1 + Pillar 2 + Pillar 3 enforced. The remaining 4
+sections need gateway-persistence work in a future phase.
+
