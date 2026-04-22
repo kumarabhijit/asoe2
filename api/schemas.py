@@ -678,6 +678,64 @@ class MOQAnalysisData(BaseModel):
     block_message: Optional[str] = None
 
 
+class PalletLine(BaseModel):
+    """One per-line pallet alignment row from PalletAlignmentRecipe."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sku: str
+    description: str = ""
+    uom: str = ""
+    layer_qty: float = 0.0
+    pallet_qty: float = 0.0
+    ordered_qty: float
+    complete_layers: int = 0
+    loose_qty: float = 0.0
+    full_pallets: int = 0
+    pallet_fill_pct: float = 0.0
+    violation_type: Optional[str] = None
+
+
+class PalletSuggestion(BaseModel):
+    """One AI suggestion row from PalletAlignmentRecipe."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sku: str
+    description: str = ""
+    current: float
+    suggested: float
+    delta: float = 0.0
+    layers: int = 0
+    full_pallets: int = 0
+    reason: str = ""
+
+
+class PalletAnalysisData(BaseModel):
+    """PalletAlignmentRecipe → UI `pallet_analysis`.
+
+    Registry-classified fields (2026-04-22 workshop):
+      * audit-bearing: total_ordered_cases, loose_cases_total,
+        order_line_count, classification, suggested_plan, lines.
+
+    Recipe + UI line/plan shapes are 1:1, so the adapter is purely
+    coercion. The UI's mock-only legacy top-level fields
+    (at_risk_total, extra_labor_est_hrs, freight_waste_pct) are not
+    in this contract — they're not classified in the registry and
+    no recipe currently produces them. Those are kept optional on
+    the UI type and remain mock-only.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    total_ordered_cases: float
+    loose_cases_total: float
+    order_line_count: int
+    classification: str
+    lines: List[PalletLine] = Field(default_factory=list)
+    suggested_plan: List[PalletSuggestion] = Field(default_factory=list)
+
+
 class AnalysisResponse(BaseModel):
     """GET /api/v1/exceptions/{id}/analysis"""
 
@@ -696,3 +754,4 @@ class AnalysisResponse(BaseModel):
     delivery_delay_analysis: Optional[DeliveryDelayAnalysisData] = None
     overmax_analysis: Optional[OverMaxAnalysisData] = None
     moq_analysis: Optional[MOQAnalysisData] = None
+    pallet_analysis: Optional[PalletAnalysisData] = None

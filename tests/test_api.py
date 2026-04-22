@@ -1289,3 +1289,64 @@ class TestAnalysis:
             headers=_auth(analyst_token),
         ).json()
         assert trace.get("audit_context_missing_fields") == []
+
+    # -----------------------------------------------------------------
+    # L2d.pallet — recipe + UI shapes are 1:1 (sku/desc/uom/layer_qty/
+    # pallet_qty/...). Adapter is pure coercion.
+    # -----------------------------------------------------------------
+
+    def _create_pallet(self, client, token) -> str:
+        event = {
+            "order_id": "PO-PLT-001",
+            "line_item": 1,
+            "po_price": 10.0,
+            "sap_base_price": 10.0,
+            "event_type": "PALLET_CONFIG_VIOLATION",
+            "retailer_id": "R-50",
+            "line_count": 2,
+            "metadata": {
+                "pallet_lines": [
+                    {
+                        "sku": "SKU-PLT-A", "description": "Widget A",
+                        "uom": "CASE",
+                        "layer_qty": 10, "pallet_qty": 60,
+                        "ordered_qty": 75,
+                    },
+                    {
+                        "sku": "SKU-PLT-B", "description": "Widget B",
+                        "uom": "CASE",
+                        "layer_qty": 12, "pallet_qty": 72,
+                        "ordered_qty": 60,
+                    },
+                ],
+            },
+        }
+        r = client.post(
+            "/api/v1/exceptions/resolve", json=event, headers=_auth(token),
+        )
+        assert r.status_code == 200, r.text
+        return r.json()["exception_id"]
+
+    def test_analysis_carries_pallet_alignment(self, client, analyst_token):
+        exc_id = self._create_pallet(client, analyst_token)
+        data = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        ).json()
+        pa = data.get("pallet_analysis")
+        assert pa is not None
+        assert pa["order_line_count"] == 2
+        assert len(pa["lines"]) == 2
+        assert pa["lines"][0]["sku"] == "SKU-PLT-A"
+        assert pa["classification"] in (
+            "BROKEN_LAYER", "PARTIAL_PALLET", "MIXED_VIOLATION",
+        )
+        assert len(pa["suggested_plan"]) == 2
+
+    def test_trace_for_pallet_has_no_audit_gap(self, client, analyst_token):
+        exc_id = self._create_pallet(client, analyst_token)
+        trace = client.get(
+            f"/api/v1/exceptions/{exc_id}/trace",
+            headers=_auth(analyst_token),
+        ).json()
+        assert trace.get("audit_context_missing_fields") == []

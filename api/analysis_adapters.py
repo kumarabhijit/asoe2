@@ -38,6 +38,9 @@ from api.schemas import (
     MOQAnalysisData,
     OverMaxAnalysisData,
     OverMaxLine,
+    PalletAnalysisData,
+    PalletLine,
+    PalletSuggestion,
     PriceHoldAnalysisData,
     RoundUpPlanLine,
     TrimPlanLine,
@@ -50,6 +53,8 @@ from contracts.policy import (
     MOQ_SEVERE_SHORTFALL_PCT,
     MOQ_UPLIFT_REVIEW_PCT,
     OVER_MAX_SEVERE_EXCEEDANCE_PCT,
+    PALLET_CONFIG_BROKEN_LAYER_FILL_PCT,
+    PALLET_CONFIG_MIN_FILL_PCT,
     PRICE_HOLD_HARD_BLOCK_PCT,
     PRICE_HOLD_TOLERANCE_PCT,
 )
@@ -57,6 +62,7 @@ from recipes.DeliveryDelayResolutionRecipe import resolve_delivery_delay
 from recipes.EdiMismatchRecipe import detect_edi_mismatch
 from recipes.MOQRoundUpRecipe import round_up_moq
 from recipes.OverMaxTrimRecipe import trim_over_max
+from recipes.PalletAlignmentRecipe import align_pallets
 from recipes.PriceHoldReleaseRecipe import execute_price_hold_release
 
 
@@ -564,6 +570,115 @@ def adapt_moq(record: ExceptionRecord) -> Optional[MOQAnalysisData]:
     return _moq_from_outputs(synthetic, event)
 
 
+def _coerce_pallet_line(raw: Any) -> Optional[PalletLine]:
+    if not isinstance(raw, dict) or "sku" not in raw:
+        return None
+    try:
+        return PalletLine(
+            sku=str(raw["sku"]),
+            description=str(raw.get("description") or ""),
+            uom=str(raw.get("uom") or ""),
+            layer_qty=_as_float(raw.get("layer_qty")),
+            pallet_qty=_as_float(raw.get("pallet_qty")),
+            ordered_qty=_as_float(raw.get("ordered_qty")),
+            complete_layers=int(raw.get("complete_layers") or 0),
+            loose_qty=_as_float(raw.get("loose_qty")),
+            full_pallets=int(raw.get("full_pallets") or 0),
+            pallet_fill_pct=_as_float(raw.get("pallet_fill_pct")),
+            violation_type=raw.get("violation_type"),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_pallet_suggestion(raw: Any) -> Optional[PalletSuggestion]:
+    if not isinstance(raw, dict) or "sku" not in raw:
+        return None
+    try:
+        return PalletSuggestion(
+            sku=str(raw["sku"]),
+            description=str(raw.get("description") or ""),
+            current=_as_float(raw.get("current")),
+            suggested=_as_float(raw.get("suggested")),
+            delta=_as_float(raw.get("delta")),
+            layers=int(raw.get("layers") or 0),
+            full_pallets=int(raw.get("full_pallets") or 0),
+            reason=str(raw.get("reason") or ""),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _pallet_from_outputs(
+    outputs: Dict[str, Any],
+) -> Optional[PalletAnalysisData]:
+    classification = outputs.get("classification")
+    if classification is None:
+        return None
+    raw_lines = outputs.get("lines") or []
+    raw_plan = outputs.get("suggested_plan") or []
+    lines = [m for m in (_coerce_pallet_line(r) for r in raw_lines) if m]
+    plan = [m for m in (_coerce_pallet_suggestion(r) for r in raw_plan) if m]
+    if not lines:
+        # Recipe couldn't produce per-line data — projection has no
+        # meaningful Layer-2 surface. Composer will mark
+        # AUDIT_CONTEXT_MISSING.
+        return None
+    try:
+        return PalletAnalysisData(
+            total_ordered_cases=_as_float(outputs.get("total_ordered_cases")),
+            loose_cases_total=_as_float(outputs.get("loose_cases_total")),
+            order_line_count=int(outputs.get("order_line_count") or len(lines)),
+            classification=str(classification),
+            lines=lines,
+            suggested_plan=plan,
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def adapt_pallet(record: ExceptionRecord) -> Optional[PalletAnalysisData]:
+    """Project a PalletAlignmentRecipe resolution into PalletAnalysisData.
+
+    Recipe is shadow-gated YELLOW for any non-conforming pallet, so
+    the synthetic fallback path is the most common.
+    """
+    outputs = record.resolution_data or {}
+    event = record.original_event or {}
+    status = outputs.get("status")
+
+    if status and status != "FAILED":
+        projection = _pallet_from_outputs(outputs)
+        if projection is not None:
+            return projection
+
+    metadata = event.get("metadata") or {}
+    # Source-of-truth key is `pallet_lines` (orchestration/nodes.py
+    # validate_types reads metadata.pallet_lines for this recipe).
+    # Tolerate `lines` / `order_lines` as fallbacks since e2e
+    # fixtures and synthesis tests use both shapes.
+    raw_lines = (
+        metadata.get("pallet_lines")
+        or metadata.get("lines")
+        or metadata.get("order_lines")
+        or []
+    )
+    if not raw_lines:
+        return None
+    try:
+        synthetic = align_pallets(
+            order_id=str(event.get("order_id", "")),
+            lines=raw_lines,
+            min_fill_pct=PALLET_CONFIG_MIN_FILL_PCT,
+            broken_layer_fill_pct=PALLET_CONFIG_BROKEN_LAYER_FILL_PCT,
+        )
+    except (TypeError, ValueError):
+        return None
+    if synthetic.get("status") == "FAILED":
+        return None
+    return _pallet_from_outputs(synthetic)
+
+
 # Recipe-name → (target field on AnalysisResponse, adapter function).
 #
 # The endpoint looks up by `record.selected_recipe`. Absent recipe name
@@ -580,6 +695,7 @@ ANALYSIS_ADAPTERS: Dict[
     ),
     "OverMaxTrimRecipe.py": ("overmax_analysis", adapt_overmax),
     "MOQRoundUpRecipe.py": ("moq_analysis", adapt_moq),
+    "PalletAlignmentRecipe.py": ("pallet_analysis", adapt_pallet),
 }
 
 
@@ -594,6 +710,7 @@ INTENT_TO_RECIPE_NAME: Dict[str, str] = {
     "DELIVERY_DELAY": "DeliveryDelayResolutionRecipe.py",
     "OVER_MAX": "OverMaxTrimRecipe.py",
     "MIN_ORDER_QTY": "MOQRoundUpRecipe.py",
+    "PALLET_CONFIG": "PalletAlignmentRecipe.py",
 }
 
 

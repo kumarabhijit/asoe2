@@ -191,6 +191,16 @@
               }
             ]
           },
+          "pallet_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PalletAnalysisData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "price_hold_analysis": {
             "anyOf": [
               {
@@ -1352,6 +1362,171 @@
           "qty"
         ],
         "title": "OverMaxLine",
+        "type": "object"
+      },
+      "PalletAnalysisData": {
+        "additionalProperties": false,
+        "description": "PalletAlignmentRecipe \u2192 UI `pallet_analysis`.\n\nRegistry-classified fields (2026-04-22 workshop):\n  * audit-bearing: total_ordered_cases, loose_cases_total,\n    order_line_count, classification, suggested_plan, lines.\n\nRecipe + UI line/plan shapes are 1:1, so the adapter is purely\ncoercion. The UI's mock-only legacy top-level fields\n(at_risk_total, extra_labor_est_hrs, freight_waste_pct) are not\nin this contract \u2014 they're not classified in the registry and\nno recipe currently produces them. Those are kept optional on\nthe UI type and remain mock-only.",
+        "properties": {
+          "classification": {
+            "title": "Classification",
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/PalletLine"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "loose_cases_total": {
+            "title": "Loose Cases Total",
+            "type": "number"
+          },
+          "order_line_count": {
+            "title": "Order Line Count",
+            "type": "integer"
+          },
+          "suggested_plan": {
+            "items": {
+              "$ref": "#/components/schemas/PalletSuggestion"
+            },
+            "title": "Suggested Plan",
+            "type": "array"
+          },
+          "total_ordered_cases": {
+            "title": "Total Ordered Cases",
+            "type": "number"
+          }
+        },
+        "required": [
+          "total_ordered_cases",
+          "loose_cases_total",
+          "order_line_count",
+          "classification"
+        ],
+        "title": "PalletAnalysisData",
+        "type": "object"
+      },
+      "PalletLine": {
+        "additionalProperties": false,
+        "description": "One per-line pallet alignment row from PalletAlignmentRecipe.",
+        "properties": {
+          "complete_layers": {
+            "default": 0,
+            "title": "Complete Layers",
+            "type": "integer"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "full_pallets": {
+            "default": 0,
+            "title": "Full Pallets",
+            "type": "integer"
+          },
+          "layer_qty": {
+            "default": 0.0,
+            "title": "Layer Qty",
+            "type": "number"
+          },
+          "loose_qty": {
+            "default": 0.0,
+            "title": "Loose Qty",
+            "type": "number"
+          },
+          "ordered_qty": {
+            "title": "Ordered Qty",
+            "type": "number"
+          },
+          "pallet_fill_pct": {
+            "default": 0.0,
+            "title": "Pallet Fill Pct",
+            "type": "number"
+          },
+          "pallet_qty": {
+            "default": 0.0,
+            "title": "Pallet Qty",
+            "type": "number"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          },
+          "uom": {
+            "default": "",
+            "title": "Uom",
+            "type": "string"
+          },
+          "violation_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Violation Type"
+          }
+        },
+        "required": [
+          "sku",
+          "ordered_qty"
+        ],
+        "title": "PalletLine",
+        "type": "object"
+      },
+      "PalletSuggestion": {
+        "additionalProperties": false,
+        "description": "One AI suggestion row from PalletAlignmentRecipe.",
+        "properties": {
+          "current": {
+            "title": "Current",
+            "type": "number"
+          },
+          "delta": {
+            "default": 0.0,
+            "title": "Delta",
+            "type": "number"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "full_pallets": {
+            "default": 0,
+            "title": "Full Pallets",
+            "type": "integer"
+          },
+          "layers": {
+            "default": 0,
+            "title": "Layers",
+            "type": "integer"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          },
+          "suggested": {
+            "title": "Suggested",
+            "type": "number"
+          }
+        },
+        "required": [
+          "sku",
+          "current",
+          "suggested"
+        ],
+        "title": "PalletSuggestion",
         "type": "object"
       },
       "PolicyOverrideResponse": {
