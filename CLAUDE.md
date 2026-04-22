@@ -89,6 +89,36 @@ Do not:
 - mask failure as success
 - return success when escalation is correct
 - degrade into partial execution
+### 6) UI richness is a strict product commitment (Verdict 2026-04-22)
+The rich `*AnalysisData` classes in `asoe-ui/src/types/exceptions.ts`
+and their Pydantic mirrors in `api/schemas.py` are the evidence
+payload a human operator consumes to authorise a financially
+binding, SOX-relevant decision. The Verdict from the
+2026-04-22 compliance workshop is explicit: **do not prune the UI
+types to match current recipe output**. If a field is declared
+audit-bearing in `compliance/audit_bearing_registry.yaml` but no
+recipe / gateway / policy currently produces it, the correct
+response is to:
+  1. Add a gateway or extend the recipe's captured context so
+     `state.enrichment_context` carries the missing evidence
+     (Verdict Pillar 1), or
+  2. Flag the gap in `compliance/audit_bearing_registry.yaml`
+     under `grandfather_clauses` with a compliance-approved
+     deadline.
+
+**Never** silently remove a field from a `*AnalysisData` class or
+`OrderAnalysis` to make coverage green — that is the partial-truth
+state Compliance (Perspective 6) holds veto over.
+
+Corresponding rejection on the other side: the `build_analysis`
+graph node is the sole assembler of the analysis payload. **Do not
+push composition logic onto recipes or into the orchestration
+nodes between shadow and execute.** Recipes return dicts; the
+composer at `api/analysis_composer.py` projects them into the
+typed contract; section components in the UI are dumb projectors.
+If you feel tempted to combine recipe output + event data +
+gateway results inside a recipe to produce a "ready-to-render"
+payload, you're violating Pillar 2 — stop and use the composer.
 ---
 ## Reasoning Boundaries
 You may reason about:

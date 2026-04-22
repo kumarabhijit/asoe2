@@ -632,3 +632,56 @@ def apply_effects(state: GraphState) -> GraphState:
             )
 
     return state
+
+
+# ---------------------------------------------------------------------------
+# build_analysis — Verdict Pillar 2: registry-enforced CQRS read model.
+#
+# Runs at the TAIL of every graph path (GREEN success, YELLOW manual
+# review, RED block, and every terminal routing in between) so the
+# audit-bearing field registry at
+# `compliance/audit_bearing_registry.yaml` is enforced before
+# persistence. Two outcomes:
+#
+#   * Coverage complete → state passes through unchanged. Downstream
+#     /analysis endpoint reads the composer's projection on demand.
+#   * Coverage incomplete → final_status is upgraded to
+#     AUDIT_CONTEXT_MISSING (distinct from FAIL_TO_HUMAN so auditors
+#     see "compliance data was missing" rather than "pipeline
+#     crashed"). The explanation names the missing fields so the
+#     trace is actionable.
+#
+# This node NEVER mutates resolution_data, execution_log.outputs, or
+# shadow decisions — enforcing the registry is a compliance gate,
+# not a business-logic override (CLAUDE.md §1).
+# ---------------------------------------------------------------------------
+
+
+def build_analysis(state: GraphState) -> GraphState:
+    # Defensive re-entry guard: if a prior node already set
+    # AUDIT_CONTEXT_MISSING, leave it alone. Don't double-append
+    # missing-field lists.
+    if state.final_status == TerminalStatus.AUDIT_CONTEXT_MISSING:
+        return state
+
+    # Lazy import — keeps orchestration independent of the API layer
+    # in the import graph so test isolation stays clean.
+    from api.analysis_composer import compose_from_state
+
+    composed = compose_from_state(state)
+
+    if not composed.should_route_to_audit_context_missing:
+        return state
+
+    missing_list = ", ".join(composed.missing_audit_fields)
+    preamble = state.explanation or ""
+    suffix = (
+        f"Audit-bearing fields missing from "
+        f"{composed.class_name}: [{missing_list}]. Record cannot be "
+        f"presented to an operator without authoritative values for "
+        f"these fields — see "
+        f"compliance/audit_bearing_registry.yaml."
+    )
+    state.final_status = TerminalStatus.AUDIT_CONTEXT_MISSING
+    state.explanation = f"{preamble}\n\n{suffix}" if preamble else suffix
+    return state

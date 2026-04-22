@@ -44,6 +44,7 @@ class ExceptionRecord:
         account_id: Optional[str] = None,
         account_name: Optional[str] = None,
         original_event: Optional[Dict[str, Any]] = None,
+        enrichment_context: Optional[Dict[str, Any]] = None,
     ):
         self.id = str(uuid4())
         self.tenant_id = tenant_id
@@ -65,6 +66,16 @@ class ExceptionRecord:
         # re-analysis can faithfully replay through run_graph(). None for
         # records created before the feature shipped.
         self.original_event: Optional[Dict[str, Any]] = original_event
+        # Verdict Pillar 1 (2026-04-22 compliance workshop): audit-bearing
+        # upstream context carried from GraphState.enrichment_context.
+        # Gateway-fetched evidence (matched POs, warehouse snapshots,
+        # contract refs, SAP doc numbers) that the operator reviewed to
+        # authorise an action. The build_analysis composition node reads
+        # this to populate Layer-2 evidence on the UI. Distinct from
+        # resolution_data (recipe output). Empty = "not fetched for this
+        # resolution path" — triggers "Context Not Required for
+        # Resolution" on the UI, never a dash.
+        self.enrichment_context: Dict[str, Any] = enrichment_context or {}
         # Append-only audit trail of human-triggered re-analyses. Each entry:
         # {attempt, triggered_at, triggered_by, reason, prior_trace_id,
         #  prior_shadow_verdict, prior_final_status, new_trace_id,
@@ -141,6 +152,7 @@ class ExceptionStore:
         final_status: Optional[str] = None,
         resolution_data: Optional[Dict[str, Any]] = None,
         original_event: Optional[Dict[str, Any]] = None,
+        enrichment_context: Optional[Dict[str, Any]] = None,
     ) -> ExceptionRecord:
         lifecycle = STATUS_TO_LIFECYCLE.get(final_status or "", "INGESTED")
         record = ExceptionRecord(
@@ -155,6 +167,7 @@ class ExceptionStore:
             final_status=final_status,
             resolution_data=resolution_data,
             original_event=original_event,
+            enrichment_context=enrichment_context,
         )
         with self._lock:
             self._records[record.id] = record
@@ -429,7 +442,14 @@ class DatabaseBackedStore:
         final_status: Optional[str] = None,
         resolution_data: Optional[Dict[str, Any]] = None,
         original_event: Optional[Dict[str, Any]] = None,
+        enrichment_context: Optional[Dict[str, Any]] = None,
     ) -> ExceptionRecord:
+        # Verdict Pillar 1: `enrichment_context` is forwarded to the
+        # repository. The DB repository currently has no dedicated
+        # column — a follow-up migration (V003) promotes it to JSONB
+        # alongside `original_event`. Until then, gateway evidence
+        # flows only through the in-memory store (see
+        # _dict_to_record's TODO below).
         row = self._exceptions.create(
             tenant_id=tenant_id,
             order_id=order_id,
@@ -444,7 +464,13 @@ class DatabaseBackedStore:
             # serialises to JSONB (Postgres) / JSON TEXT (SQLite).
             original_event=original_event,
         )
-        return self._dict_to_record(row)
+        record = self._dict_to_record(row)
+        # Attach enrichment_context on the returned record even though
+        # the DB doesn't yet persist it — lets Pillar 2 consumers read
+        # it within the same request. The next DB migration will add
+        # the column and this in-memory bridge will retire.
+        record.enrichment_context = dict(enrichment_context or {})
+        return record
 
     def get(self, exception_id: str, tenant_id: str) -> Optional[ExceptionRecord]:
         row = self._exceptions.get(exception_id, tenant_id)
@@ -593,6 +619,10 @@ class DatabaseBackedStore:
         record.account_id = d.get("account_id")
         record.account_name = d.get("account_name")
         record.original_event = d.get("original_event")
+        # Verdict Pillar 1: default to empty dict on DB-sourced records
+        # (the column is owed by V003). In-memory `create()` overrides
+        # this with the caller-supplied context before returning.
+        record.enrichment_context = d.get("enrichment_context") or {}
         record.reanalysis_history = d.get("reanalysis_history") or []
         record.created_at = d.get("created_at", "")
         record.updated_at = d.get("updated_at", "")

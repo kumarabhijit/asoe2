@@ -899,3 +899,454 @@ class TestAnalysis:
             headers=_auth(viewer_token),
         )
         assert r.status_code == 403
+
+    # -----------------------------------------------------------------
+    # Review L2 — enrichment adapter: recipe output → typed analysis
+    # field. Proves the adapter registry projects the expected shape
+    # end-to-end (POST /resolve → GET /analysis) for every wired
+    # recipe. Adding a new adapter = add a case here.
+    # -----------------------------------------------------------------
+
+    def _create_phr(self, client, token, *, po_price: float) -> str:
+        """Post an EDI_850_PRICE_HOLD event and return its exception_id."""
+        event = {
+            "order_id": f"PHR-{int(po_price * 100)}",
+            "line_item": 1,
+            "po_price": po_price,
+            "sap_base_price": 100.0,
+            "event_type": "EDI_850_PRICE_HOLD",
+            "retailer_id": "R-10",
+            "line_count": 1,
+            "metadata": {"price_hold_status": "HELD"},
+        }
+        r = client.post(
+            "/api/v1/exceptions/resolve", json=event, headers=_auth(token),
+        )
+        assert r.status_code == 200, r.text
+        return r.json()["exception_id"]
+
+    def test_analysis_carries_price_hold_enrichment(self, client, analyst_token):
+        exc_id = self._create_phr(client, analyst_token, po_price=101.0)
+        r = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data.get("price_hold_analysis") is not None
+        phr = data["price_hold_analysis"]
+        # AUTO_RELEASE branch: 1% variance < 2% tolerance
+        assert phr["hold_status"] == "RELEASED"
+        assert phr["action"] == "AUTO_RELEASE"
+        assert phr["po_price"] == 101.0
+        assert phr["sap_base_price"] == 100.0
+        assert phr["variance_pct"] == pytest.approx(0.01, abs=1e-6)
+        assert phr["tolerance_pct"] > 0
+        assert phr["hard_block_pct"] > phr["tolerance_pct"]
+        assert phr["reason"]  # non-empty human-readable string
+
+    def test_analysis_price_hold_escalate_branch(self, client, analyst_token):
+        # 5% variance — above 2% tolerance, below 10% hard-block → ESCALATE.
+        # Hold remains in place (status=REVIEW_REQUIRED maps to hold_status=HELD).
+        exc_id = self._create_phr(client, analyst_token, po_price=105.0)
+        r = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        )
+        data = r.json()
+        phr = data["price_hold_analysis"]
+        assert phr["hold_status"] == "HELD"
+        assert phr["action"] == "ESCALATE"
+
+    def test_analysis_price_hold_hard_block_branch(self, client, analyst_token):
+        # 15% variance → HARD_BLOCK. Status=REJECTED maps to hold_status=HELD.
+        exc_id = self._create_phr(client, analyst_token, po_price=115.0)
+        r = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        )
+        data = r.json()
+        phr = data["price_hold_analysis"]
+        assert phr["hold_status"] == "HELD"
+        assert phr["action"] == "HARD_BLOCK"
+
+    def _create_edi_mismatch(self, client, token, *, sub_type: str) -> str:
+        event = {
+            "order_id": f"EDI-{sub_type}",
+            "line_item": 1,
+            "po_price": 100.0,
+            "sap_base_price": 100.0,
+            "event_type": "EDI_850_LINE_MISMATCH",
+            "retailer_id": "R-20",
+            "line_count": 1,
+            "metadata": {
+                "mismatch_sub_type": sub_type,
+                "expected_value": "SKU-A",
+                "received_value": "SKU-B",
+            },
+        }
+        r = client.post(
+            "/api/v1/exceptions/resolve", json=event, headers=_auth(token),
+        )
+        assert r.status_code == 200, r.text
+        return r.json()["exception_id"]
+
+    def test_analysis_carries_edi_mismatch_enrichment(self, client, analyst_token):
+        exc_id = self._create_edi_mismatch(client, analyst_token, sub_type="QTY_MISMATCH")
+        r = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        )
+        assert r.status_code == 200
+        edi = r.json().get("edi_mismatch_analysis")
+        assert edi is not None
+        assert edi["sub_type"] == "QTY_MISMATCH"
+        assert edi["classification"] == "REVIEW"
+        assert edi["recommended_action"] == "REQUEST_BUYER_CONFIRMATION"
+        assert edi["autonomy_level"] in {"L1", "L2", "L3"}
+        assert edi["notification_template"] == "edi_line_mismatch_inquiry"
+
+    def test_analysis_edi_sku_mismatch_hard_reject(self, client, analyst_token):
+        exc_id = self._create_edi_mismatch(client, analyst_token, sub_type="SKU_MISMATCH")
+        data = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        ).json()
+        edi = data["edi_mismatch_analysis"]
+        assert edi["classification"] == "HARD_REJECT"
+        assert edi["recommended_action"] == "BLOCK_AND_NOTIFY"
+
+    def test_analysis_edi_price_mismatch_does_not_surface(self, client, analyst_token):
+        # PRICE_MISMATCH routes at classifier time to CONTRACTUAL_CORRECTION
+        # (PriceAdjustmentRecipe, not EdiMismatchRecipe). No PriceAdjustment
+        # adapter is wired yet, so neither enrichment field appears.
+        exc_id = self._create_edi_mismatch(
+            client, analyst_token, sub_type="PRICE_MISMATCH",
+        )
+        data = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        ).json()
+        assert data.get("edi_mismatch_analysis") is None
+        # Classifier fork verification — intent landed as CONTRACTUAL_CORRECTION.
+        detail = client.get(
+            f"/api/v1/exceptions/{exc_id}", headers=_auth(analyst_token),
+        ).json()
+        assert detail["intent"] == "CONTRACTUAL_CORRECTION"
+
+    def test_analysis_omits_enrichment_when_no_recipe(self, client, analyst_token):
+        # Baseline /resolve event carries no recipe-specific intent, so
+        # neither enrichment field should appear. Protects the data-presence
+        # pattern — absent ≠ null ≠ partial.
+        exc_id = self._create_exception(client, analyst_token)
+        data = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        ).json()
+        assert data.get("price_hold_analysis") is None
+        assert data.get("edi_mismatch_analysis") is None
+
+    # -----------------------------------------------------------------
+    # Verdict Pillar 2.3 — structured trace surface for audit gaps.
+    # When build_analysis flagged AUDIT_CONTEXT_MISSING, the trace
+    # must carry the class + ordered list of missing fields so the
+    # auditor doesn't regex the prose explanation.
+    # -----------------------------------------------------------------
+
+    def test_trace_carries_audit_missing_fields_on_complete_records(
+        self, client, analyst_token,
+    ):
+        """Happy path: PHR AUTO_RELEASE → coverage complete → the
+        trace's audit_context_missing_* fields are absent/empty."""
+        exc_id = self._create_phr(client, analyst_token, po_price=101.0)
+        trace = client.get(
+            f"/api/v1/exceptions/{exc_id}/trace",
+            headers=_auth(analyst_token),
+        ).json()
+        assert trace.get("audit_context_missing_class") in (None, "")
+        assert trace.get("audit_context_missing_fields") == []
+
+    # -----------------------------------------------------------------
+    # L2d.delivery_delay — adapter end-to-end. Three-path lookup
+    # (GREEN → adapter projects recipe output; YELLOW → composer
+    # synthesises via pure recipe invocation; missing dates → None).
+    # -----------------------------------------------------------------
+
+    def _create_delivery_delay(
+        self, client, token, *, days_late: int,
+    ) -> str:
+        event = {
+            "order_id": f"PO-DD-{days_late}",
+            "line_item": 1,
+            "po_price": 10.0,
+            "sap_base_price": 10.0,
+            "event_type": "DELIVERY_DELAY",
+            "retailer_id": "R-74",
+            "line_count": 3,
+            "metadata": {
+                "planned_date": "2026-04-20T00:00:00Z",
+                "projected_eta": f"2026-04-{20 + days_late:02d}T00:00:00Z",
+                "days_late": days_late,
+                "delay_category": "CARRIER_DELAY",
+                "delay_reason": "Carrier hub backlog (decorative).",
+                "carrier": "ACME-FRT",
+                "route": "MID-SE-01",
+            },
+        }
+        r = client.post(
+            "/api/v1/exceptions/resolve", json=event, headers=_auth(token),
+        )
+        assert r.status_code == 200, r.text
+        return r.json()["exception_id"]
+
+    def test_analysis_carries_delivery_delay_minor_branch(
+        self, client, analyst_token,
+    ):
+        # 3 days late → MINOR_DELAY (between 2 and 5 day thresholds)
+        # → YELLOW shadow → adapter synthesises via pure recipe.
+        exc_id = self._create_delivery_delay(client, analyst_token, days_late=3)
+        data = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        ).json()
+        dd = data.get("delivery_delay_analysis")
+        assert dd is not None
+        assert dd["days_late"] == 3
+        assert dd["delay_category"] == "CARRIER_DELAY"
+        assert dd["affected_lines"] == 3
+        assert dd["carrier"] == "ACME-FRT"
+        # Grandfathered fields — should be absent under the active
+        # delivery_delay_financial_gap clause.
+        assert dd.get("at_risk") is None
+
+    def test_analysis_carries_delivery_delay_severe_branch(
+        self, client, analyst_token,
+    ):
+        # 7 days late → SEVERE_DELAY → ESCALATE branch.
+        exc_id = self._create_delivery_delay(client, analyst_token, days_late=7)
+        data = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        ).json()
+        dd = data.get("delivery_delay_analysis")
+        assert dd is not None
+        assert dd["days_late"] == 7
+
+    def test_trace_for_delivery_delay_has_no_audit_gap(
+        self, client, analyst_token,
+    ):
+        """Grandfathered fields must NOT count as audit gaps — the
+        delivery_delay record's trace.audit_context_missing_fields
+        is empty even though at_risk is null."""
+        exc_id = self._create_delivery_delay(client, analyst_token, days_late=3)
+        trace = client.get(
+            f"/api/v1/exceptions/{exc_id}/trace",
+            headers=_auth(analyst_token),
+        ).json()
+        assert trace.get("audit_context_missing_fields") == []
+
+    # -----------------------------------------------------------------
+    # L2d.overmax — adapter end-to-end. Recipe computes excess_qty,
+    # exceedance_pct, at_risk, trim_plan from event metadata.
+    # contract_ref/block_status/block_reason are grandfathered.
+    # -----------------------------------------------------------------
+
+    def _create_overmax(
+        self, client, token, *, total_ordered: float, max_qty: float,
+    ) -> str:
+        event = {
+            "order_id": f"PO-OM-{int(total_ordered)}",
+            "line_item": 1,
+            "po_price": 10.0,
+            "sap_base_price": 10.0,
+            "event_type": "OVER_MAX_QTY",
+            "retailer_id": "R-30",
+            "line_count": 2,
+            "metadata": {
+                "total_ordered": total_ordered,
+                "max_qty": max_qty,
+                "uom": "CASE",
+                "order_lines": [
+                    {
+                        "sku": "SKU-A", "description": "Widget A",
+                        "qty": total_ordered / 2,
+                        "max_line_qty": max_qty / 2,
+                        "is_even_layer_item": True,
+                    },
+                    {
+                        "sku": "SKU-B", "description": "Widget B",
+                        "qty": total_ordered / 2,
+                        "max_line_qty": max_qty / 2,
+                        "is_even_layer_item": True,
+                    },
+                ],
+                "unit_cost_per_line": {"SKU-A": 12.0, "SKU-B": 18.0},
+            },
+        }
+        r = client.post(
+            "/api/v1/exceptions/resolve", json=event, headers=_auth(token),
+        )
+        assert r.status_code == 200, r.text
+        return r.json()["exception_id"]
+
+    def test_analysis_carries_overmax_minor_branch(
+        self, client, analyst_token,
+    ):
+        # 110 vs 100 ceiling = 10% exceedance → MINOR (under SEVERE
+        # threshold of 50%). Shadow YELLOW → adapter synthesises.
+        exc_id = self._create_overmax(
+            client, analyst_token, total_ordered=110.0, max_qty=100.0,
+        )
+        data = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        ).json()
+        om = data.get("overmax_analysis")
+        assert om is not None
+        assert om["total_ordered"] == 110.0
+        assert om["max_qty"] == 100.0
+        assert om["excess_qty"] == 10.0
+        assert om["exceedance_pct"] == 0.1
+        assert om["uom"] == "CASE"
+        assert len(om["order_lines"]) == 2
+        assert len(om["trim_plan"]) >= 1
+        # Grandfathered fields absent — clause is active.
+        assert om.get("contract_ref") is None
+
+    def test_trace_for_overmax_has_no_audit_gap(
+        self, client, analyst_token,
+    ):
+        exc_id = self._create_overmax(
+            client, analyst_token, total_ordered=110.0, max_qty=100.0,
+        )
+        trace = client.get(
+            f"/api/v1/exceptions/{exc_id}/trace",
+            headers=_auth(analyst_token),
+        ).json()
+        assert trace.get("audit_context_missing_fields") == []
+
+    # -----------------------------------------------------------------
+    # L2d.moq — adapter end-to-end. Recipe computes shortfall + plan;
+    # at_risk surfaces the recipe's uplift_value.
+    # -----------------------------------------------------------------
+
+    def _create_moq(
+        self, client, token, *, ordered: float, moq: float,
+    ) -> str:
+        event = {
+            "order_id": f"PO-MOQ-{int(ordered)}",
+            "line_item": 1,
+            "po_price": 10.0,
+            "sap_base_price": 10.0,
+            "event_type": "MIN_ORDER_QTY",
+            "retailer_id": "R-40",
+            "line_count": 1,
+            "metadata": {
+                "sku": "SKU-MQ-001",
+                "ordered_qty": ordered,
+                "moq_qty": moq,
+                "unit_cost": 12.5,
+                "uom": "CASE",
+            },
+        }
+        r = client.post(
+            "/api/v1/exceptions/resolve", json=event, headers=_auth(token),
+        )
+        assert r.status_code == 200, r.text
+        return r.json()["exception_id"]
+
+    def test_analysis_carries_moq_round_up_branch(
+        self, client, analyst_token,
+    ):
+        # Ordered 18 vs MOQ 20 → 10% shortfall → ROUND_UP_REVIEW
+        # YELLOW. Adapter synthesises via the recipe.
+        exc_id = self._create_moq(client, analyst_token, ordered=18.0, moq=20.0)
+        data = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        ).json()
+        moq = data.get("moq_analysis")
+        assert moq is not None
+        assert moq["ordered_qty"] == 18.0
+        assert moq["moq_qty"] == 20.0
+        assert moq["shortfall_qty"] == 2.0
+        assert moq["sku"] == "SKU-MQ-001"
+        assert moq["unit_cost"] == 12.5
+        assert moq["uom"] == "CASE"
+        # uplift_value = uplift_qty (2) × unit_cost (12.5) = 25
+        assert moq["at_risk"] == 25.0
+        assert len(moq["round_up_plan"]) >= 1
+        # Grandfathered fields absent.
+        assert moq.get("contract_ref") is None
+        assert moq.get("moq_source") is None
+
+    def test_trace_for_moq_has_no_audit_gap(
+        self, client, analyst_token,
+    ):
+        exc_id = self._create_moq(client, analyst_token, ordered=18.0, moq=20.0)
+        trace = client.get(
+            f"/api/v1/exceptions/{exc_id}/trace",
+            headers=_auth(analyst_token),
+        ).json()
+        assert trace.get("audit_context_missing_fields") == []
+
+    # -----------------------------------------------------------------
+    # L2d.pallet — recipe + UI shapes are 1:1 (sku/desc/uom/layer_qty/
+    # pallet_qty/...). Adapter is pure coercion.
+    # -----------------------------------------------------------------
+
+    def _create_pallet(self, client, token) -> str:
+        event = {
+            "order_id": "PO-PLT-001",
+            "line_item": 1,
+            "po_price": 10.0,
+            "sap_base_price": 10.0,
+            "event_type": "PALLET_CONFIG_VIOLATION",
+            "retailer_id": "R-50",
+            "line_count": 2,
+            "metadata": {
+                "pallet_lines": [
+                    {
+                        "sku": "SKU-PLT-A", "description": "Widget A",
+                        "uom": "CASE",
+                        "layer_qty": 10, "pallet_qty": 60,
+                        "ordered_qty": 75,
+                    },
+                    {
+                        "sku": "SKU-PLT-B", "description": "Widget B",
+                        "uom": "CASE",
+                        "layer_qty": 12, "pallet_qty": 72,
+                        "ordered_qty": 60,
+                    },
+                ],
+            },
+        }
+        r = client.post(
+            "/api/v1/exceptions/resolve", json=event, headers=_auth(token),
+        )
+        assert r.status_code == 200, r.text
+        return r.json()["exception_id"]
+
+    def test_analysis_carries_pallet_alignment(self, client, analyst_token):
+        exc_id = self._create_pallet(client, analyst_token)
+        data = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        ).json()
+        pa = data.get("pallet_analysis")
+        assert pa is not None
+        assert pa["order_line_count"] == 2
+        assert len(pa["lines"]) == 2
+        assert pa["lines"][0]["sku"] == "SKU-PLT-A"
+        assert pa["classification"] in (
+            "BROKEN_LAYER", "PARTIAL_PALLET", "MIXED_VIOLATION",
+        )
+        assert len(pa["suggested_plan"]) == 2
+
+    def test_trace_for_pallet_has_no_audit_gap(self, client, analyst_token):
+        exc_id = self._create_pallet(client, analyst_token)
+        trace = client.get(
+            f"/api/v1/exceptions/{exc_id}/trace",
+            headers=_auth(analyst_token),
+        ).json()
+        assert trace.get("audit_context_missing_fields") == []

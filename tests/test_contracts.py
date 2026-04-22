@@ -48,6 +48,11 @@ class TestEnums:
             TerminalStatus.BLOCKED,
             TerminalStatus.REJECTED,
             TerminalStatus.COMPLETE_WITH_CHILDREN,
+            # Registry-enforced audit gap — emitted by the composition
+            # node when an audit-bearing field declared in
+            # compliance/audit_bearing_registry.yaml can't be
+            # populated. Routes to FAILED in STATUS_TO_LIFECYCLE.
+            TerminalStatus.AUDIT_CONTEXT_MISSING,
         }
 
 

@@ -35,6 +35,14 @@ class TerminalStatus(str, Enum):
     BLOCKED = "BLOCKED"
     REJECTED = "REJECTED"
     COMPLETE_WITH_CHILDREN = "COMPLETE_WITH_CHILDREN"
+    # Registry-enforced audit gap — the `build_analysis` composition node
+    # (api/analysis_composer.py) emits this when one or more audit-bearing
+    # fields declared in `compliance/audit_bearing_registry.yaml` cannot
+    # be populated from recipe output / enrichment context / event. Named
+    # distinctly from FAIL_TO_HUMAN so auditors see "compliance data was
+    # missing" rather than "the pipeline crashed". Routes to FAILED in
+    # the lifecycle (no reviewer path — the record cannot be audited).
+    AUDIT_CONTEXT_MISSING = "AUDIT_CONTEXT_MISSING"
 
 
 # Single source of truth: maps TerminalStatus to exception lifecycle state.
@@ -46,6 +54,7 @@ STATUS_TO_LIFECYCLE: Dict[str, str] = {
     "BLOCKED": "BLOCKED",
     "REJECTED": "REJECTED",
     "COMPLETE_WITH_CHILDREN": "RESOLVED",
+    "AUDIT_CONTEXT_MISSING": "FAILED",
 }
 
 # 12-state exception lifecycle (architecture_v3.md §9.1).
@@ -324,6 +333,17 @@ class GraphState(BaseModel):
     # Gateway integration (Phase 7)
     resolved_data: Dict[str, Any] = Field(default_factory=dict)
     effect_results: List[GatewayResponse] = Field(default_factory=list)
+    # Verdict Pillar 1 (2026-04-22 compliance workshop): audit-bearing
+    # upstream context — gateway-fetched evidence (matched POs,
+    # warehouse snapshots, contract refs, SAP doc numbers) that the
+    # operator reviews to authorise an action. Distinct from
+    # `resolved_data` (transient recipe input) in both semantics and
+    # lifetime: this bag survives to `ExceptionRecord.enrichment_context`
+    # and is consumed by the `build_analysis` composition node to
+    # populate Layer-2 evidence on the UI. Empty means "not fetched
+    # for this resolution path" — the UI must render "Context Not
+    # Required for Resolution", never a dash (workshop §Pillar 3).
+    enrichment_context: Dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _explanation_for_terminal_state(self) -> "GraphState":

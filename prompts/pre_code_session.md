@@ -172,6 +172,37 @@ In all halt cases, output:
 
 ---
 
+## WORKING-STYLE CONSTRAINTS (operational hygiene)
+
+These are non-negotiable for any session that writes or reads files in
+this codebase. Failure modes they prevent are real (sessions that
+timeout mid-edit, compliance artifacts that ship without review).
+
+1. **Write and read in small, section-wise chunks.** Long single
+   writes (>200 lines in one operation) and long single reads (>300
+   lines) risk timing out and corrupting intermediate state. Prefer
+   multiple focused edits over one monolithic write; prefer targeted
+   reads (with line ranges) over dumping entire files. If a file
+   legitimately needs to grow large, build it up in successive
+   `Edit` operations with verification between them.
+
+2. **Compliance artifacts are CODEOWNERS-gated.** Any file under
+   `compliance/` (notably `compliance/audit_bearing_registry.yaml`
+   and `compliance/audit_bearing_registry.md`) requires a
+   compliance-team reviewer on the PR that changes it. Do not bypass,
+   "temporarily disable," or ship a tactical edit around the registry
+   without compliance sign-off. The registry is the contract the
+   `build_analysis` composition node enforces; a drift here is a SOX
+   issue, not an engineering one.
+
+3. **Audit-bearing field changes are registry-first.** Adding,
+   renaming, or removing a field on any `*AnalysisData` Pydantic
+   class (in `api/schemas.py`) MUST be accompanied in the same PR by
+   a row in `compliance/audit_bearing_registry.yaml`. The fitness
+   test `tests/test_audit_registry_coverage.py` (when it lands) will
+   fail CI otherwise. Until the test ships, treat the obligation as
+   an unwritten rule you still honor.
+
 ## POST-CHANGE VERIFICATION
 
 After completing the change:
@@ -184,6 +215,9 @@ After completing the change:
 5. Confirm the change is small and reviewable.
 6. Confirm docs are updated if the change affects user-facing behaviour
    (use prompts/update_docs.md).
+7. If any `*AnalysisData` field was added / renamed / removed, confirm
+   `compliance/audit_bearing_registry.yaml` was updated in the same
+   PR and that CODEOWNERS surfaced a compliance reviewer request.
 
 Return: a concise summary of what was changed, files touched, tests
 added/modified, and confirmation that all tests pass.

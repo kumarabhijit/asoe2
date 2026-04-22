@@ -302,6 +302,21 @@ class TraceResponse(BaseModel):
     customer_email_draft: Optional[str] = None
     """Copy-paste-ready customer communication draft."""
 
+    # Verdict Pillar 2.3 (2026-04-22 workshop) — structured audit-gap
+    # surface. When the build_analysis node flags
+    # AUDIT_CONTEXT_MISSING, these fields carry the class name +
+    # ordered list of missing audit-bearing fields so auditors don't
+    # have to regex the free-text explanation. Both None when
+    # coverage was complete.
+    audit_context_missing_class: Optional[str] = None
+    """Pydantic class name whose audit-bearing fields were incomplete
+    (e.g. "PriceHoldAnalysisData"). None = coverage OK."""
+
+    audit_context_missing_fields: List[str] = Field(default_factory=list)
+    """Ordered list of field names declared audit-bearing in
+    compliance/audit_bearing_registry.yaml that could not be
+    populated for this record. Empty = coverage OK."""
+
 
 class StatsResponse(BaseModel):
     """GET /api/v1/exceptions/stats — dashboard metrics."""
@@ -433,6 +448,294 @@ class LineAnalysis(BaseModel):
     waterfall: List[PricingWaterfallStep] = Field(default_factory=list)
 
 
+# ---------------------------------------------------------------------------
+# Analysis enrichment payloads (review L2)
+#
+# Each enrichment type mirrors one recipe's output shape as projected into
+# a UI-consumable schema. The adapter in `api/analysis_adapters.py` maps
+# `record.resolution_data` + `record.original_event` + policy constants
+# into these models; the /analysis endpoint then surfaces them as optional
+# fields on AnalysisResponse. Field names intentionally match the UI's
+# `OrderAnalysis` interface (`src/types/exceptions.ts`) so the
+# data-presence rendering pattern on the UI side needs zero changes.
+#
+# IMPORTANT: these Pydantic classes are NOT a second source of truth for
+# recipe output. Recipes continue to return plain dicts; the adapter is
+# the single projection point. Adding a new enrichment => add (a) a
+# Pydantic model here, (b) an adapter function, (c) an optional field
+# below on AnalysisResponse. No recipe changes.
+# ---------------------------------------------------------------------------
+
+
+class PriceHoldAnalysisData(BaseModel):
+    """PriceHoldReleaseRecipe → UI `price_hold_analysis`.
+
+    `hold_status` is a two-valued projection of the recipe's four-valued
+    `status`: "RELEASED" when the hold was lifted, "HELD" otherwise (the
+    recipe's REVIEW_REQUIRED, REJECTED, and FAILED outcomes all leave the
+    hold in place). Other fields mirror the recipe output or the event
+    inputs (po_price / sap_base_price) / policy constants
+    (tolerance_pct / hard_block_pct).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    hold_status: Literal["HELD", "RELEASED"]
+    po_price: float
+    sap_base_price: float
+    variance_pct: float
+    tolerance_pct: float
+    hard_block_pct: float
+    action: Literal["AUTO_RELEASE", "ESCALATE", "HARD_BLOCK"]
+    reason: str
+
+
+class EdiMismatchAnalysisData(BaseModel):
+    """EdiMismatchRecipe → UI `edi_mismatch_analysis`.
+
+    `sub_type` is intentionally untyped-string (not a Literal) so the UI
+    can render new sub_types added in the recipe without a contract
+    bump. `expected_value` / `received_value` are `Any` because EDI 850
+    line fields are heterogeneous (SKU strings, qty integers, ship-to
+    dicts).
+
+    Note: PRICE_MISMATCH never reaches this recipe — the classifier
+    routes it to CONTRACTUAL_CORRECTION / PriceAdjustmentRecipe.py to
+    preserve the single-source-of-truth invariant. The adapter returns
+    None for FAILED recipe outputs, so PRICE_MISMATCH routing-error
+    records never surface this field.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    sub_type: str
+    classification: Literal["HARD_REJECT", "REVIEW", "ESCALATE"]
+    recommended_action: str
+    autonomy_level: Literal["L1", "L2", "L3"]
+    expected_value: Any = None
+    received_value: Any = None
+    notification_template: Optional[str] = None
+
+
+class AlternateDeliveryOption(BaseModel):
+    """One ranked alternate delivery option from
+    DeliveryDelayResolutionRecipe._rank_options."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    type: str  # EXPEDITE / SPLIT_SHIP / PARTIAL / RESCHEDULE
+    title: str = ""
+    description: str = ""
+    new_eta: Optional[str] = None
+    extra_cost: float = 0.0
+    recommended: bool = False
+
+
+class DeliveryDelayAnalysisData(BaseModel):
+    """DeliveryDelayResolutionRecipe → UI `delivery_delay_analysis`.
+
+    Registry-classified fields (2026-04-22 workshop):
+
+      * audit-bearing:
+          planned_date, projected_eta, days_late, delay_category,
+          affected_lines, at_risk, sla_deadline (when present)
+      * conditional:
+          alternate_options (depends_on resolved_action ∈
+          {EXPEDITE, SPLIT_SHIP, PARTIAL, RESCHEDULE})
+      * contextual:
+          delay_reason, carrier, route, rule_id
+
+    `at_risk` and `sla_deadline` are currently covered by the
+    `delivery_delay_financial_gap` grandfather clause — the contract
+    gateway that would produce them isn't wired yet. The composer
+    treats them as contextual until the 2026-07-21 deadline.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    planned_date: str
+    projected_eta: str
+    days_late: int
+    delay_category: str
+    affected_lines: int
+    at_risk: Optional[float] = None  # grandfathered
+    sla_deadline: Optional[str] = None  # grandfathered
+    alternate_options: List[AlternateDeliveryOption] = Field(default_factory=list)
+    # Contextual — absence on the UI is expected (structural omission
+    # via EvidenceBlock in asoe-ui).
+    delay_reason: Optional[str] = None
+    carrier: Optional[str] = None
+    route: Optional[str] = None
+    rule_id: Optional[str] = None
+
+
+class OverMaxLine(BaseModel):
+    """One affected order line in an OVER_MAX exception."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sku: str
+    description: str = ""
+    qty: float
+    max_line_qty: Optional[float] = None
+    excess: float = 0.0
+    is_even_layer_item: bool = False
+
+
+class TrimPlanLine(BaseModel):
+    """One row in OverMaxTrimRecipe's trim plan."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sku: str
+    description: str = ""
+    ordered: float
+    trimmed_to: float
+    delta: float = 0.0
+    action: Literal["TRIM", "SKIP", "OK"] = "TRIM"
+
+
+class OverMaxAnalysisData(BaseModel):
+    """OverMaxTrimRecipe → UI `overmax_analysis`.
+
+    Registry-classified fields (2026-04-22 workshop):
+      * audit-bearing: total_ordered, max_qty, excess_qty,
+        exceedance_pct, uom, at_risk, order_lines, trim_plan.
+      * audit-bearing (grandfathered until 2026-07-21 — gateway gap):
+        contract_ref, block_status, block_reason.
+
+    The recipe computes excess_qty / exceedance_pct / trim_plan /
+    at_risk from event metadata; the SAP block + contract gateway
+    that would supply contract_ref / block_status / block_reason
+    is not yet wired (overmax_gateway_gap clause).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    total_ordered: float
+    max_qty: float
+    excess_qty: float
+    exceedance_pct: float
+    uom: str = ""
+    at_risk: float = 0.0
+    order_lines: List[OverMaxLine] = Field(default_factory=list)
+    trim_plan: List[TrimPlanLine] = Field(default_factory=list)
+    # Grandfathered audit-bearing — populated when the SAP contract
+    # gateway lands.
+    contract_ref: Optional[str] = None
+    block_status: Optional[str] = None
+    block_reason: Optional[str] = None
+
+
+class RoundUpPlanLine(BaseModel):
+    """One row in MOQRoundUpRecipe's round-up plan."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sku: str
+    description: str = ""
+    ordered: float
+    round_up_to: float
+    delta: float = 0.0
+    action: Literal["ROUND_UP", "ACCEPT_BELOW", "ESCALATE"] = "ROUND_UP"
+
+
+class MOQAnalysisData(BaseModel):
+    """MOQRoundUpRecipe → UI `moq_analysis`.
+
+    Registry-classified fields (2026-04-22 workshop):
+      * audit-bearing: ordered_qty, moq_qty, shortfall_qty,
+        shortfall_pct, sku, unit_cost, uom, at_risk, round_up_plan.
+      * grandfathered audit-bearing (until 2026-07-21 — gateway gap):
+        moq_source, channel, contract_ref, block_status.
+      * contextual: description, block_message.
+
+    `at_risk` is sourced from the recipe's `uplift_value`
+    (uplift_qty × unit_cost). The `sap_steps` UI field is omitted
+    here — it's contextual / not produced by the recipe and the
+    UI can render whatever's present in `round_up_plan`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ordered_qty: float
+    moq_qty: float
+    shortfall_qty: float
+    shortfall_pct: float
+    sku: str
+    unit_cost: float = 0.0
+    uom: str = ""
+    at_risk: float = 0.0
+    round_up_plan: List[RoundUpPlanLine] = Field(default_factory=list)
+    # Grandfathered audit-bearing.
+    moq_source: Optional[str] = None
+    channel: Optional[str] = None
+    contract_ref: Optional[str] = None
+    block_status: Optional[str] = None
+    # Contextual.
+    description: Optional[str] = None
+    block_message: Optional[str] = None
+
+
+class PalletLine(BaseModel):
+    """One per-line pallet alignment row from PalletAlignmentRecipe."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sku: str
+    description: str = ""
+    uom: str = ""
+    layer_qty: float = 0.0
+    pallet_qty: float = 0.0
+    ordered_qty: float
+    complete_layers: int = 0
+    loose_qty: float = 0.0
+    full_pallets: int = 0
+    pallet_fill_pct: float = 0.0
+    violation_type: Optional[str] = None
+
+
+class PalletSuggestion(BaseModel):
+    """One AI suggestion row from PalletAlignmentRecipe."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sku: str
+    description: str = ""
+    current: float
+    suggested: float
+    delta: float = 0.0
+    layers: int = 0
+    full_pallets: int = 0
+    reason: str = ""
+
+
+class PalletAnalysisData(BaseModel):
+    """PalletAlignmentRecipe → UI `pallet_analysis`.
+
+    Registry-classified fields (2026-04-22 workshop):
+      * audit-bearing: total_ordered_cases, loose_cases_total,
+        order_line_count, classification, suggested_plan, lines.
+
+    Recipe + UI line/plan shapes are 1:1, so the adapter is purely
+    coercion. The UI's mock-only legacy top-level fields
+    (at_risk_total, extra_labor_est_hrs, freight_waste_pct) are not
+    in this contract — they're not classified in the registry and
+    no recipe currently produces them. Those are kept optional on
+    the UI type and remain mock-only.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    total_ordered_cases: float
+    loose_cases_total: float
+    order_line_count: int
+    classification: str
+    lines: List[PalletLine] = Field(default_factory=list)
+    suggested_plan: List[PalletSuggestion] = Field(default_factory=list)
+
+
 class AnalysisResponse(BaseModel):
     """GET /api/v1/exceptions/{id}/analysis"""
 
@@ -441,3 +744,14 @@ class AnalysisResponse(BaseModel):
     risk: str
     resolution: str
     lines: List[LineAnalysis] = Field(default_factory=list)
+
+    # Data-presence enrichment fields (review L2). Populated by
+    # `api.analysis_adapters.ANALYSIS_ADAPTERS` keyed on
+    # `record.selected_recipe`. Absent when the recipe output is
+    # malformed, FAILED, or the record has no recipe yet.
+    price_hold_analysis: Optional[PriceHoldAnalysisData] = None
+    edi_mismatch_analysis: Optional[EdiMismatchAnalysisData] = None
+    delivery_delay_analysis: Optional[DeliveryDelayAnalysisData] = None
+    overmax_analysis: Optional[OverMaxAnalysisData] = None
+    moq_analysis: Optional[MOQAnalysisData] = None
+    pallet_analysis: Optional[PalletAnalysisData] = None

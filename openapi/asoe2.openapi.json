@@ -82,6 +82,57 @@
         "title": "AdminReleaseRequest",
         "type": "object"
       },
+      "AlternateDeliveryOption": {
+        "additionalProperties": false,
+        "description": "One ranked alternate delivery option from\nDeliveryDelayResolutionRecipe._rank_options.",
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "extra_cost": {
+            "default": 0.0,
+            "title": "Extra Cost",
+            "type": "number"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "new_eta": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Eta"
+          },
+          "recommended": {
+            "default": false,
+            "title": "Recommended",
+            "type": "boolean"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type"
+        ],
+        "title": "AlternateDeliveryOption",
+        "type": "object"
+      },
       "AnalysisResponse": {
         "description": "GET /api/v1/exceptions/{id}/analysis",
         "properties": {
@@ -89,9 +140,29 @@
             "title": "Confidence",
             "type": "integer"
           },
+          "delivery_delay_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeliveryDelayAnalysisData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "diagnosis": {
             "title": "Diagnosis",
             "type": "string"
+          },
+          "edi_mismatch_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EdiMismatchAnalysisData"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "lines": {
             "items": {
@@ -99,6 +170,46 @@
             },
             "title": "Lines",
             "type": "array"
+          },
+          "moq_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MOQAnalysisData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "overmax_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OverMaxAnalysisData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pallet_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PalletAnalysisData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "price_hold_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PriceHoldAnalysisData"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "resolution": {
             "title": "Resolution",
@@ -227,6 +338,114 @@
         "title": "CosignRequest",
         "type": "object"
       },
+      "DeliveryDelayAnalysisData": {
+        "additionalProperties": false,
+        "description": "DeliveryDelayResolutionRecipe \u2192 UI `delivery_delay_analysis`.\n\nRegistry-classified fields (2026-04-22 workshop):\n\n  * audit-bearing:\n      planned_date, projected_eta, days_late, delay_category,\n      affected_lines, at_risk, sla_deadline (when present)\n  * conditional:\n      alternate_options (depends_on resolved_action \u2208\n      {EXPEDITE, SPLIT_SHIP, PARTIAL, RESCHEDULE})\n  * contextual:\n      delay_reason, carrier, route, rule_id\n\n`at_risk` and `sla_deadline` are currently covered by the\n`delivery_delay_financial_gap` grandfather clause \u2014 the contract\ngateway that would produce them isn't wired yet. The composer\ntreats them as contextual until the 2026-07-21 deadline.",
+        "properties": {
+          "affected_lines": {
+            "title": "Affected Lines",
+            "type": "integer"
+          },
+          "alternate_options": {
+            "items": {
+              "$ref": "#/components/schemas/AlternateDeliveryOption"
+            },
+            "title": "Alternate Options",
+            "type": "array"
+          },
+          "at_risk": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At Risk"
+          },
+          "carrier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carrier"
+          },
+          "days_late": {
+            "title": "Days Late",
+            "type": "integer"
+          },
+          "delay_category": {
+            "title": "Delay Category",
+            "type": "string"
+          },
+          "delay_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delay Reason"
+          },
+          "planned_date": {
+            "title": "Planned Date",
+            "type": "string"
+          },
+          "projected_eta": {
+            "title": "Projected Eta",
+            "type": "string"
+          },
+          "route": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route"
+          },
+          "rule_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rule Id"
+          },
+          "sla_deadline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sla Deadline"
+          }
+        },
+        "required": [
+          "planned_date",
+          "projected_eta",
+          "days_late",
+          "delay_category",
+          "affected_lines"
+        ],
+        "title": "DeliveryDelayAnalysisData",
+        "type": "object"
+      },
       "DispositionRequest": {
         "additionalProperties": false,
         "description": "PATCH /api/v1/exceptions/{id}/disposition \u2014 unified HITL primitive\n(v2 consolidation).\n\nSingle endpoint collapsing Approve + Reject + Override into a\nsub-type-discriminated resolution. The caller specifies the chosen\naction; the server derives the sub-type:\n  - chosen_action == recommended_action \u2192 APPROVE (exceptions:approve)\n  - chosen_action == \"NO_ACTION\"        \u2192 REJECT  (exceptions:approve)\n  - chosen_action != recommended_action \u2192 OVERRIDE (exceptions:override,\n                                                     four-eyes applies)\n\nNotes are mandatory (SOX). reason_tag is validated against\nAllowedOverrideReasonTag when present; it defaults to \"other\" for\nPhase 2 compatibility. Emits a single EXCEPTION_RESOLVED audit event\nwith sub_type in new_value so downstream analytics stay consistent.",
@@ -250,6 +469,63 @@
           "reason_tag"
         ],
         "title": "DispositionRequest",
+        "type": "object"
+      },
+      "EdiMismatchAnalysisData": {
+        "additionalProperties": false,
+        "description": "EdiMismatchRecipe \u2192 UI `edi_mismatch_analysis`.\n\n`sub_type` is intentionally untyped-string (not a Literal) so the UI\ncan render new sub_types added in the recipe without a contract\nbump. `expected_value` / `received_value` are `Any` because EDI 850\nline fields are heterogeneous (SKU strings, qty integers, ship-to\ndicts).\n\nNote: PRICE_MISMATCH never reaches this recipe \u2014 the classifier\nroutes it to CONTRACTUAL_CORRECTION / PriceAdjustmentRecipe.py to\npreserve the single-source-of-truth invariant. The adapter returns\nNone for FAILED recipe outputs, so PRICE_MISMATCH routing-error\nrecords never surface this field.",
+        "properties": {
+          "autonomy_level": {
+            "enum": [
+              "L1",
+              "L2",
+              "L3"
+            ],
+            "title": "Autonomy Level",
+            "type": "string"
+          },
+          "classification": {
+            "enum": [
+              "HARD_REJECT",
+              "REVIEW",
+              "ESCALATE"
+            ],
+            "title": "Classification",
+            "type": "string"
+          },
+          "expected_value": {
+            "title": "Expected Value"
+          },
+          "notification_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notification Template"
+          },
+          "received_value": {
+            "title": "Received Value"
+          },
+          "recommended_action": {
+            "title": "Recommended Action",
+            "type": "string"
+          },
+          "sub_type": {
+            "title": "Sub Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sub_type",
+          "classification",
+          "recommended_action",
+          "autonomy_level"
+        ],
+        "title": "EdiMismatchAnalysisData",
         "type": "object"
       },
       "EscalateRequest": {
@@ -832,6 +1108,427 @@
         "title": "MFAVerifyRequest",
         "type": "object"
       },
+      "MOQAnalysisData": {
+        "additionalProperties": false,
+        "description": "MOQRoundUpRecipe \u2192 UI `moq_analysis`.\n\nRegistry-classified fields (2026-04-22 workshop):\n  * audit-bearing: ordered_qty, moq_qty, shortfall_qty,\n    shortfall_pct, sku, unit_cost, uom, at_risk, round_up_plan.\n  * grandfathered audit-bearing (until 2026-07-21 \u2014 gateway gap):\n    moq_source, channel, contract_ref, block_status.\n  * contextual: description, block_message.\n\n`at_risk` is sourced from the recipe's `uplift_value`\n(uplift_qty \u00d7 unit_cost). The `sap_steps` UI field is omitted\nhere \u2014 it's contextual / not produced by the recipe and the\nUI can render whatever's present in `round_up_plan`.",
+        "properties": {
+          "at_risk": {
+            "default": 0.0,
+            "title": "At Risk",
+            "type": "number"
+          },
+          "block_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Block Message"
+          },
+          "block_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Block Status"
+          },
+          "channel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel"
+          },
+          "contract_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Ref"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "moq_qty": {
+            "title": "Moq Qty",
+            "type": "number"
+          },
+          "moq_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Moq Source"
+          },
+          "ordered_qty": {
+            "title": "Ordered Qty",
+            "type": "number"
+          },
+          "round_up_plan": {
+            "items": {
+              "$ref": "#/components/schemas/RoundUpPlanLine"
+            },
+            "title": "Round Up Plan",
+            "type": "array"
+          },
+          "shortfall_pct": {
+            "title": "Shortfall Pct",
+            "type": "number"
+          },
+          "shortfall_qty": {
+            "title": "Shortfall Qty",
+            "type": "number"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          },
+          "unit_cost": {
+            "default": 0.0,
+            "title": "Unit Cost",
+            "type": "number"
+          },
+          "uom": {
+            "default": "",
+            "title": "Uom",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ordered_qty",
+          "moq_qty",
+          "shortfall_qty",
+          "shortfall_pct",
+          "sku"
+        ],
+        "title": "MOQAnalysisData",
+        "type": "object"
+      },
+      "OverMaxAnalysisData": {
+        "additionalProperties": false,
+        "description": "OverMaxTrimRecipe \u2192 UI `overmax_analysis`.\n\nRegistry-classified fields (2026-04-22 workshop):\n  * audit-bearing: total_ordered, max_qty, excess_qty,\n    exceedance_pct, uom, at_risk, order_lines, trim_plan.\n  * audit-bearing (grandfathered until 2026-07-21 \u2014 gateway gap):\n    contract_ref, block_status, block_reason.\n\nThe recipe computes excess_qty / exceedance_pct / trim_plan /\nat_risk from event metadata; the SAP block + contract gateway\nthat would supply contract_ref / block_status / block_reason\nis not yet wired (overmax_gateway_gap clause).",
+        "properties": {
+          "at_risk": {
+            "default": 0.0,
+            "title": "At Risk",
+            "type": "number"
+          },
+          "block_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Block Reason"
+          },
+          "block_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Block Status"
+          },
+          "contract_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Ref"
+          },
+          "exceedance_pct": {
+            "title": "Exceedance Pct",
+            "type": "number"
+          },
+          "excess_qty": {
+            "title": "Excess Qty",
+            "type": "number"
+          },
+          "max_qty": {
+            "title": "Max Qty",
+            "type": "number"
+          },
+          "order_lines": {
+            "items": {
+              "$ref": "#/components/schemas/OverMaxLine"
+            },
+            "title": "Order Lines",
+            "type": "array"
+          },
+          "total_ordered": {
+            "title": "Total Ordered",
+            "type": "number"
+          },
+          "trim_plan": {
+            "items": {
+              "$ref": "#/components/schemas/TrimPlanLine"
+            },
+            "title": "Trim Plan",
+            "type": "array"
+          },
+          "uom": {
+            "default": "",
+            "title": "Uom",
+            "type": "string"
+          }
+        },
+        "required": [
+          "total_ordered",
+          "max_qty",
+          "excess_qty",
+          "exceedance_pct"
+        ],
+        "title": "OverMaxAnalysisData",
+        "type": "object"
+      },
+      "OverMaxLine": {
+        "additionalProperties": false,
+        "description": "One affected order line in an OVER_MAX exception.",
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "excess": {
+            "default": 0.0,
+            "title": "Excess",
+            "type": "number"
+          },
+          "is_even_layer_item": {
+            "default": false,
+            "title": "Is Even Layer Item",
+            "type": "boolean"
+          },
+          "max_line_qty": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Line Qty"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "number"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sku",
+          "qty"
+        ],
+        "title": "OverMaxLine",
+        "type": "object"
+      },
+      "PalletAnalysisData": {
+        "additionalProperties": false,
+        "description": "PalletAlignmentRecipe \u2192 UI `pallet_analysis`.\n\nRegistry-classified fields (2026-04-22 workshop):\n  * audit-bearing: total_ordered_cases, loose_cases_total,\n    order_line_count, classification, suggested_plan, lines.\n\nRecipe + UI line/plan shapes are 1:1, so the adapter is purely\ncoercion. The UI's mock-only legacy top-level fields\n(at_risk_total, extra_labor_est_hrs, freight_waste_pct) are not\nin this contract \u2014 they're not classified in the registry and\nno recipe currently produces them. Those are kept optional on\nthe UI type and remain mock-only.",
+        "properties": {
+          "classification": {
+            "title": "Classification",
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/PalletLine"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "loose_cases_total": {
+            "title": "Loose Cases Total",
+            "type": "number"
+          },
+          "order_line_count": {
+            "title": "Order Line Count",
+            "type": "integer"
+          },
+          "suggested_plan": {
+            "items": {
+              "$ref": "#/components/schemas/PalletSuggestion"
+            },
+            "title": "Suggested Plan",
+            "type": "array"
+          },
+          "total_ordered_cases": {
+            "title": "Total Ordered Cases",
+            "type": "number"
+          }
+        },
+        "required": [
+          "total_ordered_cases",
+          "loose_cases_total",
+          "order_line_count",
+          "classification"
+        ],
+        "title": "PalletAnalysisData",
+        "type": "object"
+      },
+      "PalletLine": {
+        "additionalProperties": false,
+        "description": "One per-line pallet alignment row from PalletAlignmentRecipe.",
+        "properties": {
+          "complete_layers": {
+            "default": 0,
+            "title": "Complete Layers",
+            "type": "integer"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "full_pallets": {
+            "default": 0,
+            "title": "Full Pallets",
+            "type": "integer"
+          },
+          "layer_qty": {
+            "default": 0.0,
+            "title": "Layer Qty",
+            "type": "number"
+          },
+          "loose_qty": {
+            "default": 0.0,
+            "title": "Loose Qty",
+            "type": "number"
+          },
+          "ordered_qty": {
+            "title": "Ordered Qty",
+            "type": "number"
+          },
+          "pallet_fill_pct": {
+            "default": 0.0,
+            "title": "Pallet Fill Pct",
+            "type": "number"
+          },
+          "pallet_qty": {
+            "default": 0.0,
+            "title": "Pallet Qty",
+            "type": "number"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          },
+          "uom": {
+            "default": "",
+            "title": "Uom",
+            "type": "string"
+          },
+          "violation_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Violation Type"
+          }
+        },
+        "required": [
+          "sku",
+          "ordered_qty"
+        ],
+        "title": "PalletLine",
+        "type": "object"
+      },
+      "PalletSuggestion": {
+        "additionalProperties": false,
+        "description": "One AI suggestion row from PalletAlignmentRecipe.",
+        "properties": {
+          "current": {
+            "title": "Current",
+            "type": "number"
+          },
+          "delta": {
+            "default": 0.0,
+            "title": "Delta",
+            "type": "number"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "full_pallets": {
+            "default": 0,
+            "title": "Full Pallets",
+            "type": "integer"
+          },
+          "layers": {
+            "default": 0,
+            "title": "Layers",
+            "type": "integer"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          },
+          "suggested": {
+            "title": "Suggested",
+            "type": "number"
+          }
+        },
+        "required": [
+          "sku",
+          "current",
+          "suggested"
+        ],
+        "title": "PalletSuggestion",
+        "type": "object"
+      },
       "PolicyOverrideResponse": {
         "description": "Response for policy update.",
         "properties": {
@@ -897,6 +1594,65 @@
           "value"
         ],
         "title": "PolicyUpdateRequest",
+        "type": "object"
+      },
+      "PriceHoldAnalysisData": {
+        "additionalProperties": false,
+        "description": "PriceHoldReleaseRecipe \u2192 UI `price_hold_analysis`.\n\n`hold_status` is a two-valued projection of the recipe's four-valued\n`status`: \"RELEASED\" when the hold was lifted, \"HELD\" otherwise (the\nrecipe's REVIEW_REQUIRED, REJECTED, and FAILED outcomes all leave the\nhold in place). Other fields mirror the recipe output or the event\ninputs (po_price / sap_base_price) / policy constants\n(tolerance_pct / hard_block_pct).",
+        "properties": {
+          "action": {
+            "enum": [
+              "AUTO_RELEASE",
+              "ESCALATE",
+              "HARD_BLOCK"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "hard_block_pct": {
+            "title": "Hard Block Pct",
+            "type": "number"
+          },
+          "hold_status": {
+            "enum": [
+              "HELD",
+              "RELEASED"
+            ],
+            "title": "Hold Status",
+            "type": "string"
+          },
+          "po_price": {
+            "title": "Po Price",
+            "type": "number"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "sap_base_price": {
+            "title": "Sap Base Price",
+            "type": "number"
+          },
+          "tolerance_pct": {
+            "title": "Tolerance Pct",
+            "type": "number"
+          },
+          "variance_pct": {
+            "title": "Variance Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "hold_status",
+          "po_price",
+          "sap_base_price",
+          "variance_pct",
+          "tolerance_pct",
+          "hard_block_pct",
+          "action",
+          "reason"
+        ],
+        "title": "PriceHoldAnalysisData",
         "type": "object"
       },
       "PricingWaterfallStep": {
@@ -1212,6 +1968,51 @@
         "title": "ResolveResponse",
         "type": "object"
       },
+      "RoundUpPlanLine": {
+        "additionalProperties": false,
+        "description": "One row in MOQRoundUpRecipe's round-up plan.",
+        "properties": {
+          "action": {
+            "default": "ROUND_UP",
+            "enum": [
+              "ROUND_UP",
+              "ACCEPT_BELOW",
+              "ESCALATE"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "delta": {
+            "default": 0.0,
+            "title": "Delta",
+            "type": "number"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "ordered": {
+            "title": "Ordered",
+            "type": "number"
+          },
+          "round_up_to": {
+            "title": "Round Up To",
+            "type": "number"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sku",
+          "ordered",
+          "round_up_to"
+        ],
+        "title": "RoundUpPlanLine",
+        "type": "object"
+      },
       "SAPActionStep": {
         "description": "A recommended SAP action step.\n\nHuman-facing only \u2014 not machine-consumed. Rendered verbatim in Layer 2\nfor operator reference. Constrained generation is NOT required here\n(CLAUDE.md \u00a73).",
         "properties": {
@@ -1362,6 +2163,24 @@
       "TraceResponse": {
         "description": "GET /api/v1/exceptions/{id}/trace \u2014 full TraceRecord JSON.",
         "properties": {
+          "audit_context_missing_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audit Context Missing Class"
+          },
+          "audit_context_missing_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Audit Context Missing Fields",
+            "type": "array"
+          },
           "backend_fallback": {
             "anyOf": [
               {
@@ -1515,6 +2334,51 @@
           "event_id"
         ],
         "title": "TraceResponse",
+        "type": "object"
+      },
+      "TrimPlanLine": {
+        "additionalProperties": false,
+        "description": "One row in OverMaxTrimRecipe's trim plan.",
+        "properties": {
+          "action": {
+            "default": "TRIM",
+            "enum": [
+              "TRIM",
+              "SKIP",
+              "OK"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "delta": {
+            "default": 0.0,
+            "title": "Delta",
+            "type": "number"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "ordered": {
+            "title": "Ordered",
+            "type": "number"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          },
+          "trimmed_to": {
+            "title": "Trimmed To",
+            "type": "number"
+          }
+        },
+        "required": [
+          "sku",
+          "ordered",
+          "trimmed_to"
+        ],
+        "title": "TrimPlanLine",
         "type": "object"
       },
       "UserProfile": {
