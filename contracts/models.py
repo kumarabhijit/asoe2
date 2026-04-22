@@ -35,6 +35,14 @@ class TerminalStatus(str, Enum):
     BLOCKED = "BLOCKED"
     REJECTED = "REJECTED"
     COMPLETE_WITH_CHILDREN = "COMPLETE_WITH_CHILDREN"
+    # Registry-enforced audit gap — the `build_analysis` composition node
+    # (api/analysis_composer.py) emits this when one or more audit-bearing
+    # fields declared in `compliance/audit_bearing_registry.yaml` cannot
+    # be populated from recipe output / enrichment context / event. Named
+    # distinctly from FAIL_TO_HUMAN so auditors see "compliance data was
+    # missing" rather than "the pipeline crashed". Routes to FAILED in
+    # the lifecycle (no reviewer path — the record cannot be audited).
+    AUDIT_CONTEXT_MISSING = "AUDIT_CONTEXT_MISSING"
 
 
 # Single source of truth: maps TerminalStatus to exception lifecycle state.
@@ -46,6 +54,7 @@ STATUS_TO_LIFECYCLE: Dict[str, str] = {
     "BLOCKED": "BLOCKED",
     "REJECTED": "REJECTED",
     "COMPLETE_WITH_CHILDREN": "RESOLVED",
+    "AUDIT_CONTEXT_MISSING": "FAILED",
 }
 
 # 12-state exception lifecycle (architecture_v3.md §9.1).

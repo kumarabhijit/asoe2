@@ -577,9 +577,14 @@ grandfather_clauses:
 # ---------------------------------------------------------------------------
 
 summary:
-  total_fields: 96
-  audit_bearing: 64
-  conditional: 8
-  contextual: 24
+  # Machine-verified by tests/test_audit_registry_coverage.py
+  # (test_summary_tally_matches_actual_classifications). The
+  # workshop's initial tally of 96 was human-counted and under by 11
+  # (post-workshop minor-class expansion + subfield enumeration);
+  # the actual totals below are re-derived from the live rows.
+  total_fields: 107
+  audit_bearing: 84
+  conditional: 5
+  contextual: 18
   backend_gap_fields: 6
   gateway_dependent_fields: 11

@@ -1,0 +1,40 @@
+# CODEOWNERS — automatic review assignment for path-sensitive files.
+#
+# Format: <path-pattern> <@user-or-team> [<@user-or-team> ...]
+#
+# Compliance artifacts are registry-level contracts that the
+# `build_analysis` composition node enforces at graph-execution time.
+# A drift here is a SOX §404 issue (the production audit trail no
+# longer reflects what the compliance team classified), not an
+# engineering one — so changes REQUIRE a compliance-team reviewer on
+# every PR.
+#
+# See: compliance/audit_bearing_registry.md (workshop minutes,
+# 2026-04-22) and prompts/pre_code_session.md §"WORKING-STYLE
+# CONSTRAINTS".
+
+# Audit-bearing field registry (machine-readable + minutes).
+# Both files must stay in sync; any change ships through compliance.
+/compliance/                   @compliance-team
+/compliance/**                 @compliance-team
+
+# The terminal status vocabulary is tightly coupled to the registry
+# — AUDIT_CONTEXT_MISSING is what the enforcement node emits on a
+# missing audit-bearing field. Review alongside compliance whenever
+# it changes.
+/contracts/models.py           @compliance-team @backend-team
+
+# The composition node + adapter registry are the code paths that
+# consume the registry. Code review from both compliance and backend
+# keeps the contract and implementation honest against each other.
+/api/analysis_composer.py      @compliance-team @backend-team
+/api/analysis_adapters.py      @backend-team
+/api/schemas.py                @backend-team
+
+# Policy constants (thresholds that the shadow + recipes read).
+/contracts/policy.py           @compliance-team @backend-team
+
+# Pre-session prompt documents the working-style constraints and
+# registry-first discipline; compliance should see changes to its
+# section alongside platform.
+/prompts/pre_code_session.md   @platform-team @compliance-team

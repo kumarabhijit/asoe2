@@ -9,6 +9,12 @@ dependencies = [
   "fastapi>=0.110.0",
   "uvicorn[standard]>=0.29.0",
   "redis>=5.0.0",
+  # Compliance: audit-bearing field registry
+  # (compliance/audit_bearing_registry.yaml) is parsed at import time
+  # by api/analysis_composer.py. PyYAML is transitively available via
+  # langchain today but pinned explicitly here so the registry load
+  # isn't at the mercy of an unrelated dep change.
+  "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
