@@ -1498,6 +1498,24 @@
       "TraceResponse": {
         "description": "GET /api/v1/exceptions/{id}/trace \u2014 full TraceRecord JSON.",
         "properties": {
+          "audit_context_missing_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audit Context Missing Class"
+          },
+          "audit_context_missing_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Audit Context Missing Fields",
+            "type": "array"
+          },
           "backend_fallback": {
             "anyOf": [
               {

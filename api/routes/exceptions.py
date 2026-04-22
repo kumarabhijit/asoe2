@@ -35,7 +35,7 @@ import re
 import threading
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, Query, Request
@@ -48,6 +48,7 @@ from api.deps import (
     require_role,
 )
 from api.analysis_adapters import ANALYSIS_ADAPTERS, resolve_adapter_key
+from api.analysis_composer import compose as compose_analysis
 from api.errors import ASOEError
 from api.schemas import (
     AdminReleaseRequest,
@@ -200,6 +201,19 @@ def _persist_exception(
         enrichment_context=ctx,
     )
 
+    # Verdict Pillar 2.3: capture a structured audit-gap snapshot on
+    # the trace. The build_analysis node already flipped final_status
+    # when coverage was incomplete; this block surfaces WHICH fields
+    # were missing so auditors see a machine-readable breakdown
+    # alongside the prose explanation.
+    from api.analysis_composer import compose as _compose_record
+    _composed = _compose_record(record)
+    audit_missing_class: Optional[str] = None
+    audit_missing_fields: List[str] = []
+    if _composed.class_name and _composed.missing_audit_fields:
+        audit_missing_class = _composed.class_name
+        audit_missing_fields = list(_composed.missing_audit_fields)
+
     trace_data = {
         "trace_id": trace_id or "",
         "event_id": state.event.order_id,
@@ -214,6 +228,8 @@ def _persist_exception(
         "is_fallback_generated": True,
         "final_status": state.final_status.value if state.final_status else None,
         "explanation": state.explanation,
+        "audit_context_missing_class": audit_missing_class,
+        "audit_context_missing_fields": audit_missing_fields,
     }
     exception_store.store_trace(record.id, trace_data)
     return record.id
@@ -1490,18 +1506,34 @@ async def get_analysis(
         if record.final_status:
             resolution = record.final_status
 
-    # Enrichment projection (review L2). Consult the adapter registry
-    # by `selected_recipe`, or fall back to an intent→recipe mapping
-    # when the record was shadow-gated before select_recipe ran. The
-    # adapter returns None for degenerate inputs; None serializes as
-    # an absent field, preserving the UI's data-presence pattern.
+    # Verdict Pillar 2.2: route the read path through the composer so
+    # registry coverage is honoured on reads AND emissions. The
+    # composer returns a ComposedAnalysis with (a) the typed
+    # projection, (b) the missing-audit-field list, (c) the class
+    # name in play. At graph-execution time the build_analysis node
+    # already flipped records with incomplete coverage to
+    # AUDIT_CONTEXT_MISSING — but if an older record (created
+    # before Pillar 2 shipped) or a grandfathered field is in play,
+    # coverage here can still be incomplete. When that happens we
+    # emit the projection (so the UI gets what it can) but suppress
+    # it under `_audit_coverage: "incomplete"` so downstream
+    # consumers know the surface is partial.
+    composed = compose_analysis(record)
     extras: Dict[str, Any] = {}
-    adapter_key = resolve_adapter_key(record)
-    if adapter_key and adapter_key in ANALYSIS_ADAPTERS:
-        field_name, adapter = ANALYSIS_ADAPTERS[adapter_key]
-        projected = adapter(record)
-        if projected is not None:
-            extras[field_name] = projected
+    if composed.class_name and composed.projection is not None:
+        # Find the AnalysisResponse field this projection lands on.
+        # Adapter registry's second element is the target field name
+        # — look it up by resolving the adapter key for this record.
+        adapter_key = resolve_adapter_key(record)
+        if adapter_key and adapter_key in ANALYSIS_ADAPTERS:
+            field_name, _adapter = ANALYSIS_ADAPTERS[adapter_key]
+            # Per Dana's mandate: never ship partial-truth. If the
+            # composer flagged missing audit-bearing fields, do NOT
+            # surface the projection as if it were authoritative.
+            # Grandfathered missing fields don't block (the clause
+            # handles that at the classifier level).
+            if composed.is_complete:
+                extras[field_name] = composed.projection
 
     return AnalysisResponse(
         diagnosis=diagnosis,

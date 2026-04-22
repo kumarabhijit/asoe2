@@ -1045,3 +1045,23 @@ class TestAnalysis:
         ).json()
         assert data.get("price_hold_analysis") is None
         assert data.get("edi_mismatch_analysis") is None
+
+    # -----------------------------------------------------------------
+    # Verdict Pillar 2.3 — structured trace surface for audit gaps.
+    # When build_analysis flagged AUDIT_CONTEXT_MISSING, the trace
+    # must carry the class + ordered list of missing fields so the
+    # auditor doesn't regex the prose explanation.
+    # -----------------------------------------------------------------
+
+    def test_trace_carries_audit_missing_fields_on_complete_records(
+        self, client, analyst_token,
+    ):
+        """Happy path: PHR AUTO_RELEASE → coverage complete → the
+        trace's audit_context_missing_* fields are absent/empty."""
+        exc_id = self._create_phr(client, analyst_token, po_price=101.0)
+        trace = client.get(
+            f"/api/v1/exceptions/{exc_id}/trace",
+            headers=_auth(analyst_token),
+        ).json()
+        assert trace.get("audit_context_missing_class") in (None, "")
+        assert trace.get("audit_context_missing_fields") == []

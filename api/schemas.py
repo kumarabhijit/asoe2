@@ -302,6 +302,21 @@ class TraceResponse(BaseModel):
     customer_email_draft: Optional[str] = None
     """Copy-paste-ready customer communication draft."""
 
+    # Verdict Pillar 2.3 (2026-04-22 workshop) — structured audit-gap
+    # surface. When the build_analysis node flags
+    # AUDIT_CONTEXT_MISSING, these fields carry the class name +
+    # ordered list of missing audit-bearing fields so auditors don't
+    # have to regex the free-text explanation. Both None when
+    # coverage was complete.
+    audit_context_missing_class: Optional[str] = None
+    """Pydantic class name whose audit-bearing fields were incomplete
+    (e.g. "PriceHoldAnalysisData"). None = coverage OK."""
+
+    audit_context_missing_fields: List[str] = Field(default_factory=list)
+    """Ordered list of field names declared audit-bearing in
+    compliance/audit_bearing_registry.yaml that could not be
+    populated for this record. Empty = coverage OK."""
+
 
 class StatsResponse(BaseModel):
     """GET /api/v1/exceptions/stats — dashboard metrics."""
