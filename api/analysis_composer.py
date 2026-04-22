@@ -344,4 +344,68 @@ def _pydantic_class_name_for(registry_key: str) -> Optional[str]:
     return getattr(return_type, "__name__", None)
 
 
-__all__ = ["ComposedAnalysis", "compose"]
+def compose_from_state(state: Any) -> ComposedAnalysis:
+    """Graph-time entry point. Builds an ephemeral record-shaped view
+    over a `GraphState` and delegates to `compose(record)`.
+
+    Used by the `build_analysis` graph node (orchestration.nodes) to
+    enforce registry coverage BEFORE persistence. At that point the
+    record doesn't exist yet — _persist_exception only runs after
+    the graph. The view exposes exactly the attributes the composer
+    reads:
+
+      * selected_recipe          — resolve_adapter_key()
+      * intent (as str)          — resolve_adapter_key() fallback
+      * resolution_data          — adapter's GREEN path
+      * original_event           — adapter's synthetic fallback
+      * enrichment_context       — (reserved for Pillar 1 consumers)
+      * resolved_action          — conditional predicate evaluation
+
+    The view is a dataclass-like stub, not a real ExceptionRecord —
+    it doesn't persist, doesn't have an id, doesn't need a tenant.
+    That's intentional: we're enforcing the registry, not creating
+    an audit row.
+    """
+    from dataclasses import dataclass as _dc, field as _field
+
+    @_dc
+    class _StateView:
+        selected_recipe: Optional[str]
+        intent: Optional[str]
+        resolution_data: Dict[str, Any]
+        original_event: Optional[Dict[str, Any]]
+        enrichment_context: Dict[str, Any] = _field(default_factory=dict)
+        resolved_action: Optional[str] = None
+
+    intent_value: Optional[str] = None
+    intent = getattr(state, "intent", None)
+    if intent is not None:
+        # Tolerate both enum and plain-string intents.
+        intent_value = (
+            intent.value if hasattr(intent, "value") else str(intent)
+        )
+
+    outputs: Dict[str, Any] = {}
+    exec_log = getattr(state, "execution_log", None)
+    if exec_log is not None:
+        outputs = getattr(exec_log, "outputs", {}) or {}
+
+    event = getattr(state, "event", None)
+    event_dump = (
+        event.model_dump(mode="json")
+        if event is not None and hasattr(event, "model_dump")
+        else None
+    )
+
+    view = _StateView(
+        selected_recipe=getattr(state, "selected_recipe", None),
+        intent=intent_value,
+        resolution_data=outputs,
+        original_event=event_dump,
+        enrichment_context=dict(getattr(state, "enrichment_context", {}) or {}),
+        resolved_action=None,  # pre-disposition; HITL hasn't landed an action
+    )
+    return compose(view)
+
+
+__all__ = ["ComposedAnalysis", "compose", "compose_from_state"]

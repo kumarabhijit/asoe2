@@ -47,7 +47,15 @@ def route_after_gate(state: GraphState) -> str:
 
 
 def _add_common_nodes_and_edges(graph: StateGraph) -> None:
-    """Register all nodes and edges shared between normal and explain graphs."""
+    """Register all nodes and edges shared between normal and explain graphs.
+
+    Verdict Pillar 2: `build_analysis` sits on every terminal edge so
+    the audit-bearing registry is enforced regardless of which
+    lifecycle the record lands in (COMPLETE / BLOCKED / REJECTED /
+    MANUAL_REVIEW_REQUIRED / FAIL_TO_HUMAN). Re-entry is cheap and
+    the node no-ops on records it can't classify — no behavioural
+    change for records outside the registry.
+    """
     graph.add_node("ingest", nodes.ingest)
     graph.add_node("classify", nodes.classify)
     graph.add_node("load_skill", nodes.load_skill)
@@ -55,6 +63,7 @@ def _add_common_nodes_and_edges(graph: StateGraph) -> None:
     graph.add_node("shadow_audit", nodes.shadow_audit)
     graph.add_node("select_recipe", nodes.select_recipe)
     graph.add_node("validate_types", nodes.validate_types)
+    graph.add_node("build_analysis", nodes.build_analysis)
 
     graph.set_entry_point("ingest")
     graph.add_edge("ingest", "classify")
@@ -62,16 +71,17 @@ def _add_common_nodes_and_edges(graph: StateGraph) -> None:
     graph.add_edge("load_skill", "validate_circuit_breaker")
     graph.add_conditional_edges(
         "validate_circuit_breaker", route_after_gate,
-        {"terminal": END, "continue": "shadow_audit"},
+        {"terminal": "build_analysis", "continue": "shadow_audit"},
     )
     graph.add_conditional_edges(
         "shadow_audit", route_after_gate,
-        {"terminal": END, "continue": "select_recipe"},
+        {"terminal": "build_analysis", "continue": "select_recipe"},
     )
     graph.add_conditional_edges(
         "select_recipe", route_after_gate,
-        {"terminal": END, "continue": "validate_types"},
+        {"terminal": "build_analysis", "continue": "validate_types"},
     )
+    graph.add_edge("build_analysis", END)
 
 
 @cache
@@ -85,10 +95,13 @@ def build_graph():
     graph.add_edge("validate_types", "resolve_dependencies")
     graph.add_conditional_edges(
         "resolve_dependencies", route_after_gate,
-        {"terminal": END, "continue": "execute_recipe"},
+        {"terminal": "build_analysis", "continue": "execute_recipe"},
     )
     graph.add_edge("execute_recipe", "apply_effects")
-    graph.add_edge("apply_effects", END)
+    # Verdict Pillar 2: every GREEN-path terminus flows through
+    # build_analysis so the audit-bearing registry is enforced even
+    # on successful recipe executions.
+    graph.add_edge("apply_effects", "build_analysis")
     return graph.compile()
 
 
@@ -104,7 +117,10 @@ def build_explain_graph():
     _add_common_nodes_and_edges(graph)
     graph.add_node("explain_only", nodes.explain_only)
     graph.add_edge("validate_types", "explain_only")
-    graph.add_edge("explain_only", END)
+    # Verdict Pillar 2: explain-mode also runs through build_analysis
+    # so dry-run traces exhibit the same AUDIT_CONTEXT_MISSING
+    # behaviour as live executions.
+    graph.add_edge("explain_only", "build_analysis")
     return graph.compile()
 
 
