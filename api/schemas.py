@@ -517,6 +517,59 @@ class EdiMismatchAnalysisData(BaseModel):
     notification_template: Optional[str] = None
 
 
+class AlternateDeliveryOption(BaseModel):
+    """One ranked alternate delivery option from
+    DeliveryDelayResolutionRecipe._rank_options."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    type: str  # EXPEDITE / SPLIT_SHIP / PARTIAL / RESCHEDULE
+    title: str = ""
+    description: str = ""
+    new_eta: Optional[str] = None
+    extra_cost: float = 0.0
+    recommended: bool = False
+
+
+class DeliveryDelayAnalysisData(BaseModel):
+    """DeliveryDelayResolutionRecipe → UI `delivery_delay_analysis`.
+
+    Registry-classified fields (2026-04-22 workshop):
+
+      * audit-bearing:
+          planned_date, projected_eta, days_late, delay_category,
+          affected_lines, at_risk, sla_deadline (when present)
+      * conditional:
+          alternate_options (depends_on resolved_action ∈
+          {EXPEDITE, SPLIT_SHIP, PARTIAL, RESCHEDULE})
+      * contextual:
+          delay_reason, carrier, route, rule_id
+
+    `at_risk` and `sla_deadline` are currently covered by the
+    `delivery_delay_financial_gap` grandfather clause — the contract
+    gateway that would produce them isn't wired yet. The composer
+    treats them as contextual until the 2026-07-21 deadline.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    planned_date: str
+    projected_eta: str
+    days_late: int
+    delay_category: str
+    affected_lines: int
+    at_risk: Optional[float] = None  # grandfathered
+    sla_deadline: Optional[str] = None  # grandfathered
+    alternate_options: List[AlternateDeliveryOption] = Field(default_factory=list)
+    # Contextual — absence on the UI is expected (structural omission
+    # via EvidenceBlock in asoe-ui).
+    delay_reason: Optional[str] = None
+    carrier: Optional[str] = None
+    route: Optional[str] = None
+    rule_id: Optional[str] = None
+
+
 class AnalysisResponse(BaseModel):
     """GET /api/v1/exceptions/{id}/analysis"""
 
@@ -532,3 +585,4 @@ class AnalysisResponse(BaseModel):
     # malformed, FAILED, or the record has no recipe yet.
     price_hold_analysis: Optional[PriceHoldAnalysisData] = None
     edi_mismatch_analysis: Optional[EdiMismatchAnalysisData] = None
+    delivery_delay_analysis: Optional[DeliveryDelayAnalysisData] = None

@@ -82,12 +82,73 @@
         "title": "AdminReleaseRequest",
         "type": "object"
       },
+      "AlternateDeliveryOption": {
+        "additionalProperties": false,
+        "description": "One ranked alternate delivery option from\nDeliveryDelayResolutionRecipe._rank_options.",
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "extra_cost": {
+            "default": 0.0,
+            "title": "Extra Cost",
+            "type": "number"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "new_eta": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Eta"
+          },
+          "recommended": {
+            "default": false,
+            "title": "Recommended",
+            "type": "boolean"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type"
+        ],
+        "title": "AlternateDeliveryOption",
+        "type": "object"
+      },
       "AnalysisResponse": {
         "description": "GET /api/v1/exceptions/{id}/analysis",
         "properties": {
           "confidence": {
             "title": "Confidence",
             "type": "integer"
+          },
+          "delivery_delay_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeliveryDelayAnalysisData"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "diagnosis": {
             "title": "Diagnosis",
@@ -245,6 +306,114 @@
           "notes"
         ],
         "title": "CosignRequest",
+        "type": "object"
+      },
+      "DeliveryDelayAnalysisData": {
+        "additionalProperties": false,
+        "description": "DeliveryDelayResolutionRecipe \u2192 UI `delivery_delay_analysis`.\n\nRegistry-classified fields (2026-04-22 workshop):\n\n  * audit-bearing:\n      planned_date, projected_eta, days_late, delay_category,\n      affected_lines, at_risk, sla_deadline (when present)\n  * conditional:\n      alternate_options (depends_on resolved_action \u2208\n      {EXPEDITE, SPLIT_SHIP, PARTIAL, RESCHEDULE})\n  * contextual:\n      delay_reason, carrier, route, rule_id\n\n`at_risk` and `sla_deadline` are currently covered by the\n`delivery_delay_financial_gap` grandfather clause \u2014 the contract\ngateway that would produce them isn't wired yet. The composer\ntreats them as contextual until the 2026-07-21 deadline.",
+        "properties": {
+          "affected_lines": {
+            "title": "Affected Lines",
+            "type": "integer"
+          },
+          "alternate_options": {
+            "items": {
+              "$ref": "#/components/schemas/AlternateDeliveryOption"
+            },
+            "title": "Alternate Options",
+            "type": "array"
+          },
+          "at_risk": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At Risk"
+          },
+          "carrier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carrier"
+          },
+          "days_late": {
+            "title": "Days Late",
+            "type": "integer"
+          },
+          "delay_category": {
+            "title": "Delay Category",
+            "type": "string"
+          },
+          "delay_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delay Reason"
+          },
+          "planned_date": {
+            "title": "Planned Date",
+            "type": "string"
+          },
+          "projected_eta": {
+            "title": "Projected Eta",
+            "type": "string"
+          },
+          "route": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route"
+          },
+          "rule_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rule Id"
+          },
+          "sla_deadline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sla Deadline"
+          }
+        },
+        "required": [
+          "planned_date",
+          "projected_eta",
+          "days_late",
+          "delay_category",
+          "affected_lines"
+        ],
+        "title": "DeliveryDelayAnalysisData",
         "type": "object"
       },
       "DispositionRequest": {

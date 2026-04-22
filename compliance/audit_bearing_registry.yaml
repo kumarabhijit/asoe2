@@ -394,7 +394,12 @@ DeliveryDelayAnalysisData:
     note: Optional at the type level; when the gateway produces it, it is audit-bearing.
   alternate_options:
     tier: conditional
-    depends_on: resolved_action in alternate_options[*].type
+    # Recipe (DeliveryDelayResolutionRecipe) emits options with
+    # type in {EXPEDITE, SPLIT_SHIP, PARTIAL, RESCHEDULE}. The
+    # composer's _predicate_holds supports static membership;
+    # keep the list aligned with the recipe's AlternateOption
+    # vocabulary.
+    depends_on: resolved_action in [EXPEDITE, SPLIT_SHIP, PARTIAL, RESCHEDULE]
     source: recipe-output
     rationale: Required when the approved action selects from this list.
   delay_reason:
@@ -569,6 +574,25 @@ grandfather_clauses:
       composition node treats these six fields as contextual until the
       deadline. Post-deadline, missing values route
       CONTRACTUAL_CORRECTION exceptions to AUDIT_CONTEXT_MISSING.
+    owner: backend
+    tracking_issue: TBD
+
+  delivery_delay_financial_gap:
+    fields:
+      - DeliveryDelayAnalysisData.at_risk
+      - DeliveryDelayAnalysisData.sla_deadline
+    opened: 2026-04-22
+    deadline: 2026-07-21
+    rationale: >-
+      The delivery-delay recipe computes days_late and categorises
+      severity but has no gateway wired to contract / SLA / line-value
+      data, so at_risk (financial impact) and sla_deadline (contractual
+      deadline) cannot be populated authoritatively. Compliance approves
+      a 90-day clause: the composition node treats these two fields as
+      contextual so DELIVERY_DELAY exceptions resolve under Pillar 2
+      while the backend team wires the contract gateway. Post-deadline,
+      missing values route DELIVERY_DELAY exceptions to
+      AUDIT_CONTEXT_MISSING.
     owner: backend
     tracking_issue: TBD
 

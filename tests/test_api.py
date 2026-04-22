@@ -1065,3 +1065,82 @@ class TestAnalysis:
         ).json()
         assert trace.get("audit_context_missing_class") in (None, "")
         assert trace.get("audit_context_missing_fields") == []
+
+    # -----------------------------------------------------------------
+    # L2d.delivery_delay — adapter end-to-end. Three-path lookup
+    # (GREEN → adapter projects recipe output; YELLOW → composer
+    # synthesises via pure recipe invocation; missing dates → None).
+    # -----------------------------------------------------------------
+
+    def _create_delivery_delay(
+        self, client, token, *, days_late: int,
+    ) -> str:
+        event = {
+            "order_id": f"PO-DD-{days_late}",
+            "line_item": 1,
+            "po_price": 10.0,
+            "sap_base_price": 10.0,
+            "event_type": "DELIVERY_DELAY",
+            "retailer_id": "R-74",
+            "line_count": 3,
+            "metadata": {
+                "planned_date": "2026-04-20T00:00:00Z",
+                "projected_eta": f"2026-04-{20 + days_late:02d}T00:00:00Z",
+                "days_late": days_late,
+                "delay_category": "CARRIER_DELAY",
+                "delay_reason": "Carrier hub backlog (decorative).",
+                "carrier": "ACME-FRT",
+                "route": "MID-SE-01",
+            },
+        }
+        r = client.post(
+            "/api/v1/exceptions/resolve", json=event, headers=_auth(token),
+        )
+        assert r.status_code == 200, r.text
+        return r.json()["exception_id"]
+
+    def test_analysis_carries_delivery_delay_minor_branch(
+        self, client, analyst_token,
+    ):
+        # 3 days late → MINOR_DELAY (between 2 and 5 day thresholds)
+        # → YELLOW shadow → adapter synthesises via pure recipe.
+        exc_id = self._create_delivery_delay(client, analyst_token, days_late=3)
+        data = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        ).json()
+        dd = data.get("delivery_delay_analysis")
+        assert dd is not None
+        assert dd["days_late"] == 3
+        assert dd["delay_category"] == "CARRIER_DELAY"
+        assert dd["affected_lines"] == 3
+        assert dd["carrier"] == "ACME-FRT"
+        # Grandfathered fields — should be absent under the active
+        # delivery_delay_financial_gap clause.
+        assert dd.get("at_risk") is None
+
+    def test_analysis_carries_delivery_delay_severe_branch(
+        self, client, analyst_token,
+    ):
+        # 7 days late → SEVERE_DELAY → ESCALATE branch.
+        exc_id = self._create_delivery_delay(client, analyst_token, days_late=7)
+        data = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        ).json()
+        dd = data.get("delivery_delay_analysis")
+        assert dd is not None
+        assert dd["days_late"] == 7
+
+    def test_trace_for_delivery_delay_has_no_audit_gap(
+        self, client, analyst_token,
+    ):
+        """Grandfathered fields must NOT count as audit gaps — the
+        delivery_delay record's trace.audit_context_missing_fields
+        is empty even though at_risk is null."""
+        exc_id = self._create_delivery_delay(client, analyst_token, days_late=3)
+        trace = client.get(
+            f"/api/v1/exceptions/{exc_id}/trace",
+            headers=_auth(analyst_token),
+        ).json()
+        assert trace.get("audit_context_missing_fields") == []

@@ -31,13 +31,21 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional, Tuple
 
-from api.schemas import EdiMismatchAnalysisData, PriceHoldAnalysisData
+from api.schemas import (
+    AlternateDeliveryOption,
+    DeliveryDelayAnalysisData,
+    EdiMismatchAnalysisData,
+    PriceHoldAnalysisData,
+)
 from api.store import ExceptionRecord
 from contracts.policy import (
+    DELIVERY_DELAY_MINOR_DAYS,
+    DELIVERY_DELAY_SEVERE_DAYS,
     EDI_MISMATCH_AUTONOMY_LEVELS,
     PRICE_HOLD_HARD_BLOCK_PCT,
     PRICE_HOLD_TOLERANCE_PCT,
 )
+from recipes.DeliveryDelayResolutionRecipe import resolve_delivery_delay
 from recipes.EdiMismatchRecipe import detect_edi_mismatch
 from recipes.PriceHoldReleaseRecipe import execute_price_hold_release
 
@@ -192,6 +200,133 @@ def adapt_edi_mismatch(record: ExceptionRecord) -> Optional[EdiMismatchAnalysisD
     return _edi_from_outputs(synthetic)
 
 
+def _ranked_option_to_model(
+    raw: Dict[str, Any], *, recommended: bool = False,
+) -> Optional[AlternateDeliveryOption]:
+    """Coerce one recipe-emitted alternate option into the typed
+    Pydantic model. Returns None on shape drift so the caller can
+    silently drop rather than poison the list."""
+    if not isinstance(raw, dict):
+        return None
+    raw_type = raw.get("type")
+    if not raw_type:
+        return None
+    try:
+        return AlternateDeliveryOption(
+            id=str(raw.get("id") or raw_type),
+            type=str(raw_type),
+            title=str(raw.get("title") or raw_type),
+            description=str(raw.get("description") or ""),
+            new_eta=raw.get("new_eta"),
+            extra_cost=_as_float(raw.get("extra_cost")),
+            recommended=bool(raw.get("recommended", recommended)),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _delivery_delay_from_outputs(
+    outputs: Dict[str, Any], event: Dict[str, Any],
+) -> Optional[DeliveryDelayAnalysisData]:
+    """Shape a DeliveryDelayResolutionRecipe output dict into the UI
+    model. Event supplies planned_date / projected_eta / line_count
+    because the recipe doesn't echo them back."""
+    metadata = event.get("metadata") or {}
+    planned = metadata.get("planned_date")
+    projected = metadata.get("projected_eta")
+    if not planned or not projected:
+        return None
+
+    days_late = outputs.get("days_late")
+    if days_late is None:
+        return None
+
+    primary_raw = outputs.get("primary_option")
+    primary_id: Optional[str] = None
+    if isinstance(primary_raw, dict):
+        primary_id = primary_raw.get("id") or primary_raw.get("type")
+
+    ranked_raw = outputs.get("alternate_options") or []
+    alternates: List[AlternateDeliveryOption] = []
+    for opt in ranked_raw:
+        is_primary = (
+            isinstance(opt, dict)
+            and (opt.get("id") == primary_id or opt.get("type") == primary_id)
+        )
+        model = _ranked_option_to_model(opt, recommended=bool(is_primary))
+        if model is not None:
+            alternates.append(model)
+
+    try:
+        return DeliveryDelayAnalysisData(
+            planned_date=str(planned),
+            projected_eta=str(projected),
+            days_late=int(days_late),
+            delay_category=str(
+                outputs.get("delay_category")
+                or metadata.get("delay_category")
+                or "UNSPECIFIED"
+            ),
+            affected_lines=int(event.get("line_count") or 1),
+            # at_risk + sla_deadline — gateway-dependent; grandfathered
+            # under delivery_delay_financial_gap until 2026-07-21.
+            at_risk=None,
+            sla_deadline=metadata.get("sla_deadline"),
+            alternate_options=alternates,
+            delay_reason=metadata.get("delay_reason"),
+            carrier=outputs.get("carrier") or metadata.get("carrier"),
+            route=outputs.get("route") or metadata.get("route"),
+            rule_id=metadata.get("rule_id"),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def adapt_delivery_delay(
+    record: ExceptionRecord,
+) -> Optional[DeliveryDelayAnalysisData]:
+    """Project a DeliveryDelayResolutionRecipe resolution into
+    DeliveryDelayAnalysisData.
+
+    Three-path lookup:
+      1. Recipe output in `record.resolution_data` (GREEN path).
+      2. Shadow-gated (YELLOW SEVERE / YELLOW MINOR) — synthesise
+         by invoking the pure recipe with event-sourced params.
+      3. Event lacks planned/projected dates → None (defensive).
+    """
+    outputs = record.resolution_data or {}
+    event = record.original_event or {}
+    status = outputs.get("status")
+
+    if status and status not in ("FAILED",):
+        projection = _delivery_delay_from_outputs(outputs, event)
+        if projection is not None:
+            return projection
+
+    metadata = event.get("metadata") or {}
+    planned = metadata.get("planned_date")
+    projected = metadata.get("projected_eta")
+    if not planned or not projected:
+        return None
+    try:
+        synthetic = resolve_delivery_delay(
+            order_id=str(event.get("order_id", "")),
+            planned_date=str(planned),
+            projected_eta=str(projected),
+            minor_days=DELIVERY_DELAY_MINOR_DAYS,
+            severe_days=DELIVERY_DELAY_SEVERE_DAYS,
+            carrier=metadata.get("carrier"),
+            route=metadata.get("route"),
+            delay_category=metadata.get("delay_category"),
+            alternate_options=metadata.get("alternate_options") or [],
+        )
+    except (TypeError, ValueError):
+        return None
+    if synthetic.get("status") == "FAILED":
+        return None
+    return _delivery_delay_from_outputs(synthetic, event)
+
+
 # Recipe-name → (target field on AnalysisResponse, adapter function).
 #
 # The endpoint looks up by `record.selected_recipe`. Absent recipe name
@@ -203,6 +338,9 @@ ANALYSIS_ADAPTERS: Dict[
 ] = {
     "PriceHoldReleaseRecipe.py": ("price_hold_analysis", adapt_price_hold),
     "EdiMismatchRecipe.py": ("edi_mismatch_analysis", adapt_edi_mismatch),
+    "DeliveryDelayResolutionRecipe.py": (
+        "delivery_delay_analysis", adapt_delivery_delay,
+    ),
 }
 
 
@@ -214,6 +352,7 @@ ANALYSIS_ADAPTERS: Dict[
 INTENT_TO_RECIPE_NAME: Dict[str, str] = {
     "PRICE_HOLD_RELEASE": "PriceHoldReleaseRecipe.py",
     "EDI_MISMATCH": "EdiMismatchRecipe.py",
+    "DELIVERY_DELAY": "DeliveryDelayResolutionRecipe.py",
 }
 
 
