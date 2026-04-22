@@ -35,6 +35,40 @@ REGISTRY = {
         func=execute_price_correction,
         required_params=("order_id", "line_item", "requested_price", "erp_context"),
         allowed_intents=("CONTRACTUAL_CORRECTION",),
+        # Verdict T4: SAP doc + contract + promotion gateway READS
+        # populate the audit-bearing PriceAnalysisData fields. Each
+        # response shape is documented in api/analysis_adapters.py
+        # (adapt_price). Retiring price_analysis_gateway_gap.
+        dependencies=(
+            GatewayDependency(
+                gateway_name="sap_doc",
+                operation="lookup",
+                params_from_state={
+                    "order_id": "event.order_id",
+                    "line_item": "event.line_item",
+                },
+                result_key="sap_doc_context",
+            ),
+            GatewayDependency(
+                gateway_name="sap_contract",
+                operation="lookup",
+                params_from_state={
+                    "order_id": "event.order_id",
+                    "retailer_id": "event.retailer_id",
+                    "sku": "event.sku",
+                },
+                result_key="contract_context",
+            ),
+            GatewayDependency(
+                gateway_name="promotion",
+                operation="lookup",
+                params_from_state={
+                    "order_id": "event.order_id",
+                    "sku": "event.sku",
+                },
+                result_key="promotion_context",
+            ),
+        ),
     ),
     "CreditHoldReleaseRecipe.py": RecipeSpec(
         name="CreditHoldReleaseRecipe.py",

@@ -669,6 +669,15 @@ def build_analysis(state: GraphState) -> GraphState:
     # missing-field lists.
     if state.final_status == TerminalStatus.AUDIT_CONTEXT_MISSING:
         return state
+    # FAIL_TO_HUMAN is the system's "this exception needs human
+    # investigation outside the normal flow" terminal — typically
+    # set by validate_circuit_breaker, an unrecoverable input
+    # validation failure, or a missing recipe. Audit-completeness
+    # checks are moot when the record isn't going to a normal
+    # operator review surface; preserve FAIL_TO_HUMAN so circuit
+    # breaker / validation failures stay debuggable.
+    if state.final_status == TerminalStatus.FAIL_TO_HUMAN:
+        return state
 
     # Lazy import — keeps orchestration independent of the API layer
     # in the import graph so test isolation stays clean.

@@ -508,13 +508,11 @@ PriceAnalysisData:
   doc_type:
     tier: audit-bearing
     source: control
-    status: backend-gap
-    rationale: SAP document type (Sales Order, Delivery) — §404 evidentiary requirement.
     gateway_dependency: true
+    rationale: SAP document type (Sales Order, Delivery) — §404 evidentiary requirement.
   doc_number:
     tier: audit-bearing
     source: control
-    status: backend-gap
     gateway_dependency: true
     rationale: SAP document number — identifies what's being adjusted.
   sku:
@@ -523,25 +521,23 @@ PriceAnalysisData:
   rule_id:
     tier: audit-bearing
     source: control
-    status: backend-gap
+    gateway_dependency: true
     rationale: Rule that triggered the exception (e.g. SO-PRICE-001) — control narrative attribution.
   root_cause_category:
     tier: audit-bearing
     source: control
-    status: backend-gap
+    gateway_dependency: true
     rationale: Deterministic root-cause category — control narrative attribution.
   contract_ref:
-    tier: audit-bearing
+    tier: contextual
     source: control
-    status: backend-gap
     gateway_dependency: true
-    rationale: §404 — active contract must be cited on pricing adjustments.
+    rationale: §404 — active contract cited on pricing adjustments when one governs the line. Absent → the line has no governing contract.
   promotion_ref:
-    tier: audit-bearing
+    tier: contextual
     source: control
-    status: backend-gap
     gateway_dependency: true
-    rationale: Active promotion must be cited when present; affects adjustment validity.
+    rationale: Active promotion cited when present; absent → the line has no governing promotion.
   material_desc:
     tier: contextual
     source: decorative
@@ -557,25 +553,13 @@ PriceAnalysisData:
 # ---------------------------------------------------------------------------
 
 grandfather_clauses:
-  price_analysis_gateway_gap:
-    fields:
-      - PriceAnalysisData.doc_type
-      - PriceAnalysisData.doc_number
-      - PriceAnalysisData.rule_id
-      - PriceAnalysisData.root_cause_category
-      - PriceAnalysisData.contract_ref
-      - PriceAnalysisData.promotion_ref
-    opened: 2026-04-22
-    deadline: 2026-06-21
-    rationale: >-
-      PriceAdjustmentRecipe and its dependency gateways do not currently
-      persist SAP doc metadata or active contract/promotion references
-      into resolution_data. Compliance approves a 60-day clause: the
-      composition node treats these six fields as contextual until the
-      deadline. Post-deadline, missing values route
-      CONTRACTUAL_CORRECTION exceptions to AUDIT_CONTEXT_MISSING.
-    owner: backend
-    tracking_issue: TBD
+  # price_analysis_gateway_gap retired (T4, 2026-04-22): SAP doc /
+  # contract / promotion gateways are wired on
+  # PriceAdjustmentRecipe; doc_type / doc_number / rule_id /
+  # root_cause_category persist as audit-bearing via
+  # enrichment_context. contract_ref / promotion_ref reclassified to
+  # contextual (conditionally present — not every price line is
+  # contract- or promotion-governed).
 
   moq_gateway_gap:
     fields:
@@ -650,8 +634,8 @@ summary:
   # (post-workshop minor-class expansion + subfield enumeration);
   # the actual totals below are re-derived from the live rows.
   total_fields: 107
-  audit_bearing: 84
+  audit_bearing: 82
   conditional: 5
-  contextual: 18
-  backend_gap_fields: 6
-  gateway_dependent_fields: 11
+  contextual: 20
+  backend_gap_fields: 0
+  gateway_dependent_fields: 13

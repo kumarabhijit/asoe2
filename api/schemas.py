@@ -736,6 +736,53 @@ class PalletAnalysisData(BaseModel):
     suggested_plan: List[PalletSuggestion] = Field(default_factory=list)
 
 
+class PriceAnalysisData(BaseModel):
+    """PriceAdjustmentRecipe → UI `price_analysis`.
+
+    Registry-classified fields (2026-04-22 workshop, post-T4 retirement
+    of price_analysis_gateway_gap):
+      * audit-bearing (event/control): erp_unit_price, po_unit_price,
+        variance_amount, variance_pct, total_at_risk, total_quantity,
+        uom, sku.
+      * audit-bearing (gateway, sap_doc): doc_type, doc_number.
+      * audit-bearing (gateway, sap_contract): contract_ref, rule_id.
+      * audit-bearing (gateway, promotion): promotion_ref,
+        root_cause_category.
+      * contextual: material_desc, order_date.
+
+    Sources:
+      * `record.original_event` — po_price, sap_base_price, line_item,
+        retailer_id, sku, line_count, metadata.
+      * `record.enrichment_context["sap_doc_context"]` — SAP document
+        metadata (doc_type, doc_number, applied condition chain).
+      * `record.enrichment_context["contract_context"]` — KONA / custom
+        contract lookup (contract_ref, rule_id_hints).
+      * `record.enrichment_context["promotion_context"]` — promotion
+        master (promotion_ref, root_cause_category).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    erp_unit_price: float
+    po_unit_price: float
+    variance_amount: float
+    variance_pct: float
+    total_at_risk: float
+    total_quantity: float
+    uom: str
+    doc_type: str
+    doc_number: str
+    sku: str
+    rule_id: str
+    root_cause_category: str
+    # Contextual — present when the line is governed by an active
+    # contract or promotion; absent otherwise (no fallback "—").
+    contract_ref: Optional[str] = None
+    promotion_ref: Optional[str] = None
+    material_desc: Optional[str] = None
+    order_date: Optional[str] = None
+
+
 class WarehouseInfo(BaseModel):
     """Inventory snapshot for one DC. Audit-bearing per registry::
     BackOrderAnalysisData.primary_dc — reviewer attests against the
@@ -974,3 +1021,4 @@ class AnalysisResponse(BaseModel):
     duplicate_detection: Optional[DuplicateDetectionData] = None
     order_comparison: Optional[OrderComparisonData] = None
     backorder_analysis: Optional[BackOrderAnalysisData] = None
+    price_analysis: Optional[PriceAnalysisData] = None

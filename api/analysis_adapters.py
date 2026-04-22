@@ -47,6 +47,7 @@ from api.schemas import (
     OverMaxAnalysisData,
     OverMaxLine,
     PalletAnalysisData,
+    PriceAnalysisData,
     PalletLine,
     PalletSuggestion,
     PriceHoldAnalysisData,
@@ -884,6 +885,103 @@ def adapt_order_comparison(
     )
 
 
+# ─── Price adapter (T4 — retires price_analysis_gateway_gap) ──────────
+#
+# PriceAdjustmentRecipe now carries three gateway dependencies
+# (sap_doc / sap_contract / promotion — see recipes/registry.py). Their
+# payloads land in enrichment_context under result keys
+# `sap_doc_context`, `contract_context`, `promotion_context`. The
+# adapter projects them into PriceAnalysisData; missing audit-bearing
+# gateway fields route the exception to AUDIT_CONTEXT_MISSING (no
+# grandfather clause — retired in this engagement).
+#
+# Expected gateway response shapes:
+#
+#   sap_doc_context    → {doc_type, doc_number, applied_condition_chain?}
+#   contract_context   → {contract_ref, rule_id, root_cause_category?}
+#   promotion_context  → {promotion_ref, root_cause_category?}
+#
+# Real SAP integration is a separate platform track; in-repo
+# fixtures in tests/conftest.py register StubGateway responses that
+# mirror this shape.
+
+def adapt_price(record: ExceptionRecord) -> Optional[PriceAnalysisData]:
+    """Project PriceAdjustmentRecipe into PriceAnalysisData.
+
+    Four source bags:
+      * `record.original_event` — po_price, sap_base_price, sku,
+        line_count, uom, metadata.
+      * `record.enrichment_context["sap_doc_context"]` — SAP doc
+        metadata (audit-bearing: doc_type, doc_number).
+      * `record.enrichment_context["contract_context"]` — contract
+        lookup (audit-bearing: rule_id; contextual: contract_ref).
+      * `record.enrichment_context["promotion_context"]` — promotion
+        master (audit-bearing: root_cause_category; contextual:
+        promotion_ref).
+
+    Returns None when any audit-bearing gateway field is absent —
+    composer routes to AUDIT_CONTEXT_MISSING.
+    """
+    event = record.original_event or {}
+    ctx = record.enrichment_context or {}
+    sap_doc = ctx.get("sap_doc_context") or {}
+    contract = ctx.get("contract_context") or {}
+    promotion = ctx.get("promotion_context") or {}
+
+    doc_type = sap_doc.get("doc_type")
+    doc_number = sap_doc.get("doc_number")
+    rule_id = contract.get("rule_id")
+    root_cause_category = (
+        promotion.get("root_cause_category")
+        or contract.get("root_cause_category")
+    )
+    if not doc_type or not doc_number or not rule_id or not root_cause_category:
+        return None
+
+    po_price = _as_float(event.get("po_price"))
+    sap_base_price = _as_float(event.get("sap_base_price"))
+    if sap_base_price <= 0:
+        return None
+    metadata = event.get("metadata") or {}
+    total_quantity = _as_float(
+        metadata.get("total_quantity"),
+        default=_as_float(event.get("line_count"), default=1.0),
+    )
+    uom = str(
+        sap_doc.get("uom")
+        or metadata.get("uom")
+        or "EA"
+    )
+    variance_amount = round(sap_base_price - po_price, 4)
+    variance_pct = round(variance_amount / sap_base_price, 6)
+    total_at_risk = round(variance_amount * total_quantity, 2)
+
+    try:
+        return PriceAnalysisData(
+            erp_unit_price=sap_base_price,
+            po_unit_price=po_price,
+            variance_amount=variance_amount,
+            variance_pct=variance_pct,
+            total_at_risk=total_at_risk,
+            total_quantity=total_quantity,
+            uom=uom,
+            doc_type=str(doc_type),
+            doc_number=str(doc_number),
+            sku=str(event.get("sku") or metadata.get("sku")
+                    or sap_doc.get("sku") or ""),
+            rule_id=str(rule_id),
+            root_cause_category=str(root_cause_category),
+            contract_ref=contract.get("contract_ref"),
+            promotion_ref=promotion.get("promotion_ref"),
+            material_desc=sap_doc.get("material_desc")
+            or metadata.get("material_desc"),
+            order_date=sap_doc.get("order_date")
+            or metadata.get("order_date"),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
 # ─── BackOrder adapter (T3) ─────────────────────────────────────────────
 #
 # BackOrder is the most multi-source adapter shipped so far:
@@ -1102,6 +1200,7 @@ ANALYSIS_ADAPTERS: Dict[
     "PalletAlignmentRecipe.py": ("pallet_analysis", adapt_pallet),
     "DuplicatePORecipe.py": ("duplicate_detection", adapt_duplicate),
     "BackOrderResolutionRecipe.py": ("backorder_analysis", adapt_back_order),
+    "PriceAdjustmentRecipe.py": ("price_analysis", adapt_price),
 }
 
 
@@ -1135,6 +1234,7 @@ INTENT_TO_RECIPE_NAME: Dict[str, str] = {
     "PALLET_CONFIG": "PalletAlignmentRecipe.py",
     "DUPLICATE_PO": "DuplicatePORecipe.py",
     "BACK_ORDER": "BackOrderResolutionRecipe.py",
+    "CONTRACTUAL_CORRECTION": "PriceAdjustmentRecipe.py",
 }
 
 

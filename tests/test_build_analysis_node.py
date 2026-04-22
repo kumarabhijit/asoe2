@@ -68,11 +68,14 @@ class TestBuildAnalysisHappyPath:
         assert result.explanation == original_explanation  # untouched
 
     def test_record_outside_registry_is_noop(self):
-        """CONTRACTUAL_CORRECTION → PriceAdjustmentRecipe — no adapter
-        wired yet, so build_analysis has nothing to enforce."""
+        """CREDIT_BLOCK → CreditHoldReleaseRecipe has no AnalysisData
+        section in the registry (and no adapter), so build_analysis
+        finds nothing to enforce and is a no-op. Was previously
+        PriceAdjustmentRecipe — re-pointed at T4 because that recipe
+        now has adapt_price wired."""
         state = GraphState(event=_phr_event())
-        state.intent = Intent.CONTRACTUAL_CORRECTION
-        state.selected_recipe = "PriceAdjustmentRecipe.py"
+        state.intent = Intent.CREDIT_BLOCK
+        state.selected_recipe = "CreditHoldReleaseRecipe.py"
         state.final_status = TerminalStatus.COMPLETE
         result = build_analysis(state)
         assert result.final_status == TerminalStatus.COMPLETE

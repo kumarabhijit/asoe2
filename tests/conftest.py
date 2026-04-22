@@ -159,8 +159,64 @@ def _register_oms_stub():
             ),
         },
     )
+    # Verdict T4: SAP doc / contract / promotion stubs supply the
+    # audit-bearing PriceAnalysisData fields that retired the
+    # price_analysis_gateway_gap clause. Real SAP integration is a
+    # separate platform track; these stubs mirror the response shape
+    # documented in api/analysis_adapters.py::adapt_price.
+    sap_doc_stub = StubGateway(
+        "sap_doc",
+        responses={
+            "lookup": GatewayResponse(
+                gateway_name="sap_doc",
+                operation="lookup",
+                status="SUCCESS",
+                data={
+                    "doc_type": "Sales Order",
+                    "doc_number": "5500001234",
+                    "applied_condition_chain": ["PR00", "K007"],
+                    "sku": "SKU-STUB-1",
+                    "uom": "CS",
+                    "material_desc": "Stub Material",
+                    "order_date": "2026-04-22",
+                },
+            ),
+        },
+    )
+    sap_contract_stub = StubGateway(
+        "sap_contract",
+        responses={
+            "lookup": GatewayResponse(
+                gateway_name="sap_contract",
+                operation="lookup",
+                status="SUCCESS",
+                data={
+                    "contract_ref": "KONA-CN-1001",
+                    "rule_id": "SO-PRICE-001",
+                    "root_cause_category": "CONTRACT_PRICE_OVERRIDE",
+                },
+            ),
+        },
+    )
+    promotion_stub = StubGateway(
+        "promotion",
+        responses={
+            "lookup": GatewayResponse(
+                gateway_name="promotion",
+                operation="lookup",
+                status="SUCCESS",
+                data={
+                    "promotion_ref": "PRMO-2026-04-Q2",
+                    "root_cause_category": "PROMOTION_HONOR",
+                },
+            ),
+        },
+    )
     register_gateway(oms_stub)
     register_gateway(notification_stub)
+    register_gateway(sap_doc_stub)
+    register_gateway(sap_contract_stub)
+    register_gateway(promotion_stub)
     yield
     clear_registry()
 

@@ -276,6 +276,16 @@
               }
             ]
           },
+          "price_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PriceAnalysisData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "price_hold_analysis": {
             "anyOf": [
               {
@@ -2010,6 +2020,120 @@
           "value"
         ],
         "title": "PolicyUpdateRequest",
+        "type": "object"
+      },
+      "PriceAnalysisData": {
+        "additionalProperties": false,
+        "description": "PriceAdjustmentRecipe \u2192 UI `price_analysis`.\n\nRegistry-classified fields (2026-04-22 workshop, post-T4 retirement\nof price_analysis_gateway_gap):\n  * audit-bearing (event/control): erp_unit_price, po_unit_price,\n    variance_amount, variance_pct, total_at_risk, total_quantity,\n    uom, sku.\n  * audit-bearing (gateway, sap_doc): doc_type, doc_number.\n  * audit-bearing (gateway, sap_contract): contract_ref, rule_id.\n  * audit-bearing (gateway, promotion): promotion_ref,\n    root_cause_category.\n  * contextual: material_desc, order_date.\n\nSources:\n  * `record.original_event` \u2014 po_price, sap_base_price, line_item,\n    retailer_id, sku, line_count, metadata.\n  * `record.enrichment_context[\"sap_doc_context\"]` \u2014 SAP document\n    metadata (doc_type, doc_number, applied condition chain).\n  * `record.enrichment_context[\"contract_context\"]` \u2014 KONA / custom\n    contract lookup (contract_ref, rule_id_hints).\n  * `record.enrichment_context[\"promotion_context\"]` \u2014 promotion\n    master (promotion_ref, root_cause_category).",
+        "properties": {
+          "contract_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Ref"
+          },
+          "doc_number": {
+            "title": "Doc Number",
+            "type": "string"
+          },
+          "doc_type": {
+            "title": "Doc Type",
+            "type": "string"
+          },
+          "erp_unit_price": {
+            "title": "Erp Unit Price",
+            "type": "number"
+          },
+          "material_desc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Desc"
+          },
+          "order_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order Date"
+          },
+          "po_unit_price": {
+            "title": "Po Unit Price",
+            "type": "number"
+          },
+          "promotion_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Promotion Ref"
+          },
+          "root_cause_category": {
+            "title": "Root Cause Category",
+            "type": "string"
+          },
+          "rule_id": {
+            "title": "Rule Id",
+            "type": "string"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          },
+          "total_at_risk": {
+            "title": "Total At Risk",
+            "type": "number"
+          },
+          "total_quantity": {
+            "title": "Total Quantity",
+            "type": "number"
+          },
+          "uom": {
+            "title": "Uom",
+            "type": "string"
+          },
+          "variance_amount": {
+            "title": "Variance Amount",
+            "type": "number"
+          },
+          "variance_pct": {
+            "title": "Variance Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "erp_unit_price",
+          "po_unit_price",
+          "variance_amount",
+          "variance_pct",
+          "total_at_risk",
+          "total_quantity",
+          "uom",
+          "doc_type",
+          "doc_number",
+          "sku",
+          "rule_id",
+          "root_cause_category"
+        ],
+        "title": "PriceAnalysisData",
         "type": "object"
       },
       "PriceHoldAnalysisData": {
