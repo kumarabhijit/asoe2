@@ -561,67 +561,21 @@ grandfather_clauses:
   # contextual (conditionally present — not every price line is
   # contract- or promotion-governed).
 
-  moq_gateway_gap:
-    fields:
-      - MOQAnalysisData.moq_source
-      - MOQAnalysisData.channel
-      - MOQAnalysisData.contract_ref
-      - MOQAnalysisData.block_status
-    opened: 2026-04-22
-    deadline: 2026-07-21
-    rationale: >-
-      MOQRoundUpRecipe receives ordered_qty / moq_qty / unit_cost
-      from event metadata; the SAP customer-master / contract /
-      block-status gateway that would supply MOQ provenance
-      (KNMT-MINBM vs MARC-MINBE), distribution channel, contract
-      ref, and current block status is not wired. Compliance
-      approves a 90-day clause: composer treats these as contextual
-      until the deadline. Post-deadline, missing values route MIN_ORDER_QTY
-      exceptions to AUDIT_CONTEXT_MISSING.
-    owner: backend
-    tracking_issue: TBD
+  # moq_gateway_gap retired (T5, 2026-04-22): SAP customer_master +
+  # sap_contract + sap_block gateways wired on MOQRoundUpRecipe;
+  # moq_source / channel / contract_ref / block_status persist via
+  # enrichment_context.
 
-  overmax_gateway_gap:
-    fields:
-      - OverMaxAnalysisData.contract_ref
-      - OverMaxAnalysisData.block_status
-      - OverMaxAnalysisData.block_reason
-      - OverMaxAnalysisData.order_lines
-      - OverMaxAnalysisData.trim_plan
-      - OverMaxAnalysisData.uom
-    opened: 2026-04-22
-    deadline: 2026-07-21
-    rationale: >-
-      OverMaxTrimRecipe receives total_ordered / max_qty /
-      order_lines from event metadata but the SAP contract /
-      block-status gateway is not wired, AND not every event
-      supplies per-line metadata (order_lines, unit_cost_per_line);
-      when absent, trim_plan also collapses to empty. Compliance
-      approves a 90-day clause: the composition node treats these
-      five fields as contextual until the deadline. Post-deadline,
-      missing values route OVER_MAX exceptions to
-      AUDIT_CONTEXT_MISSING.
-    owner: backend
-    tracking_issue: TBD
+  # overmax_gateway_gap retired (T5, 2026-04-22): SAP contract +
+  # sap_block gateways wired on OverMaxTrimRecipe; contract_ref /
+  # block_status / block_reason persist via enrichment_context.
+  # order_lines / trim_plan / uom were misclassified under this clause
+  # (recipe-driven, not gateway-driven) — they remain audit-bearing
+  # and project from event metadata + recipe output.
 
-  delivery_delay_financial_gap:
-    fields:
-      - DeliveryDelayAnalysisData.at_risk
-      - DeliveryDelayAnalysisData.sla_deadline
-    opened: 2026-04-22
-    deadline: 2026-07-21
-    rationale: >-
-      The delivery-delay recipe computes days_late and categorises
-      severity but has no gateway wired to contract / SLA / line-value
-      data, so at_risk (financial impact) and sla_deadline (contractual
-      deadline) cannot be populated authoritatively. Compliance approves
-      a 90-day clause: the composition node treats these two fields as
-      contextual so DELIVERY_DELAY exceptions resolve under Pillar 2
-      while the backend team wires the contract gateway. Post-deadline,
-      missing values route DELIVERY_DELAY exceptions to
-      AUDIT_CONTEXT_MISSING.
-    owner: backend
-    tracking_issue: TBD
+  # delivery_delay_financial_gap retired (T5, 2026-04-22): SLA contract
+  # gateway wired on DeliveryDelayResolutionRecipe; at_risk +
+  # sla_deadline persist via enrichment_context.
 
 # ---------------------------------------------------------------------------
 # Summary tally (for CI fitness test + release-note generation).

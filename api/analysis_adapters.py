@@ -263,10 +263,13 @@ def _ranked_option_to_model(
 
 def _delivery_delay_from_outputs(
     outputs: Dict[str, Any], event: Dict[str, Any],
+    sla_ctx: Optional[Dict[str, Any]] = None,
 ) -> Optional[DeliveryDelayAnalysisData]:
     """Shape a DeliveryDelayResolutionRecipe output dict into the UI
     model. Event supplies planned_date / projected_eta / line_count
-    because the recipe doesn't echo them back."""
+    because the recipe doesn't echo them back. `sla_ctx` (T5) carries
+    at_risk + sla_deadline from the SLA contract gateway."""
+    sla_ctx = sla_ctx or {}
     metadata = event.get("metadata") or {}
     planned = metadata.get("planned_date")
     projected = metadata.get("projected_eta")
@@ -304,10 +307,14 @@ def _delivery_delay_from_outputs(
                 or "UNSPECIFIED"
             ),
             affected_lines=int(event.get("line_count") or 1),
-            # at_risk + sla_deadline — gateway-dependent; grandfathered
-            # under delivery_delay_financial_gap until 2026-07-21.
-            at_risk=None,
-            sla_deadline=metadata.get("sla_deadline"),
+            # T5: at_risk + sla_deadline now sourced from sla_contract
+            # gateway via enrichment_context (delivery_delay_financial_gap
+            # retired). Falls back to event metadata if the gateway
+            # didn't run (shadow-gated paths).
+            at_risk=_as_float(
+                sla_ctx.get("at_risk"), default=None
+            ) if sla_ctx.get("at_risk") is not None else metadata.get("at_risk"),
+            sla_deadline=sla_ctx.get("sla_deadline") or metadata.get("sla_deadline"),
             alternate_options=alternates,
             delay_reason=metadata.get("delay_reason"),
             carrier=outputs.get("carrier") or metadata.get("carrier"),
@@ -332,10 +339,11 @@ def adapt_delivery_delay(
     """
     outputs = record.resolution_data or {}
     event = record.original_event or {}
+    sla_ctx = (record.enrichment_context or {}).get("sla_contract_context") or {}
     status = outputs.get("status")
 
     if status and status not in ("FAILED",):
-        projection = _delivery_delay_from_outputs(outputs, event)
+        projection = _delivery_delay_from_outputs(outputs, event, sla_ctx)
         if projection is not None:
             return projection
 
@@ -360,7 +368,7 @@ def adapt_delivery_delay(
         return None
     if synthetic.get("status") == "FAILED":
         return None
-    return _delivery_delay_from_outputs(synthetic, event)
+    return _delivery_delay_from_outputs(synthetic, event, sla_ctx)
 
 
 def _coerce_overmax_line(raw: Any) -> Optional[OverMaxLine]:
@@ -403,8 +411,12 @@ def _coerce_trim_plan_line(raw: Any) -> Optional[TrimPlanLine]:
 
 def _overmax_from_outputs(
     outputs: Dict[str, Any], event: Dict[str, Any],
+    contract_ctx: Optional[Dict[str, Any]] = None,
+    block_ctx: Optional[Dict[str, Any]] = None,
 ) -> Optional[OverMaxAnalysisData]:
     metadata = event.get("metadata") or {}
+    contract_ctx = contract_ctx or {}
+    block_ctx = block_ctx or {}
     total_ordered = _as_float(metadata.get("total_ordered"))
     max_qty = _as_float(metadata.get("max_qty"))
     if total_ordered <= 0 or max_qty <= 0:
@@ -438,12 +450,16 @@ def _overmax_from_outputs(
             at_risk=_as_float(outputs.get("at_risk")),
             order_lines=order_lines,
             trim_plan=trim_plan,
-            # Grandfathered fields — populated when SAP gateway
-            # lands. Optional in the model so coverage doesn't fail
-            # while the overmax_gateway_gap clause is active.
-            contract_ref=metadata.get("contract_ref"),
-            block_status=metadata.get("block_status"),
-            block_reason=metadata.get("block_reason"),
+            # T5: contract_ref / block_status / block_reason now from
+            # gateway via enrichment_context (overmax_gateway_gap
+            # retired). Falls back to event metadata if the gateway
+            # didn't run (shadow-gated paths).
+            contract_ref=contract_ctx.get("contract_ref")
+            or metadata.get("contract_ref"),
+            block_status=block_ctx.get("block_status")
+            or metadata.get("block_status"),
+            block_reason=block_ctx.get("block_reason")
+            or metadata.get("block_reason"),
         )
     except (TypeError, ValueError):
         return None
@@ -454,14 +470,19 @@ def adapt_overmax(record: ExceptionRecord) -> Optional[OverMaxAnalysisData]:
 
     Three-path lookup mirroring the other adapters: recipe output,
     synthetic invocation when shadow gated, defensive None on missing
-    event metadata.
+    event metadata. T5: contract_ref / block_status / block_reason
+    sourced from sap_contract + sap_block gateway via
+    enrichment_context (overmax_gateway_gap retired).
     """
     outputs = record.resolution_data or {}
     event = record.original_event or {}
+    enrichment = record.enrichment_context or {}
+    contract_ctx = enrichment.get("contract_context") or {}
+    block_ctx = enrichment.get("block_context") or {}
     status = outputs.get("status")
 
     if status and status != "FAILED":
-        projection = _overmax_from_outputs(outputs, event)
+        projection = _overmax_from_outputs(outputs, event, contract_ctx, block_ctx)
         if projection is not None:
             return projection
 
@@ -483,12 +504,18 @@ def adapt_overmax(record: ExceptionRecord) -> Optional[OverMaxAnalysisData]:
         return None
     if synthetic.get("status") == "FAILED":
         return None
-    return _overmax_from_outputs(synthetic, event)
+    return _overmax_from_outputs(synthetic, event, contract_ctx, block_ctx)
 
 
 def _moq_from_outputs(
     outputs: Dict[str, Any], event: Dict[str, Any],
+    cm_ctx: Optional[Dict[str, Any]] = None,
+    contract_ctx: Optional[Dict[str, Any]] = None,
+    block_ctx: Optional[Dict[str, Any]] = None,
 ) -> Optional[MOQAnalysisData]:
+    cm_ctx = cm_ctx or {}
+    contract_ctx = contract_ctx or {}
+    block_ctx = block_ctx or {}
     metadata = event.get("metadata") or {}
     ordered_qty = _as_float(metadata.get("ordered_qty"))
     moq_qty = _as_float(metadata.get("moq_qty"))
@@ -536,14 +563,19 @@ def _moq_from_outputs(
             uom=str(metadata.get("uom") or ""),
             at_risk=_as_float(outputs.get("uplift_value")),
             round_up_plan=plan,
-            # Grandfathered audit-bearing — present iff metadata
-            # supplies them today; gateway will populate post-deadline.
-            moq_source=metadata.get("moq_source"),
-            channel=metadata.get("channel"),
-            contract_ref=metadata.get("contract_ref"),
-            block_status=metadata.get("block_status"),
+            # T5: moq_source / channel / contract_ref / block_status
+            # now from gateway via enrichment_context (moq_gateway_gap
+            # retired). Falls back to event metadata if the gateway
+            # didn't run (shadow-gated paths).
+            moq_source=cm_ctx.get("moq_source") or metadata.get("moq_source"),
+            channel=cm_ctx.get("channel") or metadata.get("channel"),
+            contract_ref=contract_ctx.get("contract_ref")
+            or metadata.get("contract_ref"),
+            block_status=block_ctx.get("block_status")
+            or metadata.get("block_status"),
             description=metadata.get("description"),
-            block_message=metadata.get("block_message"),
+            block_message=block_ctx.get("block_message")
+            or metadata.get("block_message"),
         )
     except (TypeError, ValueError):
         return None
@@ -554,14 +586,23 @@ def adapt_moq(record: ExceptionRecord) -> Optional[MOQAnalysisData]:
 
     Three-path lookup. at_risk surfaces the recipe's `uplift_value`
     (uplift_qty × unit_cost) — already the right number for the
-    four-eyes financial-impact gate.
+    four-eyes financial-impact gate. T5: moq_source / channel /
+    contract_ref / block_status sourced from sap_customer_master /
+    sap_contract / sap_block via enrichment_context (moq_gateway_gap
+    retired).
     """
     outputs = record.resolution_data or {}
     event = record.original_event or {}
+    enrichment = record.enrichment_context or {}
+    cm_ctx = enrichment.get("customer_master_context") or {}
+    contract_ctx = enrichment.get("contract_context") or {}
+    block_ctx = enrichment.get("block_context") or {}
     status = outputs.get("status")
 
     if status and status != "FAILED":
-        projection = _moq_from_outputs(outputs, event)
+        projection = _moq_from_outputs(
+            outputs, event, cm_ctx, contract_ctx, block_ctx,
+        )
         if projection is not None:
             return projection
 
@@ -587,7 +628,7 @@ def adapt_moq(record: ExceptionRecord) -> Optional[MOQAnalysisData]:
         return None
     if synthetic.get("status") == "FAILED":
         return None
-    return _moq_from_outputs(synthetic, event)
+    return _moq_from_outputs(synthetic, event, cm_ctx, contract_ctx, block_ctx)
 
 
 def _coerce_pallet_line(raw: Any) -> Optional[PalletLine]:

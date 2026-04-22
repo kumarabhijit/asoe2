@@ -212,11 +212,63 @@ def _register_oms_stub():
             ),
         },
     )
+    # Verdict T5: SAP block + customer-master + SLA contract stubs
+    # supply the audit-bearing fields that retired the
+    # delivery_delay_financial_gap / overmax_gateway_gap /
+    # moq_gateway_gap clauses. Real SAP integration is a separate
+    # platform track; these stubs mirror the response shape
+    # documented in api/analysis_adapters.py.
+    sap_block_stub = StubGateway(
+        "sap_block",
+        responses={
+            "lookup": GatewayResponse(
+                gateway_name="sap_block",
+                operation="lookup",
+                status="SUCCESS",
+                data={
+                    "block_status": "ACTIVE",
+                    "block_reason": "OVER_MAX_QTY",
+                    "block_message": "Order exceeds contractual maximum",
+                },
+            ),
+        },
+    )
+    sap_customer_master_stub = StubGateway(
+        "sap_customer_master",
+        responses={
+            "lookup": GatewayResponse(
+                gateway_name="sap_customer_master",
+                operation="lookup",
+                status="SUCCESS",
+                data={
+                    "moq_source": "KNMT-MINBM",
+                    "channel": "DIRECT",
+                },
+            ),
+        },
+    )
+    sla_contract_stub = StubGateway(
+        "sla_contract",
+        responses={
+            "lookup": GatewayResponse(
+                gateway_name="sla_contract",
+                operation="lookup",
+                status="SUCCESS",
+                data={
+                    "sla_deadline": "2026-04-25T00:00:00Z",
+                    "at_risk": 1500.0,
+                },
+            ),
+        },
+    )
     register_gateway(oms_stub)
     register_gateway(notification_stub)
     register_gateway(sap_doc_stub)
     register_gateway(sap_contract_stub)
     register_gateway(promotion_stub)
+    register_gateway(sap_block_stub)
+    register_gateway(sap_customer_master_stub)
+    register_gateway(sla_contract_stub)
     yield
     clear_registry()
 

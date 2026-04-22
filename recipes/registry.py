@@ -200,6 +200,28 @@ REGISTRY = {
         ),
         allowed_intents=("OVER_MAX",),
         expected_metadata_keys=("max_qty", "order_lines"),
+        # Verdict T5: SAP contract + block-status gateway READS
+        # populate the audit-bearing OverMax fields previously
+        # under overmax_gateway_gap.
+        dependencies=(
+            GatewayDependency(
+                gateway_name="sap_contract",
+                operation="lookup",
+                params_from_state={
+                    "order_id": "event.order_id",
+                    "retailer_id": "event.retailer_id",
+                },
+                result_key="contract_context",
+            ),
+            GatewayDependency(
+                gateway_name="sap_block",
+                operation="lookup",
+                params_from_state={
+                    "order_id": "event.order_id",
+                },
+                result_key="block_context",
+            ),
+        ),
     ),
     "MOQRoundUpRecipe.py": RecipeSpec(
         name="MOQRoundUpRecipe.py",
@@ -211,6 +233,37 @@ REGISTRY = {
         ),
         allowed_intents=("MIN_ORDER_QTY",),
         expected_metadata_keys=("moq_qty", "unit_cost"),
+        # Verdict T5: customer-master + contract + block-status
+        # gateway READS populate the audit-bearing MOQ fields
+        # previously under moq_gateway_gap.
+        dependencies=(
+            GatewayDependency(
+                gateway_name="sap_customer_master",
+                operation="lookup",
+                params_from_state={
+                    "retailer_id": "event.retailer_id",
+                    "sku": "event.sku",
+                },
+                result_key="customer_master_context",
+            ),
+            GatewayDependency(
+                gateway_name="sap_contract",
+                operation="lookup",
+                params_from_state={
+                    "order_id": "event.order_id",
+                    "retailer_id": "event.retailer_id",
+                },
+                result_key="contract_context",
+            ),
+            GatewayDependency(
+                gateway_name="sap_block",
+                operation="lookup",
+                params_from_state={
+                    "order_id": "event.order_id",
+                },
+                result_key="block_context",
+            ),
+        ),
     ),
     "PalletAlignmentRecipe.py": RecipeSpec(
         name="PalletAlignmentRecipe.py",
@@ -231,6 +284,20 @@ REGISTRY = {
         ),
         allowed_intents=("DELIVERY_DELAY",),
         expected_metadata_keys=("planned_date", "projected_eta"),
+        # Verdict T5: SLA contract gateway READ populates the
+        # audit-bearing financial fields previously under
+        # delivery_delay_financial_gap (at_risk, sla_deadline).
+        dependencies=(
+            GatewayDependency(
+                gateway_name="sla_contract",
+                operation="lookup",
+                params_from_state={
+                    "order_id": "event.order_id",
+                    "retailer_id": "event.retailer_id",
+                },
+                result_key="sla_contract_context",
+            ),
+        ),
     ),
 }
 
