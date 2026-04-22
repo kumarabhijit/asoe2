@@ -444,12 +444,10 @@ class DatabaseBackedStore:
         original_event: Optional[Dict[str, Any]] = None,
         enrichment_context: Optional[Dict[str, Any]] = None,
     ) -> ExceptionRecord:
-        # Verdict Pillar 1: `enrichment_context` is forwarded to the
-        # repository. The DB repository currently has no dedicated
-        # column — a follow-up migration (V003) promotes it to JSONB
-        # alongside `original_event`. Until then, gateway evidence
-        # flows only through the in-memory store (see
-        # _dict_to_record's TODO below).
+        # Verdict Pillar 1: `enrichment_context` is persisted to a
+        # dedicated JSONB column (V004). The repository serialises
+        # to JSONB (Postgres) / JSON TEXT (SQLite) alongside
+        # `original_event` (V002).
         row = self._exceptions.create(
             tenant_id=tenant_id,
             order_id=order_id,
@@ -460,17 +458,10 @@ class DatabaseBackedStore:
             selected_recipe=selected_recipe,
             final_status=final_status,
             resolution_data=resolution_data,
-            # V002 promoted these to dedicated columns. The repository
-            # serialises to JSONB (Postgres) / JSON TEXT (SQLite).
             original_event=original_event,
+            enrichment_context=enrichment_context,
         )
-        record = self._dict_to_record(row)
-        # Attach enrichment_context on the returned record even though
-        # the DB doesn't yet persist it — lets Pillar 2 consumers read
-        # it within the same request. The next DB migration will add
-        # the column and this in-memory bridge will retire.
-        record.enrichment_context = dict(enrichment_context or {})
-        return record
+        return self._dict_to_record(row)
 
     def get(self, exception_id: str, tenant_id: str) -> Optional[ExceptionRecord]:
         row = self._exceptions.get(exception_id, tenant_id)
@@ -619,9 +610,7 @@ class DatabaseBackedStore:
         record.account_id = d.get("account_id")
         record.account_name = d.get("account_name")
         record.original_event = d.get("original_event")
-        # Verdict Pillar 1: default to empty dict on DB-sourced records
-        # (the column is owed by V003). In-memory `create()` overrides
-        # this with the caller-supplied context before returning.
+        # Verdict Pillar 1: enrichment_context is durable (V004 column).
         record.enrichment_context = d.get("enrichment_context") or {}
         record.reanalysis_history = d.get("reanalysis_history") or []
         record.created_at = d.get("created_at", "")

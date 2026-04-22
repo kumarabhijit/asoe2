@@ -88,6 +88,7 @@ class ExceptionRepository:
         resolution_data: Optional[Dict[str, Any]] = None,
         original_event: Optional[Dict[str, Any]] = None,
         reanalysis_history: Optional[List[Dict[str, Any]]] = None,
+        enrichment_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         record_id = _uuid()
         now = _now()
@@ -98,6 +99,7 @@ class ExceptionRepository:
             _json_dumps(original_event) if original_event is not None else None
         )
         history_json = _json_dumps(reanalysis_history or [])
+        enrichment_json = _json_dumps(enrichment_context or {})
 
         with self._adapter.cursor(tenant_id) as cur:
             cur.execute(
@@ -105,13 +107,13 @@ class ExceptionRepository:
                    (id, tenant_id, order_id, event_type, intent,
                     lifecycle_state, shadow_verdict, selected_recipe,
                     final_status, trace_id, resolution_data,
-                    original_event, reanalysis_history,
+                    original_event, reanalysis_history, enrichment_context,
                     created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (record_id, tenant_id, order_id, event_type, intent,
                  lifecycle_state, shadow_verdict, selected_recipe,
                  final_status, trace_id, res_data,
-                 original_event_json, history_json,
+                 original_event_json, history_json, enrichment_json,
                  now, now),
             )
 
@@ -129,6 +131,7 @@ class ExceptionRepository:
             "resolution_data": resolution_data or {},
             "original_event": original_event,
             "reanalysis_history": reanalysis_history or [],
+            "enrichment_context": enrichment_context or {},
             "resolved_by": None,
             "resolved_action": None,
             "resolution_notes": None,
@@ -143,7 +146,7 @@ class ExceptionRepository:
                           lifecycle_state, shadow_verdict, selected_recipe,
                           final_status, trace_id, resolution_data,
                           resolved_by, resolved_action, resolution_notes,
-                          original_event, reanalysis_history,
+                          original_event, reanalysis_history, enrichment_context,
                           created_at, updated_at
                    FROM exceptions
                    WHERE id = ? AND tenant_id = ?""",
@@ -185,7 +188,7 @@ class ExceptionRepository:
                            lifecycle_state, shadow_verdict, selected_recipe,
                            final_status, trace_id, resolution_data,
                            resolved_by, resolved_action, resolution_notes,
-                           original_event, reanalysis_history,
+                           original_event, reanalysis_history, enrichment_context,
                            created_at, updated_at
                     FROM exceptions
                     WHERE {where}
@@ -210,7 +213,10 @@ class ExceptionRepository:
 
         # Serialize JSON columns before binding. Callers pass native Python
         # objects for these fields; we persist them as JSON strings.
-        for json_col in ("resolution_data", "original_event", "reanalysis_history"):
+        for json_col in (
+            "resolution_data", "original_event",
+            "reanalysis_history", "enrichment_context",
+        ):
             if json_col in fields and not isinstance(fields[json_col], str):
                 fields[json_col] = _json_dumps(fields[json_col])
 
@@ -297,18 +303,26 @@ class ExceptionRepository:
         "lifecycle_state", "shadow_verdict", "selected_recipe",
         "final_status", "trace_id", "resolution_data", "resolved_by",
         "resolved_action", "resolution_notes",
-        "original_event", "reanalysis_history",
+        "original_event", "reanalysis_history", "enrichment_context",
         "created_at", "updated_at",
     )
 
     def _to_dict(self, row) -> Dict[str, Any]:
         r = _row_to_dict(row, self._COLUMNS)
-        for json_col in ("resolution_data", "original_event", "reanalysis_history"):
+        for json_col in (
+            "resolution_data", "original_event",
+            "reanalysis_history", "enrichment_context",
+        ):
             if isinstance(r.get(json_col), str):
                 r[json_col] = _json_loads(r[json_col])
         # Normalise: always provide a list, never None, for reanalysis_history.
         if r.get("reanalysis_history") is None:
             r["reanalysis_history"] = []
+        # Normalise: always provide a dict, never None, for enrichment_context
+        # (V004 default '{}' guarantees this for new rows; older callers may
+        # have inserted via the in-memory bridge with no value).
+        if r.get("enrichment_context") is None:
+            r["enrichment_context"] = {}
         return r
 
 

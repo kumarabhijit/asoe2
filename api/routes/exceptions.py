@@ -176,14 +176,10 @@ def _persist_exception(
 ) -> str:
     """Store exception record and trace data. Returns exception_id."""
     # Verdict Pillar 1: persist gateway context alongside recipe output.
-    # Prefer the explicit `state.enrichment_context` when populated
-    # (graph nodes that have been migrated); fall back to
-    # `state.resolved_data` so pre-migration gateway callsites still
-    # contribute evidence to the audit trail. Copy so later mutation
-    # of the graph state doesn't leak into the persisted record.
-    ctx = dict(state.enrichment_context) if state.enrichment_context else {}
-    if not ctx and state.resolved_data:
-        ctx = dict(state.resolved_data)
+    # `state.enrichment_context` is the sole source — `resolve_dependencies`
+    # writes gateway results there directly. Copy so later mutation of
+    # the graph state doesn't leak into the persisted record.
+    ctx = dict(state.enrichment_context)
 
     record = exception_store.create(
         tenant_id=tenant_id,

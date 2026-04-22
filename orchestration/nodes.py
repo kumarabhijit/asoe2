@@ -252,8 +252,8 @@ def validate_types(state: GraphState) -> GraphState:
         # Resolution context — resolved by gateway dependencies (Phase B).
         # Falls back to None when gateways have not been called (e.g. tests
         # without gateway setup).
-        fulfillment = state.resolved_data.get("fulfillment_status", {})
-        matched_details = state.resolved_data.get("matched_po_details", {})
+        fulfillment = state.enrichment_context.get("fulfillment_status", {})
+        matched_details = state.enrichment_context.get("matched_po_details", {})
         state.invocation = RecipeInvocation(
             recipe_name=state.selected_recipe,
             params={
@@ -290,8 +290,8 @@ def validate_types(state: GraphState) -> GraphState:
         )
         # Prefer the live gateway result (oms/get_price_hold_status returns
         # {"status": "HELD"}); fall back to metadata when the gateway response
-        # lacks that key — matches the DuplicatePO resolved_data pattern.
-        gateway_result = state.resolved_data.get("price_hold_status", {})
+        # lacks that key.
+        gateway_result = state.enrichment_context.get("price_hold_status", {})
         hold_status = (
             gateway_result.get("status")
             if isinstance(gateway_result, dict) else None
@@ -453,7 +453,11 @@ def resolve_dependencies(state: GraphState) -> GraphState:
     For each GatewayDependency on the RecipeSpec:
       1. Build GatewayRequest with params resolved from state
       2. Call the gateway via GatewayExecutor
-      3. Store result in state.resolved_data[dep.result_key]
+      3. Store result in state.enrichment_context[dep.result_key]
+
+    Verdict Pillar 1: gateway-fetched evidence lives in enrichment_context
+    (audit-bearing, persisted to ExceptionRecord.enrichment_context).
+    Recipe-input sites read from the same bag — one source of truth.
 
     If any dependency fails, halt with FAIL_TO_HUMAN.
     If the recipe has no dependencies, this is a no-op.
@@ -504,7 +508,7 @@ def resolve_dependencies(state: GraphState) -> GraphState:
             )
             return state
 
-        state.resolved_data[dep.result_key] = response.data
+        state.enrichment_context[dep.result_key] = response.data
 
     return state
 
