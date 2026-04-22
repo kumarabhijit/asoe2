@@ -133,9 +133,64 @@
         "title": "AlternateDeliveryOption",
         "type": "object"
       },
+      "AlternateWarehouse": {
+        "additionalProperties": false,
+        "description": "Alternate-DC option with shipping economics. Conditional on\n`resolved_action == ALT_DC` per the registry.",
+        "properties": {
+          "eta_days": {
+            "title": "Eta Days",
+            "type": "integer"
+          },
+          "freight_delta_per_unit": {
+            "title": "Freight Delta Per Unit",
+            "type": "number"
+          },
+          "freight_delta_total": {
+            "title": "Freight Delta Total",
+            "type": "number"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "plant": {
+            "title": "Plant",
+            "type": "string"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "number"
+          },
+          "region": {
+            "default": "",
+            "title": "Region",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plant",
+          "qty",
+          "eta_days",
+          "freight_delta_per_unit",
+          "freight_delta_total"
+        ],
+        "title": "AlternateWarehouse",
+        "type": "object"
+      },
       "AnalysisResponse": {
         "description": "GET /api/v1/exceptions/{id}/analysis",
         "properties": {
+          "backorder_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BackOrderAnalysisData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "confidence": {
             "title": "Confidence",
             "type": "integer"
@@ -322,6 +377,101 @@
           "access_token"
         ],
         "title": "AuthTokenResponse",
+        "type": "object"
+      },
+      "BackOrderAnalysisData": {
+        "additionalProperties": false,
+        "description": "BackOrderResolutionRecipe \u2192 UI `backorder_analysis`.\n\nRegistry-classified fields (2026-04-22 workshop):\n  * audit-bearing: ordered_qty, available_qty, gap_qty, gap_pct,\n    unit_price, uom, at_risk, atp_date, resolution_options.\n  * audit-bearing (gateway): primary_dc.\n  * conditional (gateway, depends_on resolved_action):\n    alternate_warehouses (ALT_DC), substitutes (SUBSTITUTE),\n    production / inbound_po (RESCHEDULE).\n\nNo grandfather clause in this engagement. Gateway-dependent\naudit-bearing fields (primary_dc, atp_date) MUST persist via\nenrichment_context[\"inventory_snapshot\"]; missing \u2192 composer\nroutes to AUDIT_CONTEXT_MISSING.\n\nSources:\n  * `record.original_event` \u2014 recipe input metadata (ordered_qty,\n    available_qty, unit_price, uom, sku).\n  * `record.enrichment_context[\"inventory_snapshot\"]` \u2014 gateway\n    snapshot (primary_dc, atp_date, alternate_warehouses,\n    substitutes, production, inbound_po).\n  * `record.resolution_data` \u2014 recipe-computed fields (gap_qty,\n    gap_pct, at_risk, resolution_options, recommended_action).",
+        "properties": {
+          "alternate_warehouses": {
+            "items": {
+              "$ref": "#/components/schemas/AlternateWarehouse"
+            },
+            "title": "Alternate Warehouses",
+            "type": "array"
+          },
+          "at_risk": {
+            "title": "At Risk",
+            "type": "number"
+          },
+          "atp_date": {
+            "title": "Atp Date",
+            "type": "string"
+          },
+          "available_qty": {
+            "title": "Available Qty",
+            "type": "number"
+          },
+          "gap_pct": {
+            "title": "Gap Pct",
+            "type": "number"
+          },
+          "gap_qty": {
+            "title": "Gap Qty",
+            "type": "number"
+          },
+          "inbound_po": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboundOrder"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ordered_qty": {
+            "title": "Ordered Qty",
+            "type": "number"
+          },
+          "primary_dc": {
+            "$ref": "#/components/schemas/WarehouseInfo"
+          },
+          "production": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboundOrder"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resolution_options": {
+            "items": {
+              "$ref": "#/components/schemas/ResolutionOption"
+            },
+            "title": "Resolution Options",
+            "type": "array"
+          },
+          "substitutes": {
+            "items": {
+              "$ref": "#/components/schemas/SubstituteSKU"
+            },
+            "title": "Substitutes",
+            "type": "array"
+          },
+          "unit_price": {
+            "title": "Unit Price",
+            "type": "number"
+          },
+          "uom": {
+            "title": "Uom",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ordered_qty",
+          "available_qty",
+          "gap_qty",
+          "gap_pct",
+          "unit_price",
+          "uom",
+          "at_risk",
+          "atp_date",
+          "primary_dc"
+        ],
+        "title": "BackOrderAnalysisData",
         "type": "object"
       },
       "ChallengeRequest": {
@@ -1109,6 +1259,54 @@
           "allowed_override_reason_tags_by_intent"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "InboundOrder": {
+        "additionalProperties": false,
+        "description": "Inbound production / PO entry. Conditional on\n`resolved_action == RESCHEDULE` per the registry.",
+        "properties": {
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "eta": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eta"
+          },
+          "po_num": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Po Num"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "number"
+          }
+        },
+        "required": [
+          "qty"
+        ],
+        "title": "InboundOrder",
         "type": "object"
       },
       "LineAnalysis": {
@@ -1975,6 +2173,78 @@
         "title": "RefreshRequest",
         "type": "object"
       },
+      "ResolutionOption": {
+        "additionalProperties": false,
+        "description": "One ranked resolution option for a back-order. Audit-bearing per\nregistry::BackOrderAnalysisData.resolution_options.",
+        "properties": {
+          "composite_score": {
+            "default": 0.0,
+            "title": "Composite Score",
+            "type": "number"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "sap_steps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sap Steps",
+            "type": "array"
+          },
+          "scores": {
+            "$ref": "#/components/schemas/ResolutionOptionScores"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type"
+        ],
+        "title": "ResolutionOption",
+        "type": "object"
+      },
+      "ResolutionOptionScores": {
+        "additionalProperties": false,
+        "properties": {
+          "logistics": {
+            "default": 0.0,
+            "title": "Logistics",
+            "type": "number"
+          },
+          "preference": {
+            "default": 0.0,
+            "title": "Preference",
+            "type": "number"
+          },
+          "revenue": {
+            "default": 0.0,
+            "title": "Revenue",
+            "type": "number"
+          },
+          "service": {
+            "default": 0.0,
+            "title": "Service",
+            "type": "number"
+          }
+        },
+        "title": "ResolutionOptionScores",
+        "type": "object"
+      },
       "ResolveRequest": {
         "additionalProperties": false,
         "description": "POST /api/v1/exceptions/resolve \u2014 same fields as OrderEvent.",
@@ -2360,6 +2630,51 @@
         "title": "StatsResponse",
         "type": "object"
       },
+      "SubstituteSKU": {
+        "additionalProperties": false,
+        "description": "Substitute SKU candidate. Conditional on\n`resolved_action == SUBSTITUTE` per the registry.",
+        "properties": {
+          "acceptance_rate": {
+            "title": "Acceptance Rate",
+            "type": "number"
+          },
+          "available_qty": {
+            "title": "Available Qty",
+            "type": "number"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "price_delta_pct": {
+            "title": "Price Delta Pct",
+            "type": "number"
+          },
+          "priority": {
+            "default": 0,
+            "title": "Priority",
+            "type": "integer"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          },
+          "source": {
+            "default": "",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sku",
+          "available_qty",
+          "price_delta_pct",
+          "acceptance_rate"
+        ],
+        "title": "SubstituteSKU",
+        "type": "object"
+      },
       "TenantResetRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2718,6 +3033,36 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "WarehouseInfo": {
+        "additionalProperties": false,
+        "description": "Inventory snapshot for one DC. Audit-bearing per registry::\nBackOrderAnalysisData.primary_dc \u2014 reviewer attests against the\nplant + qty before approving an ALT_DC or SUBSTITUTE action.",
+        "properties": {
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "plant": {
+            "title": "Plant",
+            "type": "string"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "number"
+          },
+          "region": {
+            "default": "",
+            "title": "Region",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plant",
+          "qty"
+        ],
+        "title": "WarehouseInfo",
         "type": "object"
       },
       "WorkflowRequest": {

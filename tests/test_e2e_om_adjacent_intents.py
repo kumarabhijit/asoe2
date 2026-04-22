@@ -98,28 +98,40 @@ def _back_order_event(ordered: float, available: float) -> dict:
 
 
 class TestResolveBackOrder:
-    def test_minor_gap_review_required(self, client, analyst_token):
+    """Verdict alignment (T3): shadow-gated paths skip
+    resolve_dependencies, so the BackOrder gateway evidence
+    (primary_dc, atp_date) is absent. With backorder_warehouse_gap
+    NOT opened (Verdict full-close engagement), the composer routes
+    YELLOW/RED shadow-gated BackOrders to AUDIT_CONTEXT_MISSING.
+
+    Architectural follow-up (out of scope here): move gateway READS
+    before shadow so the audit context is always populated even on
+    blocked paths. Until then, shadow YELLOW/RED for BackOrder
+    routes to AUDIT_CONTEXT_MISSING.
+    """
+
+    def test_minor_gap_routes_to_audit_context_missing(self, client, analyst_token):
         r = client.post(
             "/api/v1/exceptions/resolve",
-            json=_back_order_event(100, 75),  # 25% gap
+            json=_back_order_event(100, 75),  # 25% gap → YELLOW shadow
             headers=_auth(analyst_token),
         )
         assert r.status_code == 200
         data = r.json()
         assert data["intent"] == "BACK_ORDER"
         assert data["shadow_verdict"] == "YELLOW"
-        assert data["final_status"] == "MANUAL_REVIEW_REQUIRED"
+        assert data["final_status"] == "AUDIT_CONTEXT_MISSING"
 
-    def test_severe_gap_blocked(self, client, analyst_token):
+    def test_severe_gap_routes_to_audit_context_missing(self, client, analyst_token):
         r = client.post(
             "/api/v1/exceptions/resolve",
-            json=_back_order_event(100, 40),  # 60% gap
+            json=_back_order_event(100, 40),  # 60% gap → RED shadow
             headers=_auth(analyst_token),
         )
         data = r.json()
         assert data["intent"] == "BACK_ORDER"
         assert data["shadow_verdict"] == "RED"
-        assert data["final_status"] == "BLOCKED"
+        assert data["final_status"] == "AUDIT_CONTEXT_MISSING"
 
     def test_trace_carries_policy_hit(self, client, analyst_token):
         r = client.post(

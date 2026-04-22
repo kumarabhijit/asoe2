@@ -736,6 +736,130 @@ class PalletAnalysisData(BaseModel):
     suggested_plan: List[PalletSuggestion] = Field(default_factory=list)
 
 
+class WarehouseInfo(BaseModel):
+    """Inventory snapshot for one DC. Audit-bearing per registry::
+    BackOrderAnalysisData.primary_dc — reviewer attests against the
+    plant + qty before approving an ALT_DC or SUBSTITUTE action."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    plant: str
+    name: str = ""
+    region: str = ""
+    qty: float
+
+
+class AlternateWarehouse(BaseModel):
+    """Alternate-DC option with shipping economics. Conditional on
+    `resolved_action == ALT_DC` per the registry."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    plant: str
+    name: str = ""
+    region: str = ""
+    qty: float
+    eta_days: int
+    freight_delta_per_unit: float
+    freight_delta_total: float
+
+
+class SubstituteSKU(BaseModel):
+    """Substitute SKU candidate. Conditional on
+    `resolved_action == SUBSTITUTE` per the registry."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sku: str
+    description: str = ""
+    available_qty: float
+    price_delta_pct: float
+    acceptance_rate: float
+    source: str = ""
+    priority: int = 0
+
+
+class InboundOrder(BaseModel):
+    """Inbound production / PO entry. Conditional on
+    `resolved_action == RESCHEDULE` per the registry."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    qty: float
+    date: Optional[str] = None
+    eta: Optional[str] = None
+    po_num: Optional[str] = None
+
+
+class ResolutionOptionScores(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    service: float = 0.0
+    revenue: float = 0.0
+    logistics: float = 0.0
+    preference: float = 0.0
+
+
+class ResolutionOption(BaseModel):
+    """One ranked resolution option for a back-order. Audit-bearing per
+    registry::BackOrderAnalysisData.resolution_options."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    type: str  # SPLIT_SHIPMENT / ALT_DC / SUBSTITUTE / RESCHEDULE
+    title: str = ""
+    description: str = ""
+    composite_score: float = 0.0
+    scores: ResolutionOptionScores = Field(default_factory=ResolutionOptionScores)
+    sap_steps: List[str] = Field(default_factory=list)
+
+
+class BackOrderAnalysisData(BaseModel):
+    """BackOrderResolutionRecipe → UI `backorder_analysis`.
+
+    Registry-classified fields (2026-04-22 workshop):
+      * audit-bearing: ordered_qty, available_qty, gap_qty, gap_pct,
+        unit_price, uom, at_risk, atp_date, resolution_options.
+      * audit-bearing (gateway): primary_dc.
+      * conditional (gateway, depends_on resolved_action):
+        alternate_warehouses (ALT_DC), substitutes (SUBSTITUTE),
+        production / inbound_po (RESCHEDULE).
+
+    No grandfather clause in this engagement. Gateway-dependent
+    audit-bearing fields (primary_dc, atp_date) MUST persist via
+    enrichment_context["inventory_snapshot"]; missing → composer
+    routes to AUDIT_CONTEXT_MISSING.
+
+    Sources:
+      * `record.original_event` — recipe input metadata (ordered_qty,
+        available_qty, unit_price, uom, sku).
+      * `record.enrichment_context["inventory_snapshot"]` — gateway
+        snapshot (primary_dc, atp_date, alternate_warehouses,
+        substitutes, production, inbound_po).
+      * `record.resolution_data` — recipe-computed fields (gap_qty,
+        gap_pct, at_risk, resolution_options, recommended_action).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ordered_qty: float
+    available_qty: float
+    gap_qty: float
+    gap_pct: float
+    unit_price: float
+    uom: str
+    at_risk: float
+    atp_date: str
+    primary_dc: WarehouseInfo
+    resolution_options: List[ResolutionOption] = Field(default_factory=list)
+    # Conditional — present only when the chosen resolution path uses them.
+    alternate_warehouses: List[AlternateWarehouse] = Field(default_factory=list)
+    substitutes: List[SubstituteSKU] = Field(default_factory=list)
+    production: Optional[InboundOrder] = None
+    inbound_po: Optional[InboundOrder] = None
+
+
 class OrderSnapshot(BaseModel):
     """One side of a matched-PO pair from the OMS get_matched_po_details
     gateway. All subfields are audit-bearing per the
@@ -849,3 +973,4 @@ class AnalysisResponse(BaseModel):
     pallet_analysis: Optional[PalletAnalysisData] = None
     duplicate_detection: Optional[DuplicateDetectionData] = None
     order_comparison: Optional[OrderComparisonData] = None
+    backorder_analysis: Optional[BackOrderAnalysisData] = None

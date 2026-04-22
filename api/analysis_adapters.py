@@ -33,11 +33,14 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 from api.schemas import (
     AlternateDeliveryOption,
+    AlternateWarehouse,
+    BackOrderAnalysisData,
     ComparisonLineItem,
     ComparisonOrder,
     DeliveryDelayAnalysisData,
     DuplicateDetectionData,
     EdiMismatchAnalysisData,
+    InboundOrder,
     MOQAnalysisData,
     OrderComparisonData,
     OrderSnapshot,
@@ -47,11 +50,16 @@ from api.schemas import (
     PalletLine,
     PalletSuggestion,
     PriceHoldAnalysisData,
+    ResolutionOption,
+    ResolutionOptionScores,
     RoundUpPlanLine,
+    SubstituteSKU,
     TrimPlanLine,
+    WarehouseInfo,
 )
 from api.store import ExceptionRecord
 from contracts.policy import (
+    BACK_ORDER_SEVERE_GAP_PCT,
     DELIVERY_DELAY_MINOR_DAYS,
     DELIVERY_DELAY_SEVERE_DAYS,
     DUPLICATE_PO_AUTONOMY_LEVELS,
@@ -67,6 +75,7 @@ from contracts.policy import (
     PRICE_HOLD_HARD_BLOCK_PCT,
     PRICE_HOLD_TOLERANCE_PCT,
 )
+from recipes.BackOrderResolutionRecipe import resolve_back_order
 from recipes.DeliveryDelayResolutionRecipe import resolve_delivery_delay
 from recipes.DuplicatePORecipe import detect_duplicate_po
 from recipes.EdiMismatchRecipe import detect_edi_mismatch
@@ -875,6 +884,205 @@ def adapt_order_comparison(
     )
 
 
+# ─── BackOrder adapter (T3) ─────────────────────────────────────────────
+#
+# BackOrder is the most multi-source adapter shipped so far:
+#   * recipe-input fields (ordered_qty, available_qty, unit_price, uom)
+#     come from `event.metadata`.
+#   * recipe-output fields (gap_qty, gap_pct, at_risk, resolution_options)
+#     come from `record.resolution_data` (synthesised when empty).
+#   * gateway audit-bearing fields (primary_dc, atp_date) come from
+#     `record.enrichment_context["inventory_snapshot"]`.
+#   * conditional gateway fields (alternate_warehouses, substitutes,
+#     production, inbound_po) come from the same gateway snapshot;
+#     the composer enforces them only when `resolved_action` matches
+#     the registry's `depends_on` predicate.
+
+def _warehouse_info(payload: Optional[Dict[str, Any]]) -> Optional[WarehouseInfo]:
+    if not payload:
+        return None
+    plant = payload.get("plant")
+    qty = payload.get("qty")
+    if plant is None or qty is None:
+        return None
+    try:
+        return WarehouseInfo(
+            plant=str(plant),
+            name=str(payload.get("name") or ""),
+            region=str(payload.get("region") or ""),
+            qty=_as_float(qty),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _alternate_warehouse(payload: Dict[str, Any]) -> Optional[AlternateWarehouse]:
+    try:
+        return AlternateWarehouse(
+            plant=str(payload.get("plant", "")),
+            name=str(payload.get("name") or ""),
+            region=str(payload.get("region") or ""),
+            qty=_as_float(payload.get("qty")),
+            eta_days=int(payload.get("eta_days") or 0),
+            freight_delta_per_unit=_as_float(payload.get("freight_delta_per_unit")),
+            freight_delta_total=_as_float(payload.get("freight_delta_total")),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _substitute(payload: Dict[str, Any]) -> Optional[SubstituteSKU]:
+    try:
+        return SubstituteSKU(
+            sku=str(payload.get("sku", "")),
+            description=str(payload.get("description") or ""),
+            available_qty=_as_float(payload.get("available_qty")),
+            price_delta_pct=_as_float(payload.get("price_delta_pct")),
+            acceptance_rate=_as_float(payload.get("acceptance_rate")),
+            source=str(payload.get("source") or ""),
+            priority=int(payload.get("priority") or 0),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _inbound(payload: Optional[Dict[str, Any]]) -> Optional[InboundOrder]:
+    if not payload:
+        return None
+    try:
+        return InboundOrder(
+            qty=_as_float(payload.get("qty")),
+            date=payload.get("date"),
+            eta=payload.get("eta"),
+            po_num=payload.get("po_num"),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _resolution_option(payload: Dict[str, Any]) -> Optional[ResolutionOption]:
+    try:
+        scores_raw = payload.get("scores") or {}
+        scores = ResolutionOptionScores(
+            service=_as_float(scores_raw.get("service")),
+            revenue=_as_float(scores_raw.get("revenue")),
+            logistics=_as_float(scores_raw.get("logistics")),
+            preference=_as_float(scores_raw.get("preference")),
+        )
+        return ResolutionOption(
+            id=str(payload.get("id", "")),
+            type=str(payload.get("type", "")),
+            title=str(payload.get("title") or ""),
+            description=str(payload.get("description") or ""),
+            composite_score=_as_float(payload.get("composite_score")),
+            scores=scores,
+            sap_steps=[str(s) for s in (payload.get("sap_steps") or [])],
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _synthesize_back_order_outputs(record: ExceptionRecord) -> Dict[str, Any]:
+    """Run BackOrderResolutionRecipe synthetically on the explain /
+    shadow-gated path. Recipe is pure — no side effects."""
+    event = record.original_event or {}
+    metadata = event.get("metadata") or {}
+    ordered_qty = _as_float(metadata.get("ordered_qty"))
+    available_qty = _as_float(metadata.get("available_qty"))
+    if ordered_qty <= 0:
+        return {}
+    enrichment = (record.enrichment_context or {}).get("inventory_snapshot") or {}
+    try:
+        return resolve_back_order(
+            order_id=str(event.get("order_id", "")),
+            sku=str(event.get("sku") or metadata.get("sku") or ""),
+            ordered_qty=ordered_qty,
+            available_qty=available_qty,
+            unit_price=_as_float(metadata.get("unit_price")),
+            uom=str(metadata.get("uom") or "CS"),
+            severe_gap_pct=BACK_ORDER_SEVERE_GAP_PCT,
+            alternate_warehouses=enrichment.get("alternate_warehouses"),
+            substitutes=enrichment.get("substitutes"),
+        )
+    except (TypeError, ValueError):
+        return {}
+
+
+def adapt_back_order(record: ExceptionRecord) -> Optional[BackOrderAnalysisData]:
+    """Project BackOrderResolutionRecipe into BackOrderAnalysisData.
+
+    Three source bags:
+      * `event.metadata` — recipe inputs (ordered_qty, available_qty,
+        unit_price, uom).
+      * `record.enrichment_context["inventory_snapshot"]` — gateway
+        snapshot (primary_dc + atp_date, plus conditional
+        alternate_warehouses / substitutes / production / inbound_po).
+      * `record.resolution_data` — recipe-computed gap / at_risk /
+        resolution_options (synthesised if empty).
+
+    Returns None when:
+      * No primary_dc snapshot in enrichment_context (audit-bearing
+        gateway field missing → composer routes to AUDIT_CONTEXT_MISSING).
+      * Recipe input metadata is unusable (ordered_qty <= 0).
+    """
+    event = record.original_event or {}
+    metadata = event.get("metadata") or {}
+    ordered_qty = _as_float(metadata.get("ordered_qty"))
+    if ordered_qty <= 0:
+        return None
+
+    enrichment = (record.enrichment_context or {}).get("inventory_snapshot") or {}
+    primary_dc = _warehouse_info(enrichment.get("primary_dc"))
+    if primary_dc is None:
+        return None
+    atp_date = enrichment.get("atp_date")
+    if not atp_date:
+        return None
+
+    outputs = record.resolution_data or {}
+    if not outputs.get("recommended_action") and outputs.get("status") != "COMPLETE":
+        outputs = _synthesize_back_order_outputs(record)
+
+    available_qty = _as_float(metadata.get("available_qty"))
+    unit_price = _as_float(metadata.get("unit_price"))
+    uom = str(metadata.get("uom") or "")
+
+    raw_options = outputs.get("resolution_options") or []
+    resolution_options = [
+        opt for opt in (_resolution_option(o) for o in raw_options) if opt
+    ]
+    raw_alternates = enrichment.get("alternate_warehouses") or []
+    alternates = [
+        alt for alt in (_alternate_warehouse(a) for a in raw_alternates) if alt
+    ]
+    raw_substitutes = enrichment.get("substitutes") or []
+    substitutes = [
+        sub for sub in (_substitute(s) for s in raw_substitutes) if sub
+    ]
+
+    try:
+        return BackOrderAnalysisData(
+            ordered_qty=ordered_qty,
+            available_qty=available_qty,
+            gap_qty=_as_float(outputs.get("gap_qty"), default=ordered_qty - available_qty),
+            gap_pct=_as_float(outputs.get("gap_pct"),
+                              default=(ordered_qty - available_qty) / ordered_qty),
+            unit_price=unit_price,
+            uom=uom,
+            at_risk=_as_float(outputs.get("at_risk"),
+                              default=(ordered_qty - available_qty) * unit_price),
+            atp_date=str(atp_date),
+            primary_dc=primary_dc,
+            resolution_options=resolution_options,
+            alternate_warehouses=alternates,
+            substitutes=substitutes,
+            production=_inbound(enrichment.get("production")),
+            inbound_po=_inbound(enrichment.get("inbound_po")),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
 # Recipe-name → (target field on AnalysisResponse, adapter function).
 #
 # The endpoint looks up by `record.selected_recipe`. Absent recipe name
@@ -893,6 +1101,7 @@ ANALYSIS_ADAPTERS: Dict[
     "MOQRoundUpRecipe.py": ("moq_analysis", adapt_moq),
     "PalletAlignmentRecipe.py": ("pallet_analysis", adapt_pallet),
     "DuplicatePORecipe.py": ("duplicate_detection", adapt_duplicate),
+    "BackOrderResolutionRecipe.py": ("backorder_analysis", adapt_back_order),
 }
 
 
@@ -925,6 +1134,7 @@ INTENT_TO_RECIPE_NAME: Dict[str, str] = {
     "MIN_ORDER_QTY": "MOQRoundUpRecipe.py",
     "PALLET_CONFIG": "PalletAlignmentRecipe.py",
     "DUPLICATE_PO": "DuplicatePORecipe.py",
+    "BACK_ORDER": "BackOrderResolutionRecipe.py",
 }
 
 

@@ -67,6 +67,41 @@ def _register_oms_stub():
                 status="SUCCESS",
                 data={"fulfilled": False},
             ),
+            "get_inventory_snapshot": GatewayResponse(
+                gateway_name="oms",
+                operation="get_inventory_snapshot",
+                status="SUCCESS",
+                # Verdict Pillar 1 (T3): payload carries every
+                # audit-bearing subfield required by
+                # BackOrderAnalysisData (registry: primary_dc + atp_date
+                # always, conditional alternate_warehouses /
+                # substitutes / production / inbound_po).
+                data={
+                    "primary_dc": {
+                        "plant": "DC-EAST", "name": "East DC",
+                        "region": "US-EAST", "qty": 50.0,
+                    },
+                    "atp_date": "2026-04-30",
+                    "alternate_warehouses": [
+                        {
+                            "plant": "DC-WEST", "name": "West DC",
+                            "region": "US-WEST", "qty": 200.0,
+                            "eta_days": 4, "freight_delta_per_unit": 0.50,
+                            "freight_delta_total": 25.0,
+                        },
+                    ],
+                    "substitutes": [
+                        {
+                            "sku": "SKU-BO-1-ALT", "description": "Equivalent SKU",
+                            "available_qty": 150.0, "price_delta_pct": 0.02,
+                            "acceptance_rate": 0.85, "source": "catalog",
+                            "priority": 1,
+                        },
+                    ],
+                    "production": {"qty": 100.0, "date": "2026-05-05"},
+                    "inbound_po": {"qty": 75.0, "eta": "2026-05-02", "po_num": "PO-INB-1"},
+                },
+            ),
             "get_matched_po_details": GatewayResponse(
                 gateway_name="oms",
                 operation="get_matched_po_details",
