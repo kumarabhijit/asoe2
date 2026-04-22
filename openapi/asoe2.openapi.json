@@ -171,6 +171,16 @@
             "title": "Lines",
             "type": "array"
           },
+          "moq_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MOQAnalysisData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "overmax_analysis": {
             "anyOf": [
               {
@@ -1088,6 +1098,129 @@
         "title": "MFAVerifyRequest",
         "type": "object"
       },
+      "MOQAnalysisData": {
+        "additionalProperties": false,
+        "description": "MOQRoundUpRecipe \u2192 UI `moq_analysis`.\n\nRegistry-classified fields (2026-04-22 workshop):\n  * audit-bearing: ordered_qty, moq_qty, shortfall_qty,\n    shortfall_pct, sku, unit_cost, uom, at_risk, round_up_plan.\n  * grandfathered audit-bearing (until 2026-07-21 \u2014 gateway gap):\n    moq_source, channel, contract_ref, block_status.\n  * contextual: description, block_message.\n\n`at_risk` is sourced from the recipe's `uplift_value`\n(uplift_qty \u00d7 unit_cost). The `sap_steps` UI field is omitted\nhere \u2014 it's contextual / not produced by the recipe and the\nUI can render whatever's present in `round_up_plan`.",
+        "properties": {
+          "at_risk": {
+            "default": 0.0,
+            "title": "At Risk",
+            "type": "number"
+          },
+          "block_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Block Message"
+          },
+          "block_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Block Status"
+          },
+          "channel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel"
+          },
+          "contract_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Ref"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "moq_qty": {
+            "title": "Moq Qty",
+            "type": "number"
+          },
+          "moq_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Moq Source"
+          },
+          "ordered_qty": {
+            "title": "Ordered Qty",
+            "type": "number"
+          },
+          "round_up_plan": {
+            "items": {
+              "$ref": "#/components/schemas/RoundUpPlanLine"
+            },
+            "title": "Round Up Plan",
+            "type": "array"
+          },
+          "shortfall_pct": {
+            "title": "Shortfall Pct",
+            "type": "number"
+          },
+          "shortfall_qty": {
+            "title": "Shortfall Qty",
+            "type": "number"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          },
+          "unit_cost": {
+            "default": 0.0,
+            "title": "Unit Cost",
+            "type": "number"
+          },
+          "uom": {
+            "default": "",
+            "title": "Uom",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ordered_qty",
+          "moq_qty",
+          "shortfall_qty",
+          "shortfall_pct",
+          "sku"
+        ],
+        "title": "MOQAnalysisData",
+        "type": "object"
+      },
       "OverMaxAnalysisData": {
         "additionalProperties": false,
         "description": "OverMaxTrimRecipe \u2192 UI `overmax_analysis`.\n\nRegistry-classified fields (2026-04-22 workshop):\n  * audit-bearing: total_ordered, max_qty, excess_qty,\n    exceedance_pct, uom, at_risk, order_lines, trim_plan.\n  * audit-bearing (grandfathered until 2026-07-21 \u2014 gateway gap):\n    contract_ref, block_status, block_reason.\n\nThe recipe computes excess_qty / exceedance_pct / trim_plan /\nat_risk from event metadata; the SAP block + contract gateway\nthat would supply contract_ref / block_status / block_reason\nis not yet wired (overmax_gateway_gap clause).",
@@ -1658,6 +1791,51 @@
           "exception_id"
         ],
         "title": "ResolveResponse",
+        "type": "object"
+      },
+      "RoundUpPlanLine": {
+        "additionalProperties": false,
+        "description": "One row in MOQRoundUpRecipe's round-up plan.",
+        "properties": {
+          "action": {
+            "default": "ROUND_UP",
+            "enum": [
+              "ROUND_UP",
+              "ACCEPT_BELOW",
+              "ESCALATE"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "delta": {
+            "default": 0.0,
+            "title": "Delta",
+            "type": "number"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "ordered": {
+            "title": "Ordered",
+            "type": "number"
+          },
+          "round_up_to": {
+            "title": "Round Up To",
+            "type": "number"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sku",
+          "ordered",
+          "round_up_to"
+        ],
+        "title": "RoundUpPlanLine",
         "type": "object"
       },
       "SAPActionStep": {

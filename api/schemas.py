@@ -628,6 +628,56 @@ class OverMaxAnalysisData(BaseModel):
     block_reason: Optional[str] = None
 
 
+class RoundUpPlanLine(BaseModel):
+    """One row in MOQRoundUpRecipe's round-up plan."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sku: str
+    description: str = ""
+    ordered: float
+    round_up_to: float
+    delta: float = 0.0
+    action: Literal["ROUND_UP", "ACCEPT_BELOW", "ESCALATE"] = "ROUND_UP"
+
+
+class MOQAnalysisData(BaseModel):
+    """MOQRoundUpRecipe → UI `moq_analysis`.
+
+    Registry-classified fields (2026-04-22 workshop):
+      * audit-bearing: ordered_qty, moq_qty, shortfall_qty,
+        shortfall_pct, sku, unit_cost, uom, at_risk, round_up_plan.
+      * grandfathered audit-bearing (until 2026-07-21 — gateway gap):
+        moq_source, channel, contract_ref, block_status.
+      * contextual: description, block_message.
+
+    `at_risk` is sourced from the recipe's `uplift_value`
+    (uplift_qty × unit_cost). The `sap_steps` UI field is omitted
+    here — it's contextual / not produced by the recipe and the
+    UI can render whatever's present in `round_up_plan`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ordered_qty: float
+    moq_qty: float
+    shortfall_qty: float
+    shortfall_pct: float
+    sku: str
+    unit_cost: float = 0.0
+    uom: str = ""
+    at_risk: float = 0.0
+    round_up_plan: List[RoundUpPlanLine] = Field(default_factory=list)
+    # Grandfathered audit-bearing.
+    moq_source: Optional[str] = None
+    channel: Optional[str] = None
+    contract_ref: Optional[str] = None
+    block_status: Optional[str] = None
+    # Contextual.
+    description: Optional[str] = None
+    block_message: Optional[str] = None
+
+
 class AnalysisResponse(BaseModel):
     """GET /api/v1/exceptions/{id}/analysis"""
 
@@ -645,3 +695,4 @@ class AnalysisResponse(BaseModel):
     edi_mismatch_analysis: Optional[EdiMismatchAnalysisData] = None
     delivery_delay_analysis: Optional[DeliveryDelayAnalysisData] = None
     overmax_analysis: Optional[OverMaxAnalysisData] = None
+    moq_analysis: Optional[MOQAnalysisData] = None

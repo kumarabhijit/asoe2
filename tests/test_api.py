@@ -1224,3 +1224,68 @@ class TestAnalysis:
             headers=_auth(analyst_token),
         ).json()
         assert trace.get("audit_context_missing_fields") == []
+
+    # -----------------------------------------------------------------
+    # L2d.moq — adapter end-to-end. Recipe computes shortfall + plan;
+    # at_risk surfaces the recipe's uplift_value.
+    # -----------------------------------------------------------------
+
+    def _create_moq(
+        self, client, token, *, ordered: float, moq: float,
+    ) -> str:
+        event = {
+            "order_id": f"PO-MOQ-{int(ordered)}",
+            "line_item": 1,
+            "po_price": 10.0,
+            "sap_base_price": 10.0,
+            "event_type": "MIN_ORDER_QTY",
+            "retailer_id": "R-40",
+            "line_count": 1,
+            "metadata": {
+                "sku": "SKU-MQ-001",
+                "ordered_qty": ordered,
+                "moq_qty": moq,
+                "unit_cost": 12.5,
+                "uom": "CASE",
+            },
+        }
+        r = client.post(
+            "/api/v1/exceptions/resolve", json=event, headers=_auth(token),
+        )
+        assert r.status_code == 200, r.text
+        return r.json()["exception_id"]
+
+    def test_analysis_carries_moq_round_up_branch(
+        self, client, analyst_token,
+    ):
+        # Ordered 18 vs MOQ 20 → 10% shortfall → ROUND_UP_REVIEW
+        # YELLOW. Adapter synthesises via the recipe.
+        exc_id = self._create_moq(client, analyst_token, ordered=18.0, moq=20.0)
+        data = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        ).json()
+        moq = data.get("moq_analysis")
+        assert moq is not None
+        assert moq["ordered_qty"] == 18.0
+        assert moq["moq_qty"] == 20.0
+        assert moq["shortfall_qty"] == 2.0
+        assert moq["sku"] == "SKU-MQ-001"
+        assert moq["unit_cost"] == 12.5
+        assert moq["uom"] == "CASE"
+        # uplift_value = uplift_qty (2) × unit_cost (12.5) = 25
+        assert moq["at_risk"] == 25.0
+        assert len(moq["round_up_plan"]) >= 1
+        # Grandfathered fields absent.
+        assert moq.get("contract_ref") is None
+        assert moq.get("moq_source") is None
+
+    def test_trace_for_moq_has_no_audit_gap(
+        self, client, analyst_token,
+    ):
+        exc_id = self._create_moq(client, analyst_token, ordered=18.0, moq=20.0)
+        trace = client.get(
+            f"/api/v1/exceptions/{exc_id}/trace",
+            headers=_auth(analyst_token),
+        ).json()
+        assert trace.get("audit_context_missing_fields") == []

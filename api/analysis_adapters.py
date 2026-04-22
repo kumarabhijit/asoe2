@@ -35,9 +35,11 @@ from api.schemas import (
     AlternateDeliveryOption,
     DeliveryDelayAnalysisData,
     EdiMismatchAnalysisData,
+    MOQAnalysisData,
     OverMaxAnalysisData,
     OverMaxLine,
     PriceHoldAnalysisData,
+    RoundUpPlanLine,
     TrimPlanLine,
 )
 from api.store import ExceptionRecord
@@ -45,12 +47,15 @@ from contracts.policy import (
     DELIVERY_DELAY_MINOR_DAYS,
     DELIVERY_DELAY_SEVERE_DAYS,
     EDI_MISMATCH_AUTONOMY_LEVELS,
+    MOQ_SEVERE_SHORTFALL_PCT,
+    MOQ_UPLIFT_REVIEW_PCT,
     OVER_MAX_SEVERE_EXCEEDANCE_PCT,
     PRICE_HOLD_HARD_BLOCK_PCT,
     PRICE_HOLD_TOLERANCE_PCT,
 )
 from recipes.DeliveryDelayResolutionRecipe import resolve_delivery_delay
 from recipes.EdiMismatchRecipe import detect_edi_mismatch
+from recipes.MOQRoundUpRecipe import round_up_moq
 from recipes.OverMaxTrimRecipe import trim_over_max
 from recipes.PriceHoldReleaseRecipe import execute_price_hold_release
 
@@ -455,6 +460,110 @@ def adapt_overmax(record: ExceptionRecord) -> Optional[OverMaxAnalysisData]:
     return _overmax_from_outputs(synthetic, event)
 
 
+def _moq_from_outputs(
+    outputs: Dict[str, Any], event: Dict[str, Any],
+) -> Optional[MOQAnalysisData]:
+    metadata = event.get("metadata") or {}
+    ordered_qty = _as_float(metadata.get("ordered_qty"))
+    moq_qty = _as_float(metadata.get("moq_qty"))
+    if ordered_qty < 0 or moq_qty <= 0:
+        return None
+    shortfall_qty = outputs.get("shortfall_qty")
+    shortfall_pct = outputs.get("shortfall_pct")
+    if shortfall_qty is None or shortfall_pct is None:
+        return None
+
+    sku = (
+        event.get("sku")
+        or metadata.get("sku")
+        or outputs.get("sku")
+        or ""
+    )
+
+    raw_plan = outputs.get("round_up_plan")
+    plan: List[RoundUpPlanLine] = []
+    if isinstance(raw_plan, dict):
+        # Recipe currently emits a single dict, not a list. Wrap it.
+        action = raw_plan.get("action")
+        if action not in ("ROUND_UP", "ACCEPT_BELOW", "ESCALATE"):
+            action = "ROUND_UP"
+        try:
+            plan.append(RoundUpPlanLine(
+                sku=str(raw_plan.get("sku") or sku),
+                description=str(raw_plan.get("description") or ""),
+                ordered=_as_float(raw_plan.get("ordered")),
+                round_up_to=_as_float(raw_plan.get("round_up_to")),
+                delta=_as_float(raw_plan.get("delta")),
+                action=action,
+            ))
+        except (TypeError, ValueError):
+            pass
+
+    try:
+        return MOQAnalysisData(
+            ordered_qty=ordered_qty,
+            moq_qty=moq_qty,
+            shortfall_qty=_as_float(shortfall_qty),
+            shortfall_pct=_as_float(shortfall_pct),
+            sku=str(sku),
+            unit_cost=_as_float(metadata.get("unit_cost")),
+            uom=str(metadata.get("uom") or ""),
+            at_risk=_as_float(outputs.get("uplift_value")),
+            round_up_plan=plan,
+            # Grandfathered audit-bearing — present iff metadata
+            # supplies them today; gateway will populate post-deadline.
+            moq_source=metadata.get("moq_source"),
+            channel=metadata.get("channel"),
+            contract_ref=metadata.get("contract_ref"),
+            block_status=metadata.get("block_status"),
+            description=metadata.get("description"),
+            block_message=metadata.get("block_message"),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def adapt_moq(record: ExceptionRecord) -> Optional[MOQAnalysisData]:
+    """Project an MOQRoundUpRecipe resolution into MOQAnalysisData.
+
+    Three-path lookup. at_risk surfaces the recipe's `uplift_value`
+    (uplift_qty × unit_cost) — already the right number for the
+    four-eyes financial-impact gate.
+    """
+    outputs = record.resolution_data or {}
+    event = record.original_event or {}
+    status = outputs.get("status")
+
+    if status and status != "FAILED":
+        projection = _moq_from_outputs(outputs, event)
+        if projection is not None:
+            return projection
+
+    metadata = event.get("metadata") or {}
+    ordered_qty = _as_float(metadata.get("ordered_qty"))
+    moq_qty = _as_float(metadata.get("moq_qty"))
+    if ordered_qty < 0 or moq_qty <= 0:
+        return None
+    try:
+        synthetic = round_up_moq(
+            order_id=str(event.get("order_id", "")),
+            sku=str(
+                event.get("sku") or metadata.get("sku") or ""
+            ),
+            ordered_qty=ordered_qty,
+            moq_qty=moq_qty,
+            unit_cost=_as_float(metadata.get("unit_cost")),
+            uom=str(metadata.get("uom") or "CS"),
+            severe_shortfall_pct=MOQ_SEVERE_SHORTFALL_PCT,
+            uplift_review_pct=MOQ_UPLIFT_REVIEW_PCT,
+        )
+    except (TypeError, ValueError):
+        return None
+    if synthetic.get("status") == "FAILED":
+        return None
+    return _moq_from_outputs(synthetic, event)
+
+
 # Recipe-name → (target field on AnalysisResponse, adapter function).
 #
 # The endpoint looks up by `record.selected_recipe`. Absent recipe name
@@ -470,6 +579,7 @@ ANALYSIS_ADAPTERS: Dict[
         "delivery_delay_analysis", adapt_delivery_delay,
     ),
     "OverMaxTrimRecipe.py": ("overmax_analysis", adapt_overmax),
+    "MOQRoundUpRecipe.py": ("moq_analysis", adapt_moq),
 }
 
 
@@ -483,6 +593,7 @@ INTENT_TO_RECIPE_NAME: Dict[str, str] = {
     "EDI_MISMATCH": "EdiMismatchRecipe.py",
     "DELIVERY_DELAY": "DeliveryDelayResolutionRecipe.py",
     "OVER_MAX": "OverMaxTrimRecipe.py",
+    "MIN_ORDER_QTY": "MOQRoundUpRecipe.py",
 }
 
 

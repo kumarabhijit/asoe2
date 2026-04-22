@@ -577,19 +577,44 @@ grandfather_clauses:
     owner: backend
     tracking_issue: TBD
 
+  moq_gateway_gap:
+    fields:
+      - MOQAnalysisData.moq_source
+      - MOQAnalysisData.channel
+      - MOQAnalysisData.contract_ref
+      - MOQAnalysisData.block_status
+    opened: 2026-04-22
+    deadline: 2026-07-21
+    rationale: >-
+      MOQRoundUpRecipe receives ordered_qty / moq_qty / unit_cost
+      from event metadata; the SAP customer-master / contract /
+      block-status gateway that would supply MOQ provenance
+      (KNMT-MINBM vs MARC-MINBE), distribution channel, contract
+      ref, and current block status is not wired. Compliance
+      approves a 90-day clause: composer treats these as contextual
+      until the deadline. Post-deadline, missing values route MIN_ORDER_QTY
+      exceptions to AUDIT_CONTEXT_MISSING.
+    owner: backend
+    tracking_issue: TBD
+
   overmax_gateway_gap:
     fields:
       - OverMaxAnalysisData.contract_ref
       - OverMaxAnalysisData.block_status
       - OverMaxAnalysisData.block_reason
+      - OverMaxAnalysisData.order_lines
+      - OverMaxAnalysisData.trim_plan
+      - OverMaxAnalysisData.uom
     opened: 2026-04-22
     deadline: 2026-07-21
     rationale: >-
       OverMaxTrimRecipe receives total_ordered / max_qty /
       order_lines from event metadata but the SAP contract /
-      block-status gateway is not wired. Compliance approves a
-      90-day clause: the composition node treats these three
-      fields as contextual until the deadline. Post-deadline,
+      block-status gateway is not wired, AND not every event
+      supplies per-line metadata (order_lines, unit_cost_per_line);
+      when absent, trim_plan also collapses to empty. Compliance
+      approves a 90-day clause: the composition node treats these
+      five fields as contextual until the deadline. Post-deadline,
       missing values route OVER_MAX exceptions to
       AUDIT_CONTEXT_MISSING.
     owner: backend
