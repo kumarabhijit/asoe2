@@ -67,13 +67,83 @@ def _register_oms_stub():
                 status="SUCCESS",
                 data={"fulfilled": False},
             ),
+            "get_inventory_snapshot": GatewayResponse(
+                gateway_name="oms",
+                operation="get_inventory_snapshot",
+                status="SUCCESS",
+                # Verdict Pillar 1 (T3): payload carries every
+                # audit-bearing subfield required by
+                # BackOrderAnalysisData (registry: primary_dc + atp_date
+                # always, conditional alternate_warehouses /
+                # substitutes / production / inbound_po).
+                data={
+                    "primary_dc": {
+                        "plant": "DC-EAST", "name": "East DC",
+                        "region": "US-EAST", "qty": 50.0,
+                    },
+                    "atp_date": "2026-04-30",
+                    "alternate_warehouses": [
+                        {
+                            "plant": "DC-WEST", "name": "West DC",
+                            "region": "US-WEST", "qty": 200.0,
+                            "eta_days": 4, "freight_delta_per_unit": 0.50,
+                            "freight_delta_total": 25.0,
+                        },
+                    ],
+                    "substitutes": [
+                        {
+                            "sku": "SKU-BO-1-ALT", "description": "Equivalent SKU",
+                            "available_qty": 150.0, "price_delta_pct": 0.02,
+                            "acceptance_rate": 0.85, "source": "catalog",
+                            "priority": 1,
+                        },
+                    ],
+                    "production": {"qty": 100.0, "date": "2026-05-05"},
+                    "inbound_po": {"qty": 75.0, "eta": "2026-05-02", "po_num": "PO-INB-1"},
+                },
+            ),
             "get_matched_po_details": GatewayResponse(
                 gateway_name="oms",
                 operation="get_matched_po_details",
                 status="SUCCESS",
+                # Verdict Pillar 1 (T2): payload carries every
+                # audit-bearing subfield required by
+                # DuplicateDetectionData (registry: original_order +
+                # duplicate_order OrderSnapshot pair, days_between,
+                # cancellation_target). Recipe-input booleans
+                # (has_revision_indicator, line_items_identical) are
+                # alongside.
                 data={
                     "has_revision_indicator": False,
                     "line_items_identical": True,
+                    "days_between": 1,
+                    "cancellation_target": "SO-DUP-002",
+                    "detection_method": "po_number+customer+lines",
+                    "customer_id": "R-10",
+                    "matching_fields": ["po_number", "customer_id", "line_items"],
+                    "differing_fields": [],
+                    "original_order": {
+                        "so_number": "SO-DUP-001",
+                        "po_number": "PO-4000",
+                        "created_date": "2026-04-20",
+                        "total_value": 1000.0,
+                        "line_count": 1,
+                        "status": "OPEN",
+                        "lines": [
+                            {"sku": "SKU-A", "description": "Widget", "qty": 10.0, "unit_price": 100.0},
+                        ],
+                    },
+                    "duplicate_order": {
+                        "so_number": "SO-DUP-002",
+                        "po_number": "PO-4001",
+                        "created_date": "2026-04-21",
+                        "total_value": 1000.0,
+                        "line_count": 1,
+                        "status": "OPEN",
+                        "lines": [
+                            {"sku": "SKU-A", "description": "Widget", "qty": 10.0, "unit_price": 100.0},
+                        ],
+                    },
                 },
             ),
         },
@@ -89,8 +159,116 @@ def _register_oms_stub():
             ),
         },
     )
+    # Verdict T4: SAP doc / contract / promotion stubs supply the
+    # audit-bearing PriceAnalysisData fields that retired the
+    # price_analysis_gateway_gap clause. Real SAP integration is a
+    # separate platform track; these stubs mirror the response shape
+    # documented in api/analysis_adapters.py::adapt_price.
+    sap_doc_stub = StubGateway(
+        "sap_doc",
+        responses={
+            "lookup": GatewayResponse(
+                gateway_name="sap_doc",
+                operation="lookup",
+                status="SUCCESS",
+                data={
+                    "doc_type": "Sales Order",
+                    "doc_number": "5500001234",
+                    "applied_condition_chain": ["PR00", "K007"],
+                    "sku": "SKU-STUB-1",
+                    "uom": "CS",
+                    "material_desc": "Stub Material",
+                    "order_date": "2026-04-22",
+                },
+            ),
+        },
+    )
+    sap_contract_stub = StubGateway(
+        "sap_contract",
+        responses={
+            "lookup": GatewayResponse(
+                gateway_name="sap_contract",
+                operation="lookup",
+                status="SUCCESS",
+                data={
+                    "contract_ref": "KONA-CN-1001",
+                    "rule_id": "SO-PRICE-001",
+                    "root_cause_category": "CONTRACT_PRICE_OVERRIDE",
+                },
+            ),
+        },
+    )
+    promotion_stub = StubGateway(
+        "promotion",
+        responses={
+            "lookup": GatewayResponse(
+                gateway_name="promotion",
+                operation="lookup",
+                status="SUCCESS",
+                data={
+                    "promotion_ref": "PRMO-2026-04-Q2",
+                    "root_cause_category": "PROMOTION_HONOR",
+                },
+            ),
+        },
+    )
+    # Verdict T5: SAP block + customer-master + SLA contract stubs
+    # supply the audit-bearing fields that retired the
+    # delivery_delay_financial_gap / overmax_gateway_gap /
+    # moq_gateway_gap clauses. Real SAP integration is a separate
+    # platform track; these stubs mirror the response shape
+    # documented in api/analysis_adapters.py.
+    sap_block_stub = StubGateway(
+        "sap_block",
+        responses={
+            "lookup": GatewayResponse(
+                gateway_name="sap_block",
+                operation="lookup",
+                status="SUCCESS",
+                data={
+                    "block_status": "ACTIVE",
+                    "block_reason": "OVER_MAX_QTY",
+                    "block_message": "Order exceeds contractual maximum",
+                },
+            ),
+        },
+    )
+    sap_customer_master_stub = StubGateway(
+        "sap_customer_master",
+        responses={
+            "lookup": GatewayResponse(
+                gateway_name="sap_customer_master",
+                operation="lookup",
+                status="SUCCESS",
+                data={
+                    "moq_source": "KNMT-MINBM",
+                    "channel": "DIRECT",
+                },
+            ),
+        },
+    )
+    sla_contract_stub = StubGateway(
+        "sla_contract",
+        responses={
+            "lookup": GatewayResponse(
+                gateway_name="sla_contract",
+                operation="lookup",
+                status="SUCCESS",
+                data={
+                    "sla_deadline": "2026-04-25T00:00:00Z",
+                    "at_risk": 1500.0,
+                },
+            ),
+        },
+    )
     register_gateway(oms_stub)
     register_gateway(notification_stub)
+    register_gateway(sap_doc_stub)
+    register_gateway(sap_contract_stub)
+    register_gateway(promotion_stub)
+    register_gateway(sap_block_stub)
+    register_gateway(sap_customer_master_stub)
+    register_gateway(sla_contract_stub)
     yield
     clear_registry()
 

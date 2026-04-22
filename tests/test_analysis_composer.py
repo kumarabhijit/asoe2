@@ -161,36 +161,35 @@ def test_conditional_field_enforced_when_predicate_holds():
     assert "alternate_warehouses" in enforced
 
 
-def test_grandfathered_price_analysis_fields_are_not_enforced_today():
-    """The six PriceAnalysis backend-gap fields have a grandfather
-    clause with deadline 2026-06-21. Today (before that date) they
-    must appear in waived, NOT enforced, so missing values don't
-    fail coverage."""
+def test_price_analysis_audit_bearing_fields_enforced_post_retirement():
+    """T4 retired price_analysis_gateway_gap. Per the Verdict full-close
+    engagement, doc_type / doc_number / rule_id /
+    root_cause_category remain audit-bearing AND are enforced today
+    — the SAP doc / contract / promotion gateways are wired."""
     from api.analysis_composer import _required_audit_fields
 
     record = _make_record(resolved_action=None)
     enforced, grandfathered = _required_audit_fields(
         record, "PriceAnalysisData",
     )
-    assert "contract_ref" in grandfathered
-    assert "doc_type" in grandfathered
-    assert "contract_ref" not in enforced
+    assert "doc_type" in enforced
+    assert "doc_number" in enforced
+    assert "rule_id" in enforced
+    assert "root_cause_category" in enforced
+    # No grandfather clause for this section anymore.
+    assert grandfathered == []
 
 
-def test_grandfathered_fields_become_enforced_after_deadline():
-    """Past the deadline the clause drops off and the fields flip to
-    enforced. We override the composer's `_today` seam so the check
-    runs as if the calendar had advanced past 2026-06-21."""
+def test_price_analysis_contract_and_promotion_refs_are_contextual():
+    """contract_ref / promotion_ref were reclassified contextual at T4
+    retirement — not every line is contract- or promotion-governed,
+    so absence is structurally legitimate."""
     from api.analysis_composer import _required_audit_fields
 
-    post = date(2027, 1, 1)
-    with patch("api.analysis_composer._today", return_value=post):
-        record = _make_record(resolved_action=None)
-        enforced, grandfathered = _required_audit_fields(
-            record, "PriceAnalysisData",
-        )
-    assert "contract_ref" in enforced
-    assert "contract_ref" not in grandfathered
+    record = _make_record(resolved_action=None)
+    enforced, _ = _required_audit_fields(record, "PriceAnalysisData")
+    assert "contract_ref" not in enforced
+    assert "promotion_ref" not in enforced
 
 
 def test_always_audit_bearing_convention_applies():

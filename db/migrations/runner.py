@@ -257,6 +257,27 @@ def _apply_sqlite_v003(conn: sqlite3.Connection) -> None:
     logger.info("SQLite schema V003 applied (hash-chained policy_audit_log)")
 
 
+def _apply_sqlite_v004(conn: sqlite3.Connection) -> None:
+    """V004 — Persist enrichment_context as a first-class column.
+
+    Verdict Pillar 1 (2026-04-22 compliance workshop). Mirrors the
+    Postgres migration in V004__enrichment_context.sql; the in-memory
+    bridge in DbExceptionStore.create() retires once this lands.
+    """
+    if not _sqlite_column_exists(conn, "exceptions", "enrichment_context"):
+        conn.execute(
+            "ALTER TABLE exceptions ADD COLUMN enrichment_context TEXT "
+            "NOT NULL DEFAULT '{}'"
+        )
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+        ("V004", now),
+    )
+    conn.commit()
+    logger.info("SQLite schema V004 applied (enrichment_context column)")
+
+
 def apply_sqlite(conn: sqlite3.Connection) -> None:
     """Apply the SQLite-compatible schema (V001 + subsequent migrations)."""
     conn.executescript(_SQLITE_SCHEMA)
@@ -269,6 +290,7 @@ def apply_sqlite(conn: sqlite3.Connection) -> None:
     logger.info("SQLite schema V001 applied")
     _apply_sqlite_v002(conn)
     _apply_sqlite_v003(conn)
+    _apply_sqlite_v004(conn)
 
 
 def apply_postgres(database_url: str) -> None:
@@ -352,6 +374,22 @@ def apply_postgres(database_url: str) -> None:
             logger.info("PostgreSQL schema V003 applied (hash-chained audit log)")
         else:
             logger.info("PostgreSQL schema V003 already applied, skipping")
+
+        # V004 — enrichment_context column (Verdict Pillar 1).
+        cur.execute(
+            "SELECT version FROM schema_migrations WHERE version = %s",
+            ("V004",),
+        )
+        if not cur.fetchone():
+            v004_sql = (_MIGRATIONS_DIR / "V004__enrichment_context.sql").read_text()
+            cur.execute(v004_sql)
+            cur.execute(
+                "INSERT INTO schema_migrations (version) VALUES (%s)",
+                ("V004",),
+            )
+            logger.info("PostgreSQL schema V004 applied (enrichment_context column)")
+        else:
+            logger.info("PostgreSQL schema V004 already applied, skipping")
 
         conn.commit()
     except Exception:

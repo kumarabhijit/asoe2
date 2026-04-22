@@ -718,10 +718,12 @@ class TestDuplicatePOValidateTypesNode:
         assert isinstance(scores, dict)
         assert scores.get("po_number") == 1.0
 
-    def test_duplicate_po_resolution_context_from_resolved_data(self, duplicate_po_event):
-        """Gateway-resolved context flows into recipe params."""
+    def test_duplicate_po_resolution_context_from_enrichment_context(self, duplicate_po_event):
+        """Gateway-resolved context flows into recipe params via the
+        single audit-bearing bag (V004). resolved_data is no longer the
+        gateway-result carrier."""
         duplicate_po_event.selected_recipe = "DuplicatePORecipe.py"
-        duplicate_po_event.resolved_data = {
+        duplicate_po_event.enrichment_context = {
             "fulfillment_status": {"fulfilled": True},
             "matched_po_details": {"has_revision_indicator": True, "line_items_identical": False},
         }

@@ -133,9 +133,64 @@
         "title": "AlternateDeliveryOption",
         "type": "object"
       },
+      "AlternateWarehouse": {
+        "additionalProperties": false,
+        "description": "Alternate-DC option with shipping economics. Conditional on\n`resolved_action == ALT_DC` per the registry.",
+        "properties": {
+          "eta_days": {
+            "title": "Eta Days",
+            "type": "integer"
+          },
+          "freight_delta_per_unit": {
+            "title": "Freight Delta Per Unit",
+            "type": "number"
+          },
+          "freight_delta_total": {
+            "title": "Freight Delta Total",
+            "type": "number"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "plant": {
+            "title": "Plant",
+            "type": "string"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "number"
+          },
+          "region": {
+            "default": "",
+            "title": "Region",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plant",
+          "qty",
+          "eta_days",
+          "freight_delta_per_unit",
+          "freight_delta_total"
+        ],
+        "title": "AlternateWarehouse",
+        "type": "object"
+      },
       "AnalysisResponse": {
         "description": "GET /api/v1/exceptions/{id}/analysis",
         "properties": {
+          "backorder_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BackOrderAnalysisData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "confidence": {
             "title": "Confidence",
             "type": "integer"
@@ -153,6 +208,16 @@
           "diagnosis": {
             "title": "Diagnosis",
             "type": "string"
+          },
+          "duplicate_detection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DuplicateDetectionData"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "edi_mismatch_analysis": {
             "anyOf": [
@@ -181,6 +246,16 @@
               }
             ]
           },
+          "order_comparison": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrderComparisonData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "overmax_analysis": {
             "anyOf": [
               {
@@ -195,6 +270,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/PalletAnalysisData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "price_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PriceAnalysisData"
               },
               {
                 "type": "null"
@@ -304,6 +389,101 @@
         "title": "AuthTokenResponse",
         "type": "object"
       },
+      "BackOrderAnalysisData": {
+        "additionalProperties": false,
+        "description": "BackOrderResolutionRecipe \u2192 UI `backorder_analysis`.\n\nRegistry-classified fields (2026-04-22 workshop):\n  * audit-bearing: ordered_qty, available_qty, gap_qty, gap_pct,\n    unit_price, uom, at_risk, atp_date, resolution_options.\n  * audit-bearing (gateway): primary_dc.\n  * conditional (gateway, depends_on resolved_action):\n    alternate_warehouses (ALT_DC), substitutes (SUBSTITUTE),\n    production / inbound_po (RESCHEDULE).\n\nNo grandfather clause in this engagement. Gateway-dependent\naudit-bearing fields (primary_dc, atp_date) MUST persist via\nenrichment_context[\"inventory_snapshot\"]; missing \u2192 composer\nroutes to AUDIT_CONTEXT_MISSING.\n\nSources:\n  * `record.original_event` \u2014 recipe input metadata (ordered_qty,\n    available_qty, unit_price, uom, sku).\n  * `record.enrichment_context[\"inventory_snapshot\"]` \u2014 gateway\n    snapshot (primary_dc, atp_date, alternate_warehouses,\n    substitutes, production, inbound_po).\n  * `record.resolution_data` \u2014 recipe-computed fields (gap_qty,\n    gap_pct, at_risk, resolution_options, recommended_action).",
+        "properties": {
+          "alternate_warehouses": {
+            "items": {
+              "$ref": "#/components/schemas/AlternateWarehouse"
+            },
+            "title": "Alternate Warehouses",
+            "type": "array"
+          },
+          "at_risk": {
+            "title": "At Risk",
+            "type": "number"
+          },
+          "atp_date": {
+            "title": "Atp Date",
+            "type": "string"
+          },
+          "available_qty": {
+            "title": "Available Qty",
+            "type": "number"
+          },
+          "gap_pct": {
+            "title": "Gap Pct",
+            "type": "number"
+          },
+          "gap_qty": {
+            "title": "Gap Qty",
+            "type": "number"
+          },
+          "inbound_po": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboundOrder"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ordered_qty": {
+            "title": "Ordered Qty",
+            "type": "number"
+          },
+          "primary_dc": {
+            "$ref": "#/components/schemas/WarehouseInfo"
+          },
+          "production": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboundOrder"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resolution_options": {
+            "items": {
+              "$ref": "#/components/schemas/ResolutionOption"
+            },
+            "title": "Resolution Options",
+            "type": "array"
+          },
+          "substitutes": {
+            "items": {
+              "$ref": "#/components/schemas/SubstituteSKU"
+            },
+            "title": "Substitutes",
+            "type": "array"
+          },
+          "unit_price": {
+            "title": "Unit Price",
+            "type": "number"
+          },
+          "uom": {
+            "title": "Uom",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ordered_qty",
+          "available_qty",
+          "gap_qty",
+          "gap_pct",
+          "unit_price",
+          "uom",
+          "at_risk",
+          "atp_date",
+          "primary_dc"
+        ],
+        "title": "BackOrderAnalysisData",
+        "type": "object"
+      },
       "ChallengeRequest": {
         "description": "POST /api/v1/exceptions/{id}/challenge \u2014 post-execution challenge.\n\nAvailable on RESOLVED exceptions (GREEN verdict post-execution review).\nTransitions RESOLVED \u2192 ESCALATED for investigation.",
         "properties": {
@@ -316,6 +496,81 @@
           "challenge_reason"
         ],
         "title": "ChallengeRequest",
+        "type": "object"
+      },
+      "ComparisonLineItem": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "number"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          },
+          "unit_price": {
+            "title": "Unit Price",
+            "type": "number"
+          }
+        },
+        "required": [
+          "sku",
+          "qty",
+          "unit_price"
+        ],
+        "title": "ComparisonLineItem",
+        "type": "object"
+      },
+      "ComparisonOrder": {
+        "additionalProperties": false,
+        "properties": {
+          "created_date": {
+            "title": "Created Date",
+            "type": "string"
+          },
+          "customer": {
+            "default": "",
+            "title": "Customer",
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ComparisonLineItem"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "po_number": {
+            "title": "Po Number",
+            "type": "string"
+          },
+          "so_number": {
+            "title": "So Number",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "total_value": {
+            "title": "Total Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "so_number",
+          "po_number",
+          "created_date",
+          "total_value",
+          "status"
+        ],
+        "title": "ComparisonOrder",
         "type": "object"
       },
       "CosignRequest": {
@@ -469,6 +724,60 @@
           "reason_tag"
         ],
         "title": "DispositionRequest",
+        "type": "object"
+      },
+      "DuplicateDetectionData": {
+        "additionalProperties": false,
+        "description": "DuplicatePORecipe \u2192 UI `duplicate_detection`.\n\nRegistry-classified fields (2026-04-22 workshop):\n\n  * audit-bearing (gateway): original_order, duplicate_order\n    (OrderSnapshot pair from oms/get_matched_po_details).\n  * audit-bearing (control): days_between, cancellation_target,\n    autonomy_applied.\n  * audit-bearing (recipe-output): confidence, recommended_action.\n  * contextual: detection_method (regenerable from signal_scores).\n\nNo grandfather clause: every audit-bearing field must persist\nend-to-end. Empty enrichment_context routes to\nAUDIT_CONTEXT_MISSING via the build_analysis composer.\n\nSources:\n  * `record.enrichment_context[\"matched_po_details\"]` \u2014 gateway\n    OrderSnapshot pair + days_between + detection_method +\n    cancellation_target.\n  * `record.resolution_data` \u2014 recipe composite_score (\u2192\n    confidence), recommended_action, autonomy_level.",
+        "properties": {
+          "autonomy_applied": {
+            "title": "Autonomy Applied",
+            "type": "string"
+          },
+          "cancellation_target": {
+            "title": "Cancellation Target",
+            "type": "string"
+          },
+          "confidence": {
+            "title": "Confidence",
+            "type": "number"
+          },
+          "days_between": {
+            "title": "Days Between",
+            "type": "integer"
+          },
+          "detection_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detection Method"
+          },
+          "duplicate_order": {
+            "$ref": "#/components/schemas/OrderSnapshot"
+          },
+          "original_order": {
+            "$ref": "#/components/schemas/OrderSnapshot"
+          },
+          "recommended_action": {
+            "title": "Recommended Action",
+            "type": "string"
+          }
+        },
+        "required": [
+          "original_order",
+          "duplicate_order",
+          "days_between",
+          "confidence",
+          "recommended_action",
+          "cancellation_target",
+          "autonomy_applied"
+        ],
+        "title": "DuplicateDetectionData",
         "type": "object"
       },
       "EdiMismatchAnalysisData": {
@@ -962,6 +1271,54 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "InboundOrder": {
+        "additionalProperties": false,
+        "description": "Inbound production / PO entry. Conditional on\n`resolved_action == RESCHEDULE` per the registry.",
+        "properties": {
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "eta": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eta"
+          },
+          "po_num": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Po Num"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "number"
+          }
+        },
+        "required": [
+          "qty"
+        ],
+        "title": "InboundOrder",
+        "type": "object"
+      },
       "LineAnalysis": {
         "description": "Analysis details for a single line item.",
         "properties": {
@@ -1229,6 +1586,75 @@
           "sku"
         ],
         "title": "MOQAnalysisData",
+        "type": "object"
+      },
+      "OrderComparisonData": {
+        "additionalProperties": false,
+        "description": "Synthesised side-by-side comparison from the same\n`matched_po_details` payload that drives DuplicateDetectionData.\nNo dedicated recipe or gateway \u2014 single source of truth (R5).\n\nPer the registry (OrderComparisonData entry, \"Synthesised from\nDuplicateDetection; same attestation target\"), enforcement of\naudit-bearing coverage is delegated to DuplicateDetectionData.\nThis adapter is best-effort \u2014 projects what's present in\nmatched_po_details.",
+        "properties": {
+          "differing_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Differing Fields",
+            "type": "array"
+          },
+          "matching_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Matching Fields",
+            "type": "array"
+          },
+          "orders": {
+            "items": {
+              "$ref": "#/components/schemas/ComparisonOrder"
+            },
+            "title": "Orders",
+            "type": "array"
+          }
+        },
+        "title": "OrderComparisonData",
+        "type": "object"
+      },
+      "OrderSnapshot": {
+        "additionalProperties": false,
+        "description": "One side of a matched-PO pair from the OMS get_matched_po_details\ngateway. All subfields are audit-bearing per the\nDuplicateDetectionData.original_order / duplicate_order entries\nin compliance/audit_bearing_registry.yaml.",
+        "properties": {
+          "created_date": {
+            "title": "Created Date",
+            "type": "string"
+          },
+          "line_count": {
+            "title": "Line Count",
+            "type": "integer"
+          },
+          "po_number": {
+            "title": "Po Number",
+            "type": "string"
+          },
+          "so_number": {
+            "title": "So Number",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "total_value": {
+            "title": "Total Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "so_number",
+          "po_number",
+          "created_date",
+          "total_value",
+          "line_count",
+          "status"
+        ],
+        "title": "OrderSnapshot",
         "type": "object"
       },
       "OverMaxAnalysisData": {
@@ -1596,6 +2022,120 @@
         "title": "PolicyUpdateRequest",
         "type": "object"
       },
+      "PriceAnalysisData": {
+        "additionalProperties": false,
+        "description": "PriceAdjustmentRecipe \u2192 UI `price_analysis`.\n\nRegistry-classified fields (2026-04-22 workshop, post-T4 retirement\nof price_analysis_gateway_gap):\n  * audit-bearing (event/control): erp_unit_price, po_unit_price,\n    variance_amount, variance_pct, total_at_risk, total_quantity,\n    uom, sku.\n  * audit-bearing (gateway, sap_doc): doc_type, doc_number.\n  * audit-bearing (gateway, sap_contract): contract_ref, rule_id.\n  * audit-bearing (gateway, promotion): promotion_ref,\n    root_cause_category.\n  * contextual: material_desc, order_date.\n\nSources:\n  * `record.original_event` \u2014 po_price, sap_base_price, line_item,\n    retailer_id, sku, line_count, metadata.\n  * `record.enrichment_context[\"sap_doc_context\"]` \u2014 SAP document\n    metadata (doc_type, doc_number, applied condition chain).\n  * `record.enrichment_context[\"contract_context\"]` \u2014 KONA / custom\n    contract lookup (contract_ref, rule_id_hints).\n  * `record.enrichment_context[\"promotion_context\"]` \u2014 promotion\n    master (promotion_ref, root_cause_category).",
+        "properties": {
+          "contract_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Ref"
+          },
+          "doc_number": {
+            "title": "Doc Number",
+            "type": "string"
+          },
+          "doc_type": {
+            "title": "Doc Type",
+            "type": "string"
+          },
+          "erp_unit_price": {
+            "title": "Erp Unit Price",
+            "type": "number"
+          },
+          "material_desc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Desc"
+          },
+          "order_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order Date"
+          },
+          "po_unit_price": {
+            "title": "Po Unit Price",
+            "type": "number"
+          },
+          "promotion_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Promotion Ref"
+          },
+          "root_cause_category": {
+            "title": "Root Cause Category",
+            "type": "string"
+          },
+          "rule_id": {
+            "title": "Rule Id",
+            "type": "string"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          },
+          "total_at_risk": {
+            "title": "Total At Risk",
+            "type": "number"
+          },
+          "total_quantity": {
+            "title": "Total Quantity",
+            "type": "number"
+          },
+          "uom": {
+            "title": "Uom",
+            "type": "string"
+          },
+          "variance_amount": {
+            "title": "Variance Amount",
+            "type": "number"
+          },
+          "variance_pct": {
+            "title": "Variance Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "erp_unit_price",
+          "po_unit_price",
+          "variance_amount",
+          "variance_pct",
+          "total_at_risk",
+          "total_quantity",
+          "uom",
+          "doc_type",
+          "doc_number",
+          "sku",
+          "rule_id",
+          "root_cause_category"
+        ],
+        "title": "PriceAnalysisData",
+        "type": "object"
+      },
       "PriceHoldAnalysisData": {
         "additionalProperties": false,
         "description": "PriceHoldReleaseRecipe \u2192 UI `price_hold_analysis`.\n\n`hold_status` is a two-valued projection of the recipe's four-valued\n`status`: \"RELEASED\" when the hold was lifted, \"HELD\" otherwise (the\nrecipe's REVIEW_REQUIRED, REJECTED, and FAILED outcomes all leave the\nhold in place). Other fields mirror the recipe output or the event\ninputs (po_price / sap_base_price) / policy constants\n(tolerance_pct / hard_block_pct).",
@@ -1755,6 +2295,78 @@
           "refresh_token"
         ],
         "title": "RefreshRequest",
+        "type": "object"
+      },
+      "ResolutionOption": {
+        "additionalProperties": false,
+        "description": "One ranked resolution option for a back-order. Audit-bearing per\nregistry::BackOrderAnalysisData.resolution_options.",
+        "properties": {
+          "composite_score": {
+            "default": 0.0,
+            "title": "Composite Score",
+            "type": "number"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "sap_steps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sap Steps",
+            "type": "array"
+          },
+          "scores": {
+            "$ref": "#/components/schemas/ResolutionOptionScores"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type"
+        ],
+        "title": "ResolutionOption",
+        "type": "object"
+      },
+      "ResolutionOptionScores": {
+        "additionalProperties": false,
+        "properties": {
+          "logistics": {
+            "default": 0.0,
+            "title": "Logistics",
+            "type": "number"
+          },
+          "preference": {
+            "default": 0.0,
+            "title": "Preference",
+            "type": "number"
+          },
+          "revenue": {
+            "default": 0.0,
+            "title": "Revenue",
+            "type": "number"
+          },
+          "service": {
+            "default": 0.0,
+            "title": "Service",
+            "type": "number"
+          }
+        },
+        "title": "ResolutionOptionScores",
         "type": "object"
       },
       "ResolveRequest": {
@@ -2142,6 +2754,51 @@
         "title": "StatsResponse",
         "type": "object"
       },
+      "SubstituteSKU": {
+        "additionalProperties": false,
+        "description": "Substitute SKU candidate. Conditional on\n`resolved_action == SUBSTITUTE` per the registry.",
+        "properties": {
+          "acceptance_rate": {
+            "title": "Acceptance Rate",
+            "type": "number"
+          },
+          "available_qty": {
+            "title": "Available Qty",
+            "type": "number"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "price_delta_pct": {
+            "title": "Price Delta Pct",
+            "type": "number"
+          },
+          "priority": {
+            "default": 0,
+            "title": "Priority",
+            "type": "integer"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          },
+          "source": {
+            "default": "",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sku",
+          "available_qty",
+          "price_delta_pct",
+          "acceptance_rate"
+        ],
+        "title": "SubstituteSKU",
+        "type": "object"
+      },
       "TenantResetRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2500,6 +3157,36 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "WarehouseInfo": {
+        "additionalProperties": false,
+        "description": "Inventory snapshot for one DC. Audit-bearing per registry::\nBackOrderAnalysisData.primary_dc \u2014 reviewer attests against the\nplant + qty before approving an ALT_DC or SUBSTITUTE action.",
+        "properties": {
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "plant": {
+            "title": "Plant",
+            "type": "string"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "number"
+          },
+          "region": {
+            "default": "",
+            "title": "Region",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plant",
+          "qty"
+        ],
+        "title": "WarehouseInfo",
         "type": "object"
       },
       "WorkflowRequest": {

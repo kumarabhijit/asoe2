@@ -1,18 +1,16 @@
 """Pillar 1 tests — GraphState / ExceptionRecord / _persist_exception
 carry enrichment_context from graph execution to the audit trail.
 
-Invariants:
-  * New GraphState.enrichment_context field defaults to {} and is
-    dict-typed.
-  * New ExceptionRecord.enrichment_context attribute is initialised
-    (empty dict on records that didn't populate it).
-  * `_persist_exception` captures state.enrichment_context when
-    populated explicitly.
-  * When state.enrichment_context is empty, the bridge falls back
-    to state.resolved_data so pre-migration gateway code continues
-    to contribute evidence. This keeps the change non-breaking.
+Invariants (post-V004 single-bag semantics):
+  * GraphState.enrichment_context defaults to {} and is dict-typed.
+  * ExceptionRecord.enrichment_context defaults to {} when omitted.
+  * `_persist_exception` captures state.enrichment_context verbatim;
+    there is no fallback to state.resolved_data — gateway results
+    land in enrichment_context directly via resolve_dependencies.
   * Persisted context is a copy — mutating the graph state after
     persistence must not alter the record.
+  * resolve_dependencies writes ONLY to enrichment_context; the
+    legacy resolved_data dual-write was retired with V004.
 """
 
 from __future__ import annotations
@@ -79,10 +77,11 @@ class TestExceptionRecordEnrichmentContext:
         assert record.enrichment_context == {}
 
 
-class TestPersistExceptionBridge:
-    """The bridge in api/routes/exceptions.py::_persist_exception:
-    prefer state.enrichment_context, fall back to state.resolved_data,
-    otherwise empty. Proves the migration is non-breaking."""
+class TestPersistExceptionSingleBag:
+    """`_persist_exception` reads gateway evidence ONLY from
+    state.enrichment_context. The pre-V004 `resolved_data → enrichment_context`
+    fallback was retired — gateway nodes write to enrichment_context
+    directly (see resolve_dependencies)."""
 
     def test_explicit_enrichment_context_persists_verbatim(self):
         from api.routes.exceptions import _persist_exception
@@ -90,14 +89,17 @@ class TestPersistExceptionBridge:
         exception_store.clear()
         state = GraphState(event=_minimal_event())
         state.enrichment_context = {"primary_dc": {"plant": "DC-1"}}
-        state.resolved_data = {"legacy_key": "ignored_when_explicit"}
+        # Anything left in resolved_data is ignored — recipe-input bag,
+        # not audit evidence.
+        state.resolved_data = {"legacy_key": "ignored"}
         exc_id = _persist_exception("test-tenant", state, trace_id="tr-1")
         record = exception_store.get(exc_id, "test-tenant")
         assert record.enrichment_context == {"primary_dc": {"plant": "DC-1"}}
 
-    def test_resolved_data_fallback_when_context_empty(self):
-        """Pre-migration gateways still write to resolved_data. The
-        bridge captures it so their evidence isn't lost."""
+    def test_resolved_data_is_not_bridged_into_enrichment_context(self):
+        """V004 single-bag: gateway evidence flows via enrichment_context
+        only. Anything written to resolved_data is recipe-transient and
+        does not survive to the audit record."""
         from api.routes.exceptions import _persist_exception
 
         exception_store.clear()
@@ -106,9 +108,9 @@ class TestPersistExceptionBridge:
         # state.enrichment_context left at its default empty dict.
         exc_id = _persist_exception("test-tenant", state, trace_id="tr-2")
         record = exception_store.get(exc_id, "test-tenant")
-        assert record.enrichment_context == {"matched_po_details": {"po": "SO-9"}}
+        assert record.enrichment_context == {}
 
-    def test_empty_when_both_sources_empty(self):
+    def test_empty_when_enrichment_context_unset(self):
         from api.routes.exceptions import _persist_exception
 
         exception_store.clear()
@@ -129,3 +131,63 @@ class TestPersistExceptionBridge:
         state.enrichment_context["key"] = "mutated"
         record = exception_store.get(exc_id, "test-tenant")
         assert record.enrichment_context == {"key": "original"}
+
+
+class TestResolveDependenciesSingleBag:
+    """resolve_dependencies writes gateway results ONLY to
+    state.enrichment_context. resolved_data is no longer touched by
+    the gateway resolution path (V004 single-bag)."""
+
+    def _stub_spec_with_one_dep(self, result_key="thing"):
+        from types import SimpleNamespace
+        from contracts.models import GatewayDependency
+
+        return SimpleNamespace(
+            dependencies=(
+                GatewayDependency(
+                    gateway_name="oms",
+                    operation="get_thing",
+                    params_from_state={"order_id": "event.order_id"},
+                    result_key=result_key,
+                ),
+            ),
+        )
+
+    def test_gateway_result_lands_in_enrichment_context_only(self, monkeypatch):
+        from contracts.models import GatewayResponse, GraphState
+        from orchestration import nodes
+        from orchestration.nodes import resolve_dependencies
+
+        spec = self._stub_spec_with_one_dep()
+        monkeypatch.setattr(nodes, "get_recipe", lambda _name: spec)
+
+        class _StubExecutor:
+            def __init__(self):
+                import concurrent.futures
+                self._pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
+            def run(self, request):
+                return GatewayResponse(
+                    gateway_name=request.gateway_name,
+                    operation=request.operation,
+                    status="SUCCESS",
+                    data={"po": "SO-42"},
+                )
+
+        monkeypatch.setattr(nodes, "GatewayExecutor", _StubExecutor)
+
+        state = GraphState(event=_minimal_event())
+        state.selected_recipe = "TestRecipe.py"
+        result = resolve_dependencies(state)
+        assert result.enrichment_context == {"thing": {"po": "SO-42"}}
+        assert result.resolved_data == {}
+
+    def test_no_dependencies_is_noop(self):
+        from contracts.models import GraphState
+        from orchestration.nodes import resolve_dependencies
+
+        state = GraphState(event=_minimal_event())
+        # No selected_recipe → early return; both bags untouched.
+        result = resolve_dependencies(state)
+        assert result.enrichment_context == {}
+        assert result.resolved_data == {}

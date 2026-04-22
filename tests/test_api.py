@@ -1099,51 +1099,47 @@ class TestAnalysis:
         assert r.status_code == 200, r.text
         return r.json()["exception_id"]
 
-    def test_analysis_carries_delivery_delay_minor_branch(
+    def test_analysis_delivery_delay_shadow_gated_suppresses_projection(
         self, client, analyst_token,
     ):
-        # 3 days late → MINOR_DELAY (between 2 and 5 day thresholds)
-        # → YELLOW shadow → adapter synthesises via pure recipe.
+        """T5: post delivery_delay_financial_gap retirement, the
+        shadow-gated path doesn't fetch sla_contract gateway —
+        at_risk + sla_deadline absent → composer suppresses
+        projection (no partial-truth state)."""
+        # 3 days late → MINOR_DELAY → YELLOW shadow.
         exc_id = self._create_delivery_delay(client, analyst_token, days_late=3)
         data = client.get(
             f"/api/v1/exceptions/{exc_id}/analysis",
             headers=_auth(analyst_token),
         ).json()
-        dd = data.get("delivery_delay_analysis")
-        assert dd is not None
-        assert dd["days_late"] == 3
-        assert dd["delay_category"] == "CARRIER_DELAY"
-        assert dd["affected_lines"] == 3
-        assert dd["carrier"] == "ACME-FRT"
-        # Grandfathered fields — should be absent under the active
-        # delivery_delay_financial_gap clause.
-        assert dd.get("at_risk") is None
+        assert data.get("delivery_delay_analysis") is None
 
-    def test_analysis_carries_delivery_delay_severe_branch(
+    def test_analysis_delivery_delay_severe_shadow_gated_suppresses_projection(
         self, client, analyst_token,
     ):
-        # 7 days late → SEVERE_DELAY → ESCALATE branch.
+        """7 days late → SEVERE_DELAY → RED shadow → projection
+        suppressed (gateway data missing)."""
         exc_id = self._create_delivery_delay(client, analyst_token, days_late=7)
         data = client.get(
             f"/api/v1/exceptions/{exc_id}/analysis",
             headers=_auth(analyst_token),
         ).json()
-        dd = data.get("delivery_delay_analysis")
-        assert dd is not None
-        assert dd["days_late"] == 7
+        assert data.get("delivery_delay_analysis") is None
 
-    def test_trace_for_delivery_delay_has_no_audit_gap(
+    def test_trace_for_delivery_delay_records_missing_gateway_fields(
         self, client, analyst_token,
     ):
-        """Grandfathered fields must NOT count as audit gaps — the
-        delivery_delay record's trace.audit_context_missing_fields
-        is empty even though at_risk is null."""
+        """T5: post delivery_delay_financial_gap retirement, the
+        shadow-gated path skips resolve_dependencies → at_risk +
+        sla_deadline surface in the audit-gap trace."""
         exc_id = self._create_delivery_delay(client, analyst_token, days_late=3)
         trace = client.get(
             f"/api/v1/exceptions/{exc_id}/trace",
             headers=_auth(analyst_token),
         ).json()
-        assert trace.get("audit_context_missing_fields") == []
+        missing = trace.get("audit_context_missing_fields") or []
+        assert "at_risk" in missing
+        assert "sla_deadline" in missing
 
     # -----------------------------------------------------------------
     # L2d.overmax — adapter end-to-end. Recipe computes excess_qty,
@@ -1189,11 +1185,14 @@ class TestAnalysis:
         assert r.status_code == 200, r.text
         return r.json()["exception_id"]
 
-    def test_analysis_carries_overmax_minor_branch(
+    def test_analysis_overmax_shadow_gated_suppresses_projection(
         self, client, analyst_token,
     ):
-        # 110 vs 100 ceiling = 10% exceedance → MINOR (under SEVERE
-        # threshold of 50%). Shadow YELLOW → adapter synthesises.
+        """T5: post overmax_gateway_gap retirement, the shadow-gated
+        path doesn't fetch sap_contract / sap_block — contract_ref /
+        block_status / block_reason absent → composer suppresses
+        projection."""
+        # 110 vs 100 ceiling = 10% exceedance → MINOR → YELLOW shadow.
         exc_id = self._create_overmax(
             client, analyst_token, total_ordered=110.0, max_qty=100.0,
         )
@@ -1201,21 +1200,16 @@ class TestAnalysis:
             f"/api/v1/exceptions/{exc_id}/analysis",
             headers=_auth(analyst_token),
         ).json()
-        om = data.get("overmax_analysis")
-        assert om is not None
-        assert om["total_ordered"] == 110.0
-        assert om["max_qty"] == 100.0
-        assert om["excess_qty"] == 10.0
-        assert om["exceedance_pct"] == 0.1
-        assert om["uom"] == "CASE"
-        assert len(om["order_lines"]) == 2
-        assert len(om["trim_plan"]) >= 1
-        # Grandfathered fields absent — clause is active.
-        assert om.get("contract_ref") is None
+        assert data.get("overmax_analysis") is None
 
-    def test_trace_for_overmax_has_no_audit_gap(
+    def test_trace_for_overmax_shadow_gated_records_missing_gateway_fields(
         self, client, analyst_token,
     ):
+        """T5: post overmax_gateway_gap retirement, shadow-gated paths
+        skip resolve_dependencies — gateway-sourced contract_ref /
+        block_status / block_reason are absent and surface in the
+        audit-gap trace. Architectural follow-up (move gateway READS
+        before shadow) tracked separately."""
         exc_id = self._create_overmax(
             client, analyst_token, total_ordered=110.0, max_qty=100.0,
         )
@@ -1223,7 +1217,10 @@ class TestAnalysis:
             f"/api/v1/exceptions/{exc_id}/trace",
             headers=_auth(analyst_token),
         ).json()
-        assert trace.get("audit_context_missing_fields") == []
+        missing = trace.get("audit_context_missing_fields") or []
+        assert "contract_ref" in missing
+        assert "block_status" in missing
+        assert "block_reason" in missing
 
     # -----------------------------------------------------------------
     # L2d.moq — adapter end-to-end. Recipe computes shortfall + plan;
@@ -1255,40 +1252,39 @@ class TestAnalysis:
         assert r.status_code == 200, r.text
         return r.json()["exception_id"]
 
-    def test_analysis_carries_moq_round_up_branch(
+    def test_analysis_moq_shadow_gated_suppresses_projection(
         self, client, analyst_token,
     ):
-        # Ordered 18 vs MOQ 20 → 10% shortfall → ROUND_UP_REVIEW
-        # YELLOW. Adapter synthesises via the recipe.
+        """T5: post moq_gateway_gap retirement, the shadow-gated MOQ
+        path doesn't fetch sap_customer_master / sap_contract /
+        sap_block — the projection is suppressed by the audit-coverage
+        gate to avoid partial-truth state."""
+        # Ordered 18 vs MOQ 20 → 10% shortfall → YELLOW shadow.
         exc_id = self._create_moq(client, analyst_token, ordered=18.0, moq=20.0)
         data = client.get(
             f"/api/v1/exceptions/{exc_id}/analysis",
             headers=_auth(analyst_token),
         ).json()
-        moq = data.get("moq_analysis")
-        assert moq is not None
-        assert moq["ordered_qty"] == 18.0
-        assert moq["moq_qty"] == 20.0
-        assert moq["shortfall_qty"] == 2.0
-        assert moq["sku"] == "SKU-MQ-001"
-        assert moq["unit_cost"] == 12.5
-        assert moq["uom"] == "CASE"
-        # uplift_value = uplift_qty (2) × unit_cost (12.5) = 25
-        assert moq["at_risk"] == 25.0
-        assert len(moq["round_up_plan"]) >= 1
-        # Grandfathered fields absent.
-        assert moq.get("contract_ref") is None
-        assert moq.get("moq_source") is None
+        # No moq_analysis — composer suppresses projections that fail
+        # audit-bearing coverage.
+        assert data.get("moq_analysis") is None
 
-    def test_trace_for_moq_has_no_audit_gap(
+    def test_trace_for_moq_shadow_gated_records_missing_gateway_fields(
         self, client, analyst_token,
     ):
+        """T5: post moq_gateway_gap retirement, the audit-gap trace
+        surfaces moq_source / channel / contract_ref / block_status
+        on shadow-gated paths."""
         exc_id = self._create_moq(client, analyst_token, ordered=18.0, moq=20.0)
         trace = client.get(
             f"/api/v1/exceptions/{exc_id}/trace",
             headers=_auth(analyst_token),
         ).json()
-        assert trace.get("audit_context_missing_fields") == []
+        missing = trace.get("audit_context_missing_fields") or []
+        assert "moq_source" in missing
+        assert "channel" in missing
+        assert "contract_ref" in missing
+        assert "block_status" in missing
 
     # -----------------------------------------------------------------
     # L2d.pallet — recipe + UI shapes are 1:1 (sku/desc/uom/layer_qty/

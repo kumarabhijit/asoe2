@@ -47,7 +47,11 @@ from api.deps import (
     require_permission,
     require_role,
 )
-from api.analysis_adapters import ANALYSIS_ADAPTERS, resolve_adapter_key
+from api.analysis_adapters import (
+    ANALYSIS_ADAPTERS,
+    SECONDARY_ANALYSIS_ADAPTERS,
+    resolve_adapter_key,
+)
 from api.analysis_composer import compose as compose_analysis
 from api.errors import ASOEError
 from api.schemas import (
@@ -176,14 +180,10 @@ def _persist_exception(
 ) -> str:
     """Store exception record and trace data. Returns exception_id."""
     # Verdict Pillar 1: persist gateway context alongside recipe output.
-    # Prefer the explicit `state.enrichment_context` when populated
-    # (graph nodes that have been migrated); fall back to
-    # `state.resolved_data` so pre-migration gateway callsites still
-    # contribute evidence to the audit trail. Copy so later mutation
-    # of the graph state doesn't leak into the persisted record.
-    ctx = dict(state.enrichment_context) if state.enrichment_context else {}
-    if not ctx and state.resolved_data:
-        ctx = dict(state.resolved_data)
+    # `state.enrichment_context` is the sole source — `resolve_dependencies`
+    # writes gateway results there directly. Copy so later mutation of
+    # the graph state doesn't leak into the persisted record.
+    ctx = dict(state.enrichment_context)
 
     record = exception_store.create(
         tenant_id=tenant_id,
@@ -1534,6 +1534,16 @@ async def get_analysis(
             # handles that at the classifier level).
             if composed.is_complete:
                 extras[field_name] = composed.projection
+                # Secondary projections share the primary's attestation
+                # target (registry rationale "same attestation target").
+                # Only surface when the primary cleared audit coverage
+                # — they ride on its enforcement.
+                for sec_field, sec_adapter in SECONDARY_ANALYSIS_ADAPTERS.get(
+                    adapter_key, ()
+                ):
+                    sec_proj = sec_adapter(record)
+                    if sec_proj is not None:
+                        extras[sec_field] = sec_proj
 
     return AnalysisResponse(
         diagnosis=diagnosis,

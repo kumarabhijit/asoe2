@@ -160,7 +160,7 @@ class Tracer:
             gw_op = getattr(resp, "operation", "?")
             gw_status = getattr(resp, "status", "?")
             gateway_calls.append(f"{gw_name}/{gw_op}:{gw_status}")
-        for key in getattr(state, "resolved_data", None) or {}:
+        for key in getattr(state, "enrichment_context", None) or {}:
             gateway_calls.append(f"dep:{key}:resolved")
 
         # --- override audit ---
