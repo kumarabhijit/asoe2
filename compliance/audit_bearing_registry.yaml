@@ -1,0 +1,585 @@
+# Audit-Bearing Field Registry
+#
+# Authoritative classification of every field on every `*AnalysisData`
+# Pydantic model in `api/schemas.py`. Classifications are consumed by
+# the `build_analysis` composition node: when a field is marked
+# `tier: audit-bearing` and its value is absent at composition time,
+# the node sets `final_status = AUDIT_CONTEXT_MISSING` (distinct from
+# FAIL_TO_HUMAN) so the auditor sees a structured, named failure.
+#
+# Source of truth — see `compliance/audit_bearing_registry.md` for the
+# workshop minutes (2026-04-22) that produced this file. Every row
+# below carries either:
+#   * `source: shadow-policy` — field feeds a `policy_hits` in
+#     `constraints/fallback_backend.py`. Q1 of the classification
+#     test. Auto-audit-bearing; no discussion required.
+#   * `source: recipe-input` — field is a deterministic-branch input
+#     to the recipe. Q3. Auto-audit-bearing.
+#   * `source: control` — field is named in a SOX §404 control
+#     narrative, four-eyes gate (`POLICY_FOUR_EYES_THRESHOLD` per
+#     `contracts/policy.py:102-107`), SoD routing rule, or other
+#     policy document. Q2. Requires compliance sign-off on
+#     classification.
+#   * `source: derived` — field is a regenerable projection of other
+#     audit-bearing fields (e.g., human-readable reason text).
+#     Contextual by default.
+#   * `source: decorative` — free-text / plumbing / provenance-only.
+#     Contextual.
+#
+# Tier vocabulary:
+#   * `audit-bearing`  — MUST be populated at composition time.
+#                        Missing → AUDIT_CONTEXT_MISSING terminal.
+#   * `conditional`    — audit-bearing only when `depends_on`
+#                        predicate holds. Contextual otherwise.
+#                        Example: `alternate_warehouses` is required
+#                        iff the reviewer's resolved_action == ALT_DC.
+#   * `contextual`     — Layer 2 evidence. May be absent; the UI
+#                        structurally omits the row (never "—").
+#
+# Ownership — this file is owned by the Compliance team via
+# CODEOWNERS (path rule pending). Any PR that adds a field to a
+# `*AnalysisData` Pydantic model must also add a row here in the same
+# PR; a pytest in `tests/test_audit_registry_coverage.py` enforces
+# complete coverage and fails CI if a field is added without a
+# classification.
+#
+# Grandfather clauses — fields flagged `status: backend-gap` are
+# classified audit-bearing by compliance intent, but no current
+# gateway/recipe populates them. The `build_analysis` node treats
+# these fields as contextual until the grandfather deadline. After
+# that date, missing values route the exception to
+# AUDIT_CONTEXT_MISSING. See `grandfather_clauses` section at the
+# bottom.
+#
+# Workshop attendees (digital twins): Dana (Compliance — veto),
+# Priya (Product), Ben (Backend), Ulla (UI). Chair: Platform.
+
+version: 1
+authored: 2026-04-22
+owners:
+  - team: compliance   # holds veto on any tier change
+  - team: platform     # owns schema + composition-node enforcement
+
+conventions:
+  # Every recipe produces one of these. Always audit-bearing.
+  # Adding a new recipe automatically inherits this rule; the
+  # registry row is still required for field-name provenance.
+  always_audit_bearing_field_names:
+    - action
+    - recommended_action
+    - classification
+
+# ---------------------------------------------------------------------------
+# Section registry — one block per `*AnalysisData` Pydantic class.
+# ---------------------------------------------------------------------------
+
+PriceHoldAnalysisData:
+  hold_status:
+    tier: audit-bearing
+    source: recipe-output
+    rationale: >-
+      Record state the reviewer is acting on — authorization applies
+      to a held order vs. a released one. §404.
+  po_price:
+    tier: audit-bearing
+    source: shadow-policy
+    policy_hits: [PRICE_HOLD_INVALID_BASE, PRICE_HOLD_HARD_BLOCK, PRICE_HOLD_TOLERANCE_ESCALATE, PRICE_HOLD_TOLERANCE_OK]
+  sap_base_price:
+    tier: audit-bearing
+    source: shadow-policy
+    policy_hits: [PRICE_HOLD_INVALID_BASE, PRICE_HOLD_HARD_BLOCK, PRICE_HOLD_TOLERANCE_ESCALATE, PRICE_HOLD_TOLERANCE_OK]
+  variance_pct:
+    tier: audit-bearing
+    source: shadow-policy
+    policy_hits: [PRICE_HOLD_HARD_BLOCK, PRICE_HOLD_TOLERANCE_ESCALATE]
+    derivation: (po_price - sap_base_price) / sap_base_price
+  tolerance_pct:
+    tier: audit-bearing
+    source: recipe-input
+    rationale: Policy threshold the variance is measured against.
+  hard_block_pct:
+    tier: audit-bearing
+    source: recipe-input
+    rationale: Policy floor above which recipe returns HARD_BLOCK.
+  action:
+    tier: audit-bearing
+    source: recipe-output
+    rationale: The authorization itself (AUTO_RELEASE / ESCALATE / HARD_BLOCK).
+  reason:
+    tier: contextual
+    source: derived
+    rationale: Human-readable; regenerable from variance + thresholds.
+
+EdiMismatchAnalysisData:
+  sub_type:
+    tier: audit-bearing
+    source: shadow-policy
+    policy_hits: [EDI_SKU_MISMATCH_HARD_REJECT, EDI_SHIP_TO_ESCALATE, EDI_QTY_MISMATCH_REVIEW, EDI_UOM_MISMATCH_REVIEW, EDI_UNKNOWN_SUB_TYPE]
+  classification:
+    tier: audit-bearing
+    source: recipe-output
+    rationale: Drives SoD routing (HARD_REJECT → RED, REVIEW → YELLOW, ESCALATE → manager+).
+  recommended_action:
+    tier: audit-bearing
+    source: recipe-output
+    rationale: Authorization vocabulary; ties to AllowedResolutionAction.
+  autonomy_level:
+    tier: audit-bearing
+    source: control
+    rationale: Names the L1/L2/L3 control tier — §404 cites these explicitly.
+  expected_value:
+    tier: audit-bearing
+    source: control
+    rationale: Decision substrate — reviewer cannot inspect the mismatch without it.
+  received_value:
+    tier: audit-bearing
+    source: control
+    rationale: Decision substrate — pair with expected_value.
+  notification_template:
+    tier: contextual
+    source: decorative
+    rationale: Downstream email plumbing; zero audit content.
+
+BackOrderAnalysisData:
+  ordered_qty:
+    tier: audit-bearing
+    source: shadow-policy
+    policy_hits: [BACK_ORDER_MISSING_INPUT, BACK_ORDER_SEVERE_GAP, BACK_ORDER_MINOR_GAP_REVIEW]
+  available_qty:
+    tier: audit-bearing
+    source: shadow-policy
+    policy_hits: [BACK_ORDER_MISSING_INPUT, BACK_ORDER_SEVERE_GAP, BACK_ORDER_MINOR_GAP_REVIEW]
+  gap_qty:
+    tier: audit-bearing
+    source: recipe-output
+    derivation: ordered_qty - available_qty
+  gap_pct:
+    tier: audit-bearing
+    source: shadow-policy
+    policy_hits: [BACK_ORDER_SEVERE_GAP, BACK_ORDER_MINOR_GAP_REVIEW]
+    derivation: (ordered_qty - available_qty) / ordered_qty
+  unit_price:
+    tier: audit-bearing
+    source: control
+    rationale: Feeds at_risk; at_risk feeds four-eyes threshold per policy.py §102.
+  uom:
+    tier: audit-bearing
+    source: control
+    rationale: Quantity interpretation.
+  at_risk:
+    tier: audit-bearing
+    source: control
+    rationale: financial_impact_usd for four-eyes cosign trigger.
+    derivation: gap_qty * unit_price
+  atp_date:
+    tier: audit-bearing
+    source: control
+    rationale: Customer-commitment substrate on SPLIT_SHIPMENT / RESCHEDULE approvals.
+  resolution_options:
+    tier: audit-bearing
+    source: recipe-output
+    rationale: The ranked recommendation being accepted or overridden.
+  primary_dc:
+    tier: audit-bearing
+    source: control
+    rationale: Reviewer must see which DC was queried before approving ALT_DC or SUBSTITUTE.
+    gateway_dependency: true
+  alternate_warehouses:
+    tier: conditional
+    depends_on: resolved_action == ALT_DC
+    source: control
+    gateway_dependency: true
+    rationale: Required when the approved action is ALT_DC routing.
+  substitutes:
+    tier: conditional
+    depends_on: resolved_action == SUBSTITUTE
+    source: control
+    gateway_dependency: true
+    rationale: Required when the approved action substitutes SKUs.
+  production:
+    tier: conditional
+    depends_on: resolved_action == RESCHEDULE
+    source: control
+    gateway_dependency: true
+  inbound_po:
+    tier: conditional
+    depends_on: resolved_action == RESCHEDULE
+    source: control
+    gateway_dependency: true
+
+OverMaxAnalysisData:
+  total_ordered:
+    tier: audit-bearing
+    source: shadow-policy
+    policy_hits: [OVER_MAX_MISSING_INPUT, OVER_MAX_SEVERE_EXCEEDANCE, OVER_MAX_MINOR_REVIEW]
+  max_qty:
+    tier: audit-bearing
+    source: shadow-policy
+    policy_hits: [OVER_MAX_MISSING_INPUT, OVER_MAX_SEVERE_EXCEEDANCE, OVER_MAX_MINOR_REVIEW]
+  excess_qty:
+    tier: audit-bearing
+    source: recipe-output
+    derivation: total_ordered - max_qty
+  exceedance_pct:
+    tier: audit-bearing
+    source: shadow-policy
+    policy_hits: [OVER_MAX_SEVERE_EXCEEDANCE, OVER_MAX_MINOR_REVIEW]
+  uom:
+    tier: audit-bearing
+    source: control
+  at_risk:
+    tier: audit-bearing
+    source: control
+    rationale: four-eyes trigger.
+  contract_ref:
+    tier: audit-bearing
+    source: control
+    rationale: §404 — the reviewer must cite which contract set the ceiling.
+    gateway_dependency: true
+  block_status:
+    tier: audit-bearing
+    source: control
+    rationale: SAP state being unblocked by the authorization.
+  block_reason:
+    tier: audit-bearing
+    source: control
+    rationale: What the block was — paired with block_status.
+  order_lines:
+    tier: audit-bearing
+    source: control
+    rationale: Per-line quantity substrate for TRIM authorization.
+  trim_plan:
+    tier: audit-bearing
+    source: recipe-output
+    rationale: The attested per-line recommendation.
+
+MOQAnalysisData:
+  ordered_qty:
+    tier: audit-bearing
+    source: shadow-policy
+    policy_hits: [MOQ_MISSING_INPUT, MOQ_NO_SHORTFALL, MOQ_SEVERE_SHORTFALL, MOQ_ROUND_UP_REVIEW]
+  moq_qty:
+    tier: audit-bearing
+    source: shadow-policy
+    policy_hits: [MOQ_MISSING_INPUT, MOQ_NO_SHORTFALL, MOQ_SEVERE_SHORTFALL, MOQ_ROUND_UP_REVIEW]
+  shortfall_qty:
+    tier: audit-bearing
+    source: recipe-output
+    derivation: moq_qty - ordered_qty
+  shortfall_pct:
+    tier: audit-bearing
+    source: shadow-policy
+    policy_hits: [MOQ_SEVERE_SHORTFALL, MOQ_ROUND_UP_REVIEW]
+  sku:
+    tier: audit-bearing
+    source: control
+    rationale: Identity of what's being rounded up.
+  unit_cost:
+    tier: audit-bearing
+    source: control
+    rationale: Feeds at_risk; four-eyes input.
+  uom:
+    tier: audit-bearing
+    source: control
+  at_risk:
+    tier: audit-bearing
+    source: control
+    rationale: four-eyes trigger.
+  moq_source:
+    tier: audit-bearing
+    source: control
+    rationale: SAP provenance (KNMT-MINBM vs MARC-MINBE) of moq_qty — §404 requires attributable source.
+    gateway_dependency: true
+  channel:
+    tier: audit-bearing
+    source: control
+    rationale: MOQ varies by distribution channel; wrong channel means wrong MOQ.
+  contract_ref:
+    tier: audit-bearing
+    source: control
+    rationale: §404 — contractual MOQ provenance.
+    gateway_dependency: true
+  block_status:
+    tier: audit-bearing
+    source: control
+  round_up_plan:
+    tier: audit-bearing
+    source: recipe-output
+    rationale: The attested rounding plan.
+  description:
+    tier: contextual
+    source: decorative
+  block_message:
+    tier: contextual
+    source: decorative
+    rationale: SAP V4082 text — human-readable summary of block_status.
+  sap_steps:
+    tier: contextual
+    source: derived
+    rationale: Deterministic expansion of round_up_plan; operator attests to the plan, not each step.
+
+PalletAnalysisData:
+  total_ordered_cases:
+    tier: audit-bearing
+    source: shadow-policy
+    policy_hits: [PALLET_CONFIG_MISSING_INPUT, PALLET_CONFIG_REVIEW]
+  loose_cases_total:
+    tier: audit-bearing
+    source: shadow-policy
+    policy_hits: [PALLET_CONFIG_MISSING_INPUT, PALLET_CONFIG_REVIEW]
+  order_line_count:
+    tier: audit-bearing
+    source: recipe-output
+  classification:
+    tier: audit-bearing
+    source: recipe-output
+    rationale: BROKEN_LAYER / PARTIAL_PALLET / MIXED — attestation target.
+  suggested_plan:
+    tier: audit-bearing
+    source: recipe-output
+    rationale: Attested round-down plan.
+  lines:
+    tier: audit-bearing
+    source: recipe-output
+    rationale: Per-line fill_pct + classification — basis for suggested_plan.
+  pallet_tie:
+    tier: contextual
+    source: decorative
+  pallet_height:
+    tier: contextual
+    source: decorative
+  layer_cases:
+    tier: contextual
+    source: decorative
+  carrier:
+    tier: contextual
+    source: decorative
+  freight_delta:
+    tier: contextual
+    source: decorative
+  customer_preferences:
+    tier: contextual
+    source: decorative
+
+DeliveryDelayAnalysisData:
+  planned_date:
+    tier: audit-bearing
+    source: shadow-policy
+    policy_hits: [DELIVERY_DELAY_PENDING_COMPUTE, DELIVERY_DELAY_SEVERE, DELIVERY_DELAY_MINOR_REVIEW, DELIVERY_DELAY_ON_TIME]
+  projected_eta:
+    tier: audit-bearing
+    source: shadow-policy
+    policy_hits: [DELIVERY_DELAY_PENDING_COMPUTE, DELIVERY_DELAY_SEVERE, DELIVERY_DELAY_MINOR_REVIEW, DELIVERY_DELAY_ON_TIME]
+  days_late:
+    tier: audit-bearing
+    source: shadow-policy
+    policy_hits: [DELIVERY_DELAY_SEVERE, DELIVERY_DELAY_MINOR_REVIEW]
+    derivation: (projected_eta - planned_date).days
+  delay_category:
+    tier: audit-bearing
+    source: recipe-input
+    rationale: Category (CARRIER_DELAY / PRODUCTION_DELAY / LOGISTICS / WEATHER / CUSTOMS) is audit-citable; reason text is not.
+  affected_lines:
+    tier: audit-bearing
+    source: control
+    rationale: Touches per-line delay × line value → financial impact.
+  at_risk:
+    tier: audit-bearing
+    source: control
+    rationale: four-eyes trigger (SLA penalties + downstream).
+  sla_deadline:
+    tier: audit-bearing
+    source: control
+    rationale: SLA posture being committed to by EXPEDITE / RESCHEDULE choice (when contractually defined).
+    note: Optional at the type level; when the gateway produces it, it is audit-bearing.
+  alternate_options:
+    tier: conditional
+    depends_on: resolved_action in alternate_options[*].type
+    source: recipe-output
+    rationale: Required when the approved action selects from this list.
+  delay_reason:
+    tier: contextual
+    source: decorative
+    rationale: Free text; supports but does not drive the decision.
+  carrier:
+    tier: contextual
+    source: decorative
+  route:
+    tier: contextual
+    source: decorative
+  rule_id:
+    tier: contextual
+    source: decorative
+    rationale: Prototype rule band provenance; not audit-citable on its own.
+
+DuplicateDetectionData:
+  days_between:
+    tier: audit-bearing
+    source: control
+    rationale: Material to "fresh duplicate" vs "stale replay" distinction.
+  confidence:
+    tier: audit-bearing
+    source: recipe-output
+    rationale: Operator trusts/rejects based on this number.
+  recommended_action:
+    tier: audit-bearing
+    source: recipe-output
+  cancellation_target:
+    tier: audit-bearing
+    source: recipe-output
+    rationale: The SO being cancelled — attestation target.
+  autonomy_applied:
+    tier: audit-bearing
+    source: control
+    rationale: Names the L-tier (consistent with EdiMismatch).
+  original_order:
+    tier: audit-bearing
+    source: control
+    gateway_dependency: true
+    rationale: Reviewer must see SO-001 vs SO-002 side-by-side to authorize cancellation.
+    subfields:
+      so_number: audit-bearing
+      po_number: audit-bearing
+      created_date: audit-bearing
+      total_value: audit-bearing
+      line_count: audit-bearing
+      status: audit-bearing
+  duplicate_order:
+    tier: audit-bearing
+    source: control
+    gateway_dependency: true
+    rationale: Pair with original_order.
+    subfields:
+      so_number: audit-bearing
+      po_number: audit-bearing
+      created_date: audit-bearing
+      total_value: audit-bearing
+      line_count: audit-bearing
+      status: audit-bearing
+  detection_method:
+    tier: contextual
+    source: derived
+    rationale: Regenerable from signal_scores.
+
+OrderComparisonData:
+  orders:
+    tier: audit-bearing
+    source: control
+    gateway_dependency: true
+    rationale: Synthesised from DuplicateDetection; same attestation target.
+  matching_fields:
+    tier: audit-bearing
+    source: recipe-output
+  differing_fields:
+    tier: audit-bearing
+    source: recipe-output
+
+PriceAnalysisData:
+  erp_unit_price:
+    tier: audit-bearing
+    source: shadow-policy
+  po_unit_price:
+    tier: audit-bearing
+    source: shadow-policy
+  variance_amount:
+    tier: audit-bearing
+    source: recipe-output
+    derivation: erp_unit_price - po_unit_price
+  variance_pct:
+    tier: audit-bearing
+    source: shadow-policy
+    derivation: variance_amount / erp_unit_price
+  total_at_risk:
+    tier: audit-bearing
+    source: control
+    rationale: four-eyes trigger.
+  total_quantity:
+    tier: audit-bearing
+    source: control
+    rationale: Scales at_risk.
+  uom:
+    tier: audit-bearing
+    source: control
+  doc_type:
+    tier: audit-bearing
+    source: control
+    status: backend-gap
+    rationale: SAP document type (Sales Order, Delivery) — §404 evidentiary requirement.
+    gateway_dependency: true
+  doc_number:
+    tier: audit-bearing
+    source: control
+    status: backend-gap
+    gateway_dependency: true
+    rationale: SAP document number — identifies what's being adjusted.
+  sku:
+    tier: audit-bearing
+    source: control
+  rule_id:
+    tier: audit-bearing
+    source: control
+    status: backend-gap
+    rationale: Rule that triggered the exception (e.g. SO-PRICE-001) — control narrative attribution.
+  root_cause_category:
+    tier: audit-bearing
+    source: control
+    status: backend-gap
+    rationale: Deterministic root-cause category — control narrative attribution.
+  contract_ref:
+    tier: audit-bearing
+    source: control
+    status: backend-gap
+    gateway_dependency: true
+    rationale: §404 — active contract must be cited on pricing adjustments.
+  promotion_ref:
+    tier: audit-bearing
+    source: control
+    status: backend-gap
+    gateway_dependency: true
+    rationale: Active promotion must be cited when present; affects adjustment validity.
+  material_desc:
+    tier: contextual
+    source: decorative
+  order_date:
+    tier: contextual
+    source: decorative
+
+# ---------------------------------------------------------------------------
+# Grandfather clauses — audit-bearing fields without a current producer.
+# The composition node treats these fields as contextual until the
+# deadline; after the deadline, missing values route the exception to
+# AUDIT_CONTEXT_MISSING.
+# ---------------------------------------------------------------------------
+
+grandfather_clauses:
+  price_analysis_gateway_gap:
+    fields:
+      - PriceAnalysisData.doc_type
+      - PriceAnalysisData.doc_number
+      - PriceAnalysisData.rule_id
+      - PriceAnalysisData.root_cause_category
+      - PriceAnalysisData.contract_ref
+      - PriceAnalysisData.promotion_ref
+    opened: 2026-04-22
+    deadline: 2026-06-21
+    rationale: >-
+      PriceAdjustmentRecipe and its dependency gateways do not currently
+      persist SAP doc metadata or active contract/promotion references
+      into resolution_data. Compliance approves a 60-day clause: the
+      composition node treats these six fields as contextual until the
+      deadline. Post-deadline, missing values route
+      CONTRACTUAL_CORRECTION exceptions to AUDIT_CONTEXT_MISSING.
+    owner: backend
+    tracking_issue: TBD
+
+# ---------------------------------------------------------------------------
+# Summary tally (for CI fitness test + release-note generation).
+# ---------------------------------------------------------------------------
+
+summary:
+  total_fields: 96
+  audit_bearing: 64
+  conditional: 8
+  contextual: 24
+  backend_gap_fields: 6
+  gateway_dependent_fields: 11
