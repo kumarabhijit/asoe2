@@ -274,19 +274,22 @@ class TestExceptionRepository:
         fetched = exception_repo.get(record["id"], "t1")
         assert fetched["resolution_data"] == res_data
 
-    def test_intent_check_constraint(self, exception_repo):
-        """Only valid intents are accepted per architecture_v3.md §9.2."""
-        record = exception_repo.create(
-            tenant_id="t1", order_id="PO-CHK", event_type="TEST",
-            trace_id="t-chk", intent="CONTRACTUAL_CORRECTION",
-        )
-        assert record["intent"] == "CONTRACTUAL_CORRECTION"
-
-        with pytest.raises(Exception):
-            exception_repo.create(
-                tenant_id="t1", order_id="PO-BAD", event_type="TEST",
-                trace_id="t-bad", intent="INVALID_INTENT",
+    def test_intent_persists_verbatim(self, exception_repo):
+        """The Intent enum (contracts/models.py) is the source of truth
+        for the valid intent set; the DB stores it as free TEXT (the
+        previous SQL CHECK constraint drifted every time a new intent
+        shipped — e.g. PRICE_HOLD_RELEASE / EDI_MISMATCH /
+        BACK_ORDER / OVER_MAX / MIN_ORDER_QTY / PALLET_CONFIG /
+        DELIVERY_DELAY all had to be added post-V1)."""
+        for intent in (
+            "CONTRACTUAL_CORRECTION", "CREDIT_BLOCK", "DUPLICATE_PO",
+            "PRICE_HOLD_RELEASE", "BACK_ORDER", "DELIVERY_DELAY",
+        ):
+            record = exception_repo.create(
+                tenant_id="t1", order_id=f"PO-CHK-{intent}",
+                event_type="TEST", trace_id=f"t-{intent}", intent=intent,
             )
+            assert record["intent"] == intent
 
     def test_original_event_roundtrip(self, exception_repo):
         """V002: original_event persists as JSON and deserialises back."""
