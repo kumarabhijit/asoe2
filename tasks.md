@@ -1233,3 +1233,141 @@ without dashes.
 with Pillar 1 + Pillar 2 + Pillar 3 enforced. The remaining 4
 sections need gateway-persistence work in a future phase.
 
+
+
+## PHASE 24 — Verdict Full-Close (retire all grandfather clauses + ADR-025 graph reorder)
+
+**Companion to:** asoe-ui Phase 8.12 (mock pipeline + audit-gap surface sync).
+
+Phase 23 closed 6 of 10 enrichment sections; four remained mock-only
+and four grandfather clauses were still active. Phase 24 closes the
+Verdict commitment end-to-end.
+
+### 24.1 Foundation — single-bag enrichment_context (T1)
+- [x] `orchestration/nodes.py::resolve_dependencies` writes only
+      to `state.enrichment_context`. `state.resolved_data` no
+      longer carries gateway results.
+- [x] DuplicatePO + PriceHoldRelease recipe-input nodes read from
+      `enrichment_context` (one bag).
+- [x] `db/migrations/V004__enrichment_context.sql` — adds
+      `enrichment_context JSONB NOT NULL DEFAULT '{}'` on
+      `exceptions`. SQLite parity in `db/migrations/runner.py`.
+- [x] `db/repository.py::ExceptionRepository.create()` threads
+      `enrichment_context` through.
+- [x] `api/store.py::DbExceptionStore.create` drops the in-memory
+      bridge.
+- [x] `api/routes/exceptions.py::_persist_exception` drops the
+      `resolved_data → enrichment_context` fallback.
+- [x] Tests: `test_enrichment_context.py` extended for single-bag
+      semantics.
+
+### 24.2 DuplicatePO + OrderComparison adapters (T2)
+- [x] `api/schemas.py` — `OrderSnapshot`, `DuplicateDetectionData`,
+      `ComparisonOrder`, `ComparisonLineItem`,
+      `OrderComparisonData` Pydantic models. New
+      `AnalysisResponse` fields.
+- [x] `api/analysis_adapters.py` — `adapt_duplicate` (primary,
+      audit enforcement target) + `adapt_order_comparison`
+      (synthesised from same `matched_po_details` payload).
+- [x] `SECONDARY_ANALYSIS_ADAPTERS` registry — pattern for
+      derived projections sharing the primary's attestation
+      target.
+- [x] Synthesis fallback in `adapt_duplicate` (pure recipe call)
+      for explain-mode + shadow-gated paths.
+- [x] Explain graph wires `resolve_dependencies` so dry-run audit
+      enforcement sees the same evidence the live path would.
+- [x] Tests: `test_analysis_adapters_duplicate.py` (14 cases).
+
+### 24.3 BackOrder adapter (T3)
+- [x] `api/schemas.py` — `WarehouseInfo`, `AlternateWarehouse`,
+      `SubstituteSKU`, `InboundOrder`, `ResolutionOption`,
+      `BackOrderAnalysisData`.
+- [x] `api/analysis_adapters.py` — `adapt_back_order` with
+      synthesis fallback.
+- [x] `INTENT_TO_RECIPE_NAME["BACK_ORDER"]`.
+- [x] Tests: `test_analysis_adapters_back_order.py` (10 cases).
+
+### 24.4 Price adapter + retire price_analysis_gateway_gap (T4)
+- [x] `recipes/registry.py` — `PriceAdjustmentRecipe` gains 3
+      `GatewayDependency` entries (`sap_doc`, `sap_contract`,
+      `promotion`).
+- [x] `api/schemas.py` — `PriceAnalysisData` populated from
+      `sap_doc_context` / `contract_context` / `promotion_context`.
+- [x] `compliance/audit_bearing_registry.yaml` — retire
+      `price_analysis_gateway_gap`; reclassify `contract_ref` +
+      `promotion_ref` audit-bearing → contextual (conditionally
+      present per registry rationale).
+- [x] `orchestration/nodes.py::build_analysis` preserves
+      FAIL_TO_HUMAN against AUDIT_CONTEXT_MISSING override —
+      circuit-breaker / validation failures stay debuggable.
+- [x] Tests: `test_analysis_adapters_price.py` (14 cases) +
+      `test_audit_registry_coverage.py` summary tally re-verified.
+
+### 24.5 Retire delivery_delay / overmax / moq clauses (T5)
+- [x] `recipes/registry.py` — `DeliveryDelayResolutionRecipe`,
+      `OverMaxTrimRecipe`, `MOQRoundUpRecipe` gain
+      `GatewayDependency` entries (`sla_contract`,
+      `sap_contract` + `sap_block`, `sap_customer_master` +
+      `sap_contract` + `sap_block`).
+- [x] `api/analysis_adapters.py` — `adapt_delivery_delay` /
+      `adapt_overmax` / `adapt_moq` extended to project the
+      previously-grandfathered fields from the new gateway
+      result keys; metadata fallback retained for shadow-gated
+      paths.
+- [x] `compliance/audit_bearing_registry.yaml` — retire
+      `delivery_delay_financial_gap`, `overmax_gateway_gap`,
+      `moq_gateway_gap`. The `grandfather_clauses` block is now
+      empty.
+- [x] Tests: `test_analysis_adapters_t5.py` (8 cases).
+
+### 24.6 ADR-025 — Gateway READS before shadow_audit
+- [x] `orchestration/graph.py` — common section reorders to
+      `select_recipe → resolve_dependencies → validate_types →
+      shadow_audit`, then variant-specific post-shadow
+      continuation (`execute_recipe + apply_effects` in live;
+      `explain_only` in explain).
+- [x] `contracts/models.py` — `GraphState.request_trace_id` (UUID
+      stamped at `ingest`) for gateway-call correlation
+      independent of `shadow.trace_id` (which doesn't exist when
+      `resolve_dependencies` runs in the new order).
+- [x] `contracts/models.py` — `GatewayDependency.required_for_audit`
+      (default True). Soft-fail path in `resolve_dependencies`
+      writes empty dict + lets composer route to
+      AUDIT_CONTEXT_MISSING via the standard coverage check.
+- [x] `select_recipe` no longer terminates on no-recipe — shadow
+      gets to be the terminal voice for compliance-only intents
+      (MASS_PRICING_ERROR / UNKNOWN). `execute_recipe`'s
+      invocation-None guard preserves the upstream explanation.
+- [x] `docs/adr/ADR-025-gateway-reads-before-shadow.md` — full
+      rationale + Guardrail #4 reinterpretation + consequences.
+
+### 24.7 Sandbox infrastructure
+- [x] `api/sandbox_gateways.py` (new) — `register_sandbox_gateways()`
+      mirrors `tests/conftest.py` StubGateways (oms,
+      buyer_notification, sap_doc, sap_contract, promotion,
+      sap_block, sap_customer_master, sla_contract). Called from
+      `create_app()` inside the `ASOE_ENV=sandbox` block.
+      Idempotent.
+- [x] `db/migrations/runner.py` — drop the V1 `intent` CHECK
+      constraint from the SQLite schema. Intent enum at
+      `contracts/models.py` is the source of truth; CHECK drifted
+      every time a new intent shipped.
+- [x] `tests/test_db.py` — `test_intent_check_constraint` rewrite
+      → `test_intent_persists_verbatim` covering the full
+      post-V1 intent set.
+
+### 24.8 Test suite
+- [x] Per-tranche adapter tests landed (T2 + T3 + T4 + T5):
+      14 + 10 + 14 + 8 = 46 new cases.
+- [x] `test_e2e_om_adjacent_intents.py` shadow-gated paths revert
+      to expecting BLOCKED / MANUAL_REVIEW_REQUIRED (post-ADR-025
+      audit evidence is captured even on shadow-gated paths, so
+      the composer no longer over-routes to AUDIT_CONTEXT_MISSING).
+- [x] `test_analysis_composer.py` grandfather-clause tests
+      rewritten for post-retirement reality.
+
+✅ Outcome: `grandfather_clauses` block in
+`compliance/audit_bearing_registry.yaml` is empty. 10 of 10
+enrichment sections backend-backed. Suite 1343 passed, 35 skipped
+(+52 net new vs pre-engagement). Local sandbox e2e walkthrough
+works end-to-end via stub gateways. (2026-04-25)
