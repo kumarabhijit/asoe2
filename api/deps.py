@@ -144,7 +144,7 @@ def _validate_environment(token_env: str) -> None:
     A sandbox token presented to a production service returns 403
     immediately, before any business logic executes.
     """
-    server_env = os.getenv("ASOE_ENV", "sandbox")
+    server_env = os.getenv("ASOE_ENV", "production")
     if token_env != server_env:
         logger.warning(
             "Environment mismatch: token_env=%s server_env=%s", token_env, server_env

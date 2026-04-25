@@ -365,6 +365,22 @@ def compose_from_state(state: Any) -> ComposedAnalysis:
     it doesn't persist, doesn't have an id, doesn't need a tenant.
     That's intentional: we're enforcing the registry, not creating
     an audit row.
+
+    Note on `resolved_action`: this is hard-coded to None in the
+    view below because at graph-execution time the disposition
+    hasn't happened yet, so conditional fields gated on the
+    operator's resolved_action (alternate_warehouses,
+    substitutes, production, inbound_po) are correctly classified
+    as not-yet-required. Post-disposition coverage IS enforced —
+    the read-path composer (`compose(record)`, called from the
+    /analysis endpoint and from the trace audit-gap snapshot in
+    routes/exceptions.py) reads `record.resolved_action` via
+    `_resolve_action_of`, so the registry's `depends_on:
+    resolved_action == X` predicates fire once the operator picks
+    an action. This split keeps graph-time enforcement honest
+    (no false-positive AUDIT_CONTEXT_MISSING for fields the
+    operator hasn't yet committed to needing) while still gating
+    the post-disposition read path.
     """
     from dataclasses import dataclass as _dc, field as _field
 
