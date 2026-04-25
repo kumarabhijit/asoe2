@@ -430,6 +430,47 @@ PYTHONPATH=. uvicorn api.app:app --host 0.0.0.0 --port 8000 --reload
 # → Health check: curl http://localhost:8000/api/v1/health
 ```
 
+**Sandbox gateway stubs.** When `ASOE_ENV=sandbox` (default), the
+server registers an in-process StubGateway set at startup
+(`api/sandbox_gateways.py`) covering OMS + SAP doc / contract /
+block-status + customer-master + SLA contract + promotion +
+buyer-notification. This mirrors `tests/conftest.py` and lets every
+recipe's `GatewayDependency` chain resolve without real ERP
+connectivity. Production deployments (`ASOE_ENV=production`) skip
+the stubs — the platform team is responsible for registering real
+gateway adapters before serving traffic.
+
+### End-to-end with asoe-ui
+
+The companion frontend at
+[`kumarabhijit/asoe-ui`](../asoe-ui) connects to this API server
+when `NEXT_PUBLIC_USE_REAL_API=1`. A minimal local walkthrough:
+
+```bash
+# Backend (sandbox + SQLite + stub gateways auto-registered)
+cd asoe2
+DATABASE_URL=sqlite:///asoe2.db ASOE_ENV=sandbox JWT_SECRET=local-e2e-secret \
+  PYTHONPATH=. uvicorn api.app:app --host 127.0.0.1 --port 8000
+
+# Frontend (real-API mode pointing at the local backend)
+cd ../asoe-ui
+cat > .env.local <<EOF
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=local-e2e-nextauth-secret
+NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_USE_REAL_API=1
+EOF
+npm run dev
+# → open http://localhost:3000, log in as sarah.chen@acme-corp.com
+#   (any password works in sandbox); seed events via curl on the
+#   resolve endpoint and watch them appear in the queue.
+
+# Playwright (auto-starts UI on :3100; reuses existing :8000 backend)
+cd ../asoe-ui
+PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers ASOE2_ROOT=../asoe2 \
+  npx playwright test
+```
+
 **Key endpoints:**
 
 | Method | Path | Auth | Description |
@@ -897,8 +938,8 @@ api/                FastAPI API layer (architecture_v3.md §8, §11)
 db/                 Database layer (architecture_v3.md §9)
   connection.py     SQLiteAdapter / PostgresAdapter + _QmarkCursorWrapper (?→%s), create_adapter() factory
   repository.py     ExceptionRepository, TraceRepository, PolicyRepository
-  migrations/       V001__initial_schema.sql (5 tables, RLS, SOX trigger, pgvector); V003__audit_hash_chain.sql (prev_hash/event_hash + append-only triggers)
-docs/               AUDITOR_GUIDE.md, ADR-021, ADR-022, ADR-023
+  migrations/       V001__initial_schema.sql (5 tables, RLS, SOX trigger, pgvector); V002__reanalyze_columns.sql (original_event + reanalysis_history); V003__audit_hash_chain.sql (prev_hash/event_hash + append-only triggers); V004__enrichment_context.sql (Pillar 1 audit-evidence column)
+docs/               AUDITOR_GUIDE.md, ADR-021, ADR-022, ADR-023, ADR-024, ADR-025
   specs/            Product-owner reference specs (not runtime code)
 tests/              pytest test suite (1021 tests)
   test_*.py         Core tests: contracts, constraints, recipes, orchestration, shadow, API, DB, WebSocket, workflows, guardrails (772 tests)

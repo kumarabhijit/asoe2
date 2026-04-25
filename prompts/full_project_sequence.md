@@ -33,4 +33,12 @@ Phase sequence and build prompts:
   14  — Auth & Security Hardening                      → prompts/phase_14_auth_security.md
   15  — WebSocket / Redis Real-Time Event Publishing   → prompts/phase_15_websocket_redis.md
   16  — V1 Foundation Guardrail Tests (CI Enforcement) → prompts/phase_16_v1_guardrails.md
+  17  — superseded — see tasks.md history.
+  18  — Server-Side User Profiles & Account Entity     → see tasks.md PHASE 18
+  19  — Override Action Consolidation (Option A)        → see tasks.md PHASE 19
+  20  — Hash-Chained Append-Only Audit Log              → see tasks.md PHASE 20
+  21  — OM Coverage: PRICE_HOLD_RELEASE + EDI_MISMATCH  → see tasks.md PHASE 21
+  22  — UI Intent Parity (BACK_ORDER / OVER_MAX / MIN_ORDER_QTY / PALLET_CONFIG / DELIVERY_DELAY) → see tasks.md PHASE 22
+  23  — Verdict three-pillar architecture              → see tasks.md PHASE 23
+  24  — Verdict Full-Close (retire all grandfather clauses + ADR-025 graph reorder) → prompts/phase_24_verdict_full_close.md
 ```
