@@ -98,40 +98,34 @@ def _back_order_event(ordered: float, available: float) -> dict:
 
 
 class TestResolveBackOrder:
-    """Verdict alignment (T3): shadow-gated paths skip
-    resolve_dependencies, so the BackOrder gateway evidence
-    (primary_dc, atp_date) is absent. With backorder_warehouse_gap
-    NOT opened (Verdict full-close engagement), the composer routes
-    YELLOW/RED shadow-gated BackOrders to AUDIT_CONTEXT_MISSING.
+    """Post-2026-04-22 reorder: gateway READS run before shadow_audit,
+    so BackOrder records carry full audit evidence (primary_dc,
+    atp_date, alternate_warehouses, substitutes) regardless of the
+    shadow verdict. Shadow YELLOW → MANUAL_REVIEW_REQUIRED with
+    populated enrichment_context; shadow RED → BLOCKED."""
 
-    Architectural follow-up (out of scope here): move gateway READS
-    before shadow so the audit context is always populated even on
-    blocked paths. Until then, shadow YELLOW/RED for BackOrder
-    routes to AUDIT_CONTEXT_MISSING.
-    """
-
-    def test_minor_gap_routes_to_audit_context_missing(self, client, analyst_token):
+    def test_minor_gap_review_required(self, client, analyst_token):
         r = client.post(
             "/api/v1/exceptions/resolve",
-            json=_back_order_event(100, 75),  # 25% gap → YELLOW shadow
+            json=_back_order_event(100, 75),  # 25% gap → YELLOW
             headers=_auth(analyst_token),
         )
         assert r.status_code == 200
         data = r.json()
         assert data["intent"] == "BACK_ORDER"
         assert data["shadow_verdict"] == "YELLOW"
-        assert data["final_status"] == "AUDIT_CONTEXT_MISSING"
+        assert data["final_status"] == "MANUAL_REVIEW_REQUIRED"
 
-    def test_severe_gap_routes_to_audit_context_missing(self, client, analyst_token):
+    def test_severe_gap_blocked(self, client, analyst_token):
         r = client.post(
             "/api/v1/exceptions/resolve",
-            json=_back_order_event(100, 40),  # 60% gap → RED shadow
+            json=_back_order_event(100, 40),  # 60% gap → RED
             headers=_auth(analyst_token),
         )
         data = r.json()
         assert data["intent"] == "BACK_ORDER"
         assert data["shadow_verdict"] == "RED"
-        assert data["final_status"] == "AUDIT_CONTEXT_MISSING"
+        assert data["final_status"] == "BLOCKED"
 
     def test_trace_carries_policy_hit(self, client, analyst_token):
         r = client.post(
@@ -162,6 +156,7 @@ def _over_max_event(total_ordered: float, max_qty: float) -> dict:
         "metadata": {
             "total_ordered": total_ordered,
             "max_qty": max_qty,
+            "uom": "CASE",
             "order_lines": [
                 {"sku": "A", "description": "A", "qty": total_ordered,
                  "max_line_qty": max_qty, "is_even_layer_item": True},
@@ -171,16 +166,13 @@ def _over_max_event(total_ordered: float, max_qty: float) -> dict:
 
 
 class TestResolveOverMax:
-    """Verdict T5 alignment: overmax_gateway_gap retired. Shadow-gated
-    paths skip resolve_dependencies so contract_ref / block_status /
-    block_reason are absent → composer routes to AUDIT_CONTEXT_MISSING.
-    Architectural follow-up (out of scope here): move gateway READS
-    before shadow so audit context is always populated even on
-    blocked paths."""
+    """Post-2026-04-22 reorder: gateway READS run before shadow_audit,
+    so OverMax records carry contract_ref / block_status /
+    block_reason regardless of shadow verdict. YELLOW →
+    MANUAL_REVIEW_REQUIRED, RED → BLOCKED, both with populated
+    enrichment_context."""
 
-    def test_minor_exceedance_routes_to_audit_context_missing(
-        self, client, analyst_token,
-    ):
+    def test_minor_exceedance_review_required(self, client, analyst_token):
         r = client.post(
             "/api/v1/exceptions/resolve",
             json=_over_max_event(130, 100),  # 30% over → YELLOW
@@ -189,11 +181,9 @@ class TestResolveOverMax:
         data = r.json()
         assert data["intent"] == "OVER_MAX"
         assert data["shadow_verdict"] == "YELLOW"
-        assert data["final_status"] == "AUDIT_CONTEXT_MISSING"
+        assert data["final_status"] == "MANUAL_REVIEW_REQUIRED"
 
-    def test_severe_exceedance_routes_to_audit_context_missing(
-        self, client, analyst_token,
-    ):
+    def test_severe_exceedance_blocked(self, client, analyst_token):
         r = client.post(
             "/api/v1/exceptions/resolve",
             json=_over_max_event(170, 100),  # 70% over → RED
@@ -202,7 +192,7 @@ class TestResolveOverMax:
         data = r.json()
         assert data["intent"] == "OVER_MAX"
         assert data["shadow_verdict"] == "RED"
-        assert data["final_status"] == "AUDIT_CONTEXT_MISSING"
+        assert data["final_status"] == "BLOCKED"
 
     def test_trace_carries_policy_hit(self, client, analyst_token):
         r = client.post(
@@ -241,13 +231,11 @@ def _moq_event(ordered: float, moq: float) -> dict:
 
 
 class TestResolveMinOrderQty:
-    """Verdict T5 alignment: moq_gateway_gap retired. Shadow-gated
-    paths skip resolve_dependencies so moq_source / channel /
-    contract_ref / block_status are absent → AUDIT_CONTEXT_MISSING."""
+    """Post-2026-04-22 reorder: gateway READS run before shadow_audit,
+    so MOQ records carry moq_source / channel / contract_ref /
+    block_status regardless of shadow verdict."""
 
-    def test_minor_shortfall_routes_to_audit_context_missing(
-        self, client, analyst_token,
-    ):
+    def test_minor_shortfall_review_required(self, client, analyst_token):
         r = client.post(
             "/api/v1/exceptions/resolve",
             json=_moq_event(40, 48),  # ~17% shortfall → YELLOW
@@ -256,11 +244,9 @@ class TestResolveMinOrderQty:
         data = r.json()
         assert data["intent"] == "MIN_ORDER_QTY"
         assert data["shadow_verdict"] == "YELLOW"
-        assert data["final_status"] == "AUDIT_CONTEXT_MISSING"
+        assert data["final_status"] == "MANUAL_REVIEW_REQUIRED"
 
-    def test_severe_shortfall_routes_to_audit_context_missing(
-        self, client, analyst_token,
-    ):
+    def test_severe_shortfall_blocked(self, client, analyst_token):
         r = client.post(
             "/api/v1/exceptions/resolve",
             json=_moq_event(25, 48),  # ~48% shortfall → RED
@@ -269,7 +255,7 @@ class TestResolveMinOrderQty:
         data = r.json()
         assert data["intent"] == "MIN_ORDER_QTY"
         assert data["shadow_verdict"] == "RED"
-        assert data["final_status"] == "AUDIT_CONTEXT_MISSING"
+        assert data["final_status"] == "BLOCKED"
 
     def test_trace_carries_policy_hit(self, client, analyst_token):
         r = client.post(
@@ -355,13 +341,11 @@ def _delay_event(days_late: int) -> dict:
 
 
 class TestResolveDeliveryDelay:
-    """Verdict T5 alignment: delivery_delay_financial_gap retired.
-    Shadow-gated paths skip resolve_dependencies so at_risk +
-    sla_deadline are absent → AUDIT_CONTEXT_MISSING."""
+    """Post-2026-04-22 reorder: SLA gateway READ runs before
+    shadow_audit, so DeliveryDelay records carry at_risk +
+    sla_deadline regardless of shadow verdict."""
 
-    def test_minor_delay_routes_to_audit_context_missing(
-        self, client, analyst_token,
-    ):
+    def test_minor_delay_review_required(self, client, analyst_token):
         r = client.post(
             "/api/v1/exceptions/resolve",
             json=_delay_event(3),
@@ -370,11 +354,9 @@ class TestResolveDeliveryDelay:
         data = r.json()
         assert data["intent"] == "DELIVERY_DELAY"
         assert data["shadow_verdict"] == "YELLOW"
-        assert data["final_status"] == "AUDIT_CONTEXT_MISSING"
+        assert data["final_status"] == "MANUAL_REVIEW_REQUIRED"
 
-    def test_severe_delay_routes_to_audit_context_missing(
-        self, client, analyst_token,
-    ):
+    def test_severe_delay_blocked(self, client, analyst_token):
         r = client.post(
             "/api/v1/exceptions/resolve",
             json=_delay_event(7),
@@ -383,7 +365,7 @@ class TestResolveDeliveryDelay:
         data = r.json()
         assert data["intent"] == "DELIVERY_DELAY"
         assert data["shadow_verdict"] == "RED"
-        assert data["final_status"] == "AUDIT_CONTEXT_MISSING"
+        assert data["final_status"] == "BLOCKED"
 
     def test_trace_carries_policy_hit(self, client, analyst_token):
         r = client.post(

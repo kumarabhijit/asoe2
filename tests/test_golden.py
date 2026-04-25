@@ -352,9 +352,13 @@ class TestGoldenTraceRecord:
         assert record.shadow_policy_hits == []
 
     def test_trace_record_yellow_path_fields(self, credit_event):
+        """Post-2026-04-22 reorder: select_recipe runs before
+        shadow_audit, so YELLOW-routed records carry the proposed
+        recipe_name in their trace (the operator reviewing
+        MANUAL_REVIEW_REQUIRED sees what would have executed)."""
         result = run_graph(credit_event)
         record = Tracer().build_record(result)
         assert record.shadow_verdict == "YELLOW"
         assert "CREDIT_RELEASE_REVIEW" in record.shadow_policy_hits
         assert record.final_status == "MANUAL_REVIEW_REQUIRED"
-        assert record.recipe_name is None
+        assert record.recipe_name == "CreditHoldReleaseRecipe.py"
