@@ -11,19 +11,25 @@ from __future__ import annotations
 #
 # State transitions (all deterministic, no hidden loops):
 #   ingest → classify → load_skill → validate_circuit_breaker
-#     ├─ [breach]   → END (FAIL_TO_HUMAN)
-#     └─ [ok]       → shadow_audit
-#                       ├─ [RED]     → END (BLOCKED)
-#                       ├─ [YELLOW]  → END (MANUAL_REVIEW_REQUIRED)
-#                       └─ [GREEN]   → select_recipe
-#                                        ├─ [no recipe] → END (FAIL_TO_HUMAN)
-#                                        └─ [ok]        → validate_types
-#                                                             → resolve_dependencies
-#                                                               ├─ [gw fail] → END (FAIL_TO_HUMAN)
-#                                                               └─ [ok]      → execute_recipe
-#                                                                              → apply_effects → END
-#                                                             → explain_only  (explain mode)
-#                                                                 → END
+#     ├─ [breach]   → build_analysis → END (FAIL_TO_HUMAN)
+#     └─ [ok]       → select_recipe
+#                       ├─ [no recipe] → build_analysis → END (FAIL_TO_HUMAN)
+#                       └─ [ok]        → resolve_dependencies
+#                                          ├─ [required-gw fail] → build_analysis → END (FAIL_TO_HUMAN)
+#                                          └─ [ok]               → validate_types
+#                                                                     ├─ [invocation fail] → build_analysis → END
+#                                                                     └─ [ok]              → shadow_audit
+#                                                                                              ├─ [RED]     → build_analysis → END (BLOCKED, with audit evidence)
+#                                                                                              ├─ [YELLOW]  → build_analysis → END (MANUAL_REVIEW_REQUIRED, with audit evidence)
+#                                                                                              └─ [GREEN]   → execute_recipe → apply_effects → build_analysis → END
+#                                                                                                              (explain mode: explain_only → build_analysis → END)
+#
+# The reorder (2026-04-22 follow-up) places gateway READS
+# (resolve_dependencies) BEFORE shadow_audit so audit-bearing
+# evidence is captured for every record regardless of compliance
+# verdict. Shadow still gates *recipe execution and effects* per
+# CLAUDE.md Guardrail #4 — that is its load-bearing job; gateway
+# reads are evidence acquisition, not execution.
 #
 # Phase 6 hardening:
 #   kill switch  — run_graph() returns FAIL_TO_HUMAN before any node executes
@@ -49,20 +55,46 @@ def route_after_gate(state: GraphState) -> str:
 def _add_common_nodes_and_edges(graph: StateGraph) -> None:
     """Register all nodes and edges shared between normal and explain graphs.
 
+    Sequence (post-2026-04-22 reorder): the proposal is fully
+    materialised — recipe selected, gateway evidence resolved into
+    enrichment_context, invocation params validated — BEFORE shadow
+    audits it. Shadow gates *recipe execution and effects* per
+    CLAUDE.md Guardrail #4; gateway READS are evidence acquisition,
+    not execution, so they happen in the proposal phase. This keeps
+    Verdict Pillar 1 (audit evidence captured at exception time)
+    reachable for every record, including shadow-gated ones.
+
     Verdict Pillar 2: `build_analysis` sits on every terminal edge so
     the audit-bearing registry is enforced regardless of which
     lifecycle the record lands in (COMPLETE / BLOCKED / REJECTED /
     MANUAL_REVIEW_REQUIRED / FAIL_TO_HUMAN). Re-entry is cheap and
     the node no-ops on records it can't classify — no behavioural
     change for records outside the registry.
+
+    Topology shared by live + explain:
+        ingest → classify → load_skill → validate_circuit_breaker
+          ├─[breach]→ build_analysis (FAIL_TO_HUMAN)
+          └─[ok]→ select_recipe
+               ├─[no recipe]→ build_analysis (FAIL_TO_HUMAN)
+               └─[ok]→ resolve_dependencies
+                    ├─[required-gw fail]→ build_analysis (FAIL_TO_HUMAN)
+                    └─[ok]→ validate_types
+                         ├─[invocation fail]→ build_analysis
+                         └─[ok]→ shadow_audit
+                              ├─[RED]→ build_analysis (BLOCKED, with audit evidence)
+                              └─[YELLOW]→ build_analysis (MANUAL_REVIEW_REQUIRED, with audit evidence)
+                              └─[GREEN]→ <variant: execute_recipe / explain_only>
+
+    Each graph variant attaches the post-shadow continuation.
     """
     graph.add_node("ingest", nodes.ingest)
     graph.add_node("classify", nodes.classify)
     graph.add_node("load_skill", nodes.load_skill)
     graph.add_node("validate_circuit_breaker", nodes.validate_circuit_breaker)
-    graph.add_node("shadow_audit", nodes.shadow_audit)
     graph.add_node("select_recipe", nodes.select_recipe)
+    graph.add_node("resolve_dependencies", nodes.resolve_dependencies)
     graph.add_node("validate_types", nodes.validate_types)
+    graph.add_node("shadow_audit", nodes.shadow_audit)
     graph.add_node("build_analysis", nodes.build_analysis)
 
     graph.set_entry_point("ingest")
@@ -71,30 +103,38 @@ def _add_common_nodes_and_edges(graph: StateGraph) -> None:
     graph.add_edge("load_skill", "validate_circuit_breaker")
     graph.add_conditional_edges(
         "validate_circuit_breaker", route_after_gate,
-        {"terminal": "build_analysis", "continue": "shadow_audit"},
-    )
-    graph.add_conditional_edges(
-        "shadow_audit", route_after_gate,
         {"terminal": "build_analysis", "continue": "select_recipe"},
     )
     graph.add_conditional_edges(
         "select_recipe", route_after_gate,
+        {"terminal": "build_analysis", "continue": "resolve_dependencies"},
+    )
+    graph.add_conditional_edges(
+        "resolve_dependencies", route_after_gate,
         {"terminal": "build_analysis", "continue": "validate_types"},
     )
+    graph.add_conditional_edges(
+        "validate_types", route_after_gate,
+        {"terminal": "build_analysis", "continue": "shadow_audit"},
+    )
+    # shadow_audit's continuation is variant-specific (execute_recipe
+    # vs explain_only); each builder adds its own conditional edge.
     graph.add_edge("build_analysis", END)
 
 
 @cache
 def build_graph():
-    """Build and compile the deterministic LangGraph state machine (normal execution)."""
+    """Build and compile the deterministic LangGraph state machine (normal execution).
+
+    Live path post-shadow continuation:
+        shadow_audit (continue/GREEN) → execute_recipe → apply_effects → build_analysis
+    """
     graph = StateGraph(GraphState)
     _add_common_nodes_and_edges(graph)
-    graph.add_node("resolve_dependencies", nodes.resolve_dependencies)
     graph.add_node("execute_recipe", nodes.execute_recipe)
     graph.add_node("apply_effects", nodes.apply_effects)
-    graph.add_edge("validate_types", "resolve_dependencies")
     graph.add_conditional_edges(
-        "resolve_dependencies", route_after_gate,
+        "shadow_audit", route_after_gate,
         {"terminal": "build_analysis", "continue": "execute_recipe"},
     )
     graph.add_edge("execute_recipe", "apply_effects")
@@ -109,21 +149,20 @@ def build_graph():
 def build_explain_graph():
     """Build the explain-mode graph.
 
-    Identical to build_graph() except execute_recipe / apply_effects
-    are replaced with explain_only — the recipe doesn't run and no
-    side effects fire. Gateway READ dependencies (resolve_dependencies)
-    DO run in explain mode so the audit-bearing field registry is
-    enforced against the same evidence the live path would see;
-    otherwise dry-runs would always route to AUDIT_CONTEXT_MISSING
-    even when the production path would succeed.
+    Identical to build_graph() except the post-shadow GREEN
+    continuation runs explain_only (no recipe execution, no effects).
+    Gateway READ dependencies run in the common section per the
+    2026-04-22 reorder, so dry-runs see the same audit evidence the
+    live path would see.
+
+    Explain path post-shadow continuation:
+        shadow_audit (continue/GREEN) → explain_only → build_analysis
     """
     graph = StateGraph(GraphState)
     _add_common_nodes_and_edges(graph)
-    graph.add_node("resolve_dependencies", nodes.resolve_dependencies)
     graph.add_node("explain_only", nodes.explain_only)
-    graph.add_edge("validate_types", "resolve_dependencies")
     graph.add_conditional_edges(
-        "resolve_dependencies", route_after_gate,
+        "shadow_audit", route_after_gate,
         {"terminal": "build_analysis", "continue": "explain_only"},
     )
     # Verdict Pillar 2: explain-mode also runs through build_analysis

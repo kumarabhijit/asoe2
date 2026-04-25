@@ -229,7 +229,21 @@ class GatewayDependency(BaseModel):
 
     The orchestration layer resolves dependencies by calling the named
     gateway operation and storing the result under ``result_key`` in
-    ``GraphState.resolved_data``.  Recipes never call gateways directly.
+    ``GraphState.enrichment_context``. Recipes never call gateways
+    directly.
+
+    ``required_for_audit`` controls failure semantics in
+    ``resolve_dependencies``:
+      * True  (default) — gateway failure halts the graph with
+                          FAIL_TO_HUMAN. Use for evidence the operator
+                          MUST see (audit-bearing fields).
+      * False           — gateway failure logs and writes an empty
+                          dict to enrichment_context[result_key];
+                          the composer then routes to
+                          AUDIT_CONTEXT_MISSING via the standard
+                          coverage check rather than crashing the run.
+                          Use for evidence that's nice-to-have but not
+                          required to present the record for review.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -240,6 +254,7 @@ class GatewayDependency(BaseModel):
         description="Maps gateway param name → dot-path into GraphState (e.g. 'event.order_id')",
     )
     result_key: str
+    required_for_audit: bool = True
 
 
 class GatewayEffect(BaseModel):
@@ -317,6 +332,11 @@ class WorkflowResult(BaseModel):
 class GraphState(BaseModel):
     model_config = ConfigDict(extra="forbid")
     event: OrderEvent
+    # Request-scoped trace ID — set at ingest, used to correlate
+    # gateway calls / observability events for this run. Distinct
+    # from `shadow.trace_id` (which is the ComplianceDecision's own
+    # row ID generated when shadow_audit runs).
+    request_trace_id: str = ""
     discrepancy: Optional[PricingDiscrepancy] = None
     rag_context: RagContext = Field(default_factory=RagContext)
     skill: Optional[SkillDocument] = None

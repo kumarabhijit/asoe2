@@ -256,10 +256,17 @@ class TestSelectRecipeNode:
         result = select_recipe(credit_event)
         assert result.selected_recipe == "CreditHoldReleaseRecipe.py"
 
-    def test_mass_error_routes_to_fail_to_human(self, mass_event):
+    def test_mass_error_no_recipe_selected_but_no_terminal(self, mass_event):
+        """Post-2026-04-22 reorder: select_recipe doesn't terminate
+        when no recipe matches the intent — shadow_audit gets a chance
+        to RED-block instead. The terminal landing happens at
+        execute_recipe (FAIL_TO_HUMAN guard) only on shadow GREEN.
+        Here we exercise select_recipe in isolation, so final_status
+        stays None; it's set later by either shadow or execute_recipe."""
         mass_event.intent = Intent.MASS_PRICING_ERROR
         result = select_recipe(mass_event)
-        assert result.final_status == TerminalStatus.FAIL_TO_HUMAN
+        assert result.selected_recipe is None
+        assert result.final_status is None
 
     def test_mass_error_explanation_set(self, mass_event):
         mass_event.intent = Intent.MASS_PRICING_ERROR
@@ -641,12 +648,17 @@ class TestRecipeExceptionHandling:
 
 
 class TestUnknownIntentHandling:
-    def test_unknown_intent_select_recipe_routes_to_fail_to_human(self):
-        """UNKNOWN intent has no recipe mapping → FAIL_TO_HUMAN."""
+    def test_unknown_intent_select_recipe_does_not_terminate(self):
+        """Post-2026-04-22 reorder: select_recipe leaves selected_recipe
+        unset and explanation populated when no recipe matches; the
+        graph continues so shadow_audit gets to RED-block (or
+        execute_recipe later raises FAIL_TO_HUMAN on shadow GREEN)."""
         state = _state()
         state.intent = Intent.UNKNOWN
         result = select_recipe(state)
-        assert result.final_status == TerminalStatus.FAIL_TO_HUMAN
+        assert result.selected_recipe is None
+        assert result.final_status is None
+        assert result.explanation is not None
 
     def test_unknown_intent_select_recipe_explanation_set(self):
         state = _state()

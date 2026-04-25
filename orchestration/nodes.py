@@ -120,6 +120,14 @@ def ingest(state: GraphState) -> GraphState:
         state.explanation = f"Input validation failed: {exc}"
         return state
 
+    # Stamp a request-scoped trace ID before any node fans out — used
+    # by resolve_dependencies / apply_effects for gateway-call
+    # correlation (independent of the ComplianceDecision trace ID
+    # produced later by shadow_audit).
+    if not state.request_trace_id:
+        import uuid as _uuid
+        state.request_trace_id = str(_uuid.uuid4())
+
     state.update_count += 1
     state.batch_total_variance = abs(
         (state.event.po_price - state.event.sap_base_price) * state.event.line_count
@@ -209,7 +217,14 @@ def select_recipe(state: GraphState) -> GraphState:
         proposal = backend.propose_recipe(state)
 
     if proposal is None:
-        state.final_status = TerminalStatus.FAIL_TO_HUMAN
+        # No recipe matches this intent. Don't terminate here — shadow
+        # may still RED-block (e.g. MASS_PRICING_ERROR is a compliance
+        # outcome with no recipe by design). If shadow returns GREEN,
+        # execute_recipe's guard on `state.invocation is None` will
+        # raise FAIL_TO_HUMAN with the same explanation. This
+        # preserves shadow's authority to be the terminal voice for
+        # recipe-less intents — required by the 2026-04-22 reorder
+        # which moved shadow_audit after select_recipe.
         state.explanation = "No deterministic recipe available for this intent."
         return state
 
@@ -472,7 +487,14 @@ def resolve_dependencies(state: GraphState) -> GraphState:
         return state
 
     executor = GatewayExecutor()
-    trace_id = state.shadow.trace_id if state.shadow else ""
+    # Gateway-call correlation uses the request-scoped trace ID
+    # (stamped at ingest) — distinct from the ComplianceDecision
+    # trace ID, which only exists after shadow_audit runs. Falls
+    # back to shadow.trace_id when present so re-resolution paths
+    # post-shadow keep stable correlation.
+    trace_id = state.request_trace_id or (
+        state.shadow.trace_id if state.shadow else ""
+    )
 
     # Build all requests up front so dependencies can be resolved concurrently.
     requests = []
@@ -503,12 +525,32 @@ def resolve_dependencies(state: GraphState) -> GraphState:
         response = future.result()
 
         if response.status != "SUCCESS":
-            state.final_status = TerminalStatus.FAIL_TO_HUMAN
-            state.explanation = (
-                f"Gateway dependency failed: {dep.gateway_name}/{dep.operation}"
-                f" — {response.error or response.status}"
+            if dep.required_for_audit:
+                # Strict: this evidence is audit-bearing; without it
+                # the operator can't authorise the action. Halt.
+                state.final_status = TerminalStatus.FAIL_TO_HUMAN
+                state.explanation = (
+                    f"Gateway dependency failed: "
+                    f"{dep.gateway_name}/{dep.operation}"
+                    f" — {response.error or response.status}"
+                )
+                return state
+            # Soft-fail: write an empty bag and continue. The
+            # composer's coverage check will route to
+            # AUDIT_CONTEXT_MISSING if the absent fields turn out to
+            # be required by the registry; otherwise the run proceeds
+            # normally.
+            _node_logger.warning(
+                "gateway_dependency_soft_fail",
+                extra={
+                    "gateway": dep.gateway_name,
+                    "operation": dep.operation,
+                    "result_key": dep.result_key,
+                    "error": response.error or response.status,
+                },
             )
-            return state
+            state.enrichment_context[dep.result_key] = {}
+            continue
 
         state.enrichment_context[dep.result_key] = response.data
 
@@ -523,7 +565,14 @@ def execute_recipe(state: GraphState) -> GraphState:
     # Explicit guard — assert is disabled in optimized Python (-O flag).
     if state.invocation is None:
         state.final_status = TerminalStatus.FAIL_TO_HUMAN
-        state.explanation = "No recipe invocation available; validate_types may have found no recipe."
+        # Preserve any upstream explanation (e.g. select_recipe's
+        # "No deterministic recipe available for this intent.") —
+        # only synthesise one when nothing was set earlier.
+        if not state.explanation:
+            state.explanation = (
+                "No recipe invocation available; "
+                "validate_types may have found no recipe."
+            )
         return state
 
     # Delegate execution to RecipeExecutor (Phase 3).
@@ -614,7 +663,13 @@ def apply_effects(state: GraphState) -> GraphState:
         return state
 
     executor = GatewayExecutor()
-    trace_id = state.shadow.trace_id if state.shadow else ""
+    # Effects run post-shadow-GREEN, so shadow.trace_id is always set.
+    # Prefer it for continuity with the audit decision; fall back to
+    # request_trace_id for defensive coverage.
+    trace_id = (
+        state.shadow.trace_id
+        if state.shadow else state.request_trace_id
+    )
 
     for effect in spec.effects:
         params = {}
