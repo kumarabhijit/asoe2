@@ -31,7 +31,7 @@ def register_sandbox_gateways() -> None:
     pipeline. Safe to call multiple times — clears the registry
     first.
     """
-    if os.getenv("ASOE_ENV", "sandbox").lower() != "sandbox":
+    if os.getenv("ASOE_ENV", "production").lower() != "sandbox":
         return
 
     clear_registry()

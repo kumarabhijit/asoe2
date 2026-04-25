@@ -1,9 +1,34 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 from contracts.models import GatewayResponse, GraphState, OrderEvent
 from gateways.registry import clear_registry, register_gateway
 from gateways.stub import StubGateway
+
+
+@pytest.fixture(autouse=True)
+def _asoe_env_sandbox(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin `ASOE_ENV=sandbox` for the test session unless an explicit
+    test scenario overrides it (e.g. tests/test_security.py and
+    tests/test_sandbox_routes.py both monkeypatch ASOE_ENV=production
+    in specific cases).
+
+    Production became the default-without-env-var when the safe-default
+    flip landed (see api/app.py + api/sandbox_gateways.py +
+    api/deps.py + api/routes/sandbox.py): a missing ASOE_ENV used to
+    silently boot in sandbox mode, which is the wrong default for
+    production deploys but the right default for tests. The previous
+    behaviour leaked test code into production paths because the
+    sandbox-mode CORS allowlist + sandbox routes + stub gateway
+    registration all came along for free. New default: production
+    (locked-down). Tests opt back into sandbox via this fixture so
+    StubGateways register, sandbox routes mount, and CORS allows the
+    Playwright origin.
+    """
+    if not os.getenv("ASOE_ENV"):
+        monkeypatch.setenv("ASOE_ENV", "sandbox")
 
 
 @pytest.fixture

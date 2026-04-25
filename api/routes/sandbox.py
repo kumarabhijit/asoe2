@@ -37,7 +37,7 @@ router = APIRouter()
 
 def _require_sandbox() -> None:
     """Second defence against mis-include in prod."""
-    if os.getenv("ASOE_ENV", "sandbox").lower() != "sandbox":
+    if os.getenv("ASOE_ENV", "production").lower() != "sandbox":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Sandbox endpoints are disabled outside ASOE_ENV=sandbox.",

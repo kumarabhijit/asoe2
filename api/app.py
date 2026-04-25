@@ -37,7 +37,7 @@ def create_app() -> FastAPI:
     # browser rejects those without explicit CORS. Allowlist is the
     # common local dev origins only — not a wildcard, so accidental
     # production mis-configuration still blocks foreign origins.
-    if os.getenv("ASOE_ENV", "sandbox").lower() == "sandbox":
+    if os.getenv("ASOE_ENV", "production").lower() == "sandbox":
         application.add_middleware(
             CORSMiddleware,
             allow_origins=[
@@ -71,7 +71,7 @@ def create_app() -> FastAPI:
     # Sandbox-only test-fixture endpoints (Playwright browser e2e). Mounted
     # only when ASOE_ENV=sandbox; each handler additionally re-checks the
     # env at call time (defence in depth against accidental mis-include).
-    if os.getenv("ASOE_ENV", "sandbox").lower() == "sandbox":
+    if os.getenv("ASOE_ENV", "production").lower() == "sandbox":
         application.include_router(
             _sandbox_routes.router, prefix="/api/v1", tags=["sandbox"],
         )
