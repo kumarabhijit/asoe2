@@ -75,6 +75,13 @@ def create_app() -> FastAPI:
         application.include_router(
             _sandbox_routes.router, prefix="/api/v1", tags=["sandbox"],
         )
+        # Register stub gateways so recipes that declare GatewayDependency
+        # entries (oms / sap_doc / sap_contract / sap_block / sla_contract /
+        # sap_customer_master / promotion / buyer_notification) resolve at
+        # runtime. In production the platform team wires real adapters at
+        # startup; in sandbox these mirror tests/conftest.py.
+        from api.sandbox_gateways import register_sandbox_gateways
+        register_sandbox_gateways()
 
     return application
 
