@@ -37,9 +37,11 @@ CREATE TABLE IF NOT EXISTS exceptions (
     tenant_id         TEXT NOT NULL,
     order_id          TEXT NOT NULL,
     event_type        TEXT NOT NULL,
-    intent            TEXT CHECK (intent IN (
-                        'CONTRACTUAL_CORRECTION', 'CREDIT_BLOCK',
-                        'MASS_PRICING_ERROR', 'DUPLICATE_PO', 'UNKNOWN')),
+    -- Intent enum is enforced at the Python layer (contracts.models.Intent);
+    -- a SQL CHECK constraint here drifts every time a new intent ships,
+    -- so it's intentionally absent. The set of valid intents is owned by
+    -- the Intent enum and exposed via /api/v1/health.allowed_intents.
+    intent            TEXT,
     lifecycle_state   TEXT NOT NULL DEFAULT 'INGESTED',
     shadow_verdict    TEXT,
     selected_recipe   TEXT,
