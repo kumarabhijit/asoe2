@@ -60,11 +60,52 @@ def test_build_anthropic_propagates_missing_key(monkeypatch: pytest.MonkeyPatch)
         build_provider_client("anthropic")
 
 
-def test_build_openai_propagates_not_implemented(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_openai_constructs_for_compatible_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OpenAI is fully implemented in V1 PR-1. Using a self-hosted
+    OpenAI-compatible base URL builds the OpenAI() client class
+    (NOT AzureOpenAI) because no api_version is set."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    monkeypatch.setenv("OPENAI_BASE_URL", "https://my-azure.example/")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://my-vllm.example/v1")
+    monkeypatch.delenv("OPENAI_API_VERSION", raising=False)
     monkeypatch.setenv("ASOE_ENV", "sandbox")
-    with pytest.raises(NotImplementedError, match="V1 stub"):
+    monkeypatch.setenv("ASOE_KILL_SWITCH", "0")
+
+    fake = mock.Mock()
+    fake.OpenAI = mock.Mock(return_value=mock.Mock())
+    fake.AzureOpenAI = mock.Mock(return_value=mock.Mock())
+    monkeypatch.setitem(sys.modules, "openai", fake)
+
+    client = build_provider_client("openai")
+    assert client.provider_name == "openai"
+    fake.OpenAI.assert_called_once()
+    fake.AzureOpenAI.assert_not_called()
+
+
+def test_build_openai_constructs_for_azure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """api_version presence selects the AzureOpenAI client class."""
+    monkeypatch.setenv("OPENAI_API_KEY", "azure-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://myresource.openai.azure.com")
+    monkeypatch.setenv("OPENAI_API_VERSION", "2024-02-01")
+    monkeypatch.setenv("OPENAI_DEPLOYMENT", "asoe-prod-gpt4o")
+    monkeypatch.setenv("ASOE_ENV", "sandbox")
+    monkeypatch.setenv("ASOE_KILL_SWITCH", "0")
+
+    fake = mock.Mock()
+    fake.OpenAI = mock.Mock(return_value=mock.Mock())
+    fake.AzureOpenAI = mock.Mock(return_value=mock.Mock())
+    monkeypatch.setitem(sys.modules, "openai", fake)
+
+    client = build_provider_client("openai")
+    assert client.provider_name == "openai"
+    fake.AzureOpenAI.assert_called_once()
+    fake.OpenAI.assert_not_called()
+
+
+def test_build_openai_missing_key_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
         build_provider_client("openai")
 
 

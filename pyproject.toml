@@ -35,6 +35,13 @@ anthropic = [
   # service runs without it when the deterministic backend is active.
   "anthropic>=0.40.0",
 ]
+openai = [
+  # Required when ASOE_LLM_PROVIDER=openai. Covers OpenAI direct,
+  # Azure OpenAI, and OpenAI-compatible self-hosted clusters
+  # (vLLM, TGI, LiteLLM, LocalAI). SDK is lazy-imported in
+  # llm/openai_client.py.
+  "openai>=1.50.0",
+]
 ollama = [
   # Required when ASOE_LLM_PROVIDER=ollama. SDK is lazy-imported in
   # llm/ollama_client.py. Ollama 0.4+ supports tool calling via the
