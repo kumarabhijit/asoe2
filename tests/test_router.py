@@ -229,3 +229,52 @@ def test_use_outlines_legacy_path(monkeypatch):
     backend = get_constrained_backend()
     # outlines isn't installed in the test env — fallback applied.
     assert isinstance(backend, DeterministicFallbackBackend)
+
+
+# ---------------------------------------------------------------------------
+# Hardening gates: kill-switch + explain-mode pinning at the router
+# ---------------------------------------------------------------------------
+
+
+def test_kill_switch_pins_to_fallback_regardless_of_provider(monkeypatch):
+    """ASOE_KILL_SWITCH=1 makes every router call resolve to the
+    deterministic fallback BEFORE any provider build is attempted.
+    Defence-in-depth on top of the per-provider construction-time
+    check."""
+    monkeypatch.setenv("ASOE_LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setenv("ASOE_KILL_SWITCH", "1")
+    monkeypatch.delenv("ASOE_EXPLAIN_MODE", raising=False)
+
+    # Anthropic SDK should never be imported when kill switch is on.
+    monkeypatch.delitem(sys.modules, "anthropic", raising=False)
+
+    backend = get_constrained_backend(task="intent")
+    assert isinstance(backend, DeterministicFallbackBackend)
+
+
+def test_explain_mode_pins_to_fallback_regardless_of_provider(monkeypatch):
+    """ASOE_EXPLAIN_MODE=1 makes every router call resolve to the
+    deterministic fallback. Read-only dry-runs MUST NOT incur paid
+    LLM calls (Chen review §6)."""
+    monkeypatch.setenv("ASOE_LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setenv("ASOE_KILL_SWITCH", "0")
+    monkeypatch.setenv("ASOE_EXPLAIN_MODE", "1")
+
+    monkeypatch.delitem(sys.modules, "anthropic", raising=False)
+
+    backend = get_constrained_backend(task="intent")
+    assert isinstance(backend, DeterministicFallbackBackend)
+
+
+def test_kill_switch_takes_precedence_over_disable_for(monkeypatch):
+    """Both gates fire → kill-switch wins (explicit short-circuit at
+    the top of the router). Just a smoke test that we don't raise
+    unexpectedly when multiple gates are active."""
+    monkeypatch.setenv("ASOE_LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setenv("ASOE_KILL_SWITCH", "1")
+    monkeypatch.setenv("ASOE_LLM_DISABLE_FOR", "intent")
+    backend = get_constrained_backend(task="intent")
+    assert isinstance(backend, DeterministicFallbackBackend)

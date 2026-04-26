@@ -46,6 +46,8 @@ from typing import Any
 
 from constraints.fallback_backend import DeterministicFallbackBackend
 from contracts.policy import LLM_PROVIDER_DEFAULT, LLMProvider, LLMTask
+from hardening.explain_mode import is_explain_mode_active
+from hardening.kill_switch import is_kill_switch_active
 
 logger = logging.getLogger("asoe.constraints")
 
@@ -162,7 +164,29 @@ def get_constrained_backend(task: LLMTask | None = None) -> Any:
 
     The function NEVER raises — every failure mode falls closed to
     DeterministicFallbackBackend with a structured warning.
+
+    Hardening gates evaluated FIRST, before any provider build:
+      - ASOE_KILL_SWITCH active → deterministic, zero TCP egress.
+      - ASOE_EXPLAIN_MODE active → deterministic, read-only dry-run
+        path never makes paid LLM calls (Chen review §6).
+    Both gates re-check on every call (no cache), so an operator can
+    flip them mid-session without restarting workers.
     """
+    # 0a. Kill switch — defence-in-depth. Provider clients also
+    # check at construction time, but this gate ensures the router
+    # never even attempts the build (so a future provider that
+    # forgets the check still can't egress).
+    if is_kill_switch_active():
+        return DeterministicFallbackBackend()
+
+    # 0b. Explain mode — paid LLM calls during dry-runs would defeat
+    # the read-only guarantee documented in DESIGN.md §7. The gate
+    # is structural: every constrained-backend lookup during an
+    # explain-mode run resolves to deterministic regardless of
+    # ASOE_LLM_PROVIDER configuration.
+    if is_explain_mode_active():
+        return DeterministicFallbackBackend()
+
     # 1. Runtime kill-by-task: an operator can flip a single task off
     # without re-deploying via ASOE_LLM_DISABLE_FOR=intent,recipe,shadow.
     if task is not None and task in _resolve_disabled_tasks():

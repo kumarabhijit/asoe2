@@ -79,7 +79,16 @@ class ComplianceShadow(ComplianceShadowBase):
     """
 
     def __init__(self, backend=None) -> None:
-        self.backend = backend if backend is not None else get_constrained_backend()
+        # Default to the shadow-task router slot so per-task config
+        # (ASOE_LLM_PROVIDER_SHADOW + ASOE_LLM_DISABLE_FOR=shadow)
+        # is honoured even when ComplianceShadow is constructed
+        # outside the orchestration layer (e.g. unit tests, ad-hoc
+        # API calls). The orchestration `shadow_audit` node passes
+        # an injected backend so this default only fires for direct
+        # callers.
+        self.backend = (
+            backend if backend is not None else get_constrained_backend(task="shadow")
+        )
 
     # ------------------------------------------------------------------
     # audit — Phase 2.1
