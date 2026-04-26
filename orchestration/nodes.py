@@ -98,6 +98,23 @@ def _reset_backend_cache() -> None:
     _cached_backends.clear()
 
 
+def _drain_llm_trace(state: GraphState, backend: Any) -> None:
+    """If the backend exposes a `last_call_trace` (RemoteLLMBackend
+    does; DeterministicFallbackBackend does not), append it to
+    `state.llm_call_traces` and clear the slot so a follow-up call
+    on the same backend instance doesn't double-record.
+
+    Called from each trio call site (classify / select_recipe /
+    shadow_audit) so per-call telemetry survives onto GraphState
+    without changing the trio interface.
+    """
+    trace = getattr(backend, "last_call_trace", None)
+    if trace is None:
+        return
+    state.llm_call_traces.append(trace)
+    backend.last_call_trace = None
+
+
 class NodeValidationError(Exception):
     """Raised when a node receives invalid state at a boundary."""
 
@@ -172,6 +189,19 @@ def classify(state: GraphState) -> GraphState:
             llm_decision=decision,
             deterministic_decision=det_decision,
         )
+        # Drain LLM call trace BEFORE we apply terminal-state routing
+        # so the disagreement signal can be stamped on it. The trace
+        # carries the cross-check outcome alongside the provider
+        # telemetry — single audit record per call.
+        _drain_llm_trace(state, backend)
+        if state.llm_call_traces:
+            last_trace = state.llm_call_traces[-1]
+            # Pydantic frozen=False on LLMCallTrace; we mutate the
+            # latest entry in place to set the cross-check signal.
+            last_trace.cross_check_disagreement = not check.agreed
+            last_trace.cross_check_llm_intent = check.llm_intent
+            last_trace.cross_check_deterministic_intent = check.deterministic_intent
+
         if not check.agreed:
             # Deterministic intent wins for downstream routing; the
             # graph is forced to MANUAL_REVIEW_REQUIRED.
@@ -195,6 +225,10 @@ def classify(state: GraphState) -> GraphState:
                 },
             )
             return state
+    else:
+        # Deterministic-only path — no LLM trace to drain, but the
+        # call itself is still cheap.
+        _drain_llm_trace(state, backend)
 
     state.intent = Intent(decision.intent)
     state.confidence = decision.confidence
@@ -239,8 +273,10 @@ def shadow_audit(state: GraphState) -> GraphState:
     # via ASOE_LLM_PROVIDER_SHADOW only after compliance sign-off.
     # ASOE_LLM_DISABLE_FOR=shadow forces deterministic regardless of
     # provider config — runtime kill-by-task without a redeploy.
-    shadow = ComplianceShadow(backend=_backend(task="shadow"))
+    backend = _backend(task="shadow")
+    shadow = ComplianceShadow(backend=backend)
     state.shadow = shadow.audit(state)
+    _drain_llm_trace(state, backend)
 
     # Use the formal enforcement contract from Phase 2.
     enforcement = shadow.enforce(state.shadow)
@@ -261,6 +297,7 @@ def shadow_audit(state: GraphState) -> GraphState:
 def select_recipe(state: GraphState) -> GraphState:
     backend = _backend(task="recipe")
     proposal = backend.propose_recipe(state)
+    _drain_llm_trace(state, backend)
 
     if proposal is None:
         # No recipe matches this intent. Don't terminate here — shadow

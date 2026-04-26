@@ -33,6 +33,8 @@ from __future__ import annotations
 # tests/test_llm_cache_invalidators.py asserts byte-identical
 # rendered prefixes across distinct OrderEvents.
 
+import hashlib
+import json
 import logging
 import time
 from pathlib import Path
@@ -40,7 +42,7 @@ from typing import Any, Optional
 
 from pydantic import ValidationError
 
-from contracts.models import GraphState, Intent
+from contracts.models import GraphState, Intent, LLMCallTrace
 from contracts.policy import LLMTask
 from constraints.fallback_backend import DeterministicFallbackBackend
 from constraints.specs import (
@@ -211,7 +213,17 @@ class RemoteLLMBackend:
         self._budget = budget if budget is not None else get_budget_tracker()
         self._breaker = breaker if breaker is not None else get_circuit_breaker()
         self._skill_catalog = _get_skill_catalog(skills_dir)
+        self._skill_md_version = (
+            hashlib.sha256(self._skill_catalog.encode("utf-8")).hexdigest()
+            if self._skill_catalog
+            else ""
+        )
         self._max_tokens = max_tokens
+        # Per-call trace populated after every _invoke. Orchestration
+        # nodes drain it onto state.llm_call_traces and reset to None
+        # after each trio call. Never holds more than one entry — the
+        # backend itself is stateless across calls.
+        self.last_call_trace: Optional[LLMCallTrace] = None
 
     # ------------------------------------------------------------------
     # Trio surface
@@ -267,8 +279,20 @@ class RemoteLLMBackend:
     ) -> Any | None:
         """Returns the validated Pydantic instance on success, or None
         when any guard short-circuits (caller falls back to deterministic).
+        Always populates `self.last_call_trace` so orchestration nodes
+        can attach the per-call telemetry to GraphState.
         """
         tool_name, tool_description, directive, schema_cls = _TASK_DESCRIPTORS[task]
+
+        # Compute prompt hashes from the cacheable prefix (system +
+        # tool schema). Done up-front so every exit branch can attach
+        # the same hashes to the trace.
+        system_blocks = self._system_blocks_for(directive)
+        user_message = user_message_builder(state)
+        tool_schema = _stable_tool_schema(schema_cls)
+        prompt_hash = _hash_prompt_prefix(
+            system_blocks, tool_name, tool_description, tool_schema
+        )
 
         # 1. Budget hard-block check (read-only snapshot — no consume yet).
         snap = self._budget.snapshot()
@@ -281,6 +305,11 @@ class RemoteLLMBackend:
                     "budget_usd": snap.budget_usd,
                 },
             )
+            self.last_call_trace = self._fallback_trace(
+                task=task,
+                prompt_hash=prompt_hash,
+                fallback_reason="budget_hard_block",
+            )
             return None
 
         # 2. Circuit breaker permission. If OPEN, this raises CircuitOpen.
@@ -291,14 +320,14 @@ class RemoteLLMBackend:
                 "llm_backend.circuit_open",
                 extra={"task": task, "reason": str(exc)},
             )
+            self.last_call_trace = self._fallback_trace(
+                task=task,
+                prompt_hash=prompt_hash,
+                fallback_reason="circuit_open",
+            )
             return None
 
-        # 3. Build the call.
-        system_blocks = self._system_blocks_for(directive)
-        user_message = user_message_builder(state)
-        tool_schema = _stable_tool_schema(schema_cls)
-
-        # 4. Provider invocation.
+        # 3. Provider invocation.
         started = time.monotonic()
         try:
             result = self._provider.call_with_tool(
@@ -322,6 +351,13 @@ class RemoteLLMBackend:
                     "status_code": exc.status_code,
                 },
             )
+            self.last_call_trace = self._fallback_trace(
+                task=task,
+                prompt_hash=prompt_hash,
+                fallback_reason=exc.kind,
+                request_id=exc.request_id,
+                latency_ms=int(latency_s * 1000),
+            )
             return None
         except Exception as exc:  # noqa: BLE001
             latency_s = time.monotonic() - started
@@ -330,22 +366,27 @@ class RemoteLLMBackend:
                 "llm_backend.unexpected_error",
                 extra={"task": task, "error_type": type(exc).__name__, "error": str(exc)},
             )
+            self.last_call_trace = self._fallback_trace(
+                task=task,
+                prompt_hash=prompt_hash,
+                fallback_reason="unknown",
+                latency_ms=int(latency_s * 1000),
+            )
             return None
 
-        # 5. Record success on the breaker (latency tracked).
+        # 4. Record success on the breaker (latency tracked).
         self._breaker.record_success(result.latency_s or (time.monotonic() - started))
 
-        # 6. Consume budget AFTER the call so we charge actual usage.
+        # 5. Consume budget AFTER the call so we charge actual usage.
+        usage = TokenUsage(
+            input_tokens=result.usage.input_tokens,
+            output_tokens=result.usage.output_tokens,
+            cache_read_input_tokens=result.usage.cache_read_input_tokens,
+            cache_creation_input_tokens=result.usage.cache_creation_input_tokens,
+        )
+        cost: float = 0.0
         try:
-            cost = estimate_cost_usd(
-                result.model_id,
-                TokenUsage(
-                    input_tokens=result.usage.input_tokens,
-                    output_tokens=result.usage.output_tokens,
-                    cache_read_input_tokens=result.usage.cache_read_input_tokens,
-                    cache_creation_input_tokens=result.usage.cache_creation_input_tokens,
-                ),
-            )
+            cost = estimate_cost_usd(result.model_id, usage)
             if cost > 0:
                 self._budget.consume(cost)
         except Exception as exc:  # noqa: BLE001
@@ -357,11 +398,11 @@ class RemoteLLMBackend:
                 extra={"task": task, "error": str(exc)},
             )
 
-        # 7. Pydantic re-validation. The provider has already JSON-
+        # 6. Pydantic re-validation. The provider has already JSON-
         # validated, but we re-validate here to enforce Literal
         # narrowing and `extra="forbid"` from constraints/specs.py.
         try:
-            return schema_cls.model_validate(result.arguments)
+            decision = schema_cls.model_validate(result.arguments)
         except ValidationError as exc:
             logger.warning(
                 "llm_backend.schema_validation_failed",
@@ -372,7 +413,105 @@ class RemoteLLMBackend:
                     "arguments": dict(result.arguments),
                 },
             )
+            self.last_call_trace = self._success_trace_then_fallback(
+                task=task,
+                provider_name=self._provider.provider_name,
+                result=result,
+                prompt_hash=prompt_hash,
+                cost_usd=cost,
+                fallback_reason="validation_error",
+            )
             return None
+
+        # Success path — record the successful call trace.
+        self.last_call_trace = LLMCallTrace(
+            task=task,
+            provider=self._provider.provider_name,
+            model_id=result.model_id,
+            request_id=result.request_id,
+            prompt_hash=prompt_hash,
+            tool_call_hash=_hash_tool_call(tool_name, dict(result.arguments)),
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cache_read_input_tokens=usage.cache_read_input_tokens,
+            cache_creation_input_tokens=usage.cache_creation_input_tokens,
+            latency_ms=int(result.latency_s * 1000),
+            cost_usd_estimate=cost,
+            stop_reason=result.stop_reason,
+            skill_md_version=self._skill_md_version,
+            fallback_to_deterministic=False,
+            fallback_reason=None,
+        )
+        return decision
+
+    # ------------------------------------------------------------------
+    # Trace-building helpers — keep the _invoke control flow readable.
+    # ------------------------------------------------------------------
+
+    def _fallback_trace(
+        self,
+        *,
+        task: LLMTask,
+        prompt_hash: str,
+        fallback_reason: str,
+        request_id: Optional[str] = None,
+        latency_ms: int = 0,
+    ) -> LLMCallTrace:
+        """Build a trace for a call that fell through to the
+        deterministic backend before producing a successful provider
+        response. No token usage / cost — those columns stay zero."""
+        return LLMCallTrace(
+            task=task,
+            provider=self._provider.provider_name,
+            model_id="",
+            request_id=request_id,
+            prompt_hash=prompt_hash,
+            tool_call_hash="",
+            input_tokens=0,
+            output_tokens=0,
+            cache_read_input_tokens=0,
+            cache_creation_input_tokens=0,
+            latency_ms=latency_ms,
+            cost_usd_estimate=0.0,
+            stop_reason=None,
+            skill_md_version=self._skill_md_version,
+            fallback_to_deterministic=True,
+            fallback_reason=fallback_reason,
+        )
+
+    def _success_trace_then_fallback(
+        self,
+        *,
+        task: LLMTask,
+        provider_name: str,
+        result,
+        prompt_hash: str,
+        cost_usd: float,
+        fallback_reason: str,
+    ) -> LLMCallTrace:
+        """Build a trace for the case where the provider RETURNED
+        successfully but Pydantic re-validation rejected the
+        arguments. We DID burn provider tokens, so the trace records
+        them — but `fallback_to_deterministic=True` because the
+        graph still served the deterministic answer."""
+        return LLMCallTrace(
+            task=task,
+            provider=provider_name,
+            model_id=result.model_id,
+            request_id=result.request_id,
+            prompt_hash=prompt_hash,
+            tool_call_hash="",
+            input_tokens=result.usage.input_tokens,
+            output_tokens=result.usage.output_tokens,
+            cache_read_input_tokens=result.usage.cache_read_input_tokens,
+            cache_creation_input_tokens=result.usage.cache_creation_input_tokens,
+            latency_ms=int((result.latency_s or 0) * 1000),
+            cost_usd_estimate=cost_usd,
+            stop_reason=result.stop_reason,
+            skill_md_version=self._skill_md_version,
+            fallback_to_deterministic=True,
+            fallback_reason=fallback_reason,
+        )
 
     # ------------------------------------------------------------------
     # Cacheable system-prompt assembly. Two SystemBlocks both marked
@@ -502,6 +641,53 @@ def _sort_keys(obj: Any) -> Any:
     if isinstance(obj, list):
         return [_sort_keys(v) for v in obj]
     return obj
+
+
+# ---------------------------------------------------------------------------
+# Hashing helpers — feed the LLMCallTrace prompt_hash / tool_call_hash
+# fields. SHA-256 hex digests so two pods comparing audit logs see the
+# same value when their inputs were identical, and never see prompt
+# content in the audit trail (only hashes).
+# ---------------------------------------------------------------------------
+
+
+def _hash_prompt_prefix(
+    system_blocks: list[SystemBlock],
+    tool_name: str,
+    tool_description: str,
+    tool_schema: dict[str, Any],
+) -> str:
+    """Hash the cacheable prefix the provider sees: system blocks
+    (text + cache flags) + tool definition + tool schema. Two calls
+    that hash to the same value should hit prompt cache; the
+    invalidator audit (tests/test_llm_cache_invalidators.py) asserts
+    the inverse."""
+    h = hashlib.sha256()
+    for block in system_blocks:
+        h.update(block.text.encode("utf-8"))
+        h.update(b"\x1f")  # separator
+        h.update(b"1" if block.cache.enabled else b"0")
+        h.update(b"\x1f")
+        h.update((block.cache.ttl or "").encode("utf-8"))
+        h.update(b"\x1e")  # block separator
+    h.update(tool_name.encode("utf-8"))
+    h.update(b"\x1f")
+    h.update(tool_description.encode("utf-8"))
+    h.update(b"\x1f")
+    h.update(json.dumps(tool_schema, sort_keys=True).encode("utf-8"))
+    return h.hexdigest()
+
+
+def _hash_tool_call(tool_name: str, arguments: dict[str, Any]) -> str:
+    """Hash the tool call (name + canonicalised arguments). Stable
+    across runs with identical decisions; lets the audit trail
+    spot-check repeated outcomes without storing argument PII."""
+    canonical = json.dumps(arguments, sort_keys=True, separators=(",", ":"))
+    h = hashlib.sha256()
+    h.update(tool_name.encode("utf-8"))
+    h.update(b"\x1f")
+    h.update(canonical.encode("utf-8"))
+    return h.hexdigest()
 
 
 __all__ = (
