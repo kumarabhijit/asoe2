@@ -116,9 +116,11 @@ class ProviderError(Exception):
         super().__init__(message)
         self.kind = kind
         """Short token: 'timeout' | 'rate_limit' | 'server_error' |
-        'auth' | 'schema_mismatch' | 'connection' | 'unknown'.
-        Used for Prometheus error_type labels and TraceRecord
-        anthropic_error_type."""
+        'auth' | 'billing' | 'schema_mismatch' | 'connection' |
+        'unknown'. Used for Prometheus error_type labels and
+        TraceRecord anthropic_error_type. 'billing' marks credit /
+        quota exhaustion (non-retryable; sticky until the operator
+        adds credits)."""
         self.retryable = retryable
         self.status_code = status_code
         self.request_id = request_id

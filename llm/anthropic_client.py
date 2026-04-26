@@ -229,9 +229,25 @@ _ANTHROPIC_KIND_BY_EXC: dict[str, str] = {
 }
 
 
+# Substrings (case-insensitive) that mark a 400 BadRequestError as
+# billing/quota exhaustion rather than a real schema bug. Anthropic
+# surfaces both classes through the same exception type, so the kind
+# has to be disambiguated from the message body.
+_BILLING_MESSAGE_PATTERNS: tuple[str, ...] = (
+    "credit balance",
+    "billing",
+    "monthly token",
+    "quota",
+)
+
+
 def _classify_anthropic_exc(exc: BaseException) -> tuple[str, bool]:
     name = type(exc).__name__
     kind = _ANTHROPIC_KIND_BY_EXC.get(name, "unknown")
+    if kind == "schema_mismatch":
+        msg = str(exc).lower()
+        if any(pat in msg for pat in _BILLING_MESSAGE_PATTERNS):
+            kind = "billing"
     retryable = kind in {"rate_limit", "timeout", "connection", "server_error"}
     return kind, retryable
 

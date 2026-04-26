@@ -390,6 +390,69 @@ def test_call_with_tool_classifies_sdk_exception() -> None:
     assert ei.value.retryable is True
 
 
+def test_call_with_tool_classifies_billing_400_as_billing() -> None:
+    """A 400 BadRequestError whose body says 'credit balance' must
+    classify as kind='billing', not the default 'schema_mismatch'.
+    Operators reading the LLMCallTrace need to see billing exhaustion
+    distinctly from a real schema bug — without a follow-up probe."""
+    class FakeBadRequestError(Exception):
+        pass
+
+    FakeBadRequestError.__name__ = "BadRequestError"
+
+    fake_sdk = mock.Mock()
+    fake_sdk.messages.create.side_effect = FakeBadRequestError(
+        "Error code: 400 - {'type': 'error', 'error': {'type': "
+        "'invalid_request_error', 'message': 'Your credit balance is "
+        "too low to access the Anthropic API. Please go to Plans & "
+        "Billing to upgrade or purchase credits.'}}"
+    )
+
+    client = AnthropicProviderClient(
+        sdk_client=fake_sdk, model_id="claude-haiku-4-5-20251001"
+    )
+    with pytest.raises(ProviderError) as ei:
+        client.call_with_tool(
+            system=[],
+            user_message="u",
+            tool_name="classify_intent",
+            tool_description="d",
+            tool_input_schema={"type": "object"},
+        )
+    assert ei.value.kind == "billing"
+    assert ei.value.retryable is False
+
+
+def test_call_with_tool_classifies_non_billing_400_as_schema_mismatch() -> None:
+    """A 400 BadRequestError whose body has no billing-keyword still
+    classifies as kind='schema_mismatch' — the default path. Guards
+    against the billing pattern over-matching genuine schema bugs."""
+    class FakeBadRequestError(Exception):
+        pass
+
+    FakeBadRequestError.__name__ = "BadRequestError"
+
+    fake_sdk = mock.Mock()
+    fake_sdk.messages.create.side_effect = FakeBadRequestError(
+        "Error code: 400 - tool input validation failed: missing "
+        "required property 'intent'"
+    )
+
+    client = AnthropicProviderClient(
+        sdk_client=fake_sdk, model_id="claude-haiku-4-5-20251001"
+    )
+    with pytest.raises(ProviderError) as ei:
+        client.call_with_tool(
+            system=[],
+            user_message="u",
+            tool_name="classify_intent",
+            tool_description="d",
+            tool_input_schema={"type": "object"},
+        )
+    assert ei.value.kind == "schema_mismatch"
+    assert ei.value.retryable is False
+
+
 # ---------------------------------------------------------------------------
 # Back-compat: build_client() returns the raw SDK client
 # ---------------------------------------------------------------------------
