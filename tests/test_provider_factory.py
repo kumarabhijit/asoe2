@@ -76,16 +76,24 @@ def test_build_google_propagates_not_implemented(monkeypatch: pytest.MonkeyPatch
         build_provider_client("google")
 
 
-def test_build_ollama_propagates_not_implemented(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+def test_build_ollama_constructs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ollama is fully implemented in V1 PR-1; the factory must
+    construct an OllamaProviderClient when the SDK is available."""
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434")
     monkeypatch.setenv("ASOE_ENV", "sandbox")
-    with pytest.raises(NotImplementedError, match="V1 stub"):
-        build_provider_client("ollama")
+    monkeypatch.setenv("ASOE_KILL_SWITCH", "0")
+
+    fake = mock.Mock()
+    fake.Client = mock.Mock(return_value=mock.Mock())
+    monkeypatch.setitem(sys.modules, "ollama", fake)
+
+    client = build_provider_client("ollama")
+    assert client.provider_name == "ollama"
+    fake.Client.assert_called_once()
 
 
-def test_build_huggingface_propagates_not_implemented(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_build_huggingface_constructs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """HuggingFace is fully implemented in V1 PR-1."""
     monkeypatch.setenv("HUGGINGFACE_API_KEY", "hf_test")
     monkeypatch.setenv("HUGGINGFACE_MODEL", "Qwen/Qwen2.5-32B-Instruct")
     monkeypatch.setenv(
@@ -93,5 +101,18 @@ def test_build_huggingface_propagates_not_implemented(
         "https://my-endpoint.endpoints.huggingface.cloud",
     )
     monkeypatch.setenv("ASOE_ENV", "sandbox")
-    with pytest.raises(NotImplementedError, match="V1 stub"):
+    monkeypatch.setenv("ASOE_KILL_SWITCH", "0")
+
+    fake = mock.Mock()
+    fake.InferenceClient = mock.Mock(return_value=mock.Mock())
+    monkeypatch.setitem(sys.modules, "huggingface_hub", fake)
+
+    client = build_provider_client("huggingface")
+    assert client.provider_name == "huggingface"
+    fake.InferenceClient.assert_called_once()
+
+
+def test_build_huggingface_missing_key_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("HUGGINGFACE_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="HUGGINGFACE_API_KEY"):
         build_provider_client("huggingface")

@@ -35,6 +35,19 @@ anthropic = [
   # service runs without it when the deterministic backend is active.
   "anthropic>=0.40.0",
 ]
+ollama = [
+  # Required when ASOE_LLM_PROVIDER=ollama. SDK is lazy-imported in
+  # llm/ollama_client.py. Ollama 0.4+ supports tool calling via the
+  # native chat API.
+  "ollama>=0.4.0",
+]
+huggingface = [
+  # Required when ASOE_LLM_PROVIDER=huggingface (HF Inference
+  # Endpoints / Inference API). SDK is lazy-imported in
+  # llm/huggingface_client.py. 0.27+ supports OpenAI-style tool
+  # calling on Qwen / Llama 3.1+ / Mistral Large 2 endpoints.
+  "huggingface_hub>=0.27.0",
+]
 dev = [
   "pytest>=8.0.0",
   "pytest-cov>=5.0.0",
