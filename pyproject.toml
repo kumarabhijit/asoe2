@@ -29,6 +29,12 @@ postgres = [
 langfuse = [
   "langfuse>=2.0.0",
 ]
+anthropic = [
+  # Required when ASOE_LLM_PROVIDER ∈ {anthropic, azure_anthropic}.
+  # SDK is lazy-imported in llm/anthropic_client.py so the core
+  # service runs without it when the deterministic backend is active.
+  "anthropic>=0.40.0",
+]
 dev = [
   "pytest>=8.0.0",
   "pytest-cov>=5.0.0",

@@ -1,5 +1,16 @@
 from __future__ import annotations
 
+# OutlinesConstrainedBackend — local constrained-generation backend.
+#
+# Public surface mirrors DeterministicFallbackBackend so callers
+# (orchestration/nodes.py, compliance/shadow.py, skills/intent_classifier.py)
+# don't need a hasattr/branch on which backend is active. All trio methods
+# accept `state: GraphState` and build their prompt internally.
+#
+# The static prompt builders (intent_prompt / recipe_prompt / shadow_prompt)
+# are retained as a stable API for prompt-preview tools (sandbox UI/CLI
+# expanders) and tests; they must not be required by graph callers.
+
 from contracts.models import GraphState
 from constraints.specs import IntentDecision, RecipeProposal, ShadowDecisionSchema
 from llm.backends import get_outlines_model
@@ -9,15 +20,18 @@ class OutlinesConstrainedBackend:
     def __init__(self, model_name: str | None = None):
         self.model = get_outlines_model(model_name)
 
-    def classify_intent(self, prompt: str) -> IntentDecision:
+    def classify_intent(self, state: GraphState) -> IntentDecision:
+        prompt = self.intent_prompt(state)
         raw = self.model(prompt, IntentDecision, max_new_tokens=120)
         return IntentDecision.model_validate_json(raw)
 
-    def propose_recipe(self, prompt: str) -> RecipeProposal:
+    def propose_recipe(self, state: GraphState) -> RecipeProposal:
+        prompt = self.recipe_prompt(state)
         raw = self.model(prompt, RecipeProposal, max_new_tokens=80)
         return RecipeProposal.model_validate_json(raw)
 
-    def shadow_decision(self, prompt: str) -> ShadowDecisionSchema:
+    def shadow_decision(self, state: GraphState) -> ShadowDecisionSchema:
+        prompt = self.shadow_prompt(state)
         raw = self.model(prompt, ShadowDecisionSchema, max_new_tokens=120)
         return ShadowDecisionSchema.model_validate_json(raw)
 

@@ -142,12 +142,7 @@ def ingest(state: GraphState) -> GraphState:
 def classify(state: GraphState) -> GraphState:
     state.discrepancy = compute_discrepancy(state.event.po_price, state.event.sap_base_price)
     backend = _backend()
-    if hasattr(backend, "intent_prompt"):
-        # Outlines path: backend expects a prompt string
-        decision = backend.classify_intent(backend.intent_prompt(state))
-    else:
-        # Fallback path: backend accepts full GraphState
-        decision = backend.classify_intent(state)
+    decision = backend.classify_intent(state)
     state.intent = Intent(decision.intent)
     state.confidence = decision.confidence
     return state
@@ -209,12 +204,7 @@ def shadow_audit(state: GraphState) -> GraphState:
 
 def select_recipe(state: GraphState) -> GraphState:
     backend = _backend()
-    if hasattr(backend, "recipe_prompt"):
-        # Outlines path
-        proposal = backend.propose_recipe(backend.recipe_prompt(state))
-    else:
-        # Fallback path
-        proposal = backend.propose_recipe(state)
+    proposal = backend.propose_recipe(state)
 
     if proposal is None:
         # No recipe matches this intent. Don't terminate here — shadow

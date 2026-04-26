@@ -200,3 +200,99 @@ DELIVERY_DELAY_SEVERE_DAYS: int = 5
 SEVERE (SD-DELAY-002). Below this the recipe can recommend expedite /
 split-ship; at/above, reschedule-to-later-window plus buyer notification
 is required."""
+
+# ---------------------------------------------------------------------------
+# LLM provider routing & cost guardrails
+# ---------------------------------------------------------------------------
+# V1 flips a single deterministic fallback path into a pluggable per-task
+# routing layer. Operators choose a provider per task (intent / recipe /
+# shadow) via env vars; the router resolves to a backend and a daily USD
+# budget bounds spend. Production defaults to `fallback` until a tenant or
+# the operator explicitly opts in. SOX / Compliance Shadow integrity is
+# preserved by defaulting `shadow` to deterministic regardless of provider
+# choice (see ASOE_LLM_DISABLE_FOR).
+
+from typing import Literal
+
+LLMProvider = Literal[
+    "anthropic",        # Direct Anthropic API (sandbox/dev only by policy)
+    "azure_anthropic",  # Anthropic via Azure AI Foundry private endpoint
+    "outlines",         # Local constrained generation (Outlines + HF)
+    "local",            # Sandbox SLM via LOCAL_LLM_BACKEND_CLASS
+    "fallback",         # DeterministicFallbackBackend — always-available net
+]
+"""Allowed values for ASOE_LLM_PROVIDER and per-task overrides
+(ASOE_LLM_PROVIDER_INTENT / _RECIPE / _SHADOW). The router rejects
+any other value and falls closed to `fallback`."""
+
+LLMTask = Literal["intent", "recipe", "shadow"]
+"""The three trio methods served by a constraint backend. Each is
+independently routable so an operator can pin shadow to deterministic
+while letting intent and recipe go through a remote LLM."""
+
+LLM_PROVIDER_DEFAULT: LLMProvider = "fallback"
+"""Default provider when ASOE_LLM_PROVIDER is unset. Production deploys
+must keep this default and opt in explicitly per task."""
+
+LLM_DEFAULT_MODEL_ID: str = "claude-sonnet-4-6"
+"""Default Anthropic model when ANTHROPIC_MODEL is unset. Aligned with
+architecture_v3.md §4.2 (Reasoning Core: Claude 4.6 Sonnet)."""
+
+LLM_DAILY_USD_BUDGET_DEFAULT: float = 5.0
+"""Daily spend cap (USD) when ASOE_LLM_DAILY_USD_BUDGET is unset.
+At/above this value the router hard-blocks the LLM tier and serves
+the deterministic fallback. Sized for V1 sandbox shakeout; raise via
+env var for GA."""
+
+LLM_BUDGET_HARD_BLOCK_PCT: float = 1.0
+"""Daily budget consumption fraction at/above which all LLM calls are
+short-circuited to the deterministic fallback. Default 100%."""
+
+LLM_BUDGET_SOFT_WARN_PCT: float = 0.8
+"""Daily budget consumption fraction at/above which a Prometheus alert
+fires (no behavior change). Default 80%."""
+
+LLM_PER_RUN_USD_CAP: float = 0.10
+"""Maximum USD spend allowed across the trio of calls in a single
+graph run. Pathological-prompt guard; rejects the run to FAIL_TO_HUMAN
+if exceeded mid-run."""
+
+LLM_CIRCUIT_BREAKER_ERROR_RATE_PCT: float = 0.25
+"""Rolling 60-second LLM error rate at/above which the LLM-tier
+circuit breaker trips, routing all calls to the deterministic
+fallback for a 5-minute cooldown. Separate from the $10k batch
+breaker in orchestration/utils.py."""
+
+LLM_CIRCUIT_BREAKER_P95_LATENCY_S: float = 15.0
+"""Rolling 60-second p95 latency (seconds) above which the LLM-tier
+circuit breaker trips. Pairs with the error-rate threshold above."""
+
+LLM_CIRCUIT_BREAKER_COOLDOWN_S: int = 300
+"""Time the LLM-tier circuit breaker stays in OPEN state before
+moving to HALF_OPEN. Default 5 minutes."""
+
+LLM_CALL_TIMEOUT_S: float = 30.0
+"""Per-call timeout for an Anthropic SDK request (constrained tool-use
+output is normally <2s; tail latency on cache writes can hit 10s+).
+At 3 calls × 3 SDK retries × 30s = 270s worst case, comfortably under
+the 8-min p50 SLA."""
+
+LLM_CROSS_CHECK_DISAGREEMENT_REASON: str = "LLM_DETERMINISTIC_DISAGREEMENT"
+"""ExecutionLog reason emitted when the remote LLM and the
+deterministic classifier produce different intents. The graph routes
+to MANUAL_REVIEW_REQUIRED — a valid terminal state per CLAUDE.md §5
+that defers a contested classification to a human."""
+
+# Pricing table (USD per 1M tokens) — used by the budget tracker to
+# convert observed token counts into USD spend. Cached snapshot from
+# 2026-04-15; keep in sync with shared/models.md when new models land.
+LLM_PRICING_USD_PER_M_TOKENS: dict[str, dict[str, float]] = {
+    "claude-opus-4-7":   {"input": 5.00, "output": 25.00, "cache_read": 0.50, "cache_write_5m": 6.25},
+    "claude-opus-4-6":   {"input": 5.00, "output": 25.00, "cache_read": 0.50, "cache_write_5m": 6.25},
+    "claude-sonnet-4-6": {"input": 3.00, "output": 15.00, "cache_read": 0.30, "cache_write_5m": 3.75},
+    "claude-haiku-4-5":  {"input": 1.00, "output":  5.00, "cache_read": 0.10, "cache_write_5m": 1.25},
+}
+"""USD per 1M tokens by model and token kind. cache_read ≈ 0.1× input;
+cache_write_5m ≈ 1.25× input (5-minute TTL). 1-hour TTL is 2× input
+and added when we evaluate it (V1.x). Used at trace-emission time to
+populate TraceRecord.cost_usd_estimate."""
