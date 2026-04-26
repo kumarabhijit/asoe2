@@ -1180,6 +1180,62 @@ No process restart required; each `run_graph()` call reads the env vars fresh.
 
 ---
 
+## Deployment
+
+### Azure Container Apps (pre-prod)
+
+The FastAPI service can be deployed to Azure Container Apps with one
+command after `az login`. The end-to-end runbook lives in
+[`docs/deploy-azure-container-apps.md`](docs/deploy-azure-container-apps.md).
+
+**Quick path:**
+
+```bash
+az login
+az account set --subscription f6f24d74-9f1a-4717-94d2-4eef4a617aa0
+
+# 1. Provision infra (ACR, Postgres B1ms, Redis Basic C0, Container App)
+PG_ADMIN_PASSWORD='<strong-pw>' ./scripts/deploy-azure.sh
+
+# 2. Set secrets and roll the revision
+ANTHROPIC_API_KEY=sk-ant-... \
+ASOE_JWT_SECRET=auto \
+PG_ADMIN_PASSWORD='<same-pw>' \
+    ./scripts/set-secrets.sh
+```
+
+Artifacts:
+
+- [`Dockerfile.api`](Dockerfile.api) — production FastAPI image (uvicorn,
+  Python 3.14-slim, non-root, healthcheck on `/api/v1/health`).
+- [`infra/main.bicep`](infra/main.bicep) — IaC for ACR + Postgres Flexible
+  Server + Redis + Container Apps Environment + Container App with system-
+  assigned identity and AcrPull RBAC.
+- [`infra/parameters.sandbox.json`](infra/parameters.sandbox.json) —
+  parameters for the `asoepreprod` environment in `eastus`.
+- [`scripts/deploy-azure.sh`](scripts/deploy-azure.sh) — provisions infra,
+  builds the image in ACR, points the Container App revision at the new
+  image.
+- [`scripts/set-secrets.sh`](scripts/set-secrets.sh) — populates
+  `ANTHROPIC_API_KEY`, `ASOE_JWT_SECRET`, `DATABASE_URL`, `REDIS_URL` as
+  Container App secrets and restarts the revision.
+
+Resource sizing (sandbox):
+
+| Resource | SKU | Notes |
+| --- | --- | --- |
+| Container App | 0.5 vCPU / 1.0 GiB, min=1 / max=2 | HTTP scale rule, sticky sessions enabled for `/api/v1/ws` WebSocket |
+| Postgres Flexible | `Standard_B1ms` Burstable, 32 GB | Public + `AllowAllAzureServices` firewall rule (replace with private endpoint for prod) |
+| Redis | Basic C0 (250 MB) | TLS only (`rediss://…:6380`) |
+| ACR | Basic | system-assigned identity granted AcrPull |
+| Log Analytics | PerGB2018, 30-day retention | Container App stdout/stderr |
+
+CORS allow-origin is set to `https://asoe-ui.vercel.app` via the
+`corsAllowedOrigin` bicep parameter; change it and re-run the deploy
+script if the UI host changes.
+
+---
+
 ## Engineer Cookbook
 
 The following sections are step-by-step guides for the four most common

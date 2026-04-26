@@ -1,0 +1,36 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "eastus"
+    },
+    "namePrefix": {
+      "value": "asoepreprod"
+    },
+    "asoeEnv": {
+      "value": "sandbox"
+    },
+    "corsAllowedOrigin": {
+      "value": "https://asoe-ui.vercel.app"
+    },
+    "llmProvider": {
+      "value": "anthropic"
+    },
+    "pgAdminUser": {
+      "value": "asoeadmin"
+    },
+    "minReplicas": {
+      "value": 1
+    },
+    "maxReplicas": {
+      "value": 2
+    },
+    "cpu": {
+      "value": "0.5"
+    },
+    "memory": {
+      "value": "1.0Gi"
+    }
+  }
+}

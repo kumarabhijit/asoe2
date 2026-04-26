@@ -23,3 +23,19 @@ tests/sandbox/db/*.db
 *.log
 .DS_Store
 k8s/
+infra/
+docs/
+.github/
+.claude/
+tests/
+# Top-level markdown docs (skills/*_SKILL.md, prompts/*.md, and
+# compliance/*.md are kept — they live inside dirs that are explicitly
+# COPYed and are read at runtime).
+/README.md
+/CLAUDE.md
+/DESIGN.md
+/ARCHITECTURE.md
+/architecture_v2.md
+/architecture_v3.md
+/tasks.md
+/Login
