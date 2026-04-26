@@ -215,15 +215,27 @@ is required."""
 from typing import Literal
 
 LLMProvider = Literal[
-    "anthropic",        # Direct Anthropic API (sandbox/dev only by policy)
-    "azure_anthropic",  # Anthropic via Azure AI Foundry private endpoint
-    "outlines",         # Local constrained generation (Outlines + HF)
-    "local",            # Sandbox SLM via LOCAL_LLM_BACKEND_CLASS
-    "fallback",         # DeterministicFallbackBackend — always-available net
+    "anthropic",  # Anthropic API flavor — direct (api.anthropic.com)
+                  # OR via Azure AI Foundry private endpoint (set
+                  # ANTHROPIC_BASE_URL to the Foundry URL).
+    "openai",     # OpenAI API flavor — OpenAI direct OR Azure OpenAI
+                  # (set OPENAI_BASE_URL + OPENAI_API_VERSION).
+    "google",     # Google Vertex AI / Gemini.
+    "ollama",     # Ollama (cloud or self-hosted, OpenAI-compatible).
+    "outlines",   # Local constrained generation (Outlines + HF).
+    "local",      # Sandbox SLM via LOCAL_LLM_BACKEND_CLASS.
+    "fallback",   # DeterministicFallbackBackend — always-available net.
 ]
 """Allowed values for ASOE_LLM_PROVIDER and per-task overrides
 (ASOE_LLM_PROVIDER_INTENT / _RECIPE / _SHADOW). The router rejects
-any other value and falls closed to `fallback`."""
+any other value and falls closed to `fallback`.
+
+Provider key = API flavor. The cloud / hosting choice is config
+(base_url, deployment_name, api_version) — there is no separate
+'azure_<provider>' enum value. Anthropic on Foundry =
+provider=anthropic + base_url=<foundry-url>. Azure OpenAI =
+provider=openai + base_url=<azure-openai-url> + api_version=<...>.
+This keeps the enum stable as new clouds appear."""
 
 LLMTask = Literal["intent", "recipe", "shadow"]
 """The three trio methods served by a constraint backend. Each is
