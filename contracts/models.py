@@ -329,6 +329,118 @@ class WorkflowResult(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# LLM provenance — one entry per trio call when a remote LLM backend served
+# the call. Recorded by RemoteLLMBackend after each provider invocation
+# (success OR fallback), pulled by orchestration nodes onto GraphState, and
+# surfaced via TraceRecord + LangFuse generation spans.
+# ---------------------------------------------------------------------------
+
+
+class LLMCallTrace(BaseModel):
+    """SOX-grade per-call telemetry for one LLM trio invocation.
+
+    Audit fields (provider, model_id, request_id) carry the
+    LLMProvenance section in compliance/audit_bearing_registry.yaml.
+    Token / cost fields drive cost guardrails and dashboards. Hash
+    fields support cross-pod cache-hit verification without leaking
+    prompt content into logs.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    task: Literal["intent", "recipe", "shadow"]
+    """Which trio method this call served."""
+
+    provider: str
+    """LLMProvider value used for this call ('anthropic' / 'openai' /
+    'google' / 'ollama' / 'huggingface' / 'fallback' / etc.). Keep
+    in sync with contracts/policy.py LLMProvider enum."""
+
+    model_id: str
+    """Resolved model id reported BY the provider response (may
+    differ from the configured alias when the provider rewrites,
+    e.g. Anthropic adds a date suffix). Audit-bearing per
+    LLMProvenance."""
+
+    request_id: Optional[str] = None
+    """Provider request id — Anthropic 'request-id' header, OpenAI
+    'x-request-id' header, HF chat completion id. Critical for
+    support tickets. Audit-bearing per LLMProvenance."""
+
+    prompt_hash: str = ""
+    """SHA-256 of the cacheable system + tools bytes the provider
+    received. Two calls with the same prompt_hash should hit prompt
+    cache (when supported). Used by tests/test_llm_cache_invalidators
+    style assertions; never logged at full length."""
+
+    tool_call_hash: str = ""
+    """SHA-256 of (tool_name + JSON-canonical arguments). Lets the
+    audit trail detect identical tool calls across runs without
+    storing PII-shaped argument payloads."""
+
+    input_tokens: int = 0
+    """Prompt tokens NOT served from cache (charged at full input
+    rate). For OpenAI this excludes prompt_tokens_details.cached_tokens.
+    For Anthropic this excludes cache_read_input_tokens."""
+
+    output_tokens: int = 0
+    """Completion / output tokens."""
+
+    cache_read_input_tokens: int = 0
+    """Tokens served from prompt cache (charged at ~0.1× input rate).
+    Anthropic ephemeral / OpenAI automatic / HF + Ollama: 0
+    (no client-visible caching)."""
+
+    cache_creation_input_tokens: int = 0
+    """Tokens written to prompt cache (charged at ~1.25× input
+    rate). Anthropic 5-minute TTL only in V1."""
+
+    latency_ms: int = 0
+    """Wall-clock latency observed by the backend (provider call
+    only — does not include sanitiser / Pydantic validate)."""
+
+    cost_usd_estimate: float = 0.0
+    """USD spend estimate from contracts/policy.py
+    LLM_PRICING_USD_PER_M_TOKENS. 0.0 for provider/model
+    combinations not in the pricing table (logged as a warning
+    once at startup)."""
+
+    stop_reason: Optional[str] = None
+    """Provider-native stop reason ('end_turn' / 'tool_use' /
+    'stop' / 'length'). Telemetry only — control flow never
+    branches on it."""
+
+    skill_md_version: str = ""
+    """SHA-256 of the verbatim SKILL.md catalog at call time. A
+    catalog edit between runs produces a new value, which lets the
+    audit trail tie a specific decision to a specific reasoning
+    surface."""
+
+    fallback_to_deterministic: bool = False
+    """True when the remote provider failed (ProviderError,
+    CircuitOpen, budget hard-block, validation error, etc.) and
+    the deterministic fallback served the call instead. Surfaces
+    silent degradation to dashboards."""
+
+    fallback_reason: Optional[str] = None
+    """Short token classifying the fallback cause: 'rate_limit',
+    'timeout', 'connection', 'auth', 'schema_mismatch',
+    'server_error', 'circuit_open', 'budget_hard_block',
+    'validation_error', 'unknown'. None when the call succeeded."""
+
+    cross_check_disagreement: Optional[bool] = None
+    """Only set on intent calls. True when the LLM's intent
+    disagreed with the deterministic classifier and the graph was
+    routed to MANUAL_REVIEW_REQUIRED. None for recipe/shadow."""
+
+    cross_check_llm_intent: Optional[str] = None
+    cross_check_deterministic_intent: Optional[str] = None
+    """The two intents recorded at the point of disagreement.
+    Telemetry only — the orchestration explanation field carries
+    the human-readable form."""
+
+
 class GraphState(BaseModel):
     model_config = ConfigDict(extra="forbid")
     event: OrderEvent
@@ -364,6 +476,14 @@ class GraphState(BaseModel):
     # for this resolution path" — the UI must render "Context Not
     # Required for Resolution", never a dash (workshop §Pillar 3).
     enrichment_context: Dict[str, Any] = Field(default_factory=dict)
+    # LLM provenance (V1 PR-1 — populated only when a remote LLM
+    # backend served at least one trio call; empty otherwise). Each
+    # entry is one provider call (intent / recipe / shadow). Surfaces
+    # provider, model_id, request_id, token usage, cache hits, cost
+    # estimate, and fallback reason for SOX-grade audit. Read by the
+    # Tracer at terminal-state emit time and forwarded to LangFuse as
+    # generation spans (one per call).
+    llm_call_traces: List["LLMCallTrace"] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _explanation_for_terminal_state(self) -> "GraphState":

@@ -552,6 +552,70 @@ PriceAnalysisData:
 # AUDIT_CONTEXT_MISSING.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# LLM Provenance — V1 PR-1 (pending compliance sign-off).
+# ---------------------------------------------------------------------------
+# Audit-bearing fields recorded on every TraceRecord.llm_calls entry
+# when a remote LLM (Anthropic / OpenAI / Azure OpenAI / Ollama /
+# HuggingFace / vLLM) served a trio call. Empty list when the run was
+# served by the deterministic fallback (default / kill-switch /
+# explain-mode / fallback paths).
+#
+# Workshop status: PENDING. The remote-LLM tier was not in scope at
+# the 2026-04-22 compliance workshop — it was the V2 design blueprint
+# (architecture_v3.md §7.I). Sign-off on these classifications must
+# happen before any production deploy that flips ASOE_LLM_PROVIDER
+# off `fallback`. The `pending_signoff: true` marker is honored by
+# CODEOWNERS gates (path rule pending) so a compliance reviewer is
+# requested on every PR that touches this section.
+#
+# Source: control. These three fields name the provider, the resolved
+# model, and the provider request id — sufficient for an auditor to
+# reconstruct WHICH model produced WHICH decision and to file a
+# support ticket with the provider on disputed runs (Marcus Chen
+# review §4: "request_id is critical for support tickets").
+LLMProvenance:
+  llm_provider_used:
+    tier: audit-bearing
+    source: control
+    pending_signoff: true
+    rationale: >-
+      Identifies which LLM provider (anthropic / openai /
+      azure_anthropic / google / ollama / huggingface /
+      fallback) actually served the trio call. Required for
+      SOX evidence reconstruction — the auditor must know
+      whether a financial decision came from a frontier
+      cloud model, a private vLLM cluster, an in-tenant
+      Foundry endpoint, or the deterministic safety net.
+      Populated from RemoteLLMBackend.last_call_trace via
+      orchestration._drain_llm_trace (see
+      observability/tracer.py llm_calls aggregation).
+
+  llm_model_id:
+    tier: audit-bearing
+    source: control
+    pending_signoff: true
+    rationale: >-
+      Resolved model id reported BY the provider response.
+      Distinct from the configured alias because providers
+      may rewrite (Anthropic adds a date suffix; Azure OpenAI
+      maps deployment_name → underlying model). The auditor
+      relies on the resolved value to reproduce a decision.
+      Mismatched aliases between trace and config are a known
+      drift signal.
+
+  llm_request_id:
+    tier: audit-bearing
+    source: control
+    pending_signoff: true
+    rationale: >-
+      Provider-issued request identifier (Anthropic
+      'request-id' header; OpenAI 'x-request-id' header; HF
+      Inference completion id). Required for support tickets
+      with the provider on disputed runs and for the
+      cross-system audit chain that links our TraceRecord to
+      the provider's own server-side log.
+
 grandfather_clauses:
   # price_analysis_gateway_gap retired (T4, 2026-04-22): SAP doc /
   # contract / promotion gateways are wired on
@@ -587,8 +651,10 @@ summary:
   # workshop's initial tally of 96 was human-counted and under by 11
   # (post-workshop minor-class expansion + subfield enumeration);
   # the actual totals below are re-derived from the live rows.
-  total_fields: 107
-  audit_bearing: 82
+  # +3 audit-bearing under LLMProvenance (V1 PR-1 — provider /
+  # model / request_id) pending compliance sign-off.
+  total_fields: 110
+  audit_bearing: 85
   conditional: 5
   contextual: 20
   backend_gap_fields: 0

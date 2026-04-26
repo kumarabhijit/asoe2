@@ -43,9 +43,6 @@ class IntentClassifier:
 
         No recipe is proposed; no shadow is called.
         """
-        # Constrained classification: backend enforces allowed vocabulary
-        if hasattr(self._backend, "intent_prompt"):
-            # Outlines path: backend expects a prompt string
-            return self._backend.classify_intent(self._backend.intent_prompt(state))
-        # Fallback path: backend accepts the full state
+        # Constrained classification: every backend accepts the full
+        # GraphState (unified signature contract).
         return self._backend.classify_intent(state)

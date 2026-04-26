@@ -114,12 +114,107 @@ def _span_entries(record: Any) -> list[dict]:
     return spans
 
 
+def _generation_entries(record: Any) -> list[dict]:
+    """Build LangFuse `generation`-shaped kwargs from llm_calls.
+
+    LangFuse models LLM calls as a distinct observation type
+    (`generation`) with native fields for `model`, `input`/`output`,
+    `usage` (token counts), and `metadata`. Emitting one generation
+    per LLMCallTrace makes the LangFuse UI render token totals,
+    cost estimates, and cache-hit rates correctly per call.
+
+    Each entry is keyword-args ready for v2 `trace.generation(**kw)`
+    or v4 `start_observation(as_type='generation', **kw)`.
+
+    Fields populated on every entry:
+      - name           : 'llm.<task>' (intent / recipe / shadow)
+      - model          : resolved model_id from the provider response
+                         (empty string on fallback paths — LangFuse
+                         tolerates and just shows no model badge)
+      - input          : truncated rendering hints (no prompt content;
+                         only hashes — provider prompts can include
+                         PII per CLAUDE.md §6 and never enter LangFuse)
+      - output         : tool_call_hash + cross-check signal when
+                         present
+      - usage          : {prompt_tokens, completion_tokens, total_tokens}
+                         — LangFuse v2 native field shape that drives
+                         the model-pricing cost calculator
+      - metadata       : provider, request_id, prompt_hash, fallback
+                         flags, latency, cost_usd_estimate, cache hits
+      - level          : 'WARNING' on fallback_to_deterministic /
+                         cross_check_disagreement, else 'DEFAULT'
+      - status_message : fallback_reason when present
+    """
+    entries: list[dict] = []
+    for call in getattr(record, "llm_calls", None) or []:
+        usage = {
+            "input": call.input_tokens,
+            "output": call.output_tokens,
+            "total": call.input_tokens + call.output_tokens,
+            "unit": "TOKENS",
+        }
+        # Cache hits are not part of LangFuse's standard usage shape;
+        # carry them in metadata so dashboards can chart them.
+        metadata: dict[str, Any] = {
+            "provider": call.provider,
+            "request_id": call.request_id,
+            "prompt_hash": call.prompt_hash,
+            "tool_call_hash": call.tool_call_hash,
+            "skill_md_version": call.skill_md_version,
+            "cache_read_input_tokens": call.cache_read_input_tokens,
+            "cache_creation_input_tokens": call.cache_creation_input_tokens,
+            "latency_ms": call.latency_ms,
+            "cost_usd_estimate": call.cost_usd_estimate,
+            "stop_reason": call.stop_reason,
+            "fallback_to_deterministic": call.fallback_to_deterministic,
+            "fallback_reason": call.fallback_reason,
+        }
+        if call.cross_check_disagreement is not None:
+            metadata["cross_check_disagreement"] = call.cross_check_disagreement
+            metadata["cross_check_llm_intent"] = call.cross_check_llm_intent
+            metadata["cross_check_deterministic_intent"] = call.cross_check_deterministic_intent
+
+        # Output: never the prompt body. Hashes + signals only.
+        output: dict[str, Any] = {
+            "tool_call_hash": call.tool_call_hash,
+            "stop_reason": call.stop_reason,
+        }
+        if call.cross_check_disagreement:
+            output["cross_check"] = "DISAGREEMENT"
+
+        # Level. Fallback or disagreement → WARNING so dashboards
+        # surface the run as needing attention.
+        level = "DEFAULT"
+        if call.fallback_to_deterministic or call.cross_check_disagreement:
+            level = "WARNING"
+
+        entry: dict[str, Any] = {
+            "name": f"llm.{call.task}",
+            "model": call.model_id or "(fallback)",
+            "input": {"prompt_hash": call.prompt_hash},
+            "output": output,
+            "usage": usage,
+            "metadata": metadata,
+            "level": level,
+        }
+        if call.fallback_reason:
+            entry["status_message"] = call.fallback_reason
+        entries.append(entry)
+    return entries
+
+
 def _forward_v2(client: Any, record: Any) -> bool:
-    """Forward using langfuse v2 API: client.trace() → trace.span() / trace.score()."""
+    """Forward using langfuse v2 API: client.trace() → trace.span() /
+    trace.generation() / trace.score()."""
     trace = client.trace(id=record.trace_id or None, **_root_payload(record))
 
     for span_kwargs in _span_entries(record):
         trace.span(**span_kwargs)
+
+    # Per-LLM-call generations — LangFuse renders these with the
+    # native cost/usage UI when token counts + model are present.
+    for gen_kwargs in _generation_entries(record):
+        trace.generation(**gen_kwargs)
 
     if record.final_status:
         trace.score(
@@ -141,6 +236,13 @@ def _forward_v4(client: Any, record: Any) -> bool:
 
     for span_kwargs in _span_entries(record):
         child = root.start_observation(**span_kwargs)
+        child.end()
+
+    # Per-LLM-call generations — v4 uses `as_type="generation"` to
+    # tag the observation as an LLM call so the UI surfaces it
+    # under the model/cost views.
+    for gen_kwargs in _generation_entries(record):
+        child = root.start_observation(as_type="generation", **gen_kwargs)
         child.end()
 
     root.end()

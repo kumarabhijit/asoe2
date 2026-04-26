@@ -31,6 +31,8 @@ from contracts.models import (
 from skills.loader import SkillLoader
 from compliance.shadow import ComplianceShadow
 from constraints import get_constrained_backend
+from constraints.cross_check import cross_check
+from constraints.fallback_backend import DeterministicFallbackBackend
 from constraints.specs import RecipeProposal
 from recipes.executor import RecipeExecutor
 from recipes.registry import get_recipe
@@ -64,25 +66,53 @@ import logging
 
 _node_logger = logging.getLogger("asoe.nodes")
 
-_cached_backend = None
+# Per-task backend cache. The router resolves to a different provider
+# per task ('intent' / 'recipe' / 'shadow') based on ASOE_LLM_PROVIDER
+# + ASOE_LLM_PROVIDER_<TASK> + ASOE_LLM_DISABLE_FOR — see
+# constraints/router.py. We cache per task because constructing a
+# remote-provider SDK client (Anthropic / OpenAI / Ollama / HF) is
+# non-trivial and most graph runs hit each task exactly once.
+#
+# Tests that flip env vars must call `_reset_backend_cache()` to
+# clear stale entries.
+_cached_backends: dict[Any, Any] = {}
 
 
-def _backend():
-    """Return the env-driven constrained backend (cached for the process lifetime).
+def _backend(task: Any = None):
+    """Return the env-driven constrained backend for the given task.
 
-    The backend is stateless — caching the instance avoids redundant env var
-    reads and object construction on every node call (3x per graph execution).
+    Args:
+        task: 'intent' | 'recipe' | 'shadow' | None. None preserves
+            legacy back-compat (no per-task override applied).
+
+    The backend is cached per task for the process lifetime; the
+    underlying clients are stateless.
     """
-    global _cached_backend
-    if _cached_backend is None:
-        _cached_backend = get_constrained_backend()
-    return _cached_backend
+    if task not in _cached_backends:
+        _cached_backends[task] = get_constrained_backend(task=task)
+    return _cached_backends[task]
 
 
 def _reset_backend_cache() -> None:
-    """Reset the cached backend.  Used by tests that change env vars."""
-    global _cached_backend
-    _cached_backend = None
+    """Reset all cached backends. Used by tests that change env vars."""
+    _cached_backends.clear()
+
+
+def _drain_llm_trace(state: GraphState, backend: Any) -> None:
+    """If the backend exposes a `last_call_trace` (RemoteLLMBackend
+    does; DeterministicFallbackBackend does not), append it to
+    `state.llm_call_traces` and clear the slot so a follow-up call
+    on the same backend instance doesn't double-record.
+
+    Called from each trio call site (classify / select_recipe /
+    shadow_audit) so per-call telemetry survives onto GraphState
+    without changing the trio interface.
+    """
+    trace = getattr(backend, "last_call_trace", None)
+    if trace is None:
+        return
+    state.llm_call_traces.append(trace)
+    backend.last_call_trace = None
 
 
 class NodeValidationError(Exception):
@@ -141,13 +171,65 @@ def ingest(state: GraphState) -> GraphState:
 
 def classify(state: GraphState) -> GraphState:
     state.discrepancy = compute_discrepancy(state.event.po_price, state.event.sap_base_price)
-    backend = _backend()
-    if hasattr(backend, "intent_prompt"):
-        # Outlines path: backend expects a prompt string
-        decision = backend.classify_intent(backend.intent_prompt(state))
+    backend = _backend(task="intent")
+    decision = backend.classify_intent(state)
+
+    # Cross-check: when an LLM-backed classifier is active, run the
+    # deterministic classifier in parallel and route to MANUAL_REVIEW_-
+    # REQUIRED on disagreement. Conservative shakeout posture per
+    # CLAUDE.md §5 (MANUAL_REVIEW_REQUIRED is a valid terminal state)
+    # and the user-approved policy.
+    #
+    # Skip when the active backend is already DeterministicFallbackBackend
+    # — comparing the deterministic output to itself can never disagree
+    # and just wastes CPU.
+    if not isinstance(backend, DeterministicFallbackBackend):
+        det_decision = DeterministicFallbackBackend().classify_intent(state)
+        check = cross_check(
+            llm_decision=decision,
+            deterministic_decision=det_decision,
+        )
+        # Drain LLM call trace BEFORE we apply terminal-state routing
+        # so the disagreement signal can be stamped on it. The trace
+        # carries the cross-check outcome alongside the provider
+        # telemetry — single audit record per call.
+        _drain_llm_trace(state, backend)
+        if state.llm_call_traces:
+            last_trace = state.llm_call_traces[-1]
+            # Pydantic frozen=False on LLMCallTrace; we mutate the
+            # latest entry in place to set the cross-check signal.
+            last_trace.cross_check_disagreement = not check.agreed
+            last_trace.cross_check_llm_intent = check.llm_intent
+            last_trace.cross_check_deterministic_intent = check.deterministic_intent
+
+        if not check.agreed:
+            # Deterministic intent wins for downstream routing; the
+            # graph is forced to MANUAL_REVIEW_REQUIRED.
+            state.intent = Intent(check.winning_decision.intent)
+            state.confidence = check.winning_decision.confidence
+            state.final_status = TerminalStatus.MANUAL_REVIEW_REQUIRED
+            state.explanation = (
+                f"LLM/deterministic classification disagreement: "
+                f"llm={check.llm_intent}, "
+                f"deterministic={check.deterministic_intent}. "
+                f"Routing to manual review per cross-check policy "
+                f"({check.reason})."
+            )
+            _node_logger.warning(
+                "classify.cross_check_disagreement",
+                extra={
+                    "llm_intent": check.llm_intent,
+                    "deterministic_intent": check.deterministic_intent,
+                    "reason": check.reason,
+                    "order_id": state.event.order_id,
+                },
+            )
+            return state
     else:
-        # Fallback path: backend accepts full GraphState
-        decision = backend.classify_intent(state)
+        # Deterministic-only path — no LLM trace to drain, but the
+        # call itself is still cheap.
+        _drain_llm_trace(state, backend)
+
     state.intent = Intent(decision.intent)
     state.confidence = decision.confidence
     return state
@@ -186,10 +268,15 @@ def validate_circuit_breaker(state: GraphState) -> GraphState:
 # ---------------------------------------------------------------------------
 
 def shadow_audit(state: GraphState) -> GraphState:
-    # Inject the same constrained backend used by classify/select_recipe
-    # so the entire graph uses a consistent generation backend.
-    shadow = ComplianceShadow(backend=_backend())
+    # Per-task backend selection: shadow defaults to deterministic in
+    # V1 PR-1 (compliance integrity) and can be flipped per-tenant
+    # via ASOE_LLM_PROVIDER_SHADOW only after compliance sign-off.
+    # ASOE_LLM_DISABLE_FOR=shadow forces deterministic regardless of
+    # provider config — runtime kill-by-task without a redeploy.
+    backend = _backend(task="shadow")
+    shadow = ComplianceShadow(backend=backend)
     state.shadow = shadow.audit(state)
+    _drain_llm_trace(state, backend)
 
     # Use the formal enforcement contract from Phase 2.
     enforcement = shadow.enforce(state.shadow)
@@ -208,13 +295,9 @@ def shadow_audit(state: GraphState) -> GraphState:
 # ---------------------------------------------------------------------------
 
 def select_recipe(state: GraphState) -> GraphState:
-    backend = _backend()
-    if hasattr(backend, "recipe_prompt"):
-        # Outlines path
-        proposal = backend.propose_recipe(backend.recipe_prompt(state))
-    else:
-        # Fallback path
-        proposal = backend.propose_recipe(state)
+    backend = _backend(task="recipe")
+    proposal = backend.propose_recipe(state)
+    _drain_llm_trace(state, backend)
 
     if proposal is None:
         # No recipe matches this intent. Don't terminate here — shadow

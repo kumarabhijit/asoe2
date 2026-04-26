@@ -28,6 +28,8 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from contracts.models import LLMCallTrace
+
 logger = logging.getLogger("asoe.observability")
 
 
@@ -70,6 +72,38 @@ class TraceRecord(BaseModel):
     resolved_by: Optional[str] = Field(None, description="Identity of human who resolved the exception")
     resolved_action: Optional[str] = Field(None, description="Actual action taken (may differ from agent recommendation)")
     resolution_notes: Optional[str] = Field(None, description="Human-provided reason for override")
+
+    # LLM provenance — V1 PR-1. One entry per remote-LLM trio call.
+    # Empty list when the entire run was served by the deterministic
+    # backend (legacy / kill-switch / explain-mode / fallback paths).
+    # Each entry mirrors the LangFuse `generation` observation shape;
+    # the LangFuse sink emits one generation span per entry.
+    llm_calls: List[LLMCallTrace] = Field(
+        default_factory=list,
+        description="Per-call LLM telemetry: provider, model_id, request_id, "
+                    "tokens, cost, fallback reason, cross-check disagreement.",
+    )
+
+    # Aggregate scalars derived from llm_calls — denormalised so
+    # dashboards / cost queries don't have to walk the list. Updated
+    # by Tracer.build_record from the live llm_calls slice.
+    llm_total_input_tokens: int = Field(default=0)
+    llm_total_output_tokens: int = Field(default=0)
+    llm_total_cache_read_tokens: int = Field(default=0)
+    llm_total_cache_creation_tokens: int = Field(default=0)
+    llm_total_cost_usd_estimate: float = Field(default=0.0)
+    llm_any_fallback: bool = Field(
+        default=False,
+        description="True if any LLM call in this run fell through to "
+                    "the deterministic backend (provider error, circuit "
+                    "open, budget hard-block, validation failure).",
+    )
+    llm_cross_check_disagreement: bool = Field(
+        default=False,
+        description="True if the intent classify call's LLM/deterministic "
+                    "cross-check disagreed and the run was routed to "
+                    "MANUAL_REVIEW_REQUIRED.",
+    )
 
     # Terminal outcome
     final_status: Optional[str] = Field(None, description="TerminalStatus enum value")
@@ -180,6 +214,29 @@ class Tracer:
 
         explanation: Optional[str] = getattr(state, "explanation", None)
 
+        # --- LLM provenance ---
+        # state.llm_call_traces is the authoritative list — populated
+        # by orchestration/nodes.py::_drain_llm_trace after each trio
+        # call. Empty when the run never engaged a remote LLM (default
+        # / kill-switch / explain-mode / fallback paths).
+        llm_calls: List[LLMCallTrace] = []
+        raw_calls = getattr(state, "llm_call_traces", None) or []
+        for call in raw_calls:
+            if isinstance(call, LLMCallTrace):
+                llm_calls.append(call)
+
+        llm_total_input_tokens = sum(c.input_tokens for c in llm_calls)
+        llm_total_output_tokens = sum(c.output_tokens for c in llm_calls)
+        llm_total_cache_read_tokens = sum(c.cache_read_input_tokens for c in llm_calls)
+        llm_total_cache_creation_tokens = sum(
+            c.cache_creation_input_tokens for c in llm_calls
+        )
+        llm_total_cost_usd_estimate = sum(c.cost_usd_estimate for c in llm_calls)
+        llm_any_fallback = any(c.fallback_to_deterministic for c in llm_calls)
+        llm_cross_check_disagreement = any(
+            c.cross_check_disagreement is True for c in llm_calls
+        )
+
         return TraceRecord(
             trace_id=trace_id,
             event_id=event_id,
@@ -194,6 +251,14 @@ class Tracer:
             resolved_by=resolved_by,
             resolved_action=resolved_action,
             resolution_notes=resolution_notes,
+            llm_calls=llm_calls,
+            llm_total_input_tokens=llm_total_input_tokens,
+            llm_total_output_tokens=llm_total_output_tokens,
+            llm_total_cache_read_tokens=llm_total_cache_read_tokens,
+            llm_total_cache_creation_tokens=llm_total_cache_creation_tokens,
+            llm_total_cost_usd_estimate=round(llm_total_cost_usd_estimate, 6),
+            llm_any_fallback=llm_any_fallback,
+            llm_cross_check_disagreement=llm_cross_check_disagreement,
             final_status=final_status,
             explanation=explanation,
         )
