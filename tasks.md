@@ -1371,3 +1371,141 @@ Verdict commitment end-to-end.
 enrichment sections backend-backed. Suite 1343 passed, 35 skipped
 (+52 net new vs pre-engagement). Local sandbox e2e walkthrough
 works end-to-end via stub gateways. (2026-04-25)
+
+
+
+## PHASE 25 — Remote LLM Provider Tier (V1 PR-1)
+
+Build prompt: `prompts/pre_code_session.md`. Branch:
+`claude/add-llm-support-h2t9i`.
+
+Generalises the constraint backend to a per-task,
+provider-agnostic router so every trio call (`classify_intent` /
+`propose_recipe` / `shadow_decision`) can be served by Anthropic,
+OpenAI / Azure OpenAI / vLLM, Ollama, HuggingFace, or the
+deterministic fallback — runtime-switchable via env vars without
+redeploying. Default is `fallback` (no behavior change unless an
+operator opts in). Five expert reviews (architect, security &
+compliance, cost / ops, Claude API skill, triple-check board) + the
+user's own design decisions shaped the scope.
+
+### 25.1 Provider abstraction (S3a + S3d + S3e)
+- [x] `llm/provider_protocol.py` — `LLMProviderClient` Protocol +
+      `ToolCallResult` / `SystemBlock` / `CacheControl` /
+      `TokenUsage` / `ProviderError` dataclasses. Constraints layer
+      sees only this — no vendor SDK leaks upward.
+- [x] `llm/anthropic_client.py` — direct + Foundry, `claude-sonnet-4-6`
+      default. Tool-use forced via `tool_choice`. Cache_control
+      ephemeral on cacheable system blocks.
+- [x] `llm/openai_client.py` — full OpenAI / Azure OpenAI /
+      OpenAI-compatible (vLLM, TGI, LiteLLM, LocalAI). Auto-detects
+      Azure when `OPENAI_API_VERSION` is set. Surfaces
+      `prompt_tokens_details.cached_tokens` (OpenAI auto-caching).
+- [x] `llm/ollama_client.py` — full self-hosted + Cloud. OpenAI-style
+      tool calling on Qwen2.5+, Llama 3.1+, Mistral.
+- [x] `llm/huggingface_client.py` — full HF Dedicated Inference
+      Endpoints + Serverless Inference API (production blocks the
+      latter).
+- [x] `llm/google_client.py` — V1 stub (Vertex AI / Gemini wiring
+      in a follow-up).
+- [x] `llm/provider_factory.py` — `PROVIDER_FACTORIES` registry +
+      `build_provider_client(provider)`.
+- [x] Per-provider env-var prefix pattern (`ANTHROPIC_*` /
+      `OPENAI_*` / `OLLAMA_*` / `HUGGINGFACE_*` / `GOOGLE_*`) with
+      `RemoteLLMConfig.from_env(provider="...")`.
+- [x] Production-egress allowlists: api.anthropic.com /
+      api.openai.com / public Ollama Cloud / HF Serverless
+      Inference / public Gemini all blocked when `ASOE_ENV=production`.
+- [x] Lazy SDK imports — every client module is importable without
+      its provider's package; SDK only loads inside `from_config()`.
+
+### 25.2 LLM utilities (S2)
+- [x] `llm/sanitizer.py` — OrderEvent.metadata allowlist +
+      length-cap (256 chars) + control-char scrub +
+      untrusted-data delimiter (Chen review §5 prompt-injection
+      mitigation).
+- [x] `llm/budget.py` — InMemoryBudgetTracker +
+      RedisBudgetTracker; daily USD spend cap with soft-warn (80%)
+      / hard-block (100%) thresholds; Redis errors degrade safely.
+- [x] `llm/circuit_breaker.py` — LLM-tier breaker, sliding 60s
+      window, error-rate > 25% / p95 > 15s trip, 5-min cooldown,
+      HALF_OPEN probe with `_probe_in_flight` flag.
+
+### 25.3 Constraint-layer integration (S3b + S3c + S4)
+- [x] `constraints/llm_backend.py` — `RemoteLLMBackend`
+      composes any `LLMProviderClient` + sanitiser + breaker +
+      budget; trio surface; falls through to deterministic on
+      every failure mode.
+- [x] `constraints/router.py` — `get_constrained_backend(task)`
+      with full per-task routing (kill-switch + explain-mode at
+      the top, then `ASOE_LLM_DISABLE_FOR`, then per-task /
+      global env, then USE_OUTLINES_BACKEND legacy, then
+      fallback).
+- [x] `constraints/cross_check.py` — pure-function comparator;
+      orchestration `classify` runs deterministic in parallel
+      and routes to MANUAL_REVIEW_REQUIRED on disagreement.
+- [x] `tests/test_llm_cache_invalidators.py` — byte-identical
+      system+tools prefix audit (panel-blocked CI guard against
+      cache-hit-rate regressions).
+
+### 25.4 Orchestration wiring (S4)
+- [x] `orchestration/nodes.py` — per-task `_backend(task)` cache;
+      `classify` → `intent`, `select_recipe` → `recipe`,
+      `shadow_audit` → `shadow`. Cross-check inline. Drains
+      `last_call_trace` onto state after each call.
+- [x] `compliance/shadow.py` — default backend uses
+      `get_constrained_backend(task='shadow')`.
+- [x] Kill-switch + explain-mode pinning verified end-to-end
+      (no provider client constructed when either gate is active).
+
+### 25.5 SOX-grade telemetry (S5a + S5b)
+- [x] `contracts/models.py` — `LLMCallTrace` Pydantic model with
+      provider / model_id / request_id / token usage / cache hits /
+      cost / fallback flags / cross-check signals.
+      `GraphState.llm_call_traces: List[LLMCallTrace]`.
+- [x] `RemoteLLMBackend.last_call_trace` populated at every
+      `_invoke` exit branch (success, ProviderError,
+      CircuitOpen, budget hard-block, validation error). SHA-256
+      `prompt_hash` + `tool_call_hash` + `skill_md_version` for
+      cross-pod reproducibility audits — never logs prompt content.
+- [x] `observability/tracer.py` — `TraceRecord.llm_calls` +
+      aggregate scalars (token totals, cost, fallback flag,
+      disagreement flag).
+- [x] `observability/langfuse_sink.py` — emits one
+      `generation`-typed observation per `LLMCallTrace` on both
+      v2 and v4 LangFuse SDK paths. Native LangFuse fields
+      (`model`, `usage`); audit / fallback / cross-check signals
+      in `metadata`. Prompt content NEVER forwarded — only hashes.
+
+### 25.6 Compliance audit registry (S5c)
+- [x] `compliance/audit_bearing_registry.yaml` — new
+      `LLMProvenance` section with 3 audit-bearing rows
+      (`llm_provider_used`, `llm_model_id`, `llm_request_id`),
+      `pending_signoff: true` until the workshop follow-up
+      flips to false. Summary tally updated 107 → 110, 82 → 85.
+
+### 25.7 Docs (S5d)
+- [x] `DESIGN.md` §1 module map, §2 backend chain, §9
+      observability, §12 env-var reference, §19 test coverage.
+- [x] `architecture_v3.md` §5.3 per-task router + provider
+      matrix + cross-check + cost guardrails; §18 env vars.
+- [x] `.env.example` — full provider env-var inventory.
+- [x] `pyproject.toml` — `[anthropic, openai, ollama, huggingface]`
+      optional dependency groups.
+
+### 25.8 Test deltas
++249 net new tests across S2 / S3 / S4 / S5. Final suite: 1592
+passed, 35 skipped (vs Phase 24 baseline 1343 passed, 35 skipped).
+Zero regressions. All provider tests are network-free
+(sys.modules SDK stubs); golden-path graph tests still pass with
+default `ASOE_LLM_PROVIDER=fallback`.
+
+✅ Outcome: ASOE has a per-task, provider-agnostic remote-LLM
+tier that operators can flip on per environment / per tenant /
+per task / per call without redeploying. Sandbox shakeout default
+is `fallback` (no spend, no egress); the panel-required
+hardening (kill-switch + explain-mode pinning + production
+egress block + audit registry + cross-check + budget cap +
+circuit breaker) is in place. Production rollout requires only
+the LLMProvenance compliance sign-off + the operator's per-tenant
+provider config.

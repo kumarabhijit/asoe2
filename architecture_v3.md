@@ -432,13 +432,89 @@ Attached to `GraphState.execution_log` after recipe execution. Contains the full
 
 All LLM-generated values consumed by code are **constrained at generation time** via Pydantic Literal types. Free-form text is allowed only for human-facing explanations.
 
-**3-Tier Backend Chain** (`constraints/router.py`):
+**Per-task Provider Router** (`constraints/router.py`):
+
+V1 PR-1 generalised the constraint backend to a per-task,
+provider-agnostic router so every trio call (`classify_intent` /
+`propose_recipe` / `shadow_decision`) can be served by a different
+provider — or the deterministic fallback — without code changes.
+Resolution order:
 
 ```
-Custom backend (env var) → OutlinesConstrainedBackend → DeterministicFallbackBackend
+0. ASOE_KILL_SWITCH=1     → DeterministicFallbackBackend (no TCP)
+0. ASOE_EXPLAIN_MODE=1    → DeterministicFallbackBackend (no paid LLM)
+1. task ∈ ASOE_LLM_DISABLE_FOR → DeterministicFallbackBackend
+2. ASOE_LLM_PROVIDER_<TASK>    (per-task override)
+3. ASOE_LLM_PROVIDER           (global default)
+4. USE_OUTLINES_BACKEND=1      (legacy short-circuit → outlines)
+5. fallback                    (DeterministicFallbackBackend)
 ```
 
-Each backend implements three methods: `classify_intent()`, `propose_recipe()`, `shadow_decision()`. If `OutlinesConstrainedBackend` fails to initialize (missing `outlines` package), the router degrades gracefully to `DeterministicFallbackBackend` with a `logger.warning()`.
+**Provider matrix** (V1 PR-1 implementations):
+
+| Provider | Hosting | Status |
+|---|---|---|
+| `anthropic` | Anthropic API direct OR Azure AI Foundry private endpoint | Full |
+| `openai` | OpenAI direct, Azure OpenAI, or OpenAI-compatible (vLLM, TGI, LiteLLM, LocalAI) — including self-hosted Qwen on a vLLM cluster | Full |
+| `ollama` | Self-hosted (Qwen2.5+, Llama 3.1+, Mistral) or Cloud (private peering only in production) | Full |
+| `huggingface` | HF Dedicated Inference Endpoints (production) or Serverless Inference API (sandbox-only) | Full |
+| `google` | Vertex AI / Gemini | Stub (V1.x) |
+| `outlines` | Local in-process Outlines + transformers | Pre-existing |
+| `local` | Sandbox SLM via `LOCAL_LLM_BACKEND_CLASS` | Pre-existing |
+| `fallback` | Deterministic rule engine — always available | Default |
+
+The provider abstraction lives at `llm/provider_protocol.py`
+(`LLMProviderClient` Protocol). Each provider implements one method
+— `call_with_tool()` — returning a `ToolCallResult` with normalised
+fields (model_id, request_id, token usage including cache hits,
+latency, stop reason). Adding a new provider is a single new file
+under `llm/<name>_client.py` plus a registry entry in
+`llm/provider_factory.py` — no changes to constraints/, recipes/,
+or orchestration/.
+
+**Tool-use is the constrained-output mechanism.** Every provider
+exposes OpenAI-style `tools` + forced `tool_choice`; the
+`tool_input_schema` is derived from `IntentDecision.model_json_schema()`
+etc. with sorted keys so the cacheable prefix is byte-stable across
+pods.
+
+**`RemoteLLMBackend`** (`constraints/llm_backend.py`) is the
+provider-agnostic constraint backend that wraps any
+`LLMProviderClient`. Per-call composition:
+
+```
+sanitiser (allowlist + length-cap) → circuit breaker (acquire) →
+provider call → budget consume → Pydantic re-validate
+```
+
+On `ProviderError`, `CircuitOpen`, budget hard-block, Pydantic
+validation error, or any unexpected exception →
+`RemoteLLMBackend` delegates to the deterministic backend for that
+single trio call. The graph never sees a remote-LLM failure —
+explicit failure as success state per CLAUDE.md §5.
+
+**Cross-check on intent**: when an LLM-backed classifier is
+active, the orchestration `classify` node runs the deterministic
+classifier in parallel. Disagreement → `MANUAL_REVIEW_REQUIRED`
+with reason `LLM_DETERMINISTIC_DISAGREEMENT`. Conservative
+shakeout posture during V1 burn-in.
+
+**Cost guardrails**: `ASOE_LLM_DAILY_USD_BUDGET` (default $5
+sandbox) is a Redis-backed atomic counter. Hard-block at 100%,
+soft-warn at 80%. The LLM-tier circuit breaker (separate from
+the $10k batch breaker) trips at error_rate > 25% over 60s OR
+p95_latency > 15s, with a 5-minute cooldown.
+
+**Cache strategy**: the cacheable system prompt is the verbatim
+`skills/*.md` catalog plus a per-task directive — both marked
+cacheable. Per-call volatile content lives in the user message
+AFTER the cached prefix. Anthropic uses
+`cache_control: ephemeral`; OpenAI auto-caches at >1024 tokens;
+Ollama and HF do not expose client-controlled caching.
+
+If `OutlinesConstrainedBackend` fails to initialize (missing
+`outlines` package), the router degrades gracefully to
+`DeterministicFallbackBackend` with a `logger.warning()`.
 
 **Fallback observability:** Every backend invocation records which tier actually served the request. The `ExecutionLog.constrained_outputs` map includes the backend tier used (e.g., `"intent" → "IntentDecision:DeterministicFallbackBackend"`). Fallback activations are surfaced as:
 - A `backend_fallback` field in the `TraceRecord` (value: `"custom"`, `"outlines"`, or `"deterministic_fallback"`)
@@ -1666,3 +1742,11 @@ Every `run_graph()` call emits a `TraceRecord` to the `asoe.observability` Pytho
 | `ASOE_ENV` | `sandbox` | `production` or `sandbox` — validated against JWT `env` claim (see §11.6) |
 | `DATABASE_URL` | _(required)_ | PostgreSQL connection string |
 | `REDIS_URL` | _(required)_ | Redis connection string |
+| `ASOE_LLM_PROVIDER` | `fallback` | Global default for the constrained-generation trio. Allowed values: `anthropic` / `openai` / `google` / `ollama` / `huggingface` / `outlines` / `local` / `fallback`. See DESIGN.md §2 for the full provider matrix. |
+| `ASOE_LLM_PROVIDER_INTENT` / `_RECIPE` / `_SHADOW` | _(unset)_ | Per-task overrides. When set, override the global default for that single trio method. |
+| `ASOE_LLM_DISABLE_FOR` | _(unset)_ | Comma-list of trio tasks pinned to deterministic regardless of provider config (`intent,recipe,shadow`). Runtime kill-by-task — checked on every router call so an operator can flip mid-incident without redeploying. |
+| `ASOE_LLM_DAILY_USD_BUDGET` | `5.00` | Daily USD spend cap. At 100% the LLM tier hard-blocks to deterministic for the rest of the UTC day; soft-warns at 80%. |
+| `ANTHROPIC_API_KEY` / `_BASE_URL` / `_MODEL` / `_DEPLOYMENT` / `_API_VERSION` | _(unset)_ | Anthropic provider config. Production must set `_BASE_URL` to an Azure AI Foundry private endpoint — direct egress to api.anthropic.com is BLOCKED when `ASOE_ENV=production`. |
+| `OPENAI_API_KEY` / `_BASE_URL` / `_MODEL` / `_DEPLOYMENT` / `_API_VERSION` | _(unset)_ | OpenAI / Azure OpenAI / OpenAI-compatible (vLLM, TGI, LiteLLM). `_API_VERSION` presence auto-selects `AzureOpenAI` SDK class. |
+| `OLLAMA_BASE_URL` / `_API_KEY` / `_MODEL` | _(unset)_ | Ollama self-hosted (Qwen2.5+, Llama 3.1+, Mistral) or proxied. Public Ollama Cloud blocked in production. |
+| `HUGGINGFACE_API_KEY` / `_BASE_URL` / `_MODEL` | _(unset)_ | HF Dedicated Inference Endpoint URL (production) or Serverless Inference API (sandbox-only by policy). |

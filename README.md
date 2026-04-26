@@ -567,6 +567,115 @@ Migration: `db/migrations/V003__audit_hash_chain.sql` adds the
 columns, the triggers, and backfills existing rows into a valid chain.
 The runner applies the equivalent SQLite-compatible subset for CI.
 
+### Remote LLM providers (optional, default OFF)
+
+ASOE's constraint backend is per-task and provider-agnostic. Every
+trio call (`classify_intent` / `propose_recipe` / `shadow_decision`)
+can be served by Anthropic, OpenAI / Azure OpenAI / vLLM-compatible
+endpoints, Ollama, HuggingFace, or the deterministic rule engine —
+runtime-switchable via env vars without redeploying. Default is
+`fallback` (no LLM, no egress).
+
+**Install the provider's optional dep group:**
+
+```bash
+uv pip install "asoe[anthropic]"        # Anthropic / Foundry
+uv pip install "asoe[openai]"           # OpenAI, Azure OpenAI, vLLM, TGI, LiteLLM
+uv pip install "asoe[ollama]"           # Ollama (Qwen2.5+, Llama 3.1+, Mistral)
+uv pip install "asoe[huggingface]"      # HF Dedicated / Serverless Inference
+```
+
+**Switch a single task to a provider** (others stay deterministic):
+
+```bash
+export ASOE_LLM_PROVIDER_INTENT=anthropic
+export ANTHROPIC_API_KEY=sk-ant-...
+# Recipe and shadow stay on the deterministic backend
+```
+
+**Switch globally**:
+
+```bash
+export ASOE_LLM_PROVIDER=anthropic
+export ANTHROPIC_API_KEY=sk-ant-...
+# Optional: route via Azure AI Foundry private endpoint
+# export ANTHROPIC_BASE_URL=https://my-foundry.private.example/anthropic
+```
+
+**Run Qwen on a self-hosted vLLM cluster** (OpenAI-compatible):
+
+```bash
+export ASOE_LLM_PROVIDER=openai
+export OPENAI_API_KEY=any-non-empty-placeholder
+export OPENAI_BASE_URL=https://my-vllm.private.example/v1
+export OPENAI_MODEL=Qwen/Qwen2.5-32B-Instruct
+```
+
+**Run Qwen on local Ollama**:
+
+```bash
+export ASOE_LLM_PROVIDER=ollama
+export OLLAMA_BASE_URL=http://localhost:11434
+export OLLAMA_MODEL=qwen2.5
+```
+
+**Run Qwen on a HuggingFace Dedicated Inference Endpoint**:
+
+```bash
+export ASOE_LLM_PROVIDER=huggingface
+export HUGGINGFACE_API_KEY=hf_...
+export HUGGINGFACE_BASE_URL=https://my-endpoint.endpoints.huggingface.cloud
+export HUGGINGFACE_MODEL=Qwen/Qwen2.5-32B-Instruct
+```
+
+**Mid-incident kill-by-task** (no redeploy):
+
+```bash
+# Pin shadow to deterministic only — keep intent + recipe on Anthropic
+export ASOE_LLM_DISABLE_FOR=shadow
+
+# Total LLM-tier kill — every trio call falls back to deterministic
+export ASOE_LLM_DISABLE_FOR=intent,recipe,shadow
+
+# Bigger hammer — no TCP egress at all (also short-circuits the graph)
+export ASOE_KILL_SWITCH=1
+```
+
+**Cost guardrails:**
+
+```bash
+# Daily USD spend cap — hard-blocks the LLM tier and routes to
+# deterministic when reached. Default is $5 (sandbox shakeout sizing).
+export ASOE_LLM_DAILY_USD_BUDGET=20.00
+```
+
+The cap is Redis-backed (atomic INCRBYFLOAT); falls back to an
+in-process counter when `REDIS_URL` is unset (dev only).
+
+**Production policy gates:**
+- `ASOE_ENV=production` blocks public-cloud egress for every
+  provider — operators must configure a private endpoint URL
+  (Azure AI Foundry, Azure OpenAI, HF Dedicated, vLLM, etc.).
+- `ASOE_EXPLAIN_MODE=1` pins all tasks to deterministic so dry-runs
+  never incur paid LLM calls.
+- LLM-tier circuit breaker (separate from the $10k batch breaker)
+  trips at error_rate > 25% / 60s OR p95_latency > 15s, with a
+  5-minute cooldown.
+
+**Provenance audit:** Every trio call recorded by `RemoteLLMBackend`
+gets attached to the run's `TraceRecord` (one `LLMCallTrace` per
+call) with provider / model_id / request_id / token usage / cache
+hits / latency / cost / fallback reason / cross-check signals. The
+LangFuse sink emits one `generation`-typed observation per call.
+Audit-bearing fields documented in
+`compliance/audit_bearing_registry.yaml::LLMProvenance` (pending
+compliance sign-off).
+
+See `DESIGN.md` §2 for the full provider matrix and `.env.example`
+for the complete env-var inventory.
+
+---
+
 ### LangFuse observability (optional)
 
 Every `run_graph()` call emits a `TraceRecord` to the stdlib `asoe.observability`
@@ -602,6 +711,7 @@ export LANGFUSE_SECRET_KEY=sk-lf-...
 | span `load_skill` | `skill_name` |
 | span `shadow_audit` | `shadow_verdict`, `shadow_policy_hits` (level=WARNING if non-GREEN) |
 | span `execute_recipe` | `recipe_name` |
+| **generation** `llm.intent` / `llm.recipe` / `llm.shadow` | One per LLM call when a remote provider serves the trio. Native LangFuse generation observation: `model` = resolved model_id, `usage` = `{input, output, total, unit:"TOKENS"}`, `metadata` = provider, request_id, prompt_hash, cache hits, cost_usd_estimate, fallback flags, cross-check signals. `level=WARNING` on fallback or cross-check disagreement. **Prompt content NEVER forwarded** — only hashes. |
 | score `terminal_status` | 1.0 if COMPLETE, 0.0 otherwise |
 
 **`terminal_status` score values:** This score enables LangFuse dashboard
