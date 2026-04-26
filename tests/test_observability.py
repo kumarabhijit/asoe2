@@ -584,6 +584,198 @@ class TestLangFuseSinkWithMockClient:
         assert len(observations) == 1
         assert observations[0]["name"] == "asoe-graph-execution"
 
+    def test_forward_emits_generation_per_llm_call(self, monkeypatch):
+        """Each LLMCallTrace becomes a 'generation'-typed observation
+        with model + token usage + provider metadata. Cost / cache /
+        fallback signals carried in metadata for dashboard queries."""
+        import observability.langfuse_sink as sink
+        from contracts.models import LLMCallTrace
+
+        mock_client, observations, scores = _make_mock_client()
+        sink._langfuse_client = mock_client
+        sink._initialised = True
+
+        record = TraceRecord(
+            trace_id="tid-llm-1",
+            event_id="SO-LLM-1",
+            intent_selected="DUPLICATE_PO",
+            recipe_name="DuplicatePORecipe.py",
+            final_status="COMPLETE",
+            llm_calls=[
+                LLMCallTrace(
+                    task="intent",
+                    provider="anthropic",
+                    model_id="claude-sonnet-4-6",
+                    request_id="req_abc",
+                    prompt_hash="a" * 64,
+                    tool_call_hash="b" * 64,
+                    input_tokens=500,
+                    output_tokens=80,
+                    cache_read_input_tokens=6000,
+                    latency_ms=420,
+                    cost_usd_estimate=0.005,
+                    stop_reason="tool_use",
+                ),
+                LLMCallTrace(
+                    task="recipe",
+                    provider="anthropic",
+                    model_id="claude-sonnet-4-6",
+                    request_id="req_def",
+                    input_tokens=200,
+                    output_tokens=20,
+                ),
+            ],
+        )
+        forward(record)
+
+        # Two generation observations, one per LLMCallTrace
+        gens = [o for o in observations if o.get("name", "").startswith("llm.")]
+        assert len(gens) == 2
+        intent_gen = next(g for g in gens if g["name"] == "llm.intent")
+        recipe_gen = next(g for g in gens if g["name"] == "llm.recipe")
+
+        # v4 path tags as_type="generation"
+        assert intent_gen.get("as_type") == "generation"
+        assert recipe_gen.get("as_type") == "generation"
+
+        # Native LangFuse fields
+        assert intent_gen["model"] == "claude-sonnet-4-6"
+        assert intent_gen["usage"]["input"] == 500
+        assert intent_gen["usage"]["output"] == 80
+        assert intent_gen["usage"]["total"] == 580
+
+        # Metadata carries audit fields
+        meta = intent_gen["metadata"]
+        assert meta["provider"] == "anthropic"
+        assert meta["request_id"] == "req_abc"
+        assert meta["cache_read_input_tokens"] == 6000
+        assert meta["cost_usd_estimate"] == 0.005
+        assert meta["fallback_to_deterministic"] is False
+
+        # Default level when no fallback / disagreement
+        assert intent_gen["level"] == "DEFAULT"
+
+    def test_forward_generation_warning_level_on_fallback(self, monkeypatch):
+        """fallback_to_deterministic → level=WARNING so dashboards
+        surface degraded calls."""
+        import observability.langfuse_sink as sink
+        from contracts.models import LLMCallTrace
+
+        mock_client, observations, scores = _make_mock_client()
+        sink._langfuse_client = mock_client
+        sink._initialised = True
+
+        record = TraceRecord(
+            trace_id="t", event_id="e",
+            llm_calls=[
+                LLMCallTrace(
+                    task="intent",
+                    provider="anthropic",
+                    model_id="",
+                    fallback_to_deterministic=True,
+                    fallback_reason="rate_limit",
+                ),
+            ],
+        )
+        forward(record)
+        gen = next(o for o in observations if o.get("name") == "llm.intent")
+        assert gen["level"] == "WARNING"
+        assert gen["status_message"] == "rate_limit"
+        assert gen["model"] == "(fallback)"
+
+    def test_forward_generation_warning_level_on_disagreement(self, monkeypatch):
+        """cross_check_disagreement → level=WARNING + cross-check
+        signals carried in metadata."""
+        import observability.langfuse_sink as sink
+        from contracts.models import LLMCallTrace
+
+        mock_client, observations, scores = _make_mock_client()
+        sink._langfuse_client = mock_client
+        sink._initialised = True
+
+        record = TraceRecord(
+            trace_id="t", event_id="e",
+            llm_calls=[
+                LLMCallTrace(
+                    task="intent",
+                    provider="anthropic",
+                    model_id="claude-sonnet-4-6",
+                    cross_check_disagreement=True,
+                    cross_check_llm_intent="DUPLICATE_PO",
+                    cross_check_deterministic_intent="CONTRACTUAL_CORRECTION",
+                ),
+            ],
+        )
+        forward(record)
+        gen = next(o for o in observations if o.get("name") == "llm.intent")
+        assert gen["level"] == "WARNING"
+        assert gen["output"]["cross_check"] == "DISAGREEMENT"
+        assert gen["metadata"]["cross_check_llm_intent"] == "DUPLICATE_PO"
+        assert (
+            gen["metadata"]["cross_check_deterministic_intent"]
+            == "CONTRACTUAL_CORRECTION"
+        )
+
+    def test_forward_no_generations_when_no_llm_calls(self, monkeypatch):
+        import observability.langfuse_sink as sink
+
+        mock_client, observations, scores = _make_mock_client()
+        sink._langfuse_client = mock_client
+        sink._initialised = True
+
+        record = TraceRecord(trace_id="t", event_id="e", final_status="COMPLETE")
+        forward(record)
+        assert not any(o.get("name", "").startswith("llm.") for o in observations)
+
+    def test_forward_v2_emits_generation(self, monkeypatch):
+        """v2 LangFuse SDK path: trace.generation(**kw) is called
+        once per LLMCallTrace."""
+        import observability.langfuse_sink as sink
+        from contracts.models import LLMCallTrace
+
+        # Build a v2-shaped mock: has `trace()`, no `start_observation()`.
+        spans: list = []
+        gens: list = []
+        scores: list = []
+
+        class V2Trace:
+            def span(self, **kw):
+                spans.append(kw)
+
+            def generation(self, **kw):
+                gens.append(kw)
+
+            def score(self, **kw):
+                scores.append(kw)
+
+        class V2Client:
+            def trace(self, **kw):
+                return V2Trace()
+
+            def flush(self):
+                pass
+
+        sink._langfuse_client = V2Client()
+        sink._initialised = True
+
+        record = TraceRecord(
+            trace_id="t-v2", event_id="e",
+            llm_calls=[
+                LLMCallTrace(
+                    task="shadow", provider="ollama", model_id="qwen2.5",
+                    input_tokens=100, output_tokens=20,
+                ),
+            ],
+            final_status="COMPLETE",
+        )
+        forward(record)
+
+        assert len(gens) == 1
+        assert gens[0]["name"] == "llm.shadow"
+        assert gens[0]["model"] == "qwen2.5"
+        # v2 generation does NOT carry as_type — that's a v4 concept
+        assert "as_type" not in gens[0]
+
     def test_forward_catches_client_exception(self, monkeypatch):
         import observability.langfuse_sink as sink
 
