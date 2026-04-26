@@ -215,16 +215,28 @@ is required."""
 from typing import Literal
 
 LLMProvider = Literal[
-    "anthropic",  # Anthropic API flavor — direct (api.anthropic.com)
-                  # OR via Azure AI Foundry private endpoint (set
-                  # ANTHROPIC_BASE_URL to the Foundry URL).
-    "openai",     # OpenAI API flavor — OpenAI direct OR Azure OpenAI
-                  # (set OPENAI_BASE_URL + OPENAI_API_VERSION).
-    "google",     # Google Vertex AI / Gemini.
-    "ollama",     # Ollama (cloud or self-hosted, OpenAI-compatible).
-    "outlines",   # Local constrained generation (Outlines + HF).
-    "local",      # Sandbox SLM via LOCAL_LLM_BACKEND_CLASS.
-    "fallback",   # DeterministicFallbackBackend — always-available net.
+    "anthropic",    # Anthropic API flavor — direct (api.anthropic.com)
+                    # OR via Azure AI Foundry private endpoint (set
+                    # ANTHROPIC_BASE_URL to the Foundry URL).
+    "openai",       # OpenAI API flavor — OpenAI direct, Azure OpenAI
+                    # (set OPENAI_BASE_URL + OPENAI_API_VERSION),
+                    # OR any OpenAI-compatible endpoint such as a
+                    # self-hosted vLLM / TGI cluster running an HF
+                    # model (e.g. Qwen) — point OPENAI_BASE_URL at
+                    # the cluster URL and use the model id as
+                    # OPENAI_MODEL.
+    "google",       # Google Vertex AI / Gemini.
+    "ollama",       # Ollama (cloud or self-hosted, OpenAI-compatible).
+    "huggingface",  # HuggingFace Inference Endpoints / HF Inference
+                    # API. For Qwen / Llama / Mistral / any HF model
+                    # served via HF's hosted inference. Self-hosted
+                    # vLLM/TGI is reachable via the `openai` provider
+                    # instead — that path doesn't need an HF auth
+                    # token and uses the OpenAI Python SDK.
+    "outlines",     # Local constrained generation (Outlines + HF
+                    # transformers, in-process).
+    "local",        # Sandbox SLM via LOCAL_LLM_BACKEND_CLASS.
+    "fallback",     # DeterministicFallbackBackend — always-available net.
 ]
 """Allowed values for ASOE_LLM_PROVIDER and per-task overrides
 (ASOE_LLM_PROVIDER_INTENT / _RECIPE / _SHADOW). The router rejects
@@ -235,7 +247,10 @@ Provider key = API flavor. The cloud / hosting choice is config
 'azure_<provider>' enum value. Anthropic on Foundry =
 provider=anthropic + base_url=<foundry-url>. Azure OpenAI =
 provider=openai + base_url=<azure-openai-url> + api_version=<...>.
-This keeps the enum stable as new clouds appear."""
+Qwen on a private vLLM cluster = provider=openai +
+base_url=<vllm-url>. Qwen on HF Inference Endpoints =
+provider=huggingface. This keeps the enum stable as new clouds
+appear."""
 
 LLMTask = Literal["intent", "recipe", "shadow"]
 """The three trio methods served by a constraint backend. Each is

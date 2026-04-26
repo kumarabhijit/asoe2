@@ -30,6 +30,7 @@ def test_registry_has_all_expected_providers() -> None:
         "openai",
         "google",
         "ollama",
+        "huggingface",
     }
 
 
@@ -80,3 +81,17 @@ def test_build_ollama_propagates_not_implemented(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("ASOE_ENV", "sandbox")
     with pytest.raises(NotImplementedError, match="V1 stub"):
         build_provider_client("ollama")
+
+
+def test_build_huggingface_propagates_not_implemented(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HUGGINGFACE_API_KEY", "hf_test")
+    monkeypatch.setenv("HUGGINGFACE_MODEL", "Qwen/Qwen2.5-32B-Instruct")
+    monkeypatch.setenv(
+        "HUGGINGFACE_BASE_URL",
+        "https://my-endpoint.endpoints.huggingface.cloud",
+    )
+    monkeypatch.setenv("ASOE_ENV", "sandbox")
+    with pytest.raises(NotImplementedError, match="V1 stub"):
+        build_provider_client("huggingface")

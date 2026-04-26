@@ -20,6 +20,7 @@ from typing import Callable
 
 from llm.anthropic_client import AnthropicProviderClient, RemoteLLMConfig
 from llm.google_client import GoogleProviderClient
+from llm.huggingface_client import HuggingFaceProviderClient
 from llm.ollama_client import OllamaProviderClient
 from llm.openai_client import OpenAIProviderClient
 from llm.provider_protocol import LLMProviderClient, ProviderError
@@ -35,6 +36,7 @@ PROVIDER_FACTORIES: dict[str, Callable[[RemoteLLMConfig], LLMProviderClient]] = 
     "openai": OpenAIProviderClient.from_config,
     "google": GoogleProviderClient.from_config,
     "ollama": OllamaProviderClient.from_config,
+    "huggingface": HuggingFaceProviderClient.from_config,
 }
 """Registry mapping LLMProvider enum value → factory callable.
 The factory takes a RemoteLLMConfig and returns a client implementing
