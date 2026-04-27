@@ -167,16 +167,73 @@ and re-run `scripts/deploy-azure.sh` (or just `az deployment group create`).
 
 ## Operations
 
-### Roll a new image after a code change
+### Azure CLI cheat sheet
+
+Set these once per shell session and the rest of the commands work as-is:
 
 ```bash
-PG_ADMIN_PASSWORD=… ./scripts/deploy-azure.sh
+RG=asoepreprod
+APP=asoepreprodapi
+PG=asoepreprodpg
+REDIS=asoepreprodredis
+ACR=asoepreprodacr
+WS=$(az monitor log-analytics workspace show -g $RG -n asoepreprodlogs --query customerId -o tsv)
+FQDN=$(az containerapp show -g $RG -n $APP --query properties.configuration.ingress.fqdn -o tsv)
 ```
 
-Re-running is safe — bicep is idempotent, the image tag defaults to the
-current git short SHA, and `ANTHROPIC_API_KEY` / `ASOE_JWT_SECRET` are
-preserved from the running Container App so secrets do not regress to
-placeholders.
+| Need | Command |
+|---|---|
+| API URL | `echo "https://${FQDN}"` |
+| Health-check | `curl -fsS --max-time 30 "https://${FQDN}/api/v1/health" \| jq .` |
+| Live status | `az containerapp show -g $RG -n $APP --query "properties.{state:provisioningState, runningStatus:runningStatus, fqdn:configuration.ingress.fqdn}" -o json` |
+| Active revision summary | `az containerapp revision list -g $RG -n $APP --query "[?properties.active].{name:name, healthState:properties.healthState, runningState:properties.runningState, replicas:properties.replicas}" -o table` |
+| Replicas (per-pod state) | `az containerapp replica list -g $RG -n $APP --revision $(az containerapp revision list -g $RG -n $APP --query "[?properties.active].name \| [0]" -o tsv) -o table` |
+| Console logs (no streaming) | `az monitor log-analytics query -w $WS --analytics-query "ContainerAppConsoleLogs_CL \| where ContainerAppName_s == 'asoepreprodapi' \| where TimeGenerated > ago(15m) \| order by TimeGenerated asc \| project TimeGenerated, Log_s" -o tsv` |
+| System events (image pull, scheduling) | `az monitor log-analytics query -w $WS --analytics-query "ContainerAppSystemLogs_CL \| where ContainerAppName_s == 'asoepreprodapi' \| where TimeGenerated > ago(30m) \| order by TimeGenerated desc \| project TimeGenerated, Reason_s, Log_s" -o tsv` |
+| Streaming logs | `az containerapp logs show -g $RG -n $APP --follow` (flaky over corp networks — fall back to the Log Analytics query above) |
+| Restart active revision | `az containerapp revision restart -g $RG -n $APP --revision $(az containerapp revision list -g $RG -n $APP --query "[?properties.active].name \| [0]" -o tsv)` |
+| Secret names | `az containerapp secret list -g $RG -n $APP -o table` |
+| Postgres status | `az postgres flexible-server show -g $RG -n $PG --query "{state:state, version:version, fqdn:fullyQualifiedDomainName, sku:sku.name}" -o json` |
+| Redis primary key | `az redisenterprise database list-keys --cluster-name $REDIS -g $RG --query primaryKey -o tsv` |
+| ACR image list | `az acr repository show-tags --name $ACR --repository asoe-api --orderby time_desc -o table` |
+
+### Launch (first deploy)
+
+```bash
+az login
+az account set --subscription f6f24d74-9f1a-4717-94d2-4eef4a617aa0
+
+PG_ADMIN_PASSWORD='<strong-pw>' \
+ANTHROPIC_API_KEY='sk-ant-<your-key>' \
+    ./scripts/deploy-azure.sh
+```
+
+`ASOE_JWT_SECRET` is auto-generated and printed once. Save it (e.g. into
+1Password) — if you ever need to rotate the Container App while keeping
+issued JWTs valid, you'll need this exact value. Otherwise the next
+auto-generation invalidates all in-flight tokens.
+
+### Re-deploy (code change, env var change, infra tweak)
+
+```bash
+PG_ADMIN_PASSWORD='<same-pw>' ./scripts/deploy-azure.sh
+```
+
+Re-running is safe:
+
+- bicep is idempotent.
+- The image tag defaults to the current git short SHA, so each commit
+  produces a new revision (and thus a rollback target — see below).
+- `ANTHROPIC_API_KEY` and `ASOE_JWT_SECRET` are read off the running
+  Container App and reused, so secrets do not regress to placeholders.
+- `DATABASE_URL` and `REDIS_URL` are re-derived from the live infra,
+  which means rotating the Postgres password (next subsection) is
+  picked up automatically.
+
+### Roll a new image after a code change
+
+Same command as Re-deploy. The image build step is the slowest part
+(~1–3 min); the Container App revision swap is ~30 s after that.
 
 ### Rotate the Anthropic key
 
@@ -190,7 +247,7 @@ Or via the deploy script (re-runs the full ~5-min bicep+build+bicep
 flow but is the only path if you also need an image refresh):
 
 ```bash
-ANTHROPIC_API_KEY='sk-ant-NEW' PG_ADMIN_PASSWORD=… ./scripts/deploy-azure.sh
+ANTHROPIC_API_KEY='sk-ant-NEW' PG_ADMIN_PASSWORD='<same>' ./scripts/deploy-azure.sh
 ```
 
 ### Rotate the JWT secret
@@ -202,20 +259,79 @@ ASOE_JWT_SECRET=auto ./scripts/set-secrets.sh
 This invalidates **all currently-issued JWTs** — every authenticated
 client must re-login. The script prints the new value once; save it.
 
+### Rotate the Postgres admin password
+
+Two-step: change it on the server, then push the new value through the
+deploy script so the Container App secret picks it up.
+
+```bash
+NEW_PG_PW='<new-strong-password>'
+
+# 1. Update Postgres itself.
+az postgres flexible-server update -g $RG -n $PG \
+    --admin-password "${NEW_PG_PW}"
+
+# 2. Re-run deploy with the new password — DATABASE_URL is rebuilt and
+#    pushed to the Container App as the database-url secret. Existing
+#    ANTHROPIC_API_KEY / ASOE_JWT_SECRET are preserved.
+PG_ADMIN_PASSWORD="${NEW_PG_PW}" ./scripts/deploy-azure.sh
+```
+
+### Rotate the Redis primary key
+
+Azure rotates one key at a time so connections never go cold:
+
+```bash
+# 1. Rotate the secondary key first (no callers using it).
+az redisenterprise database regenerate-key \
+    --cluster-name $REDIS --resource-group $RG -n default \
+    --key-type Secondary
+
+# 2. Switch the running app to the new secondary key (treated as the
+#    primary by deploy-azure.sh after the next regen).
+az redisenterprise database regenerate-key \
+    --cluster-name $REDIS --resource-group $RG -n default \
+    --key-type Primary
+
+# 3. Re-deploy so REDIS_URL is rebuilt with the new primary.
+PG_ADMIN_PASSWORD='<same>' ./scripts/deploy-azure.sh
+```
+
 ### Inspect secrets
 
 ```bash
-# Names only (values redacted unless you query individually)
-az containerapp secret list -g asoepreprod -n asoepreprodapi -o table
+# Names only (values are not returned by 'list')
+az containerapp secret list -g $RG -n $APP -o table
 
-# Direct CLI rotation (alternative to set-secrets.sh)
-az containerapp secret set -g asoepreprod -n asoepreprodapi \
+# Direct CLI rotation (alternative to set-secrets.sh — bypasses the
+# revision restart, so call it explicitly afterwards)
+az containerapp secret set -g $RG -n $APP \
     --secrets anthropic-api-key=sk-ant-NEW…
 
-# Roll the active revision so it picks up the new secret
-REV=$(az containerapp revision list -g asoepreprod -n asoepreprodapi \
+REV=$(az containerapp revision list -g $RG -n $APP \
     --query "[?properties.active].name | [0]" -o tsv)
-az containerapp revision restart -g asoepreprod -n asoepreprodapi --revision $REV
+az containerapp revision restart -g $RG -n $APP --revision $REV
+```
+
+### Connect to Postgres directly (debugging)
+
+The Postgres firewall allows `AllowAllAzureServices` by default and
+nothing else. To run psql from your laptop:
+
+```bash
+# 1. Add a one-off firewall rule for your current public IP.
+MY_IP=$(curl -fsS https://api.ipify.org)
+az postgres flexible-server firewall-rule create \
+    -g $RG -n $PG --rule-name "tmp-$(whoami)" \
+    --start-ip-address $MY_IP --end-ip-address $MY_IP
+
+# 2. Connect.
+psql "host=${PG}.postgres.database.azure.com port=5432 dbname=asoe \
+      user=asoeadmin password='<your-pg-pw>' sslmode=require"
+
+# 3. Remove the rule when done.
+az postgres flexible-server firewall-rule delete \
+    -g $RG -n $PG --rule-name "tmp-$(whoami)" --yes
 ```
 
 ### Rollback to a previous revision
@@ -223,8 +339,8 @@ az containerapp revision restart -g asoepreprod -n asoepreprodapi --revision $RE
 Container Apps keeps revision history; switch traffic with one command:
 
 ```bash
-az containerapp revision list -g asoepreprod -n asoepreprodapi -o table
-az containerapp ingress traffic set -g asoepreprod -n asoepreprodapi \
+az containerapp revision list -g $RG -n $APP -o table
+az containerapp ingress traffic set -g $RG -n $APP \
     --revision-weight <older-revision-name>=100
 ```
 
@@ -237,11 +353,137 @@ HTTP-based, target 50 concurrent requests per replica.
 ### Tear down
 
 ```bash
-az group delete -n asoepreprod --yes --no-wait
+az group delete -n $RG --yes --no-wait
 ```
 
 This deletes everything provisioned by the bicep template. Postgres backups
 are deleted with the server. ACR images are gone too.
+
+## Troubleshooting
+
+Issues we actually hit during the first deploys, with the exact symptom
+and fix. Match the symptom to your case before applying a fix.
+
+### `Operation expired` on the Container App resource
+
+Symptom (in `az deployment group create` output):
+
+```
+ContainerAppOperationError: Failed to provision revision for container app
+'asoepreprodapi'. Error details: Operation expired.
+```
+
+Cause: the bicep created the Container App with the placeholder image
+`mcr.microsoft.com/azuredocs/containerapps-helloworld` (port 80, no
+`/api/v1/health`), so the probe never goes healthy and ARM hits its
+25-min terminal timeout.
+
+Fix: already in place — the deploy script runs a two-stage bicep with
+the real image baked in for Stage 2. If you ever see this again:
+
+```bash
+az containerapp delete -g $RG -n $APP --yes   # clear the failed app
+PG_ADMIN_PASSWORD='<same>' ANTHROPIC_API_KEY='sk-ant-...' ./scripts/deploy-azure.sh
+```
+
+### `ACR token exchange endpoint returned error status: 401`
+
+Symptom (in system logs):
+
+```
+Failed to construct registry secret for registry 'asoepreprodacr.azurecr.io'.
+Error: ACR token exchange endpoint returned error status: 401.
+```
+
+Cause: the Container App's identity didn't have AcrPull on the registry
+when it tried to pull. This is fixed by using a User-Assigned Managed
+Identity created and granted AcrPull in Stage 1, so RBAC has propagated
+by the time Stage 2 runs.
+
+Fix: already in place. If a previous failed run left a Container App
+with a system-assigned identity around, delete it before retrying:
+
+```bash
+az containerapp delete -g $RG -n $APP --yes
+PG_ADMIN_PASSWORD='<same>' ANTHROPIC_API_KEY='sk-ant-...' ./scripts/deploy-azure.sh
+```
+
+### `could not translate host name "<garbage>@…postgres.database.azure.com"`
+
+Symptom (in console logs):
+
+```
+psycopg2.OperationalError: could not translate host name
+"<some-fragment>@asoepreprodpg.postgres.database.azure.com" to address
+```
+
+Cause: the Postgres password contains `@` (or another reserved URL char)
+and was spliced into `DATABASE_URL` without URL-encoding, so psycopg2
+split at the wrong `@`.
+
+Fix: already in place — the deploy script URL-encodes the password and
+the Redis key before assembling the connection strings. If you see this
+again, just re-run:
+
+```bash
+PG_ADMIN_PASSWORD='<same>' ./scripts/deploy-azure.sh
+```
+
+### `extension "pgcrypto" is not allow-listed for users`
+
+Symptom (in console logs):
+
+```
+psycopg2.errors.FeatureNotSupported: extension "pgcrypto" is not
+allow-listed for users in Azure Database for PostgreSQL
+```
+
+Cause: Azure Postgres Flexible Server gates `CREATE EXTENSION` behind
+the `azure.extensions` server parameter, which defaults to empty. The
+asoe migrations need `pgcrypto` and `vector`.
+
+Fix: already in place — the bicep sets `azure.extensions=PGCRYPTO,VECTOR`
+on the server. If a previously-deployed server didn't have this,
+re-running the deploy applies the parameter (no server restart needed):
+
+```bash
+PG_ADMIN_PASSWORD='<same>' ./scripts/deploy-azure.sh
+```
+
+### 504 from the API
+
+Symptom: `curl https://${FQDN}/api/v1/health` returns HTTP 504 after a
+long wait. Container App ingress thinks the backend is healthy but the
+request didn't get a reply in time.
+
+Most common cause: the app crashed at startup (often during the
+Postgres migration). Check console logs:
+
+```bash
+az monitor log-analytics query -w $WS --analytics-query "
+ContainerAppConsoleLogs_CL
+| where ContainerAppName_s == 'asoepreprodapi'
+| where TimeGenerated > ago(15m)
+| order by TimeGenerated asc
+| project TimeGenerated, Log_s
+" -o tsv
+```
+
+The traceback will point at the actual issue — usually one of the
+above patterns or a missing-secret problem.
+
+### `invalid dsn: missing "=" after "placeholder-set-via-set-secrets-sh"`
+
+Cause: the Container App is running with placeholder secrets because
+`deploy-azure.sh` was run before `df825fa` (when secrets had to be set
+separately by `set-secrets.sh`).
+
+Fix: re-deploy with the current scripts — they own the secrets end-to-end:
+
+```bash
+git pull
+PG_ADMIN_PASSWORD='<same>' ANTHROPIC_API_KEY='sk-ant-...' ./scripts/deploy-azure.sh
+```
 
 ## Custom domain (later)
 
