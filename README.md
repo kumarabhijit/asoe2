@@ -1194,7 +1194,7 @@ command after `az login`. The end-to-end runbook lives in
 az login
 az account set --subscription f6f24d74-9f1a-4717-94d2-4eef4a617aa0
 
-# 1. Provision infra (ACR, Postgres B1ms, Redis Basic C0, Container App)
+# 1. Provision infra (ACR, Postgres B1ms, Azure Managed Redis Balanced_B0, Container App)
 PG_ADMIN_PASSWORD='<strong-pw>' ./scripts/deploy-azure.sh
 
 # 2. Set secrets and roll the revision
@@ -1212,7 +1212,7 @@ Artifacts:
   Server + Redis + Container Apps Environment + Container App with system-
   assigned identity and AcrPull RBAC.
 - [`infra/parameters.sandbox.json`](infra/parameters.sandbox.json) —
-  parameters for the `asoepreprod` environment in `westus2`.
+  parameters for the `asoepreprod` environment in `centralus`.
 - [`scripts/deploy-azure.sh`](scripts/deploy-azure.sh) — provisions infra,
   builds the image in ACR, points the Container App revision at the new
   image.
@@ -1226,7 +1226,7 @@ Resource sizing (sandbox):
 | --- | --- | --- |
 | Container App | 0.5 vCPU / 1.0 GiB, min=1 / max=2 | HTTP scale rule, sticky sessions enabled for `/api/v1/ws` WebSocket |
 | Postgres Flexible | `Standard_B1ms` Burstable, 32 GB | Public + `AllowAllAzureServices` firewall rule (replace with private endpoint for prod) |
-| Redis | Basic C0 (250 MB) | TLS only (`rediss://…:6380`) |
+| Azure Managed Redis | `Balanced_B0` (~250 MB, EnterpriseCluster) | TLS only (`rediss://…:10000`); replaces retiring Azure Cache for Redis |
 | ACR | Basic | system-assigned identity granted AcrPull |
 | Log Analytics | PerGB2018, 30-day retention | Container App stdout/stderr |
 

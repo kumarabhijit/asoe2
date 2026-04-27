@@ -59,19 +59,26 @@ PG_HOST=$(az postgres flexible-server show \
     --name "${PG_SERVER}" --resource-group "${RG}" \
     --query fullyQualifiedDomainName -o tsv)
 
-REDIS_HOST=$(az redis show \
+# Azure Managed Redis (Microsoft.Cache/redisEnterprise) — replaces the
+# retiring Azure Cache for Redis. The CLI command is `az redisenterprise`
+# (one word) and the connection port is 10000, not 6380.
+az extension add --name redisenterprise --upgrade --yes >/dev/null 2>&1 || true
+
+REDIS_HOST=$(az redisenterprise show \
     --name "${REDIS_NAME}" --resource-group "${RG}" \
     --query hostName -o tsv)
 
-REDIS_KEY=$(az redis list-keys \
-    --name "${REDIS_NAME}" --resource-group "${RG}" \
+REDIS_KEY=$(az redisenterprise database list-keys \
+    --cluster-name "${REDIS_NAME}" --resource-group "${RG}" \
     --query primaryKey -o tsv)
 
 # psycopg2 + asyncpg both accept this URL form.
 DATABASE_URL="postgresql://${PG_USER}:${PG_ADMIN_PASSWORD}@${PG_HOST}:5432/${PG_DB}?sslmode=require"
 
-# rediss:// = TLS; non-SSL port is disabled by bicep.
-REDIS_URL="rediss://:${REDIS_KEY}@${REDIS_HOST}:6380/0"
+# rediss:// = TLS; Managed Redis listens on 10000 and is always TLS.
+# No /<db-number> suffix — Enterprise cluster mode supports a single
+# logical database (the 'default' DB created by the bicep template).
+REDIS_URL="rediss://:${REDIS_KEY}@${REDIS_HOST}:10000"
 
 # ──────────────────────────────────────── Set secrets on the Container App
 

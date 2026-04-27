@@ -10,12 +10,20 @@ pre-prod environment described in `docs/deploy-azure-container-apps.md`.
 | `main.bicep` | All Azure resources (ACR, Postgres, Redis, Container App Env + App, Log Analytics, AcrPull RBAC). |
 | `parameters.sandbox.json` | Non-secret parameters for the `asoepreprod` environment. |
 
-## Resources provisioned (westus2, RG `asoepreprod`)
+## Resources provisioned (centralus, RG `asoepreprod`)
 
-> **Region note:** the original target was `eastus`, but Azure declined
-> to provision the Postgres Flexible Server B1ms there (capacity /
-> SKU unavailability at the time of deploy). Switched to `westus2`,
-> which has full Container Apps + Postgres Flex + Redis support.
+> **Region note:** `eastus` rejected the Postgres Flexible Server B1ms
+> SKU at the first deploy attempt; `westus2` returned a SKU/capacity
+> error on retry. Settled on `centralus`, which has reliable B1ms
+> availability and full support for Container Apps + Azure Managed Redis.
+>
+> **Redis note:** the original `Microsoft.Cache/redis` (Azure Cache for
+> Redis) offering is being retired on 2028-09-30 (portal banner). This
+> template now uses the replacement service, **Azure Managed Redis**
+> (`Microsoft.Cache/redisEnterprise`), at the cheapest tier
+> (`Balanced_B0`, ~250 MB). It is built on Redis Enterprise, runs in
+> EnterpriseCluster mode (single endpoint, transparent shard routing),
+> and is cheaper than legacy Basic C0.
 
 | Resource | Name | SKU | Approx. monthly cost (USD, sandbox) |
 | --- | --- | --- | --- |
@@ -23,14 +31,14 @@ pre-prod environment described in `docs/deploy-azure-container-apps.md`.
 | Container Registry | `asoepreprodacr` | Basic | ~$5 |
 | PostgreSQL Flexible Server | `asoepreprodpg` | `Standard_B1ms` Burstable, 32 GB | ~$13 |
 | PostgreSQL database | `asoe` (inside above) | n/a | included |
-| Azure Cache for Redis | `asoepreprodredis` | Basic C0 (250 MB) | ~$16 |
+| Azure Managed Redis | `asoepreprodredis` | `Balanced_B0` (~250 MB, Enterprise cluster) | ~$12 |
 | Container Apps Environment | `asoepreprodenv` | Consumption profile | ~$0 idle (compute billed per request) |
 | Container App | `asoepreprodapi` | 0.5 vCPU / 1.0 GiB, min=1 max=2 | ~$15 with 1 replica always on |
 | AcrPull role assignment | system-assigned identity → ACR | n/a | free |
 
-**Total sandbox baseline:** ~$50/month with one replica idle, scales up under
-load. Container Apps charges per vCPU-second + GiB-second + request, so quiet
-periods cost very little.
+**Total sandbox baseline:** ~$45/month with one replica idle (down from
+~$50 with legacy Redis), scales up under load. Container Apps charges per
+vCPU-second + GiB-second + request, so quiet periods cost very little.
 
 ## What is NOT in bicep (set after deploy)
 
@@ -50,7 +58,7 @@ When you graduate this environment to production:
 - [ ] Move Postgres + Redis behind a VNet private endpoint; remove
       public-network-access on both.
 - [ ] Enable Postgres geo-redundant backups + zone-redundant HA.
-- [ ] Upgrade Redis to `Standard C1` (HA + replication).
+- [ ] Upgrade Azure Managed Redis to `Balanced_B3` or `MemoryOptimized_M10` for HA + zone redundancy + larger working set.
 - [ ] Move secrets to Azure Key Vault and switch the bicep `secrets:`
       block to `keyVaultUrl` + managed-identity references.
 - [ ] Set `ASOE_ENV=production` (locks down sandbox routes + CORS).

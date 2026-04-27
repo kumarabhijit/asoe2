@@ -4,7 +4,8 @@
 //   • Log Analytics workspace          (logs + KQL)
 //   • Azure Container Registry (Basic) (image hosting)
 //   • Azure Database for PostgreSQL    (Flexible Server, B1ms)
-//   • Azure Cache for Redis            (Basic C0)
+//   • Azure Managed Redis              (Balanced_B0, Enterprise SKU,
+//                                       replaces retiring Microsoft.Cache/redis)
 //   • Container Apps managed environment
 //   • Container App (asoe API)         (system-assigned identity, ACR pull)
 //
@@ -19,7 +20,7 @@ targetScope = 'resourceGroup'
 
 // ───────────────────────────────────────────────────────────────── Parameters
 
-@description('Region for all resources. westus2 per pre-prod plan (Postgres Flexible was unavailable in eastus during initial provision).')
+@description('Region for all resources. centralus per pre-prod plan (Postgres Flexible B1ms was unavailable in eastus and westus2 returned a SKU/capacity error during initial provision; centralus has reliable B1ms availability).')
 param location string = resourceGroup().location
 
 @description('Naming prefix used for all resources (alphanumeric, no dashes).')
@@ -73,6 +74,15 @@ param cpu string = '0.5'
 
 @description('Memory per replica (must pair with cpu per Container Apps SKU table; 0.5 vCPU → 1.0Gi).')
 param memory string = '1.0Gi'
+
+@description('Azure Managed Redis SKU. Balanced_B0 is the cheapest (~250MB, eviction-only). Bump to Balanced_B1 (~1GB) if B0 is unavailable in the chosen region.')
+@allowed([
+  'Balanced_B0'
+  'Balanced_B1'
+  'Balanced_B3'
+  'MemoryOptimized_M10'
+])
+param redisSku string = 'Balanced_B0'
 
 // ───────────────────────────────────────────────────────────── Derived names
 
@@ -174,23 +184,39 @@ resource pgDatabase 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2023-12
   }
 }
 
-// ───────────────────────────────────────────────── Azure Cache for Redis
+// ──────────────────────────────────────────────────── Azure Managed Redis
+//
+// Replaces the legacy 'Microsoft.Cache/redis' offering (retiring 2028-09-30
+// per the portal banner). Managed Redis is GA, runs on Redis Enterprise,
+// and the smallest tier (Balanced_B0, ~250 MB) is cheaper than legacy
+// Basic C0. EnterpriseCluster mode exposes a single endpoint that handles
+// shard routing internally — non-cluster-aware redis-py clients connect
+// transparently for standard key-value and pub/sub ops.
+//
+// SKU note: if Balanced_B0 is rejected at deploy time (regional
+// availability still rolling out in some regions), fall back to
+// Balanced_B1 (~1 GB) by editing the redisSku param.
 
-resource redis 'Microsoft.Cache/redis@2024-03-01' = {
+resource redisEnterprise 'Microsoft.Cache/redisEnterprise@2024-10-01' = {
   name: redisName
   location: location
   tags: commonTags
+  sku: {
+    name: redisSku
+  }
+}
+
+resource redisDatabase 'Microsoft.Cache/redisEnterprise/databases@2024-10-01' = {
+  parent: redisEnterprise
+  name: 'default'
   properties: {
-    sku: {
-      name: 'Basic'
-      family: 'C'
-      capacity: 0
-    }
-    enableNonSslPort: false
-    minimumTlsVersion: '1.2'
-    publicNetworkAccess: 'Enabled'
-    redisConfiguration: {
-      'maxmemory-policy': 'allkeys-lru'
+    clientProtocol: 'Encrypted'
+    port: 10000
+    clusteringPolicy: 'EnterpriseCluster'
+    evictionPolicy: 'AllKeysLRU'
+    persistence: {
+      aofEnabled: false
+      rdbEnabled: false
     }
   }
 }
@@ -360,7 +386,8 @@ output containerAppFqdn  string = app.properties.configuration.ingress.fqdn
 output postgresHost      string = pgServer.properties.fullyQualifiedDomainName
 output postgresDatabase  string = pgDatabaseName
 output postgresAdminUser string = pgAdminUser
-output redisHost         string = redis.properties.hostName
-output redisSslPort      int    = redis.properties.sslPort
+output redisHost         string = redisEnterprise.properties.hostName
+output redisSslPort      int    = redisDatabase.properties.port
+output redisDatabaseName string = redisDatabase.name
 output logAnalyticsId    string = logAnalytics.id
 output managedIdentityPrincipalId string = app.identity.principalId
