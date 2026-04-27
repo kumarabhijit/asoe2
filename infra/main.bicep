@@ -9,9 +9,18 @@
 //   • Container Apps managed environment
 //   • Container App (asoe API)         (system-assigned identity, ACR pull)
 //
-// Secrets are declared on the Container App but NOT populated here. After
-// the first deploy, run scripts/set-secrets.sh to fill ANTHROPIC_API_KEY,
-// ASOE_JWT_SECRET, DATABASE_URL, REDIS_URL.
+// Two-stage deploy (driven by `deployContainerApp` parameter):
+//   Stage 1 (deployContainerApp=false): provisions everything EXCEPT the
+//     Container App + AcrPull role binding. This lets `az acr build`
+//     push the real image to a now-existing ACR.
+//   Stage 2 (deployContainerApp=true,  containerImage=<real-image>):
+//     creates the Container App with the real image so its /api/v1/health
+//     probe passes on first revision.
+//
+// scripts/deploy-azure.sh runs both stages back-to-back.
+//
+// Secrets are written from `@secure()` parameters with placeholder defaults
+// — scripts/set-secrets.sh overwrites them post-deploy with real values.
 //
 // Parameter file: parameters.sandbox.json
 // Deploy:         scripts/deploy-azure.sh
@@ -99,6 +108,9 @@ param memory string = '1.0Gi'
   'MemoryOptimized_M10'
 ])
 param redisSku string = 'Balanced_B0'
+
+@description('Two-stage deploy gate. Stage 1 (false) provisions ACR / Postgres / Redis / Log Analytics / Managed Env so `az acr build` has somewhere to push. Stage 2 (true) provisions the Container App + AcrPull role with the real image. The deploy script flips this between calls.')
+param deployContainerApp bool = false
 
 // ───────────────────────────────────────────────────────────── Derived names
 
@@ -262,7 +274,7 @@ resource cae 'Microsoft.App/managedEnvironments@2024-03-01' = {
 
 // ───────────────────────────────────────────── Container App (ASOE API)
 
-resource app 'Microsoft.App/containerApps@2024-03-01' = {
+resource app 'Microsoft.App/containerApps@2024-03-01' = if (deployContainerApp) {
   name: appName
   location: location
   tags: commonTags
@@ -383,10 +395,12 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
 }
 
 // Grant the Container App's system-assigned identity AcrPull on the ACR.
-// roleDefinitionId for AcrPull = 7f951dda-4ed3-4680-a7ca-43fe172d538d
-resource acrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+// roleDefinitionId for AcrPull = 7f951dda-4ed3-4680-a7ca-43fe172d538d.
+// Conditional on deployContainerApp because `app.identity.principalId`
+// only exists once the Container App resource is materialised.
+resource acrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (deployContainerApp) {
   scope: acr
-  name: guid(acr.id, app.id, 'AcrPull')
+  name: guid(acr.id, appName, 'AcrPull')
   properties: {
     principalId: app.identity.principalId
     principalType: 'ServicePrincipal'
@@ -399,10 +413,13 @@ resource acrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 
 // ──────────────────────────────────────────────────────────────── Outputs
 
+// Outputs that reference the conditional `app` resource use ternaries so
+// they degrade to empty strings during Stage 1 (deployContainerApp=false)
+// and surface the real values during Stage 2.
 output acrLoginServer    string = '${acrName}.azurecr.io'
 output acrName           string = acrName
-output containerAppName  string = app.name
-output containerAppFqdn  string = app.properties.configuration.ingress.fqdn
+output containerAppName  string = deployContainerApp ? app.name : ''
+output containerAppFqdn  string = deployContainerApp ? app.properties.configuration.ingress.fqdn : ''
 output postgresHost      string = pgServer.properties.fullyQualifiedDomainName
 output postgresDatabase  string = pgDatabaseName
 output postgresAdminUser string = pgAdminUser
@@ -410,4 +427,4 @@ output redisHost         string = redisEnterprise.properties.hostName
 output redisSslPort      int    = redisDatabase.properties.port
 output redisDatabaseName string = redisDatabase.name
 output logAnalyticsId    string = logAnalytics.id
-output managedIdentityPrincipalId string = app.identity.principalId
+output managedIdentityPrincipalId string = deployContainerApp ? app.identity.principalId : ''

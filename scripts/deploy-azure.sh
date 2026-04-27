@@ -1,21 +1,26 @@
 #!/usr/bin/env bash
 # deploy-azure.sh ─ One-shot deploy of ASOE pre-prod to Azure Container Apps.
 #
-# What it does:
+# What it does (two-stage to avoid the placeholder-image probe-failure trap):
 #   1. Verifies az CLI + required providers.
 #   2. Creates the resource group if missing.
-#   3. Deploys infra/main.bicep (ACR, Postgres, Redis, Container App Env + App).
-#   4. Builds the API image with `az acr build` (no local Docker required).
-#   5. Updates the Container App revision to the freshly built image tag.
-#   6. Reminds the operator to run scripts/set-secrets.sh.
+#   3. Deletes any prior Failed Container App so re-runs start clean.
+#   4. STAGE 1 bicep: ACR + Postgres + Redis + Log Analytics + Managed Env
+#      (no Container App yet — deployContainerApp=false).
+#   5. Builds the API image into the now-existing ACR with `az acr build`.
+#   6. STAGE 2 bicep: same template, deployContainerApp=true,
+#      containerImage=<the-just-built-image>. The Container App is created
+#      with the real image, so the /api/v1/health probe passes on the
+#      first revision and the deploy doesn't time out.
+#   7. Reminds the operator to run scripts/set-secrets.sh.
+#
+# Run from the repo root:
+#   PG_ADMIN_PASSWORD='<strong-pw>' ./scripts/deploy-azure.sh
 #
 # Prerequisites:
 #   - Azure CLI 2.55+   (https://aka.ms/InstallAzureCLI)
 #   - Logged in:        az login
 #   - Selected sub:     az account set --subscription <id>
-#
-# Usage:
-#   PG_ADMIN_PASSWORD='<strong-pw>' ./scripts/deploy-azure.sh
 #
 # Override defaults via env vars:
 #   RG=asoepreprod LOCATION=centralus IMAGE_TAG=v0.3.2 ./scripts/deploy-azure.sh
@@ -80,20 +85,41 @@ if ! az group show --name "${RG}" >/dev/null 2>&1; then
         --tags project=asoe env=sandbox managed=bicep >/dev/null
 fi
 
-# ────────────────────────────────────── 3. Bicep deploy
+# ────────────────────────────────────── 3. Clean up prior failed app
+#
+# A previous run may have left the Container App in 'Failed' provisioning
+# state (e.g. probe timeout against the placeholder image). Stage 2 below
+# can succeed against an existing healthy app, but cannot rescue one whose
+# initial provision failed — Azure refuses to overwrite. Delete it here.
 
-echo "Deploying bicep template (this provisions ACR, Postgres, Redis, Container App; ~10-15 min)..."
+if az containerapp show -n "${APP_NAME}" -g "${RG}" >/dev/null 2>&1; then
+    state=$(az containerapp show -n "${APP_NAME}" -g "${RG}" \
+        --query properties.provisioningState -o tsv 2>/dev/null || echo "Unknown")
+    if [[ "${state}" == "Failed" ]]; then
+        echo "Removing previously-failed Container App ${APP_NAME} (state=${state}) ..."
+        az containerapp delete -n "${APP_NAME}" -g "${RG}" --yes --no-wait || true
+        # Wait for the delete to actually take effect (~30 s typical).
+        until ! az containerapp show -n "${APP_NAME}" -g "${RG}" >/dev/null 2>&1; do
+            sleep 5
+        done
+    fi
+fi
+
+# ────────────────────────────────────── 4. STAGE 1 bicep: shared infra
+
+echo "STAGE 1 bicep deploy: ACR + Postgres + Redis + Log Analytics + Managed Env (~10 min)..."
 az deployment group create \
     --resource-group "${RG}" \
-    --name "asoe-deploy-$(date +%Y%m%d%H%M%S)" \
+    --name "asoe-stage1-$(date +%Y%m%d%H%M%S)" \
     --template-file "${BICEP_FILE}" \
     --parameters "@${PARAMS_FILE}" \
     --parameters pgAdminPassword="${PG_ADMIN_PASSWORD}" \
+    --parameters deployContainerApp=false \
     --output table
 
-# ────────────────────────────────────── 4. Build & push image to ACR
+# ────────────────────────────────────── 5. Build & push image to ACR
 
-echo "Building API image in ACR (uses the cloud builder, no local Docker needed)..."
+echo "Building API image in ACR (cloud builder, no local Docker needed)..."
 az acr build \
     --registry "${ACR_NAME}" \
     --image "${IMAGE_NAME}:${IMAGE_TAG}" \
@@ -101,14 +127,18 @@ az acr build \
     --file Dockerfile.api \
     .
 
-# ────────────────────────────────────── 5. Update Container App revision
+# ────────────────────────────────────── 6. STAGE 2 bicep: Container App
 
 FULL_IMAGE="${ACR_NAME}.azurecr.io/${IMAGE_NAME}:${IMAGE_TAG}"
-echo "Pointing Container App ${APP_NAME} at ${FULL_IMAGE} ..."
-az containerapp update \
-    --name "${APP_NAME}" \
+echo "STAGE 2 bicep deploy: Container App with ${FULL_IMAGE} (~3-5 min)..."
+az deployment group create \
     --resource-group "${RG}" \
-    --image "${FULL_IMAGE}" \
+    --name "asoe-stage2-$(date +%Y%m%d%H%M%S)" \
+    --template-file "${BICEP_FILE}" \
+    --parameters "@${PARAMS_FILE}" \
+    --parameters pgAdminPassword="${PG_ADMIN_PASSWORD}" \
+    --parameters deployContainerApp=true \
+    --parameters containerImage="${FULL_IMAGE}" \
     --output table
 
 FQDN=$(az containerapp show --name "${APP_NAME}" --resource-group "${RG}" \

@@ -74,19 +74,36 @@ From the repo root:
 PG_ADMIN_PASSWORD='<choose-a-strong-pw>' ./scripts/deploy-azure.sh
 ```
 
-The script:
+The script runs a **two-stage deploy** to dodge the placeholder-image
+probe-failure trap (the bicep's `/api/v1/health` HTTP probe on port 8000
+fails against the `containerapps-helloworld` placeholder, which would
+otherwise time out the deployment after ~25 minutes):
 
 1. Registers the resource providers (`Microsoft.App`, `Microsoft.ContainerRegistry`,
    `Microsoft.DBforPostgreSQL`, `Microsoft.Cache`, `Microsoft.OperationalInsights`).
 2. Creates the resource group `asoepreprod` if missing.
-3. Runs `az deployment group create` against `infra/main.bicep` — this stands up
-   ACR, Postgres, Redis, the Container Apps Environment, and the Container App
-   (with empty secrets and a placeholder image).
-4. Builds the API image in ACR with `az acr build` (no local Docker required).
-5. Updates the Container App revision to the freshly built image.
-6. Prints the FQDN of the API (e.g. `https://asoepreprodapi.<hash>.centralus.azurecontainerapps.io`).
+3. **Cleans up** any prior `Failed` Container App so re-runs start clean.
+4. **Stage 1 bicep** (`deployContainerApp=false`): provisions ACR,
+   Postgres, Azure Managed Redis, Log Analytics, and the Container Apps
+   Managed Environment.
+5. **Builds the image** with `az acr build` (cloud builder, no local
+   Docker required).
+6. **Stage 2 bicep** (`deployContainerApp=true`,
+   `containerImage=<just-built-image>`): provisions the Container App
+   with the real image — its `/api/v1/health` probe responds correctly
+   on the first revision.
+7. Prints the FQDN of the API (e.g. `https://asoepreprodapi.<hash>.centralus.azurecontainerapps.io`).
 
-Total time: ~10–15 min on first run (Postgres provisioning is the long pole).
+Total time: ~13–18 min on first run (Stage 1 ~10 min for Postgres,
+build ~3 min, Stage 2 ~3 min).
+
+> **Why two stages?** The Container App resource refuses to be created
+> until its first revision reaches a healthy state. Pre-Stage 2, the
+> bicep would default to a generic placeholder image; the real probe
+> spec doesn't match what the placeholder serves, so the revision
+> never goes healthy and the entire deployment hits its terminal
+> "Operation expired" timeout. Stage 1 + image build + Stage 2 avoids
+> that entirely.
 
 ## Step 2 — Set secrets
 
