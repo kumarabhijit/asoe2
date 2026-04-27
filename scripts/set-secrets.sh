@@ -72,13 +72,24 @@ REDIS_KEY=$(az redisenterprise database list-keys \
     --cluster-name "${REDIS_NAME}" --resource-group "${RG}" \
     --query primaryKey -o tsv)
 
+# URL-encode anything we splice into a connection-string user-info field.
+# Without this, a Postgres password containing '@' (e.g. 'Foo@2026') makes
+# psycopg2 split at the first '@' so the host becomes '2026@...' and DNS
+# fails. Redis primary keys are base64 and can contain '+' '/' '='.
+url_encode() {
+    python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"
+}
+
+PG_PASS_ENC=$(url_encode "${PG_ADMIN_PASSWORD}")
+REDIS_KEY_ENC=$(url_encode "${REDIS_KEY}")
+
 # psycopg2 + asyncpg both accept this URL form.
-DATABASE_URL="postgresql://${PG_USER}:${PG_ADMIN_PASSWORD}@${PG_HOST}:5432/${PG_DB}?sslmode=require"
+DATABASE_URL="postgresql://${PG_USER}:${PG_PASS_ENC}@${PG_HOST}:5432/${PG_DB}?sslmode=require"
 
 # rediss:// = TLS; Managed Redis listens on 10000 and is always TLS.
 # No /<db-number> suffix — Enterprise cluster mode supports a single
 # logical database (the 'default' DB created by the bicep template).
-REDIS_URL="rediss://:${REDIS_KEY}@${REDIS_HOST}:10000"
+REDIS_URL="rediss://:${REDIS_KEY_ENC}@${REDIS_HOST}:10000"
 
 # ──────────────────────────────────────── Set secrets on the Container App
 
