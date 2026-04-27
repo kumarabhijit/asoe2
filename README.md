@@ -1243,6 +1243,38 @@ CORS allow-origin is set to `https://asoe-ui.vercel.app` via the
 `corsAllowedOrigin` bicep parameter; change it and re-run the deploy
 script if the UI host changes.
 
+#### Day-to-day Azure operations
+
+After `az login` and `az account set --subscription
+f6f24d74-9f1a-4717-94d2-4eef4a617aa0`, set these in your shell once:
+
+```bash
+RG=asoepreprod
+APP=asoepreprodapi
+FQDN=$(az containerapp show -g $RG -n $APP \
+       --query properties.configuration.ingress.fqdn -o tsv)
+```
+
+| Task | Command |
+|---|---|
+| **Launch (first deploy)** | `PG_ADMIN_PASSWORD='<pw>' ANTHROPIC_API_KEY='sk-ant-...' ./scripts/deploy-azure.sh` |
+| **Re-deploy after a code change** | `PG_ADMIN_PASSWORD='<same-pw>' ./scripts/deploy-azure.sh` (secrets preserved) |
+| **Health check** | `curl -fsS --max-time 30 "https://${FQDN}/api/v1/health" \| jq .` |
+| **Active revision status** | `az containerapp revision list -g $RG -n $APP --query "[?properties.active]" -o table` |
+| **Rotate Anthropic key only** | `ANTHROPIC_API_KEY='sk-ant-NEW' ./scripts/set-secrets.sh` |
+| **Rotate JWT secret** (invalidates issued tokens) | `ASOE_JWT_SECRET=auto ./scripts/set-secrets.sh` |
+| **Rotate Postgres admin password** | `az postgres flexible-server update -g $RG -n asoepreprodpg --admin-password '<new>'` then re-run `deploy-azure.sh` with the new password |
+| **Rotate Redis primary key** | `az redisenterprise database regenerate-key --cluster-name asoepreprodredis -g $RG -n default --key-type Primary` then re-run `deploy-azure.sh` |
+| **Recent console logs** (no streaming) | see runbook's [Azure CLI cheat sheet](docs/deploy-azure-container-apps.md#azure-cli-cheat-sheet) |
+| **Roll back to a previous revision** | `az containerapp ingress traffic set -g $RG -n $APP --revision-weight <older>=100` |
+| **Tear down** | `az group delete -n $RG --yes --no-wait` |
+
+Full runbook with Postgres-direct-connect, scaling, custom-domain hookup,
+and a comprehensive Troubleshooting section (covering the issues we
+actually hit during first deploys: `Operation expired`, ACR 401,
+`pgcrypto not allow-listed`, password-with-`@`, etc.) lives in
+[`docs/deploy-azure-container-apps.md`](docs/deploy-azure-container-apps.md).
+
 ---
 
 ## Engineer Cookbook
