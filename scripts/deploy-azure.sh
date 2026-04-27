@@ -18,7 +18,7 @@
 #   PG_ADMIN_PASSWORD='<strong-pw>' ./scripts/deploy-azure.sh
 #
 # Override defaults via env vars:
-#   RG=asoepreprod LOCATION=eastus IMAGE_TAG=v0.3.2 ./scripts/deploy-azure.sh
+#   RG=asoepreprod LOCATION=westus2 IMAGE_TAG=v0.3.2 ./scripts/deploy-azure.sh
 
 set -euo pipefail
 
@@ -26,7 +26,7 @@ set -euo pipefail
 
 : "${SUBSCRIPTION_ID:=f6f24d74-9f1a-4717-94d2-4eef4a617aa0}"
 : "${RG:=asoepreprod}"
-: "${LOCATION:=eastus}"
+: "${LOCATION:=westus2}"
 : "${NAME_PREFIX:=asoepreprod}"
 : "${ACR_NAME:=${NAME_PREFIX}acr}"
 : "${APP_NAME:=${NAME_PREFIX}api}"

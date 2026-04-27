@@ -10,7 +10,12 @@ pre-prod environment described in `docs/deploy-azure-container-apps.md`.
 | `main.bicep` | All Azure resources (ACR, Postgres, Redis, Container App Env + App, Log Analytics, AcrPull RBAC). |
 | `parameters.sandbox.json` | Non-secret parameters for the `asoepreprod` environment. |
 
-## Resources provisioned (eastus, RG `asoepreprod`)
+## Resources provisioned (westus2, RG `asoepreprod`)
+
+> **Region note:** the original target was `eastus`, but Azure declined
+> to provision the Postgres Flexible Server B1ms there (capacity /
+> SKU unavailability at the time of deploy). Switched to `westus2`,
+> which has full Container Apps + Postgres Flex + Redis support.
 
 | Resource | Name | SKU | Approx. monthly cost (USD, sandbox) |
 | --- | --- | --- | --- |

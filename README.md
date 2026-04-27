@@ -1212,7 +1212,7 @@ Artifacts:
   Server + Redis + Container Apps Environment + Container App with system-
   assigned identity and AcrPull RBAC.
 - [`infra/parameters.sandbox.json`](infra/parameters.sandbox.json) —
-  parameters for the `asoepreprod` environment in `eastus`.
+  parameters for the `asoepreprod` environment in `westus2`.
 - [`scripts/deploy-azure.sh`](scripts/deploy-azure.sh) — provisions infra,
   builds the image in ACR, points the Container App revision at the new
   image.

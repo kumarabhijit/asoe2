@@ -19,7 +19,7 @@ targetScope = 'resourceGroup'
 
 // ───────────────────────────────────────────────────────────────── Parameters
 
-@description('Region for all resources. eastus per pre-prod plan.')
+@description('Region for all resources. westus2 per pre-prod plan (Postgres Flexible was unavailable in eastus during initial provision).')
 param location string = resourceGroup().location
 
 @description('Naming prefix used for all resources (alphanumeric, no dashes).')

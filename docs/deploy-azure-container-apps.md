@@ -2,14 +2,22 @@
 
 End-to-end runbook for deploying the FastAPI service (`api/app.py`) to Azure
 Container Apps. The current target is the **`asoepreprod`** environment in
-`eastus`, sized for sandbox use. Production hardening checklist lives in
+`westus2`, sized for sandbox use. Production hardening checklist lives in
 `infra/README.md`.
+
+> **Region note:** `eastus` was the original target, but Azure refused to
+> provision Postgres Flexible Server B1ms there (capacity / SKU
+> unavailability at the time of the first deploy). All resources moved
+> to `westus2`. If the original `eastus` resource group was created and
+> needs to be removed, run `az group delete -n asoepreprod --yes
+> --no-wait` before re-running the deploy script — Azure does not allow
+> moving an existing resource group to a different region.
 
 ## What gets deployed
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│ Resource group: asoepreprod   (eastus)                   │
+│ Resource group: asoepreprod   (westus2)                  │
 │                                                          │
 │  ┌─────────────────────────┐    ┌─────────────────────┐  │
 │  │ Container App: asoepre… │◄───┤ ACR: asoepreprodacr │  │
@@ -68,7 +76,7 @@ The script:
    (with empty secrets and a placeholder image).
 4. Builds the API image in ACR with `az acr build` (no local Docker required).
 5. Updates the Container App revision to the freshly built image.
-6. Prints the FQDN of the API (e.g. `https://asoepreprodapi.<hash>.eastus.azurecontainerapps.io`).
+6. Prints the FQDN of the API (e.g. `https://asoepreprodapi.<hash>.westus2.azurecontainerapps.io`).
 
 Total time: ~10–15 min on first run (Postgres provisioning is the long pole).
 
@@ -193,7 +201,7 @@ are deleted with the server. ACR images are gone too.
 ## Custom domain (later)
 
 You answered "I don't own asoecore.com" — so the API will be served on the
-auto-generated `*.eastus.azurecontainerapps.io` URL. When you do own a
+auto-generated `*.westus2.azurecontainerapps.io` URL. When you do own a
 domain, hooking it up takes:
 
 1. `az containerapp hostname add` to bind the hostname.
