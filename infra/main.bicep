@@ -48,8 +48,14 @@ param namePrefix string = 'asoepreprod'
 ])
 param asoeEnv string = 'sandbox'
 
-@description('CORS allow-origin for the FastAPI sandbox CORS middleware. Should match the UI origin.')
+@description('Single CORS allow-origin (legacy). Kept so existing parameter files keep working; prefer corsAllowedOriginsCsv for multi-origin (pre-prod UI on Azure + Vercel prod + custom domain).')
 param corsAllowedOrigin string = 'https://asoe-ui.vercel.app'
+
+@description('Comma-separated CORS allow-origins. Use this when more than one origin must be allowed (e.g. the Azure-hosted pre-prod UI FQDN AND the Vercel production URL). Empty string disables.')
+param corsAllowedOriginsCsv string = ''
+
+@description('Optional regex applied to the request Origin (allow_origin_regex). Use to match Vercel preview URLs like https://asoe-ui-git-<branch>-<team>.vercel.app without listing each. Empty string disables.')
+param corsAllowedOriginRegex string = ''
 
 @description('LLM provider routing. fallback = deterministic only, no outbound LLM traffic.')
 @allowed([
@@ -402,7 +408,9 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (deployContainerApp) 
             { name: 'ASOE_LLM_PROVIDER',  value: llmProvider }
             { name: 'ASOE_KILL_SWITCH',   value: '0' }
             { name: 'ASOE_EXPLAIN_MODE',  value: '0' }
-            { name: 'CORS_ALLOWED_ORIGIN', value: corsAllowedOrigin }
+            { name: 'CORS_ALLOWED_ORIGIN',        value: corsAllowedOrigin }
+            { name: 'CORS_ALLOWED_ORIGINS',       value: corsAllowedOriginsCsv }
+            { name: 'CORS_ALLOWED_ORIGIN_REGEX',  value: corsAllowedOriginRegex }
             { name: 'PORT',               value: '8000' }
             { name: 'ANTHROPIC_API_KEY',  secretRef: 'anthropic-api-key' }
             { name: 'ASOE_JWT_SECRET',    secretRef: 'asoe-jwt-secret' }

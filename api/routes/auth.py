@@ -13,6 +13,8 @@ real IdP integration (Okta, Azure AD) and Key Vault-managed signing keys.
 
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, Depends
 
 from api.deps import (
@@ -41,6 +43,17 @@ from api.users import (
 router = APIRouter()
 
 
+def _current_env() -> str:
+    """Return the active ASOE_ENV claim that newly minted tokens must carry.
+
+    Without this, tokens were minted with the keyword default ``"sandbox"``
+    regardless of how the container was deployed; the validator at
+    ``api.deps._validate_environment`` then rejected every authenticated
+    call as ``ENV_MISMATCH`` the moment ops set ``ASOE_ENV=production``.
+    """
+    return os.getenv("ASOE_ENV", "sandbox").lower()
+
+
 def _build_user_profile(user_rec) -> UserProfile:
     """Build a UserProfile response from a UserRecord with computed fields."""
     permissions = expand_permissions(user_rec.roles)
@@ -60,12 +73,14 @@ def _build_user_profile(user_rec) -> UserProfile:
 
 def _create_tokens_for_user(user_rec, auth_method: str = "password+mfa"):
     """Issue access + refresh token pair for a user record."""
+    env = _current_env()
     access = create_access_token(
         sub=user_rec.sub,
         email=user_rec.email,
         name=user_rec.name,
         roles=user_rec.roles,
         org=user_rec.org,
+        env=env,
         auth_method=auth_method,
         title=user_rec.title,
         avatar_initials=user_rec.avatar_initials,
@@ -77,6 +92,7 @@ def _create_tokens_for_user(user_rec, auth_method: str = "password+mfa"):
         name=user_rec.name,
         roles=user_rec.roles,
         org=user_rec.org,
+        env=env,
         title=user_rec.title,
         avatar_initials=user_rec.avatar_initials,
         assigned_accounts=user_rec.assigned_accounts or None,
@@ -132,12 +148,14 @@ async def sso_init() -> dict:
 
 @router.get("/sso/callback")
 async def sso_callback() -> dict:
+    env = _current_env()
     access = create_access_token(
         sub="sso-user",
         email="sso@example.com",
         name="SSO User",
         roles=["analyst"],
         org="sso-tenant",
+        env=env,
         auth_method="sso",
     )
     refresh = create_refresh_token(
@@ -146,6 +164,7 @@ async def sso_callback() -> dict:
         name="SSO User",
         roles=["analyst"],
         org="sso-tenant",
+        env=env,
     )
     return {
         "access_token": access,
@@ -204,13 +223,18 @@ async def refresh(req: RefreshRequest) -> AuthTokenResponse:
             status_code=401,
         )
 
+    # Re-issue against the *active* env, not the env the original token
+    # carried. If ops promoted the deployment from sandbox to production
+    # mid-session the user must re-authenticate; defaulting to a stale
+    # claim would defeat the validator at ``api.deps._validate_environment``.
+    fresh_env = _current_env()
     new_access = create_access_token(
         sub=payload.get("sub", ""),
         email=payload.get("email", ""),
         name=payload.get("name", ""),
         roles=payload.get("roles", []),
         org=payload.get("org", ""),
-        env=payload.get("env", "sandbox"),
+        env=fresh_env,
         retailer_id=payload.get("retailer_id"),
         title=payload.get("title", ""),
         avatar_initials=payload.get("avatar_initials", ""),
@@ -222,7 +246,7 @@ async def refresh(req: RefreshRequest) -> AuthTokenResponse:
         name=payload.get("name", ""),
         roles=payload.get("roles", []),
         org=payload.get("org", ""),
-        env=payload.get("env", "sandbox"),
+        env=fresh_env,
         retailer_id=payload.get("retailer_id"),
         title=payload.get("title", ""),
         avatar_initials=payload.get("avatar_initials", ""),
