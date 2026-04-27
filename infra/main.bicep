@@ -248,6 +248,23 @@ resource pgDatabase 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2023-12
   }
 }
 
+// Allow-list extensions used by the asoe migrations:
+//   pgcrypto — gen_random_uuid() (V001 schema) + audit hash chain (V003)
+//   vector   — pgvector for V2 embedding-search readiness (V001 schema)
+//
+// Azure Postgres Flexible Server gates `CREATE EXTENSION` behind this
+// server parameter; without the allow-list the migrations fail with
+// `FeatureNotSupported: extension "X" is not allow-listed`. The
+// parameter is dynamic — no server restart required.
+resource pgExtensions 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2023-12-01-preview' = {
+  parent: pgServer
+  name: 'azure.extensions'
+  properties: {
+    value: 'PGCRYPTO,VECTOR'
+    source: 'user-override'
+  }
+}
+
 // ──────────────────────────────────────────────────── Azure Managed Redis
 //
 // Replaces the legacy 'Microsoft.Cache/redis' offering (retiring 2028-09-30
