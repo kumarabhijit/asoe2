@@ -2,17 +2,32 @@
 
 End-to-end runbook for deploying the FastAPI service (`api/app.py`) to Azure
 Container Apps. The current target is the **`asoepreprod`** environment in
-`eastus`, sized for sandbox use. Production hardening checklist lives in
+`centralus`, sized for sandbox use. Production hardening checklist lives in
 `infra/README.md`.
+
+> **Region note:** `eastus` was the original target but rejected the
+> Postgres Flexible Server B1ms SKU at deploy time; `westus2` returned
+> the same error on retry. Settled on `centralus`, which has reliable
+> B1ms availability and full support for Container Apps + Azure Managed
+> Redis. If a previous failed `asoepreprod` resource group exists in
+> another region, run `az group delete -n asoepreprod --yes --no-wait`
+> first — Azure does not allow moving an existing RG to a new region.
+
+> **Redis note:** `Microsoft.Cache/redis` (Azure Cache for Redis) is
+> retiring on 2028-09-30. This template uses **Azure Managed Redis**
+> (`Microsoft.Cache/redisEnterprise`) at the cheapest tier
+> (`Balanced_B0`, ~250 MB), which is the recommended replacement and is
+> cheaper than legacy Basic C0. Connection details: TLS-only, port
+> `10000` (not `6380`), single logical database (`default`).
 
 ## What gets deployed
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│ Resource group: asoepreprod   (eastus)                   │
+│ Resource group: asoepreprod   (centralus)                │
 │                                                          │
 │  ┌─────────────────────────┐    ┌─────────────────────┐  │
-│  │ Container App: asoepre… │◄───┤ ACR: asoepreprodacr │  │
+│  │ Container App:          │◄───┤ ACR: asoepreprodacr │  │
 │  │  asoepreprodapi         │    └─────────────────────┘  │
 │  │  • 0.5 vCPU / 1 GiB     │                             │
 │  │  • min=1 max=2 replicas │    ┌─────────────────────┐  │
@@ -20,13 +35,14 @@ Container Apps. The current target is the **`asoepreprod`** environment in
 │  │  • sticky sessions (WS) │───►│ asoepreprodlogs     │  │
 │  └────────┬────────────────┘    └─────────────────────┘  │
 │           │                                              │
-│     ┌─────┴─────┐                                        │
-│     ▼           ▼                                        │
-│  ┌───────┐   ┌───────────────────┐                       │
-│  │ Redis │   │ PostgreSQL Flex.  │                       │
-│  │ Basic │   │ Standard_B1ms     │                       │
-│  │ C0    │   │ db: asoe          │                       │
-│  └───────┘   └───────────────────┘                       │
+│     ┌─────┴───────┐                                      │
+│     ▼             ▼                                      │
+│  ┌──────────┐   ┌───────────────────┐                    │
+│  │ Managed  │   │ PostgreSQL Flex.  │                    │
+│  │ Redis    │   │ Standard_B1ms     │                    │
+│  │ Bal._B0  │   │ db: asoe          │                    │
+│  │ port 10k │   └───────────────────┘                    │
+│  └──────────┘                                            │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -68,7 +84,7 @@ The script:
    (with empty secrets and a placeholder image).
 4. Builds the API image in ACR with `az acr build` (no local Docker required).
 5. Updates the Container App revision to the freshly built image.
-6. Prints the FQDN of the API (e.g. `https://asoepreprodapi.<hash>.eastus.azurecontainerapps.io`).
+6. Prints the FQDN of the API (e.g. `https://asoepreprodapi.<hash>.centralus.azurecontainerapps.io`).
 
 Total time: ~10–15 min on first run (Postgres provisioning is the long pole).
 
@@ -93,7 +109,8 @@ The script:
 
 - Reads the Postgres FQDN and Redis primary key from Azure.
 - Builds `DATABASE_URL` (`postgresql://…?sslmode=require`) and `REDIS_URL`
-  (`rediss://…:6380/0`).
+  (`rediss://…:10000`, no `/db` suffix — Managed Redis exposes a single
+  logical DB).
 - Calls `az containerapp secret set` for all four secrets.
 - Restarts the active revision so the new values are picked up.
 
@@ -193,7 +210,7 @@ are deleted with the server. ACR images are gone too.
 ## Custom domain (later)
 
 You answered "I don't own asoecore.com" — so the API will be served on the
-auto-generated `*.eastus.azurecontainerapps.io` URL. When you do own a
+auto-generated `*.centralus.azurecontainerapps.io` URL. When you do own a
 domain, hooking it up takes:
 
 1. `az containerapp hostname add` to bind the hostname.
