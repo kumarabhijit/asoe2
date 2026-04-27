@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # deploy-azure.sh ─ One-shot deploy of ASOE pre-prod to Azure Container Apps.
 #
-# What it does (two-stage to avoid the placeholder-image probe-failure trap):
+# What it does (three-stage to avoid the placeholder-image probe-failure
+# trap and to bake the API FQDN into the UI bundle at build time):
 #   1. Verifies az CLI + required providers.
 #   2. Creates the resource group if missing.
 #   3. Deletes any prior Failed Container App so re-runs start clean.
@@ -10,13 +11,17 @@
 #   5. Builds the API image into the now-existing ACR with `az acr build`.
 #   6. Builds DATABASE_URL / REDIS_URL from infra outputs (URL-encoded so a
 #      password containing '@' or a Redis key with '+' '/' '=' is safe).
-#      Reuses any previously-set ANTHROPIC_API_KEY / ASOE_JWT_SECRET on
-#      re-runs so re-deploys don't wipe them.
-#   7. STAGE 2 bicep: same template with deployContainerApp=true,
-#      containerImage=<just-built>, and all 4 secret values populated.
-#      Container App is created with real image + correct secrets, so the
-#      /api/v1/health probe + Postgres migration both succeed on first
-#      revision.
+#      Reuses any previously-set secrets on re-runs so re-deploys don't
+#      wipe them.
+#   7. STAGE 2 bicep: API Container App with real image + secrets. Probe
+#      and Postgres migration both succeed on first revision. The bicep
+#      template uses cae.properties.defaultDomain to compute the future
+#      UI FQDN deterministically and includes it in CORS_ALLOWED_ORIGINS,
+#      so even before the UI app exists the API is ready to allow it.
+#   8. STAGE 3 (only when DEPLOY_UI=1): builds the UI image with the
+#      now-resolved API FQDN passed as --build-arg NEXT_PUBLIC_API_URL,
+#      then re-runs bicep with deployUiContainerApp=true to provision
+#      the UI Container App.
 #
 # Run from the repo root:
 #
@@ -24,6 +29,13 @@
 #   ANTHROPIC_API_KEY='sk-ant-...' \           # required on first deploy;
 #                                              # preserved on subsequent re-runs
 #   ASOE_JWT_SECRET=<hex>|auto \               # optional; preserved on re-runs;
+#                                              # auto-generated on first deploy
+#   DEPLOY_UI=1 \                              # optional (default 0); when set,
+#                                              # also builds & deploys the
+#                                              # asoe-ui Container App.
+#   ASOE_UI_PATH=../asoe-ui \                  # optional; sibling-checkout path
+#                                              # of asoe-ui (default ../asoe-ui)
+#   NEXTAUTH_SECRET=<hex>|auto \               # optional; preserved on re-runs;
 #                                              # auto-generated on first deploy
 #       ./scripts/deploy-azure.sh
 #
@@ -45,14 +57,18 @@ set -euo pipefail
 : "${NAME_PREFIX:=asoepreprod}"
 : "${ACR_NAME:=${NAME_PREFIX}acr}"
 : "${APP_NAME:=${NAME_PREFIX}api}"
+: "${UI_APP_NAME:=${NAME_PREFIX}ui}"
 : "${PG_SERVER:=${NAME_PREFIX}pg}"
 : "${PG_DB:=asoe}"
 : "${PG_USER:=asoeadmin}"
 : "${REDIS_NAME:=${NAME_PREFIX}redis}"
 : "${IMAGE_NAME:=asoe-api}"
+: "${UI_IMAGE_NAME:=asoe-ui}"
 : "${IMAGE_TAG:=$(git rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M%S)}"
 : "${BICEP_FILE:=infra/main.bicep}"
 : "${PARAMS_FILE:=infra/parameters.sandbox.json}"
+: "${DEPLOY_UI:=0}"
+: "${ASOE_UI_PATH:=../asoe-ui}"
 
 if [[ -z "${PG_ADMIN_PASSWORD:-}" ]]; then
     echo "ERROR: PG_ADMIN_PASSWORD env var is required (set a strong Postgres admin password)." >&2
@@ -236,14 +252,103 @@ az deployment group create \
 FQDN=$(az containerapp show --name "${APP_NAME}" --resource-group "${RG}" \
     --query properties.configuration.ingress.fqdn -o tsv)
 
+# ────────────────────────────────────── 8. STAGE 3 (UI) — opt-in
+#
+# Skipped when DEPLOY_UI=0 (default). When enabled, builds the asoe-ui
+# Next.js standalone image into ACR with the API FQDN baked in via
+# --build-arg, then re-runs the bicep template with deployUiContainerApp
+# =true to provision the Stateless UI Container App. NEXTAUTH_SECRET is
+# preserved across re-runs (or auto-generated on first deploy).
+
+UI_FQDN=""
+if [[ "${DEPLOY_UI}" == "1" ]]; then
+    if [[ ! -d "${ASOE_UI_PATH}" ]]; then
+        echo "ERROR: ASOE_UI_PATH '${ASOE_UI_PATH}' does not exist." >&2
+        echo "       Set ASOE_UI_PATH to the asoe-ui repo checkout, e.g." >&2
+        echo "       ASOE_UI_PATH=/path/to/asoe-ui DEPLOY_UI=1 ./scripts/deploy-azure.sh" >&2
+        exit 1
+    fi
+    if [[ ! -f "${ASOE_UI_PATH}/Dockerfile" ]]; then
+        echo "ERROR: ${ASOE_UI_PATH}/Dockerfile not found. The Dockerfile must exist on the asoe-ui core_ui_integration branch." >&2
+        exit 1
+    fi
+
+    # NEXTAUTH_SECRET preservation (mirrors the ANTHROPIC_API_KEY pattern).
+    NEXTAUTH_PLACEHOLDER='placeholder-set-by-deploy-script'
+    read_existing_ui_secret() {
+        local secret_name="$1"
+        az containerapp secret show \
+            --resource-group "${RG}" --name "${UI_APP_NAME}" \
+            --secret-name "${secret_name}" \
+            --query value -o tsv 2>/dev/null || true
+    }
+    if [[ "${NEXTAUTH_SECRET:-}" == "auto" ]]; then
+        NEXTAUTH_SECRET=$(openssl rand -hex 64)
+        echo "Generated new NEXTAUTH_SECRET ($(echo -n "${NEXTAUTH_SECRET}" | wc -c) chars)."
+    elif [[ -z "${NEXTAUTH_SECRET:-}" ]]; then
+        existing=$(read_existing_ui_secret 'nextauth-secret')
+        if [[ -n "${existing}" && "${existing}" != "${NEXTAUTH_PLACEHOLDER}" ]]; then
+            NEXTAUTH_SECRET="${existing}"
+            echo "Preserving existing NEXTAUTH_SECRET (pass NEXTAUTH_SECRET=auto to rotate)."
+        else
+            NEXTAUTH_SECRET=$(openssl rand -hex 64)
+            echo "Generated new NEXTAUTH_SECRET (no existing value to preserve)."
+        fi
+    fi
+
+    echo "Building UI image in ACR with NEXT_PUBLIC_API_URL=https://${FQDN} ..."
+    az acr build \
+        --registry "${ACR_NAME}" \
+        --image "${UI_IMAGE_NAME}:${IMAGE_TAG}" \
+        --image "${UI_IMAGE_NAME}:latest" \
+        --file Dockerfile \
+        --build-arg "NEXT_PUBLIC_API_URL=https://${FQDN}" \
+        --build-arg "NEXT_PUBLIC_USE_REAL_API=1" \
+        "${ASOE_UI_PATH}"
+
+    UI_FULL_IMAGE="${ACR_NAME}.azurecr.io/${UI_IMAGE_NAME}:${IMAGE_TAG}"
+    echo "STAGE 3 bicep deploy: UI Container App with ${UI_FULL_IMAGE} (~3 min)..."
+    az deployment group create \
+        --resource-group "${RG}" \
+        --name "asoe-stage3-$(date +%Y%m%d%H%M%S)" \
+        --template-file "${BICEP_FILE}" \
+        --parameters "@${PARAMS_FILE}" \
+        --parameters pgAdminPassword="${PG_ADMIN_PASSWORD}" \
+        --parameters deployContainerApp=true \
+        --parameters deployUiContainerApp=true \
+        --parameters containerImage="${FULL_IMAGE}" \
+        --parameters containerImageUi="${UI_FULL_IMAGE}" \
+        --parameters anthropicApiKey="${ANTHROPIC_API_KEY}" \
+        --parameters asoeJwtSecret="${ASOE_JWT_SECRET}" \
+        --parameters databaseUrl="${DATABASE_URL}" \
+        --parameters redisUrl="${REDIS_URL}" \
+        --parameters nextAuthSecret="${NEXTAUTH_SECRET}" \
+        --output table
+
+    UI_FQDN=$(az containerapp show --name "${UI_APP_NAME}" --resource-group "${RG}" \
+        --query properties.configuration.ingress.fqdn -o tsv)
+fi
+
 echo
 echo "── DEPLOY COMPLETE ──────────────────────────────────────────"
 echo "API URL      : https://${FQDN}"
 echo "Health probe : https://${FQDN}/api/v1/health"
+if [[ -n "${UI_FQDN}" ]]; then
+    echo "UI URL       : https://${UI_FQDN}"
+    echo "UI sign-in   : https://${UI_FQDN}/login"
+fi
 echo
-echo "Verify with:  curl -fsS --max-time 30 https://${FQDN}/api/v1/health | jq ."
-echo "Tail logs:    az containerapp logs show -n ${APP_NAME} -g ${RG} --follow"
+echo "Verify API:   curl -fsS --max-time 30 https://${FQDN}/api/v1/health | jq ."
+echo "Tail API:     az containerapp logs show -n ${APP_NAME} -g ${RG} --follow"
+if [[ -n "${UI_FQDN}" ]]; then
+    echo "Tail UI:      az containerapp logs show -n ${UI_APP_NAME} -g ${RG} --follow"
+fi
 echo
 echo "Rotate the Anthropic key without redeploying infra:"
 echo "  ANTHROPIC_API_KEY='sk-ant-NEW' ./scripts/set-secrets.sh"
+if [[ "${DEPLOY_UI}" != "1" ]]; then
+    echo
+    echo "To deploy the UI Container App alongside the API, re-run with:"
+    echo "  DEPLOY_UI=1 ASOE_UI_PATH=../asoe-ui ./scripts/deploy-azure.sh"
+fi
 echo "─────────────────────────────────────────────────────────────"
