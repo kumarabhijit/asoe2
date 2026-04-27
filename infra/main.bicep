@@ -55,6 +55,22 @@ param pgAdminUser string = 'asoeadmin'
 @secure()
 param pgAdminPassword string
 
+@description('Anthropic API key. Placeholder until set-secrets.sh is run.')
+@secure()
+param anthropicApiKey string = 'placeholder-set-via-set-secrets-sh'
+
+@description('JWT secret for ASOE auth. Placeholder until set-secrets.sh is run.')
+@secure()
+param asoeJwtSecret string = 'placeholder-set-via-set-secrets-sh'
+
+@description('PostgreSQL connection string. Placeholder until set-secrets.sh is run.')
+@secure()
+param databaseUrl string = 'placeholder-set-via-set-secrets-sh'
+
+@description('Redis connection string. Placeholder until set-secrets.sh is run.')
+@secure()
+param redisUrl string = 'placeholder-set-via-set-secrets-sh'
+
 @description('Container image reference (set by deploy script after ACR build, e.g. asoepreprodacr.azurecr.io/asoe-api:GIT_SHA).')
 param containerImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
 
@@ -256,20 +272,24 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
           identity: 'system'
         }
       ]
-      // Secrets declared but not populated here. Use scripts/set-secrets.sh
-      // to set values after the first deploy.
+      // Secrets populated from parameters (defaults are placeholders; use set-secrets.sh
+      // to replace with actual values after the first deploy).
       secrets: [
         {
           name: 'anthropic-api-key'
+          value: anthropicApiKey
         }
         {
           name: 'asoe-jwt-secret'
+          value: asoeJwtSecret
         }
         {
           name: 'database-url'
+          value: databaseUrl
         }
         {
           name: 'redis-url'
+          value: redisUrl
         }
       ]
     }
