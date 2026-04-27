@@ -11,11 +11,15 @@
 //
 // Two-stage deploy (driven by `deployContainerApp` parameter):
 //   Stage 1 (deployContainerApp=false): provisions everything EXCEPT the
-//     Container App + AcrPull role binding. This lets `az acr build`
-//     push the real image to a now-existing ACR.
+//     Container App. Critically, this includes the User-Assigned Managed
+//     Identity (UAMI) and its AcrPull role binding on ACR — so by the
+//     time Stage 2 runs, ACR token exchange for the UAMI works on first
+//     attempt. (System-assigned identities cause a deterministic 401 race
+//     because the role binding lags the Container App creation.)
 //   Stage 2 (deployContainerApp=true,  containerImage=<real-image>):
-//     creates the Container App with the real image so its /api/v1/health
-//     probe passes on first revision.
+//     creates the Container App, configured to use the pre-existing UAMI
+//     for both pod identity and ACR pull. With the real image, the
+//     /api/v1/health probe passes on the first revision.
 //
 // scripts/deploy-azure.sh runs both stages back-to-back.
 //
@@ -109,7 +113,7 @@ param memory string = '1.0Gi'
 ])
 param redisSku string = 'Balanced_B0'
 
-@description('Two-stage deploy gate. Stage 1 (false) provisions ACR / Postgres / Redis / Log Analytics / Managed Env so `az acr build` has somewhere to push. Stage 2 (true) provisions the Container App + AcrPull role with the real image. The deploy script flips this between calls.')
+@description('Two-stage deploy gate. Stage 1 (false) provisions ACR / Postgres / Redis / Log Analytics / Managed Env / UAMI / AcrPull role binding so `az acr build` has somewhere to push and RBAC is propagated by the time Stage 2 runs. Stage 2 (true) provisions the Container App itself with the real image. The deploy script flips this between calls.')
 param deployContainerApp bool = false
 
 // ───────────────────────────────────────────────────────────── Derived names
@@ -121,11 +125,43 @@ var pgDatabaseName   = 'asoe'
 var redisName        = '${namePrefix}redis'
 var caeName          = '${namePrefix}env'
 var appName          = '${namePrefix}api'
+var uamiName         = '${namePrefix}identity'
 
 var commonTags = {
   project: 'asoe'
   env:     asoeEnv
   managed: 'bicep'
+}
+
+// ─────────────────────────────────────────────── User-Assigned Managed Identity
+//
+// Created in Stage 1 so its AcrPull role assignment (below) has time to
+// propagate before Stage 2 stands up the Container App. Using a
+// system-assigned identity instead causes a deterministic race: the
+// Container App resource is created → it tries to pull from ACR → ACR
+// returns 401 → role binding propagates a few seconds later but the
+// app has already given up.
+
+resource uami 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: uamiName
+  location: location
+  tags: commonTags
+}
+
+// AcrPull on the UAMI for ACR. Always created (independent of
+// deployContainerApp) so the role exists by the time Stage 2 runs.
+// roleDefinitionId for AcrPull = 7f951dda-4ed3-4680-a7ca-43fe172d538d.
+resource acrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: acr
+  name: guid(acr.id, uami.id, 'AcrPull')
+  properties: {
+    principalId: uami.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      '7f951dda-4ed3-4680-a7ca-43fe172d538d'
+    )
+  }
 }
 
 // ─────────────────────────────────────────────────────────── Log Analytics
@@ -279,7 +315,10 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (deployContainerApp) 
   location: location
   tags: commonTags
   identity: {
-    type: 'SystemAssigned'
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${uami.id}': {}
+    }
   }
   properties: {
     managedEnvironmentId: cae.id
@@ -306,8 +345,9 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (deployContainerApp) 
       registries: [
         {
           server: '${acrName}.azurecr.io'
-          // System-assigned identity granted AcrPull below.
-          identity: 'system'
+          // UAMI created in Stage 1 with AcrPull role pre-granted, so
+          // the registry token exchange succeeds on first attempt.
+          identity: uami.id
         }
       ]
       // Secrets populated from parameters (defaults are placeholders; use set-secrets.sh
@@ -394,23 +434,6 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (deployContainerApp) 
   }
 }
 
-// Grant the Container App's system-assigned identity AcrPull on the ACR.
-// roleDefinitionId for AcrPull = 7f951dda-4ed3-4680-a7ca-43fe172d538d.
-// Conditional on deployContainerApp because `app.identity.principalId`
-// only exists once the Container App resource is materialised.
-resource acrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (deployContainerApp) {
-  scope: acr
-  name: guid(acr.id, appName, 'AcrPull')
-  properties: {
-    principalId: app.identity.principalId
-    principalType: 'ServicePrincipal'
-    roleDefinitionId: subscriptionResourceId(
-      'Microsoft.Authorization/roleDefinitions',
-      '7f951dda-4ed3-4680-a7ca-43fe172d538d'
-    )
-  }
-}
-
 // ──────────────────────────────────────────────────────────────── Outputs
 
 // Outputs that reference the conditional `app` resource use ternaries so
@@ -427,4 +450,6 @@ output redisHost         string = redisEnterprise.properties.hostName
 output redisSslPort      int    = redisDatabase.properties.port
 output redisDatabaseName string = redisDatabase.name
 output logAnalyticsId    string = logAnalytics.id
-output managedIdentityPrincipalId string = deployContainerApp ? app.identity.principalId : ''
+output uamiResourceId             string = uami.id
+output uamiPrincipalId            string = uami.properties.principalId
+output uamiClientId               string = uami.properties.clientId

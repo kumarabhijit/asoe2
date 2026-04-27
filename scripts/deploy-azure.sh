@@ -63,7 +63,8 @@ az account set --subscription "${SUBSCRIPTION_ID}"
 
 # Register the resource providers we touch (idempotent, ~30 s on first run).
 for ns in Microsoft.App Microsoft.ContainerRegistry Microsoft.DBforPostgreSQL \
-          Microsoft.Cache Microsoft.OperationalInsights Microsoft.Insights; do
+          Microsoft.Cache Microsoft.OperationalInsights Microsoft.Insights \
+          Microsoft.ManagedIdentity; do
     state=$(az provider show -n "${ns}" --query registrationState -o tsv 2>/dev/null || echo "NotRegistered")
     if [[ "${state}" != "Registered" ]]; then
         echo "Registering provider ${ns} ..."
