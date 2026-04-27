@@ -157,13 +157,54 @@ az containerapp logs show -g $RG -n $APP --follow
 
 ## Step 4 — Point the UI at the API
 
-In `asoe-ui` (Vercel project), set the API base URL env var to
-`https://<FQDN>` and redeploy.
+You have two options for where the pre-prod UI runs:
 
-`ASOE_ENV=sandbox` causes the API's CORS middleware to allow the
-`https://asoe-ui.vercel.app` origin (configured in `infra/parameters.sandbox.json`).
-If you change the UI host, update `corsAllowedOrigin` in the parameter file
-and re-run `scripts/deploy-azure.sh` (or just `az deployment group create`).
+**Option A — Vercel (existing).** In `asoe-ui` Vercel project settings, set:
+
+| Var | Value |
+|---|---|
+| `NEXT_PUBLIC_API_URL` | `https://<API_FQDN>` |
+| `NEXT_PUBLIC_USE_REAL_API` | `1` |
+| `NEXTAUTH_URL` | `https://asoe-ui.vercel.app` (production scope only) |
+| `NEXTAUTH_SECRET` | strong 32-byte random |
+| `AUTH_TRUST_HOST` | `true` (so per-PR preview hostnames also work) |
+
+Redeploy in Vercel. The API's `CORS_ALLOWED_ORIGIN` already covers
+`https://asoe-ui.vercel.app` per `infra/parameters.sandbox.json`. For
+Vercel preview URLs (`asoe-ui-git-<branch>-<team>.vercel.app`), set
+`corsAllowedOriginRegex` in the parameter file to a pattern that
+matches your team's preview URL shape and re-run `scripts/deploy-azure.sh`.
+
+**Option B — Azure Container Apps (recommended for pre-prod).** Run the
+deploy script with `DEPLOY_UI=1`. This builds the asoe-ui Next.js
+standalone image into ACR, with `NEXT_PUBLIC_API_URL=https://<API_FQDN>`
+baked in at build time, and provisions a sister Container App in the
+same managed environment as the API:
+
+```bash
+DEPLOY_UI=1 ASOE_UI_PATH=../asoe-ui PG_ADMIN_PASSWORD='...' ./scripts/deploy-azure.sh
+```
+
+The bicep template computes the UI's deterministic FQDN from
+`cae.properties.defaultDomain` and:
+
+- pre-loads it into the API's `CORS_ALLOWED_ORIGINS`, so the API
+  accepts the UI without a follow-up redeploy;
+- bakes it into the UI's `NEXTAUTH_URL` so NextAuth's callback URLs
+  resolve correctly;
+- preserves `NEXTAUTH_SECRET` across re-runs (auto-generated on first
+  deploy; pass `NEXTAUTH_SECRET=auto` to rotate).
+
+Why pre-prod on Azure? Same audit boundary as the core service,
+private networking possible, single Log Analytics workspace, no
+cross-vendor data egress for SOX-relevant payloads. Vercel stays
+ideal for dev / per-PR previews.
+
+For UI-only redeploys (no infra/API changes), use the fast path:
+
+```bash
+./scripts/redeploy-ui.sh
+```
 
 ## Operations
 
