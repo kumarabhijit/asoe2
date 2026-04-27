@@ -6,16 +6,26 @@
 #   2. Creates the resource group if missing.
 #   3. Deletes any prior Failed Container App so re-runs start clean.
 #   4. STAGE 1 bicep: ACR + Postgres + Redis + Log Analytics + Managed Env
-#      (no Container App yet — deployContainerApp=false).
+#      + UAMI + AcrPull RBAC (no Container App yet).
 #   5. Builds the API image into the now-existing ACR with `az acr build`.
-#   6. STAGE 2 bicep: same template, deployContainerApp=true,
-#      containerImage=<the-just-built-image>. The Container App is created
-#      with the real image, so the /api/v1/health probe passes on the
-#      first revision and the deploy doesn't time out.
-#   7. Reminds the operator to run scripts/set-secrets.sh.
+#   6. Builds DATABASE_URL / REDIS_URL from infra outputs (URL-encoded so a
+#      password containing '@' or a Redis key with '+' '/' '=' is safe).
+#      Reuses any previously-set ANTHROPIC_API_KEY / ASOE_JWT_SECRET on
+#      re-runs so re-deploys don't wipe them.
+#   7. STAGE 2 bicep: same template with deployContainerApp=true,
+#      containerImage=<just-built>, and all 4 secret values populated.
+#      Container App is created with real image + correct secrets, so the
+#      /api/v1/health probe + Postgres migration both succeed on first
+#      revision.
 #
 # Run from the repo root:
-#   PG_ADMIN_PASSWORD='<strong-pw>' ./scripts/deploy-azure.sh
+#
+#   PG_ADMIN_PASSWORD='<strong-pw>' \
+#   ANTHROPIC_API_KEY='sk-ant-...' \           # required on first deploy;
+#                                              # preserved on subsequent re-runs
+#   ASOE_JWT_SECRET=<hex>|auto \               # optional; preserved on re-runs;
+#                                              # auto-generated on first deploy
+#       ./scripts/deploy-azure.sh
 #
 # Prerequisites:
 #   - Azure CLI 2.55+   (https://aka.ms/InstallAzureCLI)
@@ -35,6 +45,10 @@ set -euo pipefail
 : "${NAME_PREFIX:=asoepreprod}"
 : "${ACR_NAME:=${NAME_PREFIX}acr}"
 : "${APP_NAME:=${NAME_PREFIX}api}"
+: "${PG_SERVER:=${NAME_PREFIX}pg}"
+: "${PG_DB:=asoe}"
+: "${PG_USER:=asoeadmin}"
+: "${REDIS_NAME:=${NAME_PREFIX}redis}"
 : "${IMAGE_NAME:=asoe-api}"
 : "${IMAGE_TAG:=$(git rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M%S)}"
 : "${BICEP_FILE:=infra/main.bicep}"
@@ -73,7 +87,6 @@ for ns in Microsoft.App Microsoft.ContainerRegistry Microsoft.DBforPostgreSQL \
 done
 
 # Ensure containerapp + log-analytics + redisenterprise extensions present.
-# (redisenterprise is needed by scripts/set-secrets.sh after this script runs.)
 az extension add --name containerapp --upgrade --yes >/dev/null 2>&1 || true
 az extension add --name log-analytics --upgrade --yes >/dev/null 2>&1 || true
 az extension add --name redisenterprise --upgrade --yes >/dev/null 2>&1 || true
@@ -128,10 +141,84 @@ az acr build \
     --file Dockerfile.api \
     .
 
-# ────────────────────────────────────── 6. STAGE 2 bicep: Container App
+# ────────────────────────────────────── 6. Build secrets for Stage 2
+#
+# DATABASE_URL and REDIS_URL are derived from infra here (not via a
+# separate set-secrets.sh step) so re-running this script never wipes
+# the live secrets back to placeholders. ANTHROPIC_API_KEY and
+# ASOE_JWT_SECRET are preserved across re-runs unless explicitly
+# overridden via env var.
+
+# URL-encode so a password containing '@' or a base64 Redis key
+# containing '+' '/' '=' is safe to splice into a connection string.
+url_encode() {
+    python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"
+}
+
+PG_HOST=$(az postgres flexible-server show \
+    --name "${PG_SERVER}" --resource-group "${RG}" \
+    --query fullyQualifiedDomainName -o tsv)
+
+REDIS_HOST=$(az redisenterprise show \
+    --name "${REDIS_NAME}" --resource-group "${RG}" \
+    --query hostName -o tsv)
+
+REDIS_KEY=$(az redisenterprise database list-keys \
+    --cluster-name "${REDIS_NAME}" --resource-group "${RG}" \
+    --query primaryKey -o tsv)
+
+PG_PASS_ENC=$(url_encode "${PG_ADMIN_PASSWORD}")
+REDIS_KEY_ENC=$(url_encode "${REDIS_KEY}")
+
+DATABASE_URL="postgresql://${PG_USER}:${PG_PASS_ENC}@${PG_HOST}:5432/${PG_DB}?sslmode=require"
+REDIS_URL="rediss://:${REDIS_KEY_ENC}@${REDIS_HOST}:10000"
+
+# Helper: read a current secret value off the existing Container App
+# (returns empty string if app or secret doesn't exist).
+read_existing_secret() {
+    local secret_name="$1"
+    az containerapp secret show \
+        --resource-group "${RG}" --name "${APP_NAME}" \
+        --secret-name "${secret_name}" \
+        --query value -o tsv 2>/dev/null || true
+}
+
+PLACEHOLDER='placeholder-set-via-set-secrets-sh'
+
+# ANTHROPIC_API_KEY: required on first deploy; preserved on re-runs unless
+# the caller passed a new value to rotate it.
+if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+    existing=$(read_existing_secret 'anthropic-api-key')
+    if [[ -n "${existing}" && "${existing}" != "${PLACEHOLDER}" ]]; then
+        ANTHROPIC_API_KEY="${existing}"
+        echo "Preserving existing ANTHROPIC_API_KEY (pass ANTHROPIC_API_KEY=... to rotate)."
+    else
+        echo "ERROR: ANTHROPIC_API_KEY env var is required on first deploy." >&2
+        echo "       Example: ANTHROPIC_API_KEY='sk-ant-...' PG_ADMIN_PASSWORD='...' ./scripts/deploy-azure.sh" >&2
+        exit 1
+    fi
+fi
+
+# ASOE_JWT_SECRET: preserved on re-runs; auto-generated on first deploy
+# unless caller passed an explicit value (or 'auto' to force a new one).
+if [[ "${ASOE_JWT_SECRET:-}" == "auto" ]]; then
+    ASOE_JWT_SECRET=$(openssl rand -hex 64)
+    echo "Generated new ASOE_JWT_SECRET ($(echo -n "${ASOE_JWT_SECRET}" | wc -c) chars). Save this if you want to reuse it."
+elif [[ -z "${ASOE_JWT_SECRET:-}" ]]; then
+    existing=$(read_existing_secret 'asoe-jwt-secret')
+    if [[ -n "${existing}" && "${existing}" != "${PLACEHOLDER}" ]]; then
+        ASOE_JWT_SECRET="${existing}"
+        echo "Preserving existing ASOE_JWT_SECRET (pass ASOE_JWT_SECRET=auto to rotate)."
+    else
+        ASOE_JWT_SECRET=$(openssl rand -hex 64)
+        echo "Generated new ASOE_JWT_SECRET (no existing value to preserve)."
+    fi
+fi
+
+# ────────────────────────────────────── 7. STAGE 2 bicep: Container App
 
 FULL_IMAGE="${ACR_NAME}.azurecr.io/${IMAGE_NAME}:${IMAGE_TAG}"
-echo "STAGE 2 bicep deploy: Container App with ${FULL_IMAGE} (~3-5 min)..."
+echo "STAGE 2 bicep deploy: Container App with ${FULL_IMAGE} + real secrets (~3-5 min)..."
 az deployment group create \
     --resource-group "${RG}" \
     --name "asoe-stage2-$(date +%Y%m%d%H%M%S)" \
@@ -140,6 +227,10 @@ az deployment group create \
     --parameters pgAdminPassword="${PG_ADMIN_PASSWORD}" \
     --parameters deployContainerApp=true \
     --parameters containerImage="${FULL_IMAGE}" \
+    --parameters anthropicApiKey="${ANTHROPIC_API_KEY}" \
+    --parameters asoeJwtSecret="${ASOE_JWT_SECRET}" \
+    --parameters databaseUrl="${DATABASE_URL}" \
+    --parameters redisUrl="${REDIS_URL}" \
     --output table
 
 FQDN=$(az containerapp show --name "${APP_NAME}" --resource-group "${RG}" \
@@ -150,9 +241,9 @@ echo "── DEPLOY COMPLETE ─────────────────
 echo "API URL      : https://${FQDN}"
 echo "Health probe : https://${FQDN}/api/v1/health"
 echo
-echo "NEXT STEP (required — secrets are empty until you do this):"
-echo "  ./scripts/set-secrets.sh"
+echo "Verify with:  curl -fsS --max-time 30 https://${FQDN}/api/v1/health | jq ."
+echo "Tail logs:    az containerapp logs show -n ${APP_NAME} -g ${RG} --follow"
 echo
-echo "Then watch logs with:"
-echo "  az containerapp logs show -n ${APP_NAME} -g ${RG} --follow"
+echo "Rotate the Anthropic key without redeploying infra:"
+echo "  ANTHROPIC_API_KEY='sk-ant-NEW' ./scripts/set-secrets.sh"
 echo "─────────────────────────────────────────────────────────────"

@@ -71,31 +71,48 @@ az extension add --name containerapp --upgrade
 From the repo root:
 
 ```bash
-PG_ADMIN_PASSWORD='<choose-a-strong-pw>' ./scripts/deploy-azure.sh
+PG_ADMIN_PASSWORD='<choose-a-strong-pw>' \
+ANTHROPIC_API_KEY='sk-ant-<your-key>' \
+    ./scripts/deploy-azure.sh
 ```
 
-The script runs a **two-stage deploy** to dodge the placeholder-image
-probe-failure trap (the bicep's `/api/v1/health` HTTP probe on port 8000
-fails against the `containerapps-helloworld` placeholder, which would
-otherwise time out the deployment after ~25 minutes):
+`deploy-azure.sh` is the single source of truth for the infra **and** all
+four Container App secrets. It runs a **two-stage bicep deploy**:
 
 1. Registers the resource providers (`Microsoft.App`, `Microsoft.ContainerRegistry`,
-   `Microsoft.DBforPostgreSQL`, `Microsoft.Cache`, `Microsoft.OperationalInsights`).
+   `Microsoft.DBforPostgreSQL`, `Microsoft.Cache`, `Microsoft.OperationalInsights`,
+   `Microsoft.ManagedIdentity`).
 2. Creates the resource group `asoepreprod` if missing.
 3. **Cleans up** any prior `Failed` Container App so re-runs start clean.
 4. **Stage 1 bicep** (`deployContainerApp=false`): provisions ACR,
-   Postgres, Azure Managed Redis, Log Analytics, and the Container Apps
-   Managed Environment.
+   Postgres (with `pgcrypto` + `vector` allow-listed), Azure Managed
+   Redis, Log Analytics, the Container Apps Managed Environment, the
+   User-Assigned Managed Identity (UAMI), and the AcrPull role binding.
 5. **Builds the image** with `az acr build` (cloud builder, no local
    Docker required).
-6. **Stage 2 bicep** (`deployContainerApp=true`,
-   `containerImage=<just-built-image>`): provisions the Container App
-   with the real image — its `/api/v1/health` probe responds correctly
-   on the first revision.
-7. Prints the FQDN of the API (e.g. `https://asoepreprodapi.<hash>.centralus.azurecontainerapps.io`).
+6. **Derives connection strings**: queries Postgres FQDN + Redis hostname
+   + Redis primary key from infra, URL-encodes the password and the key,
+   builds `DATABASE_URL` and `REDIS_URL`. Preserves `ANTHROPIC_API_KEY`
+   and `ASOE_JWT_SECRET` from the existing Container App if it already
+   exists (so re-runs don't wipe them); auto-generates a fresh
+   `ASOE_JWT_SECRET` on the very first deploy.
+7. **Stage 2 bicep** (`deployContainerApp=true`, all four secrets +
+   `containerImage=<just-built>` passed as `@secure()` parameters):
+   provisions the Container App with the real image and real secrets,
+   so `/api/v1/health` + Postgres migrations both succeed on first revision.
+8. Prints the FQDN.
 
 Total time: ~13–18 min on first run (Stage 1 ~10 min for Postgres,
-build ~3 min, Stage 2 ~3 min).
+build ~1–3 min, Stage 2 ~3–5 min). Subsequent runs are faster because
+Stage 1 is mostly idempotent.
+
+### Env vars
+
+| Variable | First deploy | Subsequent deploys |
+|---|---|---|
+| `PG_ADMIN_PASSWORD` | **required** | **required** (must match Postgres admin password) |
+| `ANTHROPIC_API_KEY` | **required** | optional — preserved unless overridden to rotate |
+| `ASOE_JWT_SECRET` | optional — auto-generated if unset | optional — preserved unless overridden; pass `auto` to rotate |
 
 > **Why two stages?** The Container App resource refuses to be created
 > until its first revision reaches a healthy state. Pre-Stage 2, the
@@ -103,35 +120,11 @@ build ~3 min, Stage 2 ~3 min).
 > spec doesn't match what the placeholder serves, so the revision
 > never goes healthy and the entire deployment hits its terminal
 > "Operation expired" timeout. Stage 1 + image build + Stage 2 avoids
-> that entirely.
+> that entirely. The intermediate "derive connection strings" step
+> means re-runs of the script never overwrite the running secrets
+> with placeholders.
 
-## Step 2 — Set secrets
-
-The bicep template declares the secret slots but leaves them empty. Until you
-populate them, the API will start in fallback mode (or fail to start, if it
-cannot reach Postgres / Redis):
-
-```bash
-ANTHROPIC_API_KEY=sk-ant-... \
-ASOE_JWT_SECRET=auto \
-PG_ADMIN_PASSWORD='<the-pw-you-used-in-step-1>' \
-    ./scripts/set-secrets.sh
-```
-
-`ASOE_JWT_SECRET=auto` generates a fresh 64-byte hex string and prints it once
-— save it (e.g. into 1Password) so you can rotate replicas without invalidating
-issued tokens.
-
-The script:
-
-- Reads the Postgres FQDN and Redis primary key from Azure.
-- Builds `DATABASE_URL` (`postgresql://…?sslmode=require`) and `REDIS_URL`
-  (`rediss://…:10000`, no `/db` suffix — Managed Redis exposes a single
-  logical DB).
-- Calls `az containerapp secret set` for all four secrets.
-- Restarts the active revision so the new values are picked up.
-
-## Step 3 — Verify
+## Step 2 — Verify
 
 ```bash
 RG=asoepreprod
@@ -140,7 +133,7 @@ APP=asoepreprodapi
 FQDN=$(az containerapp show -g $RG -n $APP \
     --query properties.configuration.ingress.fqdn -o tsv)
 
-curl -fsS https://${FQDN}/api/v1/health | jq .
+curl -fsS --max-time 30 "https://${FQDN}/api/v1/health" | jq .
 ```
 
 Expected response (truncated):
@@ -180,16 +173,42 @@ and re-run `scripts/deploy-azure.sh` (or just `az deployment group create`).
 PG_ADMIN_PASSWORD=… ./scripts/deploy-azure.sh
 ```
 
-Re-running the script is safe — bicep is idempotent and the image tag defaults
-to the current git short SHA, so each commit produces a new revision.
+Re-running is safe — bicep is idempotent, the image tag defaults to the
+current git short SHA, and `ANTHROPIC_API_KEY` / `ASOE_JWT_SECRET` are
+preserved from the running Container App so secrets do not regress to
+placeholders.
 
-### Inspect / rotate secrets
+### Rotate the Anthropic key
+
+Cheap path (no infra deploy, ~30 s):
 
 ```bash
-# Inspect (only shows names, not values)
+ANTHROPIC_API_KEY='sk-ant-NEW' ./scripts/set-secrets.sh
+```
+
+Or via the deploy script (re-runs the full ~5-min bicep+build+bicep
+flow but is the only path if you also need an image refresh):
+
+```bash
+ANTHROPIC_API_KEY='sk-ant-NEW' PG_ADMIN_PASSWORD=… ./scripts/deploy-azure.sh
+```
+
+### Rotate the JWT secret
+
+```bash
+ASOE_JWT_SECRET=auto ./scripts/set-secrets.sh
+```
+
+This invalidates **all currently-issued JWTs** — every authenticated
+client must re-login. The script prints the new value once; save it.
+
+### Inspect secrets
+
+```bash
+# Names only (values redacted unless you query individually)
 az containerapp secret list -g asoepreprod -n asoepreprodapi -o table
 
-# Rotate the Anthropic key only
+# Direct CLI rotation (alternative to set-secrets.sh)
 az containerapp secret set -g asoepreprod -n asoepreprodapi \
     --secrets anthropic-api-key=sk-ant-NEW…
 
