@@ -32,8 +32,8 @@ set -euo pipefail
 : "${APP_NAME:=${NAME_PREFIX}api}"
 : "${IMAGE_NAME:=asoe-api}"
 : "${IMAGE_TAG:=$(git rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M%S)}"
-: "${BICEP_FILE:=../infra/main.bicep}"
-: "${PARAMS_FILE:=../infra/parameters.sandbox.json}"
+: "${BICEP_FILE:=infra/main.bicep}"
+: "${PARAMS_FILE:=infra/parameters.sandbox.json}"
 
 if [[ -z "${PG_ADMIN_PASSWORD:-}" ]]; then
     echo "ERROR: PG_ADMIN_PASSWORD env var is required (set a strong Postgres admin password)." >&2
