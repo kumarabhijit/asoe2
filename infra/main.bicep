@@ -610,10 +610,14 @@ resource uiApp 'Microsoft.App/containerApps@2024-03-01' = if (deployUiContainerA
 // resource doesn't exist and surface the real values once it does.
 output acrLoginServer       string = '${acrName}.azurecr.io'
 output acrName              string = acrName
-output containerAppName     string = deployContainerApp ? app.name : ''
-output containerAppFqdn     string = deployContainerApp ? app.properties.configuration.ingress.fqdn : ''
-output uiContainerAppName   string = deployUiContainerApp ? uiApp.name : ''
-output uiContainerAppFqdn   string = deployUiContainerApp ? uiApp.properties.configuration.ingress.fqdn : ''
+// Safe-access operator (`.?`) keeps the bicep linter (BCP318) happy when
+// the resource is conditional — it short-circuits to null rather than
+// failing the static null-check, and `?? ''` gives the empty-string
+// fallback the deploy script already relies on.
+output containerAppName     string = app.?name ?? ''
+output containerAppFqdn     string = app.?properties.configuration.ingress.fqdn ?? ''
+output uiContainerAppName   string = uiApp.?name ?? ''
+output uiContainerAppFqdn   string = uiApp.?properties.configuration.ingress.fqdn ?? ''
 output managedEnvDomain     string = cae.properties.defaultDomain
 output postgresHost      string = pgServer.properties.fullyQualifiedDomainName
 output postgresDatabase  string = pgDatabaseName

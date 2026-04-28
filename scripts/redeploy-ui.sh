@@ -34,8 +34,22 @@ command -v az >/dev/null || { echo "az CLI not found"; exit 1; }
 az account show >/dev/null 2>&1 || { echo "Run 'az login' first"; exit 1; }
 az account set --subscription "${SUBSCRIPTION_ID}"
 
-if [[ ! -d "${ASOE_UI_PATH}" ]]; then
-    echo "ERROR: ASOE_UI_PATH '${ASOE_UI_PATH}' does not exist." >&2
+: "${ASOE_UI_REPO_URL:=https://github.com/kumarabhijit/asoe-ui.git}"
+: "${ASOE_UI_BRANCH:=core_ui_integration}"
+
+if [[ ! -d "${ASOE_UI_PATH}/.git" ]]; then
+    if [[ -e "${ASOE_UI_PATH}" ]] && [[ -n "$(ls -A "${ASOE_UI_PATH}" 2>/dev/null)" ]]; then
+        echo "ERROR: ASOE_UI_PATH '${ASOE_UI_PATH}' exists but is not a git checkout." >&2
+        echo "       Move it aside or pick a different ASOE_UI_PATH." >&2
+        exit 1
+    fi
+    echo "Cloning asoe-ui (${ASOE_UI_BRANCH}) into ${ASOE_UI_PATH} ..."
+    git clone --branch "${ASOE_UI_BRANCH}" --depth 1 \
+        "${ASOE_UI_REPO_URL}" "${ASOE_UI_PATH}"
+fi
+
+if [[ ! -f "${ASOE_UI_PATH}/Dockerfile" ]]; then
+    echo "ERROR: ${ASOE_UI_PATH}/Dockerfile not found on the current branch." >&2
     exit 1
 fi
 

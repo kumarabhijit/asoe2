@@ -33,8 +33,15 @@
 #   DEPLOY_UI=1 \                              # optional (default 0); when set,
 #                                              # also builds & deploys the
 #                                              # asoe-ui Container App.
-#   ASOE_UI_PATH=../asoe-ui \                  # optional; sibling-checkout path
-#                                              # of asoe-ui (default ../asoe-ui)
+#   ASOE_UI_PATH=../asoe-ui \                  # optional; checkout path of the
+#                                              # asoe-ui repo (default
+#                                              # ../asoe-ui). If the path is
+#                                              # missing the script clones
+#                                              # ${ASOE_UI_REPO_URL} (default
+#                                              # https://github.com/
+#                                              # kumarabhijit/asoe-ui.git) at
+#                                              # ${ASOE_UI_BRANCH} (default
+#                                              # core_ui_integration) into it.
 #   NEXTAUTH_SECRET=<hex>|auto \               # optional; preserved on re-runs;
 #                                              # auto-generated on first deploy
 #       ./scripts/deploy-azure.sh
@@ -262,14 +269,30 @@ FQDN=$(az containerapp show --name "${APP_NAME}" --resource-group "${RG}" \
 
 UI_FQDN=""
 if [[ "${DEPLOY_UI}" == "1" ]]; then
-    if [[ ! -d "${ASOE_UI_PATH}" ]]; then
-        echo "ERROR: ASOE_UI_PATH '${ASOE_UI_PATH}' does not exist." >&2
-        echo "       Set ASOE_UI_PATH to the asoe-ui repo checkout, e.g." >&2
-        echo "       ASOE_UI_PATH=/path/to/asoe-ui DEPLOY_UI=1 ./scripts/deploy-azure.sh" >&2
-        exit 1
+    # Resolve / fetch the asoe-ui checkout. Three modes:
+    #   * Path exists with a .git directory   → use as-is.
+    #   * Path doesn't exist                   → clone from ASOE_UI_REPO_URL
+    #     into ASOE_UI_PATH (defaults to ../asoe-ui sibling). Branch defaults
+    #     to ASOE_UI_BRANCH (default core_ui_integration to match this PR;
+    #     override to 'main' once merged).
+    #   * Path exists but is empty / has no Dockerfile → error (don't risk
+    #     overwriting unrelated work).
+    : "${ASOE_UI_REPO_URL:=https://github.com/kumarabhijit/asoe-ui.git}"
+    : "${ASOE_UI_BRANCH:=core_ui_integration}"
+
+    if [[ ! -d "${ASOE_UI_PATH}/.git" ]]; then
+        if [[ -e "${ASOE_UI_PATH}" ]] && [[ -n "$(ls -A "${ASOE_UI_PATH}" 2>/dev/null)" ]]; then
+            echo "ERROR: ASOE_UI_PATH '${ASOE_UI_PATH}' exists but is not a git checkout." >&2
+            echo "       Move it aside or pick a different ASOE_UI_PATH." >&2
+            exit 1
+        fi
+        echo "Cloning asoe-ui (${ASOE_UI_BRANCH}) into ${ASOE_UI_PATH} ..."
+        git clone --branch "${ASOE_UI_BRANCH}" --depth 1 \
+            "${ASOE_UI_REPO_URL}" "${ASOE_UI_PATH}"
     fi
+
     if [[ ! -f "${ASOE_UI_PATH}/Dockerfile" ]]; then
-        echo "ERROR: ${ASOE_UI_PATH}/Dockerfile not found. The Dockerfile must exist on the asoe-ui core_ui_integration branch." >&2
+        echo "ERROR: ${ASOE_UI_PATH}/Dockerfile not found. Make sure the asoe-ui core_ui_integration branch is checked out (the Dockerfile only exists on that branch yet)." >&2
         exit 1
     fi
 
