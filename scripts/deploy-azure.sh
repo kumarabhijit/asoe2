@@ -154,15 +154,93 @@ fi
 
 # ────────────────────────────────────── 4. STAGE 1 bicep: shared infra
 
+# ── Helpers used by all bicep stages ─────────────────────────────────
+#
+# Postgres flexible server serializes config writes; the bicep template
+# touches Microsoft.DBforPostgreSQL/.../configurations/azure.extensions on
+# every deploy. If the server is mid-provisioning from a prior op, the
+# write returns `ServerIsBusy` and the whole deployment fails. Both
+# helpers below address that:
+#
+#   * wait_for_postgres_ready: poll the server's `state` until Ready
+#     (or skip if the server doesn't exist yet — first deploy).
+#   * bicep_deploy: retry the inner `az deployment group create` with
+#     exponential backoff when it fails specifically with ServerIsBusy.
+
+wait_for_postgres_ready() {
+    local max_wait=600  # 10 minutes
+    local elapsed=0
+    local interval=15
+    if ! az postgres flexible-server show \
+            -n "${PG_SERVER}" -g "${RG}" >/dev/null 2>&1; then
+        return 0  # server doesn't exist yet — Stage 1 first deploy
+    fi
+    while (( elapsed < max_wait )); do
+        local state
+        state=$(az postgres flexible-server show \
+            -n "${PG_SERVER}" -g "${RG}" --query state -o tsv 2>/dev/null || echo "Unknown")
+        if [[ "${state}" == "Ready" ]]; then
+            return 0
+        fi
+        echo "  Postgres ${PG_SERVER} state=${state}; waiting (${elapsed}/${max_wait}s) ..."
+        sleep "${interval}"
+        elapsed=$(( elapsed + interval ))
+    done
+    echo "WARNING: Postgres ${PG_SERVER} not Ready after ${max_wait}s; proceeding anyway." >&2
+    return 0
+}
+
+bicep_deploy() {
+    # bicep_deploy <stage-name> <param>=<val> [<param>=<val>...]
+    local stage_name="$1"; shift
+    local extra_params=("$@")
+    local attempt max_attempts=4
+    local base_backoff=30
+
+    for (( attempt=1; attempt <= max_attempts; attempt++ )); do
+        wait_for_postgres_ready
+
+        local deploy_name="asoe-${stage_name}-$(date +%Y%m%d%H%M%S)"
+        local cmd=(
+            az deployment group create
+            --resource-group "${RG}"
+            --name "${deploy_name}"
+            --template-file "${BICEP_FILE}"
+            --parameters "@${PARAMS_FILE}"
+            --parameters "pgAdminPassword=${PG_ADMIN_PASSWORD}"
+        )
+        for p in "${extra_params[@]}"; do
+            cmd+=(--parameters "${p}")
+        done
+
+        # Capture stderr so we can pattern-match for ServerIsBusy without
+        # losing the user-visible output on success.
+        local stderr_log
+        stderr_log=$(mktemp)
+        if "${cmd[@]}" --output table 2> >(tee "${stderr_log}" >&2); then
+            rm -f "${stderr_log}"
+            return 0
+        fi
+
+        if grep -q "ServerIsBusy" "${stderr_log}"; then
+            local backoff=$(( base_backoff * attempt ))
+            echo "  Postgres ServerIsBusy; backing off ${backoff}s and retrying (attempt ${attempt}/${max_attempts}) ..." >&2
+            rm -f "${stderr_log}"
+            sleep "${backoff}"
+            continue
+        fi
+
+        rm -f "${stderr_log}"
+        return 1  # non-retryable failure
+    done
+
+    echo "ERROR: ${stage_name} bicep deploy failed after ${max_attempts} attempts." >&2
+    return 1
+}
+
 echo "STAGE 1 bicep deploy: ACR + Postgres + Redis + Log Analytics + Managed Env (~10 min)..."
-az deployment group create \
-    --resource-group "${RG}" \
-    --name "asoe-stage1-$(date +%Y%m%d%H%M%S)" \
-    --template-file "${BICEP_FILE}" \
-    --parameters "@${PARAMS_FILE}" \
-    --parameters pgAdminPassword="${PG_ADMIN_PASSWORD}" \
-    --parameters deployContainerApp=false \
-    --output table
+bicep_deploy stage1 \
+    "deployContainerApp=false"
 
 # ────────────────────────────────────── 5. Build & push image to ACR
 
@@ -252,19 +330,13 @@ fi
 
 FULL_IMAGE="${ACR_NAME}.azurecr.io/${IMAGE_NAME}:${IMAGE_TAG}"
 echo "STAGE 2 bicep deploy: Container App with ${FULL_IMAGE} + real secrets (~3-5 min)..."
-az deployment group create \
-    --resource-group "${RG}" \
-    --name "asoe-stage2-$(date +%Y%m%d%H%M%S)" \
-    --template-file "${BICEP_FILE}" \
-    --parameters "@${PARAMS_FILE}" \
-    --parameters pgAdminPassword="${PG_ADMIN_PASSWORD}" \
-    --parameters deployContainerApp=true \
-    --parameters containerImage="${FULL_IMAGE}" \
-    --parameters anthropicApiKey="${ANTHROPIC_API_KEY}" \
-    --parameters asoeJwtSecret="${ASOE_JWT_SECRET}" \
-    --parameters databaseUrl="${DATABASE_URL}" \
-    --parameters redisUrl="${REDIS_URL}" \
-    --output table
+bicep_deploy stage2 \
+    "deployContainerApp=true" \
+    "containerImage=${FULL_IMAGE}" \
+    "anthropicApiKey=${ANTHROPIC_API_KEY}" \
+    "asoeJwtSecret=${ASOE_JWT_SECRET}" \
+    "databaseUrl=${DATABASE_URL}" \
+    "redisUrl=${REDIS_URL}"
 
 FQDN=$(az containerapp show --name "${APP_NAME}" --resource-group "${RG}" \
     --query properties.configuration.ingress.fqdn -o tsv)
@@ -431,22 +503,16 @@ if [[ "${DEPLOY_UI}" == "1" ]]; then
 
     UI_FULL_IMAGE="${ACR_NAME}.azurecr.io/${UI_IMAGE_NAME}:${IMAGE_TAG}"
     echo "STAGE 3 bicep deploy: UI Container App with ${UI_FULL_IMAGE} (~3 min)..."
-    az deployment group create \
-        --resource-group "${RG}" \
-        --name "asoe-stage3-$(date +%Y%m%d%H%M%S)" \
-        --template-file "${BICEP_FILE}" \
-        --parameters "@${PARAMS_FILE}" \
-        --parameters pgAdminPassword="${PG_ADMIN_PASSWORD}" \
-        --parameters deployContainerApp=true \
-        --parameters deployUiContainerApp=true \
-        --parameters containerImage="${FULL_IMAGE}" \
-        --parameters containerImageUi="${UI_FULL_IMAGE}" \
-        --parameters anthropicApiKey="${ANTHROPIC_API_KEY}" \
-        --parameters asoeJwtSecret="${ASOE_JWT_SECRET}" \
-        --parameters databaseUrl="${DATABASE_URL}" \
-        --parameters redisUrl="${REDIS_URL}" \
-        --parameters nextAuthSecret="${NEXTAUTH_SECRET}" \
-        --output table
+    bicep_deploy stage3 \
+        "deployContainerApp=true" \
+        "deployUiContainerApp=true" \
+        "containerImage=${FULL_IMAGE}" \
+        "containerImageUi=${UI_FULL_IMAGE}" \
+        "anthropicApiKey=${ANTHROPIC_API_KEY}" \
+        "asoeJwtSecret=${ASOE_JWT_SECRET}" \
+        "databaseUrl=${DATABASE_URL}" \
+        "redisUrl=${REDIS_URL}" \
+        "nextAuthSecret=${NEXTAUTH_SECRET}"
 
     UI_FQDN=$(az containerapp show --name "${UI_APP_NAME}" --resource-group "${RG}" \
         --query properties.configuration.ingress.fqdn -o tsv)
