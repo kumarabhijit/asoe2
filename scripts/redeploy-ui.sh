@@ -66,19 +66,26 @@ if [[ ! -d "${ASOE_UI_PATH}/.git" ]]; then
     fi
 else
     # Existing checkout — make sure it's on ${ASOE_UI_BRANCH} and current
-    # with origin. Handles the case where a previous unauthenticated /
-    # provider-quirk clone landed on the default branch instead.
+    # with origin. Same belt-and-braces logic as deploy-azure.sh:
+    #   (a) wrong branch  → fetch + checkout
+    #   (b) right branch  → fetch + reset --hard so the deploy always
+    #       picks up the latest origin commits without requiring the
+    #       user to `git pull` manually (which fails 403 against the
+    #       private repo when the PAT was scrubbed from .git/config).
+    pat_args=()
+    if [[ -n "${GH_PAT}" ]]; then
+        pat_args=(-c "http.extraHeader=AUTHORIZATION: bearer ${GH_PAT}")
+    fi
+
     current_branch=$(git -C "${ASOE_UI_PATH}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
     if [[ "${current_branch}" != "${ASOE_UI_BRANCH}" ]]; then
         echo "asoe-ui is on '${current_branch}'; switching to '${ASOE_UI_BRANCH}' ..."
-        if [[ -n "${GH_PAT}" ]]; then
-            git -C "${ASOE_UI_PATH}" \
-                -c "http.extraHeader=AUTHORIZATION: bearer ${GH_PAT}" \
-                fetch origin "${ASOE_UI_BRANCH}"
-        else
-            git -C "${ASOE_UI_PATH}" fetch origin "${ASOE_UI_BRANCH}"
-        fi
+        git -C "${ASOE_UI_PATH}" "${pat_args[@]}" fetch origin "${ASOE_UI_BRANCH}"
         git -C "${ASOE_UI_PATH}" checkout -B "${ASOE_UI_BRANCH}" "origin/${ASOE_UI_BRANCH}"
+    else
+        echo "asoe-ui is on '${ASOE_UI_BRANCH}'; fetching latest from origin ..."
+        git -C "${ASOE_UI_PATH}" "${pat_args[@]}" fetch origin "${ASOE_UI_BRANCH}"
+        git -C "${ASOE_UI_PATH}" reset --hard "origin/${ASOE_UI_BRANCH}"
     fi
 fi
 

@@ -326,25 +326,38 @@ if [[ "${DEPLOY_UI}" == "1" ]]; then
 
     sync_asoe_ui_to_branch() {
         # Existing checkout — make sure it's on ${ASOE_UI_BRANCH} and
-        # current with origin. Belt-and-braces: handles the case where
-        # the user previously cloned the default branch (main) and
-        # didn't notice; or where a `--branch` clone silently fell back
-        # for some provider/proxy reason.
+        # current with origin. Belt-and-braces: handles
+        #   (a) the case where the user previously cloned the default
+        #       branch (main) and didn't notice; or where a `--branch`
+        #       clone silently fell back for some provider/proxy reason;
+        #   (b) the case where the checkout is on the right branch but
+        #       stale because the user can't `git pull` directly (the
+        #       PAT was scrubbed from .git/config after the original
+        #       clone, so plain HTTPS pulls hit 403 against a private
+        #       repo). The script can pull because it has the PAT in
+        #       env; it injects it via -c http.extraHeader so the
+        #       remote URL itself stays clean.
         local target="$1"
         local current_branch
         current_branch=$(git -C "${target}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+
+        local pat_args=()
+        if [[ -n "${GH_PAT}" ]]; then
+            pat_args=(-c "http.extraHeader=AUTHORIZATION: bearer ${GH_PAT}")
+        fi
+
         if [[ "${current_branch}" != "${ASOE_UI_BRANCH}" ]]; then
             echo "asoe-ui is on '${current_branch}'; switching to '${ASOE_UI_BRANCH}' ..."
-            # Inject the PAT for the fetch only if available; the remote
-            # URL itself stays clean.
-            if [[ -n "${GH_PAT}" ]]; then
-                git -C "${target}" \
-                    -c "http.extraHeader=AUTHORIZATION: bearer ${GH_PAT}" \
-                    fetch origin "${ASOE_UI_BRANCH}"
-            else
-                git -C "${target}" fetch origin "${ASOE_UI_BRANCH}"
-            fi
+            git -C "${target}" "${pat_args[@]}" fetch origin "${ASOE_UI_BRANCH}"
             git -C "${target}" checkout -B "${ASOE_UI_BRANCH}" "origin/${ASOE_UI_BRANCH}"
+        else
+            # Already on the right branch — make sure it's current. Use
+            # fetch + reset --hard rather than pull/merge so we don't
+            # error out on local divergence (the script treats this
+            # checkout as a deploy artefact, not the user's workspace).
+            echo "asoe-ui is on '${ASOE_UI_BRANCH}'; fetching latest from origin ..."
+            git -C "${target}" "${pat_args[@]}" fetch origin "${ASOE_UI_BRANCH}"
+            git -C "${target}" reset --hard "origin/${ASOE_UI_BRANCH}"
         fi
     }
 
