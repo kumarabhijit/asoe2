@@ -96,6 +96,10 @@ echo "Location     : ${LOCATION}"
 echo "ACR          : ${ACR_NAME}.azurecr.io"
 echo "Container App: ${APP_NAME}"
 echo "Image tag    : ${IMAGE_NAME}:${IMAGE_TAG}"
+if [[ "${DEPLOY_UI}" == "1" ]]; then
+    echo "UI Container : ${UI_APP_NAME} (DEPLOY_UI=1)"
+    echo "UI source    : ${ASOE_UI_PATH} (branch: ${ASOE_UI_BRANCH:-core_ui_integration})"
+fi
 echo "─────────────────────────────────────────────────────────────"
 
 # ────────────────────────────────────── 1. Pre-flight checks
@@ -293,39 +297,83 @@ if [[ "${DEPLOY_UI}" == "1" ]]; then
     # persisted in `.git/config`.
     GH_PAT="${GITHUB_TOKEN:-${GH_TOKEN:-${GITHUB_CODESPACE_ACCESS:-}}}"
 
+    fetch_asoe_ui() {
+        # Fresh clone (no existing .git) — use --branch + --depth 1 so
+        # we land directly on the right branch with minimum bandwidth.
+        local target="$1"
+        if [[ -n "${GH_PAT}" ]]; then
+            local authed_url="${ASOE_UI_REPO_URL/https:\/\//https://x-access-token:${GH_PAT}@}"
+            echo "Cloning asoe-ui (${ASOE_UI_BRANCH}) into ${target} (using PAT) ..."
+            git clone --branch "${ASOE_UI_BRANCH}" --depth 1 \
+                "${authed_url}" "${target}"
+            # Scrub the PAT from the remote URL so it doesn't sit in
+            # .git/config on disk.
+            git -C "${target}" remote set-url origin "${ASOE_UI_REPO_URL}"
+        else
+            echo "Cloning asoe-ui (${ASOE_UI_BRANCH}) into ${target} ..."
+            if ! git clone --branch "${ASOE_UI_BRANCH}" --depth 1 \
+                "${ASOE_UI_REPO_URL}" "${target}" 2>/dev/null; then
+                echo "ERROR: clone failed. asoe-ui is private — set a PAT in one of:" >&2
+                echo "       GITHUB_TOKEN | GH_TOKEN | GITHUB_CODESPACE_ACCESS" >&2
+                echo "       Example:" >&2
+                echo "         GITHUB_TOKEN='ghp_...' DEPLOY_UI=1 PG_ADMIN_PASSWORD='...' ./scripts/deploy-azure.sh" >&2
+                echo "       Or pre-clone manually:" >&2
+                echo "         git clone https://<your-pat>@github.com/kumarabhijit/asoe-ui.git ${target}" >&2
+                exit 1
+            fi
+        fi
+    }
+
+    sync_asoe_ui_to_branch() {
+        # Existing checkout — make sure it's on ${ASOE_UI_BRANCH} and
+        # current with origin. Belt-and-braces: handles the case where
+        # the user previously cloned the default branch (main) and
+        # didn't notice; or where a `--branch` clone silently fell back
+        # for some provider/proxy reason.
+        local target="$1"
+        local current_branch
+        current_branch=$(git -C "${target}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+        if [[ "${current_branch}" != "${ASOE_UI_BRANCH}" ]]; then
+            echo "asoe-ui is on '${current_branch}'; switching to '${ASOE_UI_BRANCH}' ..."
+            # Inject the PAT for the fetch only if available; the remote
+            # URL itself stays clean.
+            if [[ -n "${GH_PAT}" ]]; then
+                git -C "${target}" \
+                    -c "http.extraHeader=AUTHORIZATION: bearer ${GH_PAT}" \
+                    fetch origin "${ASOE_UI_BRANCH}"
+            else
+                git -C "${target}" fetch origin "${ASOE_UI_BRANCH}"
+            fi
+            git -C "${target}" checkout -B "${ASOE_UI_BRANCH}" "origin/${ASOE_UI_BRANCH}"
+        fi
+    }
+
     if [[ ! -d "${ASOE_UI_PATH}/.git" ]]; then
         if [[ -e "${ASOE_UI_PATH}" ]] && [[ -n "$(ls -A "${ASOE_UI_PATH}" 2>/dev/null)" ]]; then
             echo "ERROR: ASOE_UI_PATH '${ASOE_UI_PATH}' exists but is not a git checkout." >&2
             echo "       Move it aside or pick a different ASOE_UI_PATH." >&2
             exit 1
         fi
-
-        if [[ -n "${GH_PAT}" ]]; then
-            # Splice the PAT into the URL only for the duration of the clone.
-            authed_url="${ASOE_UI_REPO_URL/https:\/\//https://x-access-token:${GH_PAT}@}"
-            echo "Cloning asoe-ui (${ASOE_UI_BRANCH}) into ${ASOE_UI_PATH} (using PAT) ..."
-            git clone --branch "${ASOE_UI_BRANCH}" --depth 1 \
-                "${authed_url}" "${ASOE_UI_PATH}"
-            # Scrub the PAT from the remote URL so it doesn't sit in
-            # .git/config on disk.
-            git -C "${ASOE_UI_PATH}" remote set-url origin "${ASOE_UI_REPO_URL}"
-        else
-            echo "Cloning asoe-ui (${ASOE_UI_BRANCH}) into ${ASOE_UI_PATH} ..."
-            if ! git clone --branch "${ASOE_UI_BRANCH}" --depth 1 \
-                "${ASOE_UI_REPO_URL}" "${ASOE_UI_PATH}" 2>/dev/null; then
-                echo "ERROR: clone failed. asoe-ui is private — set a PAT in one of:" >&2
-                echo "       GITHUB_TOKEN | GH_TOKEN | GITHUB_CODESPACE_ACCESS" >&2
-                echo "       Example:" >&2
-                echo "         GITHUB_TOKEN='ghp_...' DEPLOY_UI=1 PG_ADMIN_PASSWORD='...' ./scripts/deploy-azure.sh" >&2
-                echo "       Or pre-clone manually:" >&2
-                echo "         git clone https://<your-pat>@github.com/kumarabhijit/asoe-ui.git ${ASOE_UI_PATH}" >&2
-                exit 1
-            fi
-        fi
+        fetch_asoe_ui "${ASOE_UI_PATH}"
+    else
+        sync_asoe_ui_to_branch "${ASOE_UI_PATH}"
     fi
 
+    # Final verification — must land on the expected branch with the
+    # expected file. Print diagnostics (current branch, top-level ls)
+    # if not, rather than letting `az acr build` fail a few seconds
+    # later with a less informative message.
+    actual_branch=$(git -C "${ASOE_UI_PATH}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "<unknown>")
+    actual_sha=$(git -C "${ASOE_UI_PATH}" rev-parse --short HEAD 2>/dev/null || echo "<unknown>")
+    echo "asoe-ui checkout: branch=${actual_branch} sha=${actual_sha}"
+
     if [[ ! -f "${ASOE_UI_PATH}/Dockerfile" ]]; then
-        echo "ERROR: ${ASOE_UI_PATH}/Dockerfile not found. Make sure the asoe-ui core_ui_integration branch is checked out (the Dockerfile only exists on that branch yet)." >&2
+        echo "ERROR: ${ASOE_UI_PATH}/Dockerfile not found." >&2
+        echo "       Branch in the checkout: ${actual_branch}" >&2
+        echo "       HEAD sha:               ${actual_sha}" >&2
+        echo "       Top-level entries:" >&2
+        ls -1 "${ASOE_UI_PATH}" | sed 's/^/         /' >&2
+        echo "       Override the branch with ASOE_UI_BRANCH=<name> if Dockerfile lives elsewhere." >&2
         exit 1
     fi
 
@@ -353,14 +401,20 @@ if [[ "${DEPLOY_UI}" == "1" ]]; then
     fi
 
     echo "Building UI image in ACR with NEXT_PUBLIC_API_URL=https://${FQDN} ..."
-    az acr build \
-        --registry "${ACR_NAME}" \
-        --image "${UI_IMAGE_NAME}:${IMAGE_TAG}" \
-        --image "${UI_IMAGE_NAME}:latest" \
-        --file Dockerfile \
-        --build-arg "NEXT_PUBLIC_API_URL=https://${FQDN}" \
-        --build-arg "NEXT_PUBLIC_USE_REAL_API=1" \
-        "${ASOE_UI_PATH}"
+    # Run az acr build from inside the asoe-ui checkout so `--file Dockerfile .`
+    # is unambiguous regardless of how az resolves --file for sibling-path
+    # source contexts. Subshell so we don't leave the user's CWD changed.
+    (
+        cd "${ASOE_UI_PATH}"
+        az acr build \
+            --registry "${ACR_NAME}" \
+            --image "${UI_IMAGE_NAME}:${IMAGE_TAG}" \
+            --image "${UI_IMAGE_NAME}:latest" \
+            --file Dockerfile \
+            --build-arg "NEXT_PUBLIC_API_URL=https://${FQDN}" \
+            --build-arg "NEXT_PUBLIC_USE_REAL_API=1" \
+            .
+    )
 
     UI_FULL_IMAGE="${ACR_NAME}.azurecr.io/${UI_IMAGE_NAME}:${IMAGE_TAG}"
     echo "STAGE 3 bicep deploy: UI Container App with ${UI_FULL_IMAGE} (~3 min)..."

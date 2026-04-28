@@ -38,8 +38,8 @@ az account set --subscription "${SUBSCRIPTION_ID}"
 : "${ASOE_UI_BRANCH:=core_ui_integration}"
 
 # PAT support — same as deploy-azure.sh. Token spliced into the clone
-# URL only for the duration of the clone, then scrubbed from the remote
-# so it doesn't persist in .git/config.
+# URL only for the duration of the clone / fetch, then scrubbed from
+# the remote so it doesn't persist in .git/config.
 GH_PAT="${GITHUB_TOKEN:-${GH_TOKEN:-${GITHUB_CODESPACE_ACCESS:-}}}"
 
 if [[ ! -d "${ASOE_UI_PATH}/.git" ]]; then
@@ -64,10 +64,35 @@ if [[ ! -d "${ASOE_UI_PATH}/.git" ]]; then
             exit 1
         fi
     fi
+else
+    # Existing checkout — make sure it's on ${ASOE_UI_BRANCH} and current
+    # with origin. Handles the case where a previous unauthenticated /
+    # provider-quirk clone landed on the default branch instead.
+    current_branch=$(git -C "${ASOE_UI_PATH}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+    if [[ "${current_branch}" != "${ASOE_UI_BRANCH}" ]]; then
+        echo "asoe-ui is on '${current_branch}'; switching to '${ASOE_UI_BRANCH}' ..."
+        if [[ -n "${GH_PAT}" ]]; then
+            git -C "${ASOE_UI_PATH}" \
+                -c "http.extraHeader=AUTHORIZATION: bearer ${GH_PAT}" \
+                fetch origin "${ASOE_UI_BRANCH}"
+        else
+            git -C "${ASOE_UI_PATH}" fetch origin "${ASOE_UI_BRANCH}"
+        fi
+        git -C "${ASOE_UI_PATH}" checkout -B "${ASOE_UI_BRANCH}" "origin/${ASOE_UI_BRANCH}"
+    fi
 fi
 
+actual_branch=$(git -C "${ASOE_UI_PATH}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "<unknown>")
+actual_sha=$(git -C "${ASOE_UI_PATH}" rev-parse --short HEAD 2>/dev/null || echo "<unknown>")
+echo "asoe-ui checkout: branch=${actual_branch} sha=${actual_sha}"
+
 if [[ ! -f "${ASOE_UI_PATH}/Dockerfile" ]]; then
-    echo "ERROR: ${ASOE_UI_PATH}/Dockerfile not found on the current branch." >&2
+    echo "ERROR: ${ASOE_UI_PATH}/Dockerfile not found." >&2
+    echo "       Branch in the checkout: ${actual_branch}" >&2
+    echo "       HEAD sha:               ${actual_sha}" >&2
+    echo "       Top-level entries:" >&2
+    ls -1 "${ASOE_UI_PATH}" | sed 's/^/         /' >&2
+    echo "       Override the branch with ASOE_UI_BRANCH=<name> if Dockerfile lives elsewhere." >&2
     exit 1
 fi
 
@@ -83,14 +108,18 @@ fi
 UI_FULL_IMAGE="${ACR_NAME}.azurecr.io/${UI_IMAGE_NAME}:${IMAGE_TAG}"
 
 echo "Building UI image (NEXT_PUBLIC_API_URL=https://${API_FQDN}) ..."
-az acr build \
-    --registry "${ACR_NAME}" \
-    --image "${UI_IMAGE_NAME}:${IMAGE_TAG}" \
-    --image "${UI_IMAGE_NAME}:latest" \
-    --file Dockerfile \
-    --build-arg "NEXT_PUBLIC_API_URL=https://${API_FQDN}" \
-    --build-arg "NEXT_PUBLIC_USE_REAL_API=1" \
-    "${ASOE_UI_PATH}"
+# Build from inside the checkout so `--file Dockerfile .` is unambiguous.
+(
+    cd "${ASOE_UI_PATH}"
+    az acr build \
+        --registry "${ACR_NAME}" \
+        --image "${UI_IMAGE_NAME}:${IMAGE_TAG}" \
+        --image "${UI_IMAGE_NAME}:latest" \
+        --file Dockerfile \
+        --build-arg "NEXT_PUBLIC_API_URL=https://${API_FQDN}" \
+        --build-arg "NEXT_PUBLIC_USE_REAL_API=1" \
+        .
+)
 
 # Optionally rotate NEXTAUTH_SECRET. Container App secret update doesn't
 # require a fresh revision, but the runtime won't pick up the new value
