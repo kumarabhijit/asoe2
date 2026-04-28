@@ -407,20 +407,28 @@ if [[ "${DEPLOY_UI}" == "1" ]]; then
         #       PAT was scrubbed from .git/config after the original
         #       clone, so plain HTTPS pulls hit 403 against a private
         #       repo). The script can pull because it has the PAT in
-        #       env; it injects it via -c http.extraHeader so the
-        #       remote URL itself stays clean.
+        #       env; it fetches against an in-URL-authed remote (the
+        #       `extraHeader: bearer` form is unreliable for
+        #       git-over-HTTPS to github.com — the URL-embedding form
+        #       is what `git clone` itself uses), then leaves the
+        #       configured `origin` untouched.
         local target="$1"
         local current_branch
         current_branch=$(git -C "${target}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
 
-        local pat_args=()
+        # Build a one-shot fetch URL with the PAT embedded; fall back to
+        # the plain remote URL if no PAT is set (works only for public
+        # repos but the error path in fetch_asoe_ui already steers the
+        # user to a PAT in that case).
+        local fetch_url="${ASOE_UI_REPO_URL}"
         if [[ -n "${GH_PAT}" ]]; then
-            pat_args=(-c "http.extraHeader=AUTHORIZATION: bearer ${GH_PAT}")
+            fetch_url="${ASOE_UI_REPO_URL/https:\/\//https://x-access-token:${GH_PAT}@}"
         fi
 
         if [[ "${current_branch}" != "${ASOE_UI_BRANCH}" ]]; then
             echo "asoe-ui is on '${current_branch}'; switching to '${ASOE_UI_BRANCH}' ..."
-            git -C "${target}" "${pat_args[@]}" fetch origin "${ASOE_UI_BRANCH}"
+            git -C "${target}" fetch "${fetch_url}" \
+                "+refs/heads/${ASOE_UI_BRANCH}:refs/remotes/origin/${ASOE_UI_BRANCH}"
             git -C "${target}" checkout -B "${ASOE_UI_BRANCH}" "origin/${ASOE_UI_BRANCH}"
         else
             # Already on the right branch — make sure it's current. Use
@@ -428,7 +436,8 @@ if [[ "${DEPLOY_UI}" == "1" ]]; then
             # error out on local divergence (the script treats this
             # checkout as a deploy artefact, not the user's workspace).
             echo "asoe-ui is on '${ASOE_UI_BRANCH}'; fetching latest from origin ..."
-            git -C "${target}" "${pat_args[@]}" fetch origin "${ASOE_UI_BRANCH}"
+            git -C "${target}" fetch "${fetch_url}" \
+                "+refs/heads/${ASOE_UI_BRANCH}:refs/remotes/origin/${ASOE_UI_BRANCH}"
             git -C "${target}" reset --hard "origin/${ASOE_UI_BRANCH}"
         fi
     }
