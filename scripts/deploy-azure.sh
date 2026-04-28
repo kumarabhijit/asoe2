@@ -42,6 +42,12 @@
 #                                              # kumarabhijit/asoe-ui.git) at
 #                                              # ${ASOE_UI_BRANCH} (default
 #                                              # core_ui_integration) into it.
+#   GITHUB_TOKEN=ghp_... \                     # required for the auto-clone
+#                                              # if asoe-ui is a private repo.
+#                                              # Falls back to GH_TOKEN or
+#                                              # GITHUB_CODESPACE_ACCESS. Used
+#                                              # only for the clone; not
+#                                              # persisted in .git/config.
 #   NEXTAUTH_SECRET=<hex>|auto \               # optional; preserved on re-runs;
 #                                              # auto-generated on first deploy
 #       ./scripts/deploy-azure.sh
@@ -280,15 +286,42 @@ if [[ "${DEPLOY_UI}" == "1" ]]; then
     : "${ASOE_UI_REPO_URL:=https://github.com/kumarabhijit/asoe-ui.git}"
     : "${ASOE_UI_BRANCH:=core_ui_integration}"
 
+    # PAT support — kumarabhijit/asoe-ui is private. Look for a token in
+    # the conventional env vars and splice it into the clone URL using
+    # GitHub's `x-access-token:<PAT>` form. After the clone we rewrite
+    # the remote URL back to the plain form so the PAT does not get
+    # persisted in `.git/config`.
+    GH_PAT="${GITHUB_TOKEN:-${GH_TOKEN:-${GITHUB_CODESPACE_ACCESS:-}}}"
+
     if [[ ! -d "${ASOE_UI_PATH}/.git" ]]; then
         if [[ -e "${ASOE_UI_PATH}" ]] && [[ -n "$(ls -A "${ASOE_UI_PATH}" 2>/dev/null)" ]]; then
             echo "ERROR: ASOE_UI_PATH '${ASOE_UI_PATH}' exists but is not a git checkout." >&2
             echo "       Move it aside or pick a different ASOE_UI_PATH." >&2
             exit 1
         fi
-        echo "Cloning asoe-ui (${ASOE_UI_BRANCH}) into ${ASOE_UI_PATH} ..."
-        git clone --branch "${ASOE_UI_BRANCH}" --depth 1 \
-            "${ASOE_UI_REPO_URL}" "${ASOE_UI_PATH}"
+
+        if [[ -n "${GH_PAT}" ]]; then
+            # Splice the PAT into the URL only for the duration of the clone.
+            authed_url="${ASOE_UI_REPO_URL/https:\/\//https://x-access-token:${GH_PAT}@}"
+            echo "Cloning asoe-ui (${ASOE_UI_BRANCH}) into ${ASOE_UI_PATH} (using PAT) ..."
+            git clone --branch "${ASOE_UI_BRANCH}" --depth 1 \
+                "${authed_url}" "${ASOE_UI_PATH}"
+            # Scrub the PAT from the remote URL so it doesn't sit in
+            # .git/config on disk.
+            git -C "${ASOE_UI_PATH}" remote set-url origin "${ASOE_UI_REPO_URL}"
+        else
+            echo "Cloning asoe-ui (${ASOE_UI_BRANCH}) into ${ASOE_UI_PATH} ..."
+            if ! git clone --branch "${ASOE_UI_BRANCH}" --depth 1 \
+                "${ASOE_UI_REPO_URL}" "${ASOE_UI_PATH}" 2>/dev/null; then
+                echo "ERROR: clone failed. asoe-ui is private — set a PAT in one of:" >&2
+                echo "       GITHUB_TOKEN | GH_TOKEN | GITHUB_CODESPACE_ACCESS" >&2
+                echo "       Example:" >&2
+                echo "         GITHUB_TOKEN='ghp_...' DEPLOY_UI=1 PG_ADMIN_PASSWORD='...' ./scripts/deploy-azure.sh" >&2
+                echo "       Or pre-clone manually:" >&2
+                echo "         git clone https://<your-pat>@github.com/kumarabhijit/asoe-ui.git ${ASOE_UI_PATH}" >&2
+                exit 1
+            fi
+        fi
     fi
 
     if [[ ! -f "${ASOE_UI_PATH}/Dockerfile" ]]; then

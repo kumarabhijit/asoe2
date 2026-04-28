@@ -37,15 +37,33 @@ az account set --subscription "${SUBSCRIPTION_ID}"
 : "${ASOE_UI_REPO_URL:=https://github.com/kumarabhijit/asoe-ui.git}"
 : "${ASOE_UI_BRANCH:=core_ui_integration}"
 
+# PAT support — same as deploy-azure.sh. Token spliced into the clone
+# URL only for the duration of the clone, then scrubbed from the remote
+# so it doesn't persist in .git/config.
+GH_PAT="${GITHUB_TOKEN:-${GH_TOKEN:-${GITHUB_CODESPACE_ACCESS:-}}}"
+
 if [[ ! -d "${ASOE_UI_PATH}/.git" ]]; then
     if [[ -e "${ASOE_UI_PATH}" ]] && [[ -n "$(ls -A "${ASOE_UI_PATH}" 2>/dev/null)" ]]; then
         echo "ERROR: ASOE_UI_PATH '${ASOE_UI_PATH}' exists but is not a git checkout." >&2
         echo "       Move it aside or pick a different ASOE_UI_PATH." >&2
         exit 1
     fi
-    echo "Cloning asoe-ui (${ASOE_UI_BRANCH}) into ${ASOE_UI_PATH} ..."
-    git clone --branch "${ASOE_UI_BRANCH}" --depth 1 \
-        "${ASOE_UI_REPO_URL}" "${ASOE_UI_PATH}"
+
+    if [[ -n "${GH_PAT}" ]]; then
+        authed_url="${ASOE_UI_REPO_URL/https:\/\//https://x-access-token:${GH_PAT}@}"
+        echo "Cloning asoe-ui (${ASOE_UI_BRANCH}) into ${ASOE_UI_PATH} (using PAT) ..."
+        git clone --branch "${ASOE_UI_BRANCH}" --depth 1 \
+            "${authed_url}" "${ASOE_UI_PATH}"
+        git -C "${ASOE_UI_PATH}" remote set-url origin "${ASOE_UI_REPO_URL}"
+    else
+        echo "Cloning asoe-ui (${ASOE_UI_BRANCH}) into ${ASOE_UI_PATH} ..."
+        if ! git clone --branch "${ASOE_UI_BRANCH}" --depth 1 \
+            "${ASOE_UI_REPO_URL}" "${ASOE_UI_PATH}" 2>/dev/null; then
+            echo "ERROR: clone failed. asoe-ui is private — set a PAT in one of:" >&2
+            echo "       GITHUB_TOKEN | GH_TOKEN | GITHUB_CODESPACE_ACCESS" >&2
+            exit 1
+        fi
+    fi
 fi
 
 if [[ ! -f "${ASOE_UI_PATH}/Dockerfile" ]]; then
