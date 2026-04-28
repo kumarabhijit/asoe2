@@ -48,8 +48,14 @@ param namePrefix string = 'asoepreprod'
 ])
 param asoeEnv string = 'sandbox'
 
-@description('CORS allow-origin for the FastAPI sandbox CORS middleware. Should match the UI origin.')
+@description('Single CORS allow-origin (legacy). Kept so existing parameter files keep working; prefer corsAllowedOriginsCsv for multi-origin (pre-prod UI on Azure + Vercel prod + custom domain).')
 param corsAllowedOrigin string = 'https://asoe-ui.vercel.app'
+
+@description('Comma-separated CORS allow-origins. Use this when more than one origin must be allowed (e.g. the Azure-hosted pre-prod UI FQDN AND the Vercel production URL). Empty string disables.')
+param corsAllowedOriginsCsv string = ''
+
+@description('Optional regex applied to the request Origin (allow_origin_regex). Use to match Vercel preview URLs like https://asoe-ui-git-<branch>-<team>.vercel.app without listing each. Empty string disables.')
+param corsAllowedOriginRegex string = ''
 
 @description('LLM provider routing. fallback = deterministic only, no outbound LLM traffic.')
 @allowed([
@@ -88,6 +94,13 @@ param redisUrl string = 'placeholder-set-via-set-secrets-sh'
 @description('Container image reference (set by deploy script after ACR build, e.g. asoepreprodacr.azurecr.io/asoe-api:GIT_SHA).')
 param containerImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
 
+@description('UI container image reference (set by deploy script after ACR build, e.g. asoepreprodacr.azurecr.io/asoe-ui:GIT_SHA). Only consulted when deployUiContainerApp=true.')
+param containerImageUi string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+
+@description('NextAuth signing secret (server-side; rotates the issued NextAuth session cookies). Placeholder until the deploy script generates / preserves a value.')
+@secure()
+param nextAuthSecret string = 'placeholder-set-by-deploy-script'
+
 @description('Min replicas for the API container app.')
 @minValue(0)
 @maxValue(10)
@@ -116,6 +129,9 @@ param redisSku string = 'Balanced_B0'
 @description('Two-stage deploy gate. Stage 1 (false) provisions ACR / Postgres / Redis / Log Analytics / Managed Env / UAMI / AcrPull role binding so `az acr build` has somewhere to push and RBAC is propagated by the time Stage 2 runs. Stage 2 (true) provisions the Container App itself with the real image. The deploy script flips this between calls.')
 param deployContainerApp bool = false
 
+@description('Independent gate for the UI Container App. The deploy script flips this true on its third stage (after the UI image has been built into ACR with NEXT_PUBLIC_API_URL baked in). Kept independent of deployContainerApp so the API and UI can be deployed/redeployed separately without dragging the other along.')
+param deployUiContainerApp bool = false
+
 // ───────────────────────────────────────────────────────────── Derived names
 
 var logAnalyticsName = '${namePrefix}logs'
@@ -125,6 +141,7 @@ var pgDatabaseName   = 'asoe'
 var redisName        = '${namePrefix}redis'
 var caeName          = '${namePrefix}env'
 var appName          = '${namePrefix}api'
+var uiAppName        = '${namePrefix}ui'
 var uamiName         = '${namePrefix}identity'
 
 var commonTags = {
@@ -325,6 +342,30 @@ resource cae 'Microsoft.App/managedEnvironments@2024-03-01' = {
   }
 }
 
+// ─────────────────────────────────────────── Sister-app FQDNs (deterministic)
+//
+// Container Apps in the same managed environment share a defaultDomain
+// (e.g. `orangerock-0b3a1691.centralus.azurecontainerapps.io`). That lets
+// us derive both apps' public FQDNs from cae.properties.defaultDomain and
+// thread them through into:
+//   * the API's CORS_ALLOWED_ORIGINS (so the browser at the UI FQDN is
+//     allowed before the UI Container App resource is even created), and
+//   * the UI's NEXTAUTH_URL (so NextAuth knows its canonical origin
+//     without us having to two-pass the deploy).
+//
+// `cae.properties.defaultDomain` is read at deployment time; bicep
+// resolves the dependency on `cae`.
+
+var uiFqdn  = '${uiAppName}.${cae.properties.defaultDomain}'
+
+// Compose the effective CORS allowlist the API will receive. The
+// caller may pass `corsAllowedOriginsCsv` for additional origins
+// (e.g. a custom domain); we always tack the Azure-hosted UI FQDN
+// on so the deployed UI talks to the API on day one without a
+// follow-up redeploy.
+var defaultUiOrigin     = 'https://${uiFqdn}'
+var corsAllowedFinalCsv = empty(corsAllowedOriginsCsv) ? defaultUiOrigin : '${corsAllowedOriginsCsv},${defaultUiOrigin}'
+
 // ───────────────────────────────────────────── Container App (ASOE API)
 
 resource app 'Microsoft.App/containerApps@2024-03-01' = if (deployContainerApp) {
@@ -402,7 +443,9 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (deployContainerApp) 
             { name: 'ASOE_LLM_PROVIDER',  value: llmProvider }
             { name: 'ASOE_KILL_SWITCH',   value: '0' }
             { name: 'ASOE_EXPLAIN_MODE',  value: '0' }
-            { name: 'CORS_ALLOWED_ORIGIN', value: corsAllowedOrigin }
+            { name: 'CORS_ALLOWED_ORIGIN',        value: corsAllowedOrigin }
+            { name: 'CORS_ALLOWED_ORIGINS',       value: corsAllowedFinalCsv }
+            { name: 'CORS_ALLOWED_ORIGIN_REGEX',  value: corsAllowedOriginRegex }
             { name: 'PORT',               value: '8000' }
             { name: 'ANTHROPIC_API_KEY',  secretRef: 'anthropic-api-key' }
             { name: 'ASOE_JWT_SECRET',    secretRef: 'asoe-jwt-secret' }
@@ -451,15 +494,131 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (deployContainerApp) 
   }
 }
 
+// ──────────────────────────────────────────── Container App (ASOE UI)
+//
+// Stateless Next.js standalone bundle on port 3000. No sticky sessions
+// (NextAuth's session is held in a JWT cookie, not in process memory).
+// Reuses the same UAMI for ACR pull as the API app — the AcrPull role
+// granted in Stage 1 covers both.
+
+resource uiApp 'Microsoft.App/containerApps@2024-03-01' = if (deployUiContainerApp) {
+  name: uiAppName
+  location: location
+  tags: commonTags
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${uami.id}': {}
+    }
+  }
+  properties: {
+    managedEnvironmentId: cae.id
+    workloadProfileName: 'Consumption'
+    configuration: {
+      activeRevisionsMode: 'Single'
+      ingress: {
+        external: true
+        targetPort: 3000
+        transport: 'auto'
+        allowInsecure: false
+        traffic: [
+          {
+            latestRevision: true
+            weight: 100
+          }
+        ]
+      }
+      registries: [
+        {
+          server: '${acrName}.azurecr.io'
+          identity: uami.id
+        }
+      ]
+      secrets: [
+        {
+          name: 'nextauth-secret'
+          value: nextAuthSecret
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'asoe-ui'
+          image: containerImageUi
+          resources: {
+            cpu: json('0.25')
+            memory: '0.5Gi'
+          }
+          env: [
+            // NextAuth needs a canonical origin. Setting NEXTAUTH_URL
+            // explicitly is more durable than relying on AUTH_TRUST_HOST
+            // alone, which still requires NEXTAUTH_URL for callback
+            // generation in some flows.
+            { name: 'NEXTAUTH_URL',     value: 'https://${uiFqdn}' }
+            { name: 'AUTH_TRUST_HOST',  value: 'true' }
+            { name: 'NODE_ENV',         value: 'production' }
+            { name: 'PORT',             value: '3000' }
+            { name: 'NEXTAUTH_SECRET',  secretRef: 'nextauth-secret' }
+          ]
+          probes: [
+            {
+              type: 'Liveness'
+              httpGet: {
+                path: '/'
+                port: 3000
+              }
+              initialDelaySeconds: 30
+              periodSeconds: 30
+              failureThreshold: 3
+            }
+            {
+              type: 'Readiness'
+              httpGet: {
+                path: '/'
+                port: 3000
+              }
+              initialDelaySeconds: 10
+              periodSeconds: 10
+              failureThreshold: 3
+            }
+          ]
+        }
+      ]
+      scale: {
+        minReplicas: 1
+        maxReplicas: 2
+        rules: [
+          {
+            name: 'http-rule'
+            http: {
+              metadata: {
+                concurrentRequests: '50'
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
+
 // ──────────────────────────────────────────────────────────────── Outputs
 
-// Outputs that reference the conditional `app` resource use ternaries so
-// they degrade to empty strings during Stage 1 (deployContainerApp=false)
-// and surface the real values during Stage 2.
-output acrLoginServer    string = '${acrName}.azurecr.io'
-output acrName           string = acrName
-output containerAppName  string = deployContainerApp ? app.name : ''
-output containerAppFqdn  string = deployContainerApp ? app.properties.configuration.ingress.fqdn : ''
+// Outputs that reference the conditional `app` / `uiApp` resources use
+// ternaries so they degrade to empty strings during stages where the
+// resource doesn't exist and surface the real values once it does.
+output acrLoginServer       string = '${acrName}.azurecr.io'
+output acrName              string = acrName
+// Safe-access operator (`.?`) keeps the bicep linter (BCP318) happy when
+// the resource is conditional — it short-circuits to null rather than
+// failing the static null-check, and `?? ''` gives the empty-string
+// fallback the deploy script already relies on.
+output containerAppName     string = app.?name ?? ''
+output containerAppFqdn     string = app.?properties.configuration.ingress.fqdn ?? ''
+output uiContainerAppName   string = uiApp.?name ?? ''
+output uiContainerAppFqdn   string = uiApp.?properties.configuration.ingress.fqdn ?? ''
+output managedEnvDomain     string = cae.properties.defaultDomain
 output postgresHost      string = pgServer.properties.fullyQualifiedDomainName
 output postgresDatabase  string = pgDatabaseName
 output postgresAdminUser string = pgAdminUser

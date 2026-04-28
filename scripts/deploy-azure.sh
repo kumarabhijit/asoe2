@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # deploy-azure.sh ─ One-shot deploy of ASOE pre-prod to Azure Container Apps.
 #
-# What it does (two-stage to avoid the placeholder-image probe-failure trap):
+# What it does (three-stage to avoid the placeholder-image probe-failure
+# trap and to bake the API FQDN into the UI bundle at build time):
 #   1. Verifies az CLI + required providers.
 #   2. Creates the resource group if missing.
 #   3. Deletes any prior Failed Container App so re-runs start clean.
@@ -10,13 +11,17 @@
 #   5. Builds the API image into the now-existing ACR with `az acr build`.
 #   6. Builds DATABASE_URL / REDIS_URL from infra outputs (URL-encoded so a
 #      password containing '@' or a Redis key with '+' '/' '=' is safe).
-#      Reuses any previously-set ANTHROPIC_API_KEY / ASOE_JWT_SECRET on
-#      re-runs so re-deploys don't wipe them.
-#   7. STAGE 2 bicep: same template with deployContainerApp=true,
-#      containerImage=<just-built>, and all 4 secret values populated.
-#      Container App is created with real image + correct secrets, so the
-#      /api/v1/health probe + Postgres migration both succeed on first
-#      revision.
+#      Reuses any previously-set secrets on re-runs so re-deploys don't
+#      wipe them.
+#   7. STAGE 2 bicep: API Container App with real image + secrets. Probe
+#      and Postgres migration both succeed on first revision. The bicep
+#      template uses cae.properties.defaultDomain to compute the future
+#      UI FQDN deterministically and includes it in CORS_ALLOWED_ORIGINS,
+#      so even before the UI app exists the API is ready to allow it.
+#   8. STAGE 3 (only when DEPLOY_UI=1): builds the UI image with the
+#      now-resolved API FQDN passed as --build-arg NEXT_PUBLIC_API_URL,
+#      then re-runs bicep with deployUiContainerApp=true to provision
+#      the UI Container App.
 #
 # Run from the repo root:
 #
@@ -24,6 +29,26 @@
 #   ANTHROPIC_API_KEY='sk-ant-...' \           # required on first deploy;
 #                                              # preserved on subsequent re-runs
 #   ASOE_JWT_SECRET=<hex>|auto \               # optional; preserved on re-runs;
+#                                              # auto-generated on first deploy
+#   DEPLOY_UI=1 \                              # optional (default 0); when set,
+#                                              # also builds & deploys the
+#                                              # asoe-ui Container App.
+#   ASOE_UI_PATH=../asoe-ui \                  # optional; checkout path of the
+#                                              # asoe-ui repo (default
+#                                              # ../asoe-ui). If the path is
+#                                              # missing the script clones
+#                                              # ${ASOE_UI_REPO_URL} (default
+#                                              # https://github.com/
+#                                              # kumarabhijit/asoe-ui.git) at
+#                                              # ${ASOE_UI_BRANCH} (default
+#                                              # core_ui_integration) into it.
+#   GITHUB_TOKEN=ghp_... \                     # required for the auto-clone
+#                                              # if asoe-ui is a private repo.
+#                                              # Falls back to GH_TOKEN or
+#                                              # GITHUB_CODESPACE_ACCESS. Used
+#                                              # only for the clone; not
+#                                              # persisted in .git/config.
+#   NEXTAUTH_SECRET=<hex>|auto \               # optional; preserved on re-runs;
 #                                              # auto-generated on first deploy
 #       ./scripts/deploy-azure.sh
 #
@@ -45,14 +70,18 @@ set -euo pipefail
 : "${NAME_PREFIX:=asoepreprod}"
 : "${ACR_NAME:=${NAME_PREFIX}acr}"
 : "${APP_NAME:=${NAME_PREFIX}api}"
+: "${UI_APP_NAME:=${NAME_PREFIX}ui}"
 : "${PG_SERVER:=${NAME_PREFIX}pg}"
 : "${PG_DB:=asoe}"
 : "${PG_USER:=asoeadmin}"
 : "${REDIS_NAME:=${NAME_PREFIX}redis}"
 : "${IMAGE_NAME:=asoe-api}"
+: "${UI_IMAGE_NAME:=asoe-ui}"
 : "${IMAGE_TAG:=$(git rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M%S)}"
 : "${BICEP_FILE:=infra/main.bicep}"
 : "${PARAMS_FILE:=infra/parameters.sandbox.json}"
+: "${DEPLOY_UI:=0}"
+: "${ASOE_UI_PATH:=../asoe-ui}"
 
 if [[ -z "${PG_ADMIN_PASSWORD:-}" ]]; then
     echo "ERROR: PG_ADMIN_PASSWORD env var is required (set a strong Postgres admin password)." >&2
@@ -67,6 +96,10 @@ echo "Location     : ${LOCATION}"
 echo "ACR          : ${ACR_NAME}.azurecr.io"
 echo "Container App: ${APP_NAME}"
 echo "Image tag    : ${IMAGE_NAME}:${IMAGE_TAG}"
+if [[ "${DEPLOY_UI}" == "1" ]]; then
+    echo "UI Container : ${UI_APP_NAME} (DEPLOY_UI=1)"
+    echo "UI source    : ${ASOE_UI_PATH} (branch: ${ASOE_UI_BRANCH:-core_ui_integration})"
+fi
 echo "─────────────────────────────────────────────────────────────"
 
 # ────────────────────────────────────── 1. Pre-flight checks
@@ -121,15 +154,93 @@ fi
 
 # ────────────────────────────────────── 4. STAGE 1 bicep: shared infra
 
+# ── Helpers used by all bicep stages ─────────────────────────────────
+#
+# Postgres flexible server serializes config writes; the bicep template
+# touches Microsoft.DBforPostgreSQL/.../configurations/azure.extensions on
+# every deploy. If the server is mid-provisioning from a prior op, the
+# write returns `ServerIsBusy` and the whole deployment fails. Both
+# helpers below address that:
+#
+#   * wait_for_postgres_ready: poll the server's `state` until Ready
+#     (or skip if the server doesn't exist yet — first deploy).
+#   * bicep_deploy: retry the inner `az deployment group create` with
+#     exponential backoff when it fails specifically with ServerIsBusy.
+
+wait_for_postgres_ready() {
+    local max_wait=600  # 10 minutes
+    local elapsed=0
+    local interval=15
+    if ! az postgres flexible-server show \
+            -n "${PG_SERVER}" -g "${RG}" >/dev/null 2>&1; then
+        return 0  # server doesn't exist yet — Stage 1 first deploy
+    fi
+    while (( elapsed < max_wait )); do
+        local state
+        state=$(az postgres flexible-server show \
+            -n "${PG_SERVER}" -g "${RG}" --query state -o tsv 2>/dev/null || echo "Unknown")
+        if [[ "${state}" == "Ready" ]]; then
+            return 0
+        fi
+        echo "  Postgres ${PG_SERVER} state=${state}; waiting (${elapsed}/${max_wait}s) ..."
+        sleep "${interval}"
+        elapsed=$(( elapsed + interval ))
+    done
+    echo "WARNING: Postgres ${PG_SERVER} not Ready after ${max_wait}s; proceeding anyway." >&2
+    return 0
+}
+
+bicep_deploy() {
+    # bicep_deploy <stage-name> <param>=<val> [<param>=<val>...]
+    local stage_name="$1"; shift
+    local extra_params=("$@")
+    local attempt max_attempts=4
+    local base_backoff=30
+
+    for (( attempt=1; attempt <= max_attempts; attempt++ )); do
+        wait_for_postgres_ready
+
+        local deploy_name="asoe-${stage_name}-$(date +%Y%m%d%H%M%S)"
+        local cmd=(
+            az deployment group create
+            --resource-group "${RG}"
+            --name "${deploy_name}"
+            --template-file "${BICEP_FILE}"
+            --parameters "@${PARAMS_FILE}"
+            --parameters "pgAdminPassword=${PG_ADMIN_PASSWORD}"
+        )
+        for p in "${extra_params[@]}"; do
+            cmd+=(--parameters "${p}")
+        done
+
+        # Capture stderr so we can pattern-match for ServerIsBusy without
+        # losing the user-visible output on success.
+        local stderr_log
+        stderr_log=$(mktemp)
+        if "${cmd[@]}" --output table 2> >(tee "${stderr_log}" >&2); then
+            rm -f "${stderr_log}"
+            return 0
+        fi
+
+        if grep -q "ServerIsBusy" "${stderr_log}"; then
+            local backoff=$(( base_backoff * attempt ))
+            echo "  Postgres ServerIsBusy; backing off ${backoff}s and retrying (attempt ${attempt}/${max_attempts}) ..." >&2
+            rm -f "${stderr_log}"
+            sleep "${backoff}"
+            continue
+        fi
+
+        rm -f "${stderr_log}"
+        return 1  # non-retryable failure
+    done
+
+    echo "ERROR: ${stage_name} bicep deploy failed after ${max_attempts} attempts." >&2
+    return 1
+}
+
 echo "STAGE 1 bicep deploy: ACR + Postgres + Redis + Log Analytics + Managed Env (~10 min)..."
-az deployment group create \
-    --resource-group "${RG}" \
-    --name "asoe-stage1-$(date +%Y%m%d%H%M%S)" \
-    --template-file "${BICEP_FILE}" \
-    --parameters "@${PARAMS_FILE}" \
-    --parameters pgAdminPassword="${PG_ADMIN_PASSWORD}" \
-    --parameters deployContainerApp=false \
-    --output table
+bicep_deploy stage1 \
+    "deployContainerApp=false"
 
 # ────────────────────────────────────── 5. Build & push image to ACR
 
@@ -219,31 +330,223 @@ fi
 
 FULL_IMAGE="${ACR_NAME}.azurecr.io/${IMAGE_NAME}:${IMAGE_TAG}"
 echo "STAGE 2 bicep deploy: Container App with ${FULL_IMAGE} + real secrets (~3-5 min)..."
-az deployment group create \
-    --resource-group "${RG}" \
-    --name "asoe-stage2-$(date +%Y%m%d%H%M%S)" \
-    --template-file "${BICEP_FILE}" \
-    --parameters "@${PARAMS_FILE}" \
-    --parameters pgAdminPassword="${PG_ADMIN_PASSWORD}" \
-    --parameters deployContainerApp=true \
-    --parameters containerImage="${FULL_IMAGE}" \
-    --parameters anthropicApiKey="${ANTHROPIC_API_KEY}" \
-    --parameters asoeJwtSecret="${ASOE_JWT_SECRET}" \
-    --parameters databaseUrl="${DATABASE_URL}" \
-    --parameters redisUrl="${REDIS_URL}" \
-    --output table
+bicep_deploy stage2 \
+    "deployContainerApp=true" \
+    "containerImage=${FULL_IMAGE}" \
+    "anthropicApiKey=${ANTHROPIC_API_KEY}" \
+    "asoeJwtSecret=${ASOE_JWT_SECRET}" \
+    "databaseUrl=${DATABASE_URL}" \
+    "redisUrl=${REDIS_URL}"
 
 FQDN=$(az containerapp show --name "${APP_NAME}" --resource-group "${RG}" \
     --query properties.configuration.ingress.fqdn -o tsv)
+
+# ────────────────────────────────────── 8. STAGE 3 (UI) — opt-in
+#
+# Skipped when DEPLOY_UI=0 (default). When enabled, builds the asoe-ui
+# Next.js standalone image into ACR with the API FQDN baked in via
+# --build-arg, then re-runs the bicep template with deployUiContainerApp
+# =true to provision the Stateless UI Container App. NEXTAUTH_SECRET is
+# preserved across re-runs (or auto-generated on first deploy).
+
+UI_FQDN=""
+if [[ "${DEPLOY_UI}" == "1" ]]; then
+    # Resolve / fetch the asoe-ui checkout. Three modes:
+    #   * Path exists with a .git directory   → use as-is.
+    #   * Path doesn't exist                   → clone from ASOE_UI_REPO_URL
+    #     into ASOE_UI_PATH (defaults to ../asoe-ui sibling). Branch defaults
+    #     to ASOE_UI_BRANCH (default core_ui_integration to match this PR;
+    #     override to 'main' once merged).
+    #   * Path exists but is empty / has no Dockerfile → error (don't risk
+    #     overwriting unrelated work).
+    : "${ASOE_UI_REPO_URL:=https://github.com/kumarabhijit/asoe-ui.git}"
+    : "${ASOE_UI_BRANCH:=core_ui_integration}"
+
+    # PAT support — kumarabhijit/asoe-ui is private. Look for a token in
+    # the conventional env vars and splice it into the clone URL using
+    # GitHub's `x-access-token:<PAT>` form. After the clone we rewrite
+    # the remote URL back to the plain form so the PAT does not get
+    # persisted in `.git/config`.
+    GH_PAT="${GITHUB_TOKEN:-${GH_TOKEN:-${GITHUB_CODESPACE_ACCESS:-}}}"
+
+    fetch_asoe_ui() {
+        # Fresh clone (no existing .git) — use --branch + --depth 1 so
+        # we land directly on the right branch with minimum bandwidth.
+        local target="$1"
+        if [[ -n "${GH_PAT}" ]]; then
+            local authed_url="${ASOE_UI_REPO_URL/https:\/\//https://x-access-token:${GH_PAT}@}"
+            echo "Cloning asoe-ui (${ASOE_UI_BRANCH}) into ${target} (using PAT) ..."
+            git clone --branch "${ASOE_UI_BRANCH}" --depth 1 \
+                "${authed_url}" "${target}"
+            # Scrub the PAT from the remote URL so it doesn't sit in
+            # .git/config on disk.
+            git -C "${target}" remote set-url origin "${ASOE_UI_REPO_URL}"
+        else
+            echo "Cloning asoe-ui (${ASOE_UI_BRANCH}) into ${target} ..."
+            if ! git clone --branch "${ASOE_UI_BRANCH}" --depth 1 \
+                "${ASOE_UI_REPO_URL}" "${target}" 2>/dev/null; then
+                echo "ERROR: clone failed. asoe-ui is private — set a PAT in one of:" >&2
+                echo "       GITHUB_TOKEN | GH_TOKEN | GITHUB_CODESPACE_ACCESS" >&2
+                echo "       Example:" >&2
+                echo "         GITHUB_TOKEN='ghp_...' DEPLOY_UI=1 PG_ADMIN_PASSWORD='...' ./scripts/deploy-azure.sh" >&2
+                echo "       Or pre-clone manually:" >&2
+                echo "         git clone https://<your-pat>@github.com/kumarabhijit/asoe-ui.git ${target}" >&2
+                exit 1
+            fi
+        fi
+    }
+
+    sync_asoe_ui_to_branch() {
+        # Existing checkout — make sure it's on ${ASOE_UI_BRANCH} and
+        # current with origin. Belt-and-braces: handles
+        #   (a) the case where the user previously cloned the default
+        #       branch (main) and didn't notice; or where a `--branch`
+        #       clone silently fell back for some provider/proxy reason;
+        #   (b) the case where the checkout is on the right branch but
+        #       stale because the user can't `git pull` directly (the
+        #       PAT was scrubbed from .git/config after the original
+        #       clone, so plain HTTPS pulls hit 403 against a private
+        #       repo). The script can pull because it has the PAT in
+        #       env; it fetches against an in-URL-authed remote (the
+        #       `extraHeader: bearer` form is unreliable for
+        #       git-over-HTTPS to github.com — the URL-embedding form
+        #       is what `git clone` itself uses), then leaves the
+        #       configured `origin` untouched.
+        local target="$1"
+        local current_branch
+        current_branch=$(git -C "${target}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+
+        # Build a one-shot fetch URL with the PAT embedded; fall back to
+        # the plain remote URL if no PAT is set (works only for public
+        # repos but the error path in fetch_asoe_ui already steers the
+        # user to a PAT in that case).
+        local fetch_url="${ASOE_UI_REPO_URL}"
+        if [[ -n "${GH_PAT}" ]]; then
+            fetch_url="${ASOE_UI_REPO_URL/https:\/\//https://x-access-token:${GH_PAT}@}"
+        fi
+
+        if [[ "${current_branch}" != "${ASOE_UI_BRANCH}" ]]; then
+            echo "asoe-ui is on '${current_branch}'; switching to '${ASOE_UI_BRANCH}' ..."
+            git -C "${target}" fetch "${fetch_url}" \
+                "+refs/heads/${ASOE_UI_BRANCH}:refs/remotes/origin/${ASOE_UI_BRANCH}"
+            git -C "${target}" checkout -B "${ASOE_UI_BRANCH}" "origin/${ASOE_UI_BRANCH}"
+        else
+            # Already on the right branch — make sure it's current. Use
+            # fetch + reset --hard rather than pull/merge so we don't
+            # error out on local divergence (the script treats this
+            # checkout as a deploy artefact, not the user's workspace).
+            echo "asoe-ui is on '${ASOE_UI_BRANCH}'; fetching latest from origin ..."
+            git -C "${target}" fetch "${fetch_url}" \
+                "+refs/heads/${ASOE_UI_BRANCH}:refs/remotes/origin/${ASOE_UI_BRANCH}"
+            git -C "${target}" reset --hard "origin/${ASOE_UI_BRANCH}"
+        fi
+    }
+
+    if [[ ! -d "${ASOE_UI_PATH}/.git" ]]; then
+        if [[ -e "${ASOE_UI_PATH}" ]] && [[ -n "$(ls -A "${ASOE_UI_PATH}" 2>/dev/null)" ]]; then
+            echo "ERROR: ASOE_UI_PATH '${ASOE_UI_PATH}' exists but is not a git checkout." >&2
+            echo "       Move it aside or pick a different ASOE_UI_PATH." >&2
+            exit 1
+        fi
+        fetch_asoe_ui "${ASOE_UI_PATH}"
+    else
+        sync_asoe_ui_to_branch "${ASOE_UI_PATH}"
+    fi
+
+    # Final verification — must land on the expected branch with the
+    # expected file. Print diagnostics (current branch, top-level ls)
+    # if not, rather than letting `az acr build` fail a few seconds
+    # later with a less informative message.
+    actual_branch=$(git -C "${ASOE_UI_PATH}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "<unknown>")
+    actual_sha=$(git -C "${ASOE_UI_PATH}" rev-parse --short HEAD 2>/dev/null || echo "<unknown>")
+    echo "asoe-ui checkout: branch=${actual_branch} sha=${actual_sha}"
+
+    if [[ ! -f "${ASOE_UI_PATH}/Dockerfile" ]]; then
+        echo "ERROR: ${ASOE_UI_PATH}/Dockerfile not found." >&2
+        echo "       Branch in the checkout: ${actual_branch}" >&2
+        echo "       HEAD sha:               ${actual_sha}" >&2
+        echo "       Top-level entries:" >&2
+        ls -1 "${ASOE_UI_PATH}" | sed 's/^/         /' >&2
+        echo "       Override the branch with ASOE_UI_BRANCH=<name> if Dockerfile lives elsewhere." >&2
+        exit 1
+    fi
+
+    # NEXTAUTH_SECRET preservation (mirrors the ANTHROPIC_API_KEY pattern).
+    NEXTAUTH_PLACEHOLDER='placeholder-set-by-deploy-script'
+    read_existing_ui_secret() {
+        local secret_name="$1"
+        az containerapp secret show \
+            --resource-group "${RG}" --name "${UI_APP_NAME}" \
+            --secret-name "${secret_name}" \
+            --query value -o tsv 2>/dev/null || true
+    }
+    if [[ "${NEXTAUTH_SECRET:-}" == "auto" ]]; then
+        NEXTAUTH_SECRET=$(openssl rand -hex 64)
+        echo "Generated new NEXTAUTH_SECRET ($(echo -n "${NEXTAUTH_SECRET}" | wc -c) chars)."
+    elif [[ -z "${NEXTAUTH_SECRET:-}" ]]; then
+        existing=$(read_existing_ui_secret 'nextauth-secret')
+        if [[ -n "${existing}" && "${existing}" != "${NEXTAUTH_PLACEHOLDER}" ]]; then
+            NEXTAUTH_SECRET="${existing}"
+            echo "Preserving existing NEXTAUTH_SECRET (pass NEXTAUTH_SECRET=auto to rotate)."
+        else
+            NEXTAUTH_SECRET=$(openssl rand -hex 64)
+            echo "Generated new NEXTAUTH_SECRET (no existing value to preserve)."
+        fi
+    fi
+
+    echo "Building UI image in ACR with NEXT_PUBLIC_API_URL=https://${FQDN} ..."
+    # Run az acr build from inside the asoe-ui checkout so `--file Dockerfile .`
+    # is unambiguous regardless of how az resolves --file for sibling-path
+    # source contexts. Subshell so we don't leave the user's CWD changed.
+    (
+        cd "${ASOE_UI_PATH}"
+        az acr build \
+            --registry "${ACR_NAME}" \
+            --image "${UI_IMAGE_NAME}:${IMAGE_TAG}" \
+            --image "${UI_IMAGE_NAME}:latest" \
+            --file Dockerfile \
+            --build-arg "NEXT_PUBLIC_API_URL=https://${FQDN}" \
+            --build-arg "NEXT_PUBLIC_USE_REAL_API=1" \
+            .
+    )
+
+    UI_FULL_IMAGE="${ACR_NAME}.azurecr.io/${UI_IMAGE_NAME}:${IMAGE_TAG}"
+    echo "STAGE 3 bicep deploy: UI Container App with ${UI_FULL_IMAGE} (~3 min)..."
+    bicep_deploy stage3 \
+        "deployContainerApp=true" \
+        "deployUiContainerApp=true" \
+        "containerImage=${FULL_IMAGE}" \
+        "containerImageUi=${UI_FULL_IMAGE}" \
+        "anthropicApiKey=${ANTHROPIC_API_KEY}" \
+        "asoeJwtSecret=${ASOE_JWT_SECRET}" \
+        "databaseUrl=${DATABASE_URL}" \
+        "redisUrl=${REDIS_URL}" \
+        "nextAuthSecret=${NEXTAUTH_SECRET}"
+
+    UI_FQDN=$(az containerapp show --name "${UI_APP_NAME}" --resource-group "${RG}" \
+        --query properties.configuration.ingress.fqdn -o tsv)
+fi
 
 echo
 echo "── DEPLOY COMPLETE ──────────────────────────────────────────"
 echo "API URL      : https://${FQDN}"
 echo "Health probe : https://${FQDN}/api/v1/health"
+if [[ -n "${UI_FQDN}" ]]; then
+    echo "UI URL       : https://${UI_FQDN}"
+    echo "UI sign-in   : https://${UI_FQDN}/login"
+fi
 echo
-echo "Verify with:  curl -fsS --max-time 30 https://${FQDN}/api/v1/health | jq ."
-echo "Tail logs:    az containerapp logs show -n ${APP_NAME} -g ${RG} --follow"
+echo "Verify API:   curl -fsS --max-time 30 https://${FQDN}/api/v1/health | jq ."
+echo "Tail API:     az containerapp logs show -n ${APP_NAME} -g ${RG} --follow"
+if [[ -n "${UI_FQDN}" ]]; then
+    echo "Tail UI:      az containerapp logs show -n ${UI_APP_NAME} -g ${RG} --follow"
+fi
 echo
 echo "Rotate the Anthropic key without redeploying infra:"
 echo "  ANTHROPIC_API_KEY='sk-ant-NEW' ./scripts/set-secrets.sh"
+if [[ "${DEPLOY_UI}" != "1" ]]; then
+    echo
+    echo "To deploy the UI Container App alongside the API, re-run with:"
+    echo "  DEPLOY_UI=1 ASOE_UI_PATH=../asoe-ui ./scripts/deploy-azure.sh"
+fi
 echo "─────────────────────────────────────────────────────────────"

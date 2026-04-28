@@ -22,6 +22,62 @@ from api.routes import accounts, auth, exceptions, health, policies, workflows, 
 from api.routes import sandbox as _sandbox_routes
 
 
+_LOCAL_DEV_ORIGINS = (
+    "http://localhost:3000",
+    "http://localhost:3100",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3100",
+)
+
+
+def _resolve_cors_config(env: dict[str, str] | None = None) -> tuple[list[str], str | None]:
+    """Resolve the CORS allowlist + regex from environment variables.
+
+    Pure function so it is unit-testable without process env mutation.
+
+    Sources, unioned in order:
+      * ``CORS_ALLOWED_ORIGINS`` — comma-separated list (preferred form
+        for multi-origin: pre-prod UI + Vercel production + custom domain).
+      * ``CORS_ALLOWED_ORIGIN`` — single origin (legacy single-value form,
+        kept so existing bicep templates / parameter files continue working).
+      * Local dev origins (``http://localhost:3000`` etc.) — only when
+        ``ASOE_ENV=sandbox``, so production builds never silently allow
+        a developer laptop.
+
+    The regex (``CORS_ALLOWED_ORIGIN_REGEX``) is returned separately and
+    handed to ``CORSMiddleware``'s ``allow_origin_regex`` so we can match
+    Vercel preview URLs (``asoe-ui-git-<branch>-<team>.vercel.app``)
+    without listing them individually.
+    """
+    e = env if env is not None else os.environ
+    asoe_env = e.get("ASOE_ENV", "production").lower()
+
+    origins: list[str] = []
+    seen: set[str] = set()
+
+    def _add(value: str) -> None:
+        v = value.strip()
+        if v and v not in seen:
+            origins.append(v)
+            seen.add(v)
+
+    csv = e.get("CORS_ALLOWED_ORIGINS", "")
+    if csv:
+        for part in csv.split(","):
+            _add(part)
+
+    single = e.get("CORS_ALLOWED_ORIGIN", "").strip()
+    if single:
+        _add(single)
+
+    if asoe_env == "sandbox":
+        for o in _LOCAL_DEV_ORIGINS:
+            _add(o)
+
+    regex = (e.get("CORS_ALLOWED_ORIGIN_REGEX", "") or "").strip() or None
+    return origins, regex
+
+
 def create_app() -> FastAPI:
     """Build and configure the FastAPI application."""
     application = FastAPI(
@@ -30,22 +86,17 @@ def create_app() -> FastAPI:
         description="Deterministic, compliance-aware exception management API.",
     )
 
-    # Sandbox-only CORS — production fronts this service with an API
-    # gateway + same-origin UI, so Access-Control-Allow-Origin is not
-    # needed there. In sandbox the Next dev server runs on localhost:3100
-    # and the UI makes cross-origin fetch() calls to localhost:8000; the
-    # browser rejects those without explicit CORS. Allowlist is the
-    # common local dev origins only — not a wildcard, so accidental
-    # production mis-configuration still blocks foreign origins.
-    if os.getenv("ASOE_ENV", "production").lower() == "sandbox":
+    # CORS — driven by env vars so the bicep template / parameter file is
+    # the single source of truth, not a hardcoded list. ``allow_credentials``
+    # is required (NextAuth + ``Authorization: Bearer``); that means we can
+    # never use ``allow_origins=["*"]``, so the resolver always produces an
+    # explicit list (and an optional regex for Vercel preview URLs).
+    cors_origins, cors_regex = _resolve_cors_config()
+    if cors_origins or cors_regex:
         application.add_middleware(
             CORSMiddleware,
-            allow_origins=[
-                "http://localhost:3000",
-                "http://localhost:3100",
-                "http://127.0.0.1:3000",
-                "http://127.0.0.1:3100",
-            ],
+            allow_origins=cors_origins,
+            allow_origin_regex=cors_regex,
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],

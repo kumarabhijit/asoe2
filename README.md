@@ -1239,9 +1239,46 @@ Resource sizing (sandbox):
 | ACR | Basic | User-Assigned Managed Identity with pre-granted AcrPull |
 | Log Analytics | PerGB2018, 30-day retention | Container App stdout/stderr |
 
-CORS allow-origin is set to `https://asoe-ui.vercel.app` via the
-`corsAllowedOrigin` bicep parameter; change it and re-run the deploy
-script if the UI host changes.
+CORS is env-driven: pass any combination of `corsAllowedOrigin`
+(legacy single), `corsAllowedOriginsCsv` (multi-origin), or
+`corsAllowedOriginRegex` (Vercel preview URLs) in
+`infra/parameters.sandbox.json` and re-run the deploy script. The
+Azure-hosted UI's FQDN is added to the allowlist automatically by the
+bicep template (computed from `cae.properties.defaultDomain`); no
+parameter change needed when you flip `DEPLOY_UI=1`.
+
+#### Deploying asoe-ui to Azure Container Apps (pre-prod)
+
+Vercel stays as dev / per-PR previews; pre-prod can run on Azure
+alongside the API for a single audit boundary and unified
+observability. Run the deploy with `DEPLOY_UI=1`:
+
+```bash
+DEPLOY_UI=1 \
+GITHUB_TOKEN='ghp_...' \                # only if asoe-ui is private
+PG_ADMIN_PASSWORD='<strong-pw>' \
+    ./scripts/deploy-azure.sh
+```
+
+If `ASOE_UI_PATH` (default `../asoe-ui`) doesn't exist, the script
+clones it from `kumarabhijit/asoe-ui` (branch `core_ui_integration`,
+override via `ASOE_UI_REPO_URL` / `ASOE_UI_BRANCH`). For private
+repos, set a PAT in `GITHUB_TOKEN` (or `GH_TOKEN` / `GITHUB_CODESPACE_ACCESS`)
+— the token is used only during the clone and stripped from the
+remote URL afterwards so it doesn't persist in `.git/config`.
+
+The script then builds the asoe-ui Next.js standalone image into
+ACR with `NEXT_PUBLIC_API_URL=https://<API_FQDN>` baked in, and
+provisions a sister Container App (`asoepreprodui`) in the same
+managed environment. `NEXTAUTH_SECRET` auto-generates on first deploy and
+preserves on re-runs (pass `NEXTAUTH_SECRET=auto` to rotate).
+
+For UI-only redeploys after an asoe-ui code change (no API/infra
+touched, ~2 min):
+
+```bash
+./scripts/redeploy-ui.sh
+```
 
 #### Day-to-day Azure operations
 
@@ -1257,8 +1294,10 @@ FQDN=$(az containerapp show -g $RG -n $APP \
 
 | Task | Command |
 |---|---|
-| **Launch (first deploy)** | `PG_ADMIN_PASSWORD='<pw>' ANTHROPIC_API_KEY='sk-ant-...' ./scripts/deploy-azure.sh` |
-| **Re-deploy after a code change** | `PG_ADMIN_PASSWORD='<same-pw>' ./scripts/deploy-azure.sh` (secrets preserved) |
+| **Launch API only (first deploy)** | `PG_ADMIN_PASSWORD='<pw>' ANTHROPIC_API_KEY='sk-ant-...' ./scripts/deploy-azure.sh` |
+| **Launch API + UI together** | `DEPLOY_UI=1 ASOE_UI_PATH=../asoe-ui PG_ADMIN_PASSWORD='<pw>' ANTHROPIC_API_KEY='sk-ant-...' ./scripts/deploy-azure.sh` |
+| **Re-deploy API after a code change** | `PG_ADMIN_PASSWORD='<same-pw>' ./scripts/deploy-azure.sh` (secrets preserved) |
+| **Re-deploy UI after a UI change** | `./scripts/redeploy-ui.sh` (~2 min, API untouched) |
 | **Health check** | `curl -fsS --max-time 30 "https://${FQDN}/api/v1/health" \| jq .` |
 | **Active revision status** | `az containerapp revision list -g $RG -n $APP --query "[?properties.active]" -o table` |
 | **Rotate Anthropic key only** | `ANTHROPIC_API_KEY='sk-ant-NEW' ./scripts/set-secrets.sh` |
