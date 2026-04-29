@@ -1,0 +1,6 @@
+{
+  "intent": "CREDIT_BLOCK",
+  "selected_recipe": "CreditHoldReleaseRecipe.py",
+  "allowed_shadow_verdicts": ["YELLOW", "RED"],
+  "allowed_final_statuses": ["MANUAL_REVIEW_REQUIRED", "BLOCKED", "PENDING_COSIGN"]
+}

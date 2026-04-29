@@ -1,0 +1,19 @@
+{
+  "order_id": "SMK-OM-001",
+  "line_item": 1,
+  "po_price": 10.0,
+  "sap_base_price": 10.0,
+  "event_type": "OVER_MAX_QTY",
+  "retailer_id": "R-71",
+  "line_count": 1,
+  "metadata": {
+    "synthetic": true,
+    "source": "smoke-e2e",
+    "total_ordered": 130,
+    "max_qty": 100,
+    "uom": "CASE",
+    "order_lines": [
+      {"sku": "SKU-OM-A", "description": "Item A", "qty": 130, "max_line_qty": 100, "is_even_layer_item": true}
+    ]
+  }
+}

@@ -238,6 +238,51 @@ FQDN=$(az containerapp show -g $RG -n $APP --query properties.configuration.ingr
 | Redis primary key | `az redisenterprise database list-keys --cluster-name $REDIS -g $RG --query primaryKey -o tsv` |
 | ACR image list | `az acr repository show-tags --name $ACR --repository asoe-api --orderby time_desc -o table` |
 
+### End-to-end smoke test
+
+After the API + UI are deployed and you've verified `/api/v1/health` is
+green, drive the deterministic pipeline with synthetic events:
+
+```bash
+API_URL=https://${FQDN} \
+USER_EMAIL=marcus.webb@acme-corp.com \
+    ./scripts/smoke-e2e.sh
+```
+
+The script logs in, optionally resets the sandbox tenant, then POSTs
+every `tests/fixtures/synthetic/<intent>.event.json` to
+`/api/v1/exceptions/resolve` and asserts the response carries the
+expected intent + recipe and a shadow verdict / final status from
+the allowed sets in the matching `<intent>.expected.json`. Coverage
+is one fixture per intent (10 of 11 — `MASS_PRICING_ERROR` is
+intentionally skipped because it has no recipe and routes to
+`FAIL_TO_HUMAN` by design).
+
+What's validated end-to-end:
+
+- `/api/auth/login` round-trip + JWT validity
+- Intent classifier (LLM call when `ASOE_LLM_PROVIDER=anthropic`,
+  deterministic when `=fallback`)
+- Recipe registry routes intent → expected recipe
+- Compliance Shadow + executor reach a terminal state in the allowed set
+- The exception is persisted (subsequent `GET /api/v1/exceptions/{id}`
+  retrieves it; the UI surfaces it via the `/exceptions` page)
+
+Knobs:
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `API_URL` | live pre-prod FQDN | API base URL |
+| `USER_EMAIL` | `jane@acme.com` | Seeded user (admin/manager/analyst) |
+| `USER_PASSWORD` | `smoke-e2e` | Any non-empty (V1 stub auth) — shows up in audit logs |
+| `RESET_TENANT` | `1` | Reset the in-memory exception store before the run |
+| `STOP_ON_FAIL` | `0` | Set to `1` to abort on the first failing fixture |
+
+Each event carries `metadata.synthetic=true` and
+`metadata.source="smoke-e2e"` so the audit chain can distinguish smoke
+traffic from real ingest. Offline lint of the fixture format runs in
+the regular pytest suite (`tests/test_synthetic_fixtures_shape.py`).
+
 ### Launch (first deploy)
 
 ```bash

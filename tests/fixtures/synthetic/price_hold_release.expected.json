@@ -1,0 +1,6 @@
+{
+  "intent": "PRICE_HOLD_RELEASE",
+  "selected_recipe": "PriceHoldReleaseRecipe.py",
+  "allowed_shadow_verdicts": ["GREEN", "YELLOW"],
+  "allowed_final_statuses": ["COMPLETE", "MANUAL_REVIEW_REQUIRED"]
+}

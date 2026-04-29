@@ -1298,6 +1298,7 @@ FQDN=$(az containerapp show -g $RG -n $APP \
 | **Launch API + UI together** | `DEPLOY_UI=1 ASOE_UI_PATH=../asoe-ui PG_ADMIN_PASSWORD='<pw>' ANTHROPIC_API_KEY='sk-ant-...' ./scripts/deploy-azure.sh` |
 | **Re-deploy API after a code change** | `PG_ADMIN_PASSWORD='<same-pw>' ./scripts/deploy-azure.sh` (secrets preserved) |
 | **Re-deploy UI after a UI change** | `./scripts/redeploy-ui.sh` (~2 min, API untouched) |
+| **End-to-end smoke** | `API_URL=https://${FQDN} USER_EMAIL=marcus.webb@acme-corp.com ./scripts/smoke-e2e.sh` (drives every fixture in `tests/fixtures/synthetic/` through the full Skill→Shadow→Recipe pipeline) |
 | **Health check** | `curl -fsS --max-time 30 "https://${FQDN}/api/v1/health" \| jq .` |
 | **Active revision status** | `az containerapp revision list -g $RG -n $APP --query "[?properties.active]" -o table` |
 | **Rotate Anthropic key only** | `ANTHROPIC_API_KEY='sk-ant-NEW' ./scripts/set-secrets.sh` |

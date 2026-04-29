@@ -1,0 +1,6 @@
+{
+  "intent": "BACK_ORDER",
+  "selected_recipe": "BackOrderResolutionRecipe.py",
+  "allowed_shadow_verdicts": ["YELLOW"],
+  "allowed_final_statuses": ["MANUAL_REVIEW_REQUIRED"]
+}

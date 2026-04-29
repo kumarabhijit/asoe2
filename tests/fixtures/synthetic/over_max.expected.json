@@ -1,0 +1,6 @@
+{
+  "intent": "OVER_MAX",
+  "selected_recipe": "OverMaxTrimRecipe.py",
+  "allowed_shadow_verdicts": ["YELLOW"],
+  "allowed_final_statuses": ["MANUAL_REVIEW_REQUIRED"]
+}
