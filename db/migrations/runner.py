@@ -393,6 +393,24 @@ def apply_postgres(database_url: str) -> None:
         else:
             logger.info("PostgreSQL schema V004 already applied, skipping")
 
+        # V005 — drop the over-restrictive intent CHECK constraint that
+        # only listed 5 of the 11 intents the system classifies. SQLite
+        # path never had it; bring Postgres in line.
+        cur.execute(
+            "SELECT version FROM schema_migrations WHERE version = %s",
+            ("V005",),
+        )
+        if not cur.fetchone():
+            v005_sql = (_MIGRATIONS_DIR / "V005__drop_intent_check.sql").read_text()
+            cur.execute(v005_sql)
+            cur.execute(
+                "INSERT INTO schema_migrations (version) VALUES (%s)",
+                ("V005",),
+            )
+            logger.info("PostgreSQL schema V005 applied (dropped intent CHECK)")
+        else:
+            logger.info("PostgreSQL schema V005 already applied, skipping")
+
         conn.commit()
     except Exception:
         conn.rollback()
