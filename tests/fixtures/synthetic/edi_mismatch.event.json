@@ -9,7 +9,7 @@
   "metadata": {
     "synthetic": true,
     "source": "smoke-e2e",
-    "mismatch_sub_type": "SKU_NOT_FOUND",
+    "mismatch_sub_type": "SKU_MISMATCH",
     "expected_value": "SKU-CANONICAL-001",
     "received_value": "SKU-RETAILER-XYZ"
   }

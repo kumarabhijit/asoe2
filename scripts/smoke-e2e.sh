@@ -151,12 +151,17 @@ for ev_file in "${event_files[@]}"; do
     idem_key=$(python3 -c 'import uuid; print(uuid.uuid4())')
 
     set +e
+    # -D - dumps the response headers to stdout so we can grab the
+    # X-Trace-ID server-side trace id and pass it to the user for
+    # Log Analytics correlation when the call returns 5xx.
+    headers_file=$(mktemp)
     response=$(curl -sS --max-time 60 \
         -X POST \
         -H "${auth_header}" \
         -H "content-type: application/json" \
         -H "Idempotency-Key: ${idem_key}" \
         --data-binary "@${ev_file}" \
+        -D "${headers_file}" \
         -w "\n__HTTP_STATUS__:%{http_code}" \
         "${API_URL}/api/v1/exceptions/resolve")
     curl_rc=$?
@@ -164,10 +169,16 @@ for ev_file in "${event_files[@]}"; do
 
     http_status=$(awk -F: '/^__HTTP_STATUS__:/ {print $2}' <<<"${response}")
     body=$(awk '/^__HTTP_STATUS__:/ {exit} {print}' <<<"${response}")
+    trace_id=$(awk 'BEGIN{IGNORECASE=1} /^x-trace-id:/ {gsub(/\r/,""); print $2}' "${headers_file}" || true)
+    rm -f "${headers_file}"
 
     if [[ ${curl_rc} -ne 0 ]] || [[ "${http_status}" != "200" ]]; then
         echo "  ${base}: FAIL (HTTP ${http_status:-curl_rc=${curl_rc}})"
-        echo "    body: ${body}" | head -c 500
+        echo "    idempotency_key: ${idem_key}"
+        if [[ -n "${trace_id}" ]]; then
+            echo "    x-trace-id:      ${trace_id}"
+        fi
+        echo "    body:            ${body}" | head -c 600
         failed=$(( failed + 1 ))
         failed_fixtures+=("${base}")
         if [[ "${STOP_ON_FAIL}" == "1" ]]; then break; fi
