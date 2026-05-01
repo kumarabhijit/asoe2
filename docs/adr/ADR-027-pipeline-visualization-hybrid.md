@@ -1,6 +1,6 @@
 # ADR-027: Pipeline visualization — hybrid trace-derived timeline + DAG
 
-**Status:** Proposed (rev. 2 — review board amendments applied 2026-05-01)
+**Status:** Proposed (rev. 3 — reanalysis attempt-scoping added 2026-05-01)
 **Date:** 2026-05-01
 **Deciders:** Principal AI Systems Architect; Frontend Platform; AI/LangGraph;
 Compliance; ASOE Tools Admin (review pending)
@@ -15,8 +15,17 @@ Compliance; ASOE Tools Admin (review pending)
     `node_execution_id` for `build_analysis` re-entry —
     reanalysis is captured as a separate `reanalysis_history`
     entry, not as multiple executions on a single trace, so the
-    field is unnecessary. See "Amendments after review board" at
-    the end of this document for the full delta.
+    field is unnecessary.
+  - 2026-05-01 rev. 3 — reanalysis attempt-scoping made first-class.
+    `ReanalysisHistoryEntry` is now a typed Pydantic model carrying
+    `executed_nodes: list[ExecutedNode]` per attempt (today the
+    field is `List[Dict[str, Any]]` with only `prior_*` scalars).
+    DAG/timeline views are scoped to a selected attempt; default =
+    latest. Closes a real gap in rev. 2: under rev. 2 as written,
+    each reanalysis would overwrite `trace_data` and destroy the
+    prior path's executed_nodes audit evidence.
+  - See "Amendments after review board" at the end of this
+    document for the full delta.
 **Applies to:** `asoe-ui/src/components/ui/WaterfallStepper.tsx`,
 `asoe-ui/src/app/exceptions/shared.tsx`,
 `asoe-ui/src/app/exceptions/DiagnosticsSection.tsx`, new
@@ -247,15 +256,35 @@ overlaying the taken-path highlight + per-edge verdict labels.
    produces exactly one `executed_nodes` list. `build_analysis` is
    reachable from many edges but executes at most once per invoke
    (the AUDIT_CONTEXT_MISSING guard is intra-node early-exit, not a
-   second invocation). Reanalysis is captured separately by the
-   existing `reanalysis_history` field on the exception record —
-   each reanalysis writes a fresh `trace_data` (and therefore a fresh
-   `executed_nodes` list) via `store_trace`. The DAG/timeline always
-   renders the **current** trace; prior reanalysis states are
-   accessible via the existing reanalysis-history surface. This is
-   why an explicit `node_execution_id` per `ExecutedNode` is **not**
-   required (review-board amendment rejected on these grounds — see
-   end of doc).
+   second invocation). Within a single invocation `node` (canonical
+   name) is therefore the unique key — no `node_execution_id` is
+   required (review-board recommendation rejected on these grounds;
+   see Alternatives §5).
+
+   **Reanalysis is an attempt-scoped concept**, not "multiple
+   executions on one trace." Each reanalysis writes a fresh
+   `trace_data` via `store_trace` (so the latest `executed_nodes`
+   lives there) AND appends a typed `ReanalysisHistoryEntry` to
+   `record.reanalysis_history` carrying that attempt's full
+   `executed_nodes` list alongside the existing `prior_*` /
+   `new_*` scalar snapshots. **This is a behaviour change from the
+   current code**, where `reanalysis_history` is
+   `List[Dict[str, Any]]` carrying only the `prior_*` scalars
+   (`shadow_verdict`, `final_status`, `lifecycle_state`,
+   `trace_id`) — no executed_nodes. Without the change, the prior
+   path's per-node audit evidence would be destroyed on every
+   reanalysis; the SOX surface cannot accept that loss. The
+   typed entry is defined in §4 below.
+
+   **View scoping.** Both the EventsTimeline and the PipelineDAG
+   are scoped to a selected attempt. The default selection is the
+   latest attempt (i.e. the current trace). An attempt selector
+   (compact dropdown, "Attempt 1 (resolved) → Attempt 2 (current)
+   …") lives at the top of the Diagnostics section. Selecting a
+   prior attempt re-renders the timeline + DAG against that
+   attempt's `executed_nodes`. Audit users see every attempt's
+   evidence; operators default to latest and rarely need to
+   switch.
 
    **resolve_dependencies sub-spans.** This node fans gateway calls
    out via `concurrent.futures`. The single `ExecutedNode` entry's
@@ -311,6 +340,30 @@ overlaying the taken-path highlight + per-edge verdict labels.
        exit_verdict: Optional[str]
        policy_hits: list[str] = []  # populated on shadow_audit; [] elsewhere
        sub_spans: list[GatewayCallSpan] = []  # populated on resolve_dependencies; [] elsewhere
+
+   class ReanalysisHistoryEntry(BaseModel):
+       """Typed replacement for the current List[Dict[str, Any]]
+       reanalysis_history shape (api/schemas.py:254, api/store.py:83).
+
+       Each entry captures one reanalysis attempt's snapshot AND its
+       executed_nodes list, so the prior path's per-node audit
+       evidence is preserved when the next attempt overwrites
+       trace_data. Without this, reanalysing a record destroys
+       audit evidence — unacceptable on the SOX surface.
+       """
+       attempt: int                       # 1-indexed; matches existing field
+       attempted_at: datetime
+       attempted_by: str                  # user.sub
+       reason: Optional[str]              # operator-provided rationale
+       prior_trace_id: str
+       prior_shadow_verdict: Optional[str]
+       prior_final_status: Optional[str]
+       prior_lifecycle_state: str
+       new_trace_id: str
+       new_shadow_verdict: Optional[str]
+       new_final_status: Optional[str]
+       new_lifecycle_state: str
+       executed_nodes: list[ExecutedNode] # NEW — full path for this attempt
    ```
 
    **Deprecation of overlapping `TraceResponse` fields.** Once
@@ -358,16 +411,27 @@ overlaying the taken-path highlight + per-edge verdict labels.
 |---|---|---|---|
 | **A.0** | **Verdict-vocabulary registration.** Declare per-gate verdict labels alongside each `add_conditional_edges` call in `orchestration/graph.py` (e.g. via a sibling `_VERDICT_LABELS["shadow_audit"] = {...}` registry, or by migrating `route_after_gate` to return the verdict string). The compiled graph alone exposes only `{terminal, continue}` keys; the human verdicts (`GREEN | breach | no recipe`) live in the route function's implicit contract today. Phase A's introspection helper consumes this registration; without it, "verdict on edge" in the DAG is unrooted. **Load-bearing for Phase D's audit-fitness claim.** | ~1 day | AI/LangGraph review (verdict vocabulary covers every conditional gate, including the classify-time disagreement which is rendered as an implicit gate) |
 | **A** | Backend topology endpoint + introspection helper consuming the A.0 registration. Schema + endpoint, no UI consumer yet. Architectural lock test asserts compiled-graph parity. | ~1 day | AI/LangGraph review (does the introspection capture all conditional edges + verdict labels correctly?) |
-| **B** | Trace extension: `ExecutedNode` appended by every orchestration node, with `policy_hits`, `timestamp`, and `sub_spans` populated. Persisted into `trace_data`. Tests assert per-node entries land in the right order with the right exit verdicts on disagreement / RED / YELLOW / breach / no-recipe. **`pipeline_progress` WS event starts firing — batched to one event per record state change with the full `executed_nodes` list.** Real-time *timeline append* falls out of this for free; real-time *DAG re-render* stays out of scope (Phase F). | ~2 days | Compliance review (do `executed_nodes` entries carry every verdict, policy hit, and timing field an auditor needs to reconstruct a SOX-relevant decision?) |
-| **C** | `EventsTimeline.tsx` replacing the default WaterfallStepper render, consuming the streamed payload from Phase B. Hardcoded `PIPELINE_NODES` and `STATE_PROGRESS` deleted. Architectural lock test added. | ~1 day | Operator feedback on a synthetic trace (does the halt-point read clearly in <5s?) |
-| **D** | `PipelineDAG.tsx` behind disclosure. `dagre` + custom SVG, taken-path highlighting, verdict-on-edge labels. Bundle ceiling enforced via CI check on the lazy chunk size. | ~1.5 days | Audit team sign-off on **four** sample traces: autonomous-resolved (GREEN), HITL (YELLOW shadow), BLOCKED (RED shadow), and **`FAILED at classify` (cross-check disagreement)** — the original SMK-CB-001 case |
+| **B** | Trace extension: `ExecutedNode` appended by every orchestration node, with `policy_hits`, `timestamp`, and `sub_spans` populated. Persisted into `trace_data`. **Type `ReanalysisHistoryEntry` (currently `List[Dict[str, Any]]`); the reanalyze handler at `api/routes/exceptions.py:1278` writes the new attempt's `executed_nodes` into the entry alongside the existing `prior_*` / `new_*` snapshots, so prior paths are not destroyed by overwriting `trace_data`.** Tests assert per-node entries land in the right order with the right exit verdicts on disagreement / RED / YELLOW / breach / no-recipe; reanalysis tests assert each historical attempt round-trips its `executed_nodes` faithfully. **`pipeline_progress` WS event starts firing — batched to one event per record state change with the full `executed_nodes` list.** Real-time *timeline append* falls out of this for free; real-time *DAG re-render* stays out of scope (Phase F). | ~2.5 days | Compliance review (do `executed_nodes` entries carry every verdict, policy hit, and timing field an auditor needs to reconstruct a SOX-relevant decision? **Are reanalysis attempts preserved with full per-node evidence?**) |
+| **C** | `EventsTimeline.tsx` replacing the default WaterfallStepper render, consuming the streamed payload from Phase B. **Attempt selector** (default = latest, dropdown to scope timeline against any historical `ReanalysisHistoryEntry.executed_nodes`). Hardcoded `PIPELINE_NODES` and `STATE_PROGRESS` deleted. Architectural lock test added. | ~1.5 days | Operator feedback on a synthetic trace (does the halt-point read clearly in <5s? Can the operator switch to a prior attempt without confusion?) |
+| **D** | `PipelineDAG.tsx` behind disclosure. `dagre` + custom SVG, taken-path highlighting, verdict-on-edge labels. **Shares the attempt selector with the timeline** so both views switch in lockstep. Bundle ceiling enforced via CI check on the lazy chunk size. | ~1.5 days | Audit team sign-off on **four** sample traces × **two attempts each** (latest + one prior reanalysis): autonomous-resolved (GREEN), HITL (YELLOW shadow), BLOCKED (RED shadow), and **`FAILED at classify` (cross-check disagreement)** — the original SMK-CB-001 case |
 | **E** | Role-based default surface (audit users → DAG default). | ~0.5 day | RBAC review |
 
-Total: **~7-8 days** end to end. A.0 is load-bearing — it must
+Total: **~8-9 days** end to end (rev. 3 absorbed +0.5d in Phase B
+for `ReanalysisHistoryEntry` typing + history backfill, +0.5d in
+Phase C/D for the attempt selector). A.0 is load-bearing — it must
 land first. A and B unblock symptom 1 (and the `FAILED at classify`
 canonical trace) without touching the UI; Compliance can sign off
 on the audit story before Frontend starts work, which is the right
 risk-staging given the SOX surface.
+
+**Migration of existing `reanalysis_history` entries.** Records
+with reanalysis history written before Phase B's typing change
+have entries that lack `executed_nodes`. Phase B does not
+backfill (we don't have the prior trace data to reconstruct
+from). The UI's attempt selector renders such entries with an
+explicit "executed-path evidence not available — entry pre-dates
+per-node tracking" banner, same pattern as the existing-record
+migration in Open Question §5. Better than fabricating one.
 
 ## Consequences
 
@@ -576,6 +640,7 @@ above; one is rejected. Summary delta:
 | A8 | **Effort revised to 7-8 days** (was 5.5) to accommodate Phase A.0 + extended Phase B. | Phases table (Total) |
 | A9 | **Sub-spans for `resolve_dependencies`** (`GatewayCallSpan` list) — fan-out gateway timing surfaces in the timeline as nested expand without breaking the one-`ExecutedNode`-per-orchestration-node DAG model. | Architecture §3, §4 |
 | A10 | **Deprecation plan** for overlapping `TraceResponse` fields (`shadow_verdict`, `shadow_policy_hits`, `gateway_calls`): keep one release for back-compat, mark deprecated, retire after Phase D. | Architecture §4 (Deprecation subsection) |
+| A11 | **Reanalysis attempt-scoping (rev. 3 amendment).** Type `ReanalysisHistoryEntry` (currently `List[Dict[str, Any]]`); each attempt's entry carries `executed_nodes: list[ExecutedNode]` alongside the existing `prior_*` / `new_*` snapshots. UI views are scoped to a selected attempt; default = latest, dropdown to switch. Closes a real gap in rev. 2 — without this change, reanalysing a record overwrites `trace_data` and destroys the prior path's per-node audit evidence. | Status block (rev. 3); Architecture §3 (Re-entry & reanalysis semantics, View scoping); §4 (`ReanalysisHistoryEntry` schema); Phases B / C / D updated; Total estimate 7-8 → 8-9 days |
 
 ### Rejected
 
