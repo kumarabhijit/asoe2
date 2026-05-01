@@ -373,3 +373,83 @@ class TestLoopSafety:
         for state in (pricing_event, credit_event, mass_event, duplicate_po_event):
             result = run_graph(state)
             assert result.final_status in allowed
+
+
+# ---------------------------------------------------------------------------
+# ADR-027 Phase A.0 — verdict-vocabulary registration
+# ---------------------------------------------------------------------------
+#
+# The registry in orchestration/graph.py declares per-gate verdict labels
+# alongside the add_conditional_edges calls. These assertions are the
+# load-bearing fitness checks the AI/LangGraph reviewer signs off on:
+# every conditional gate is covered, every downstream is a real node in
+# the compiled graph, and the shadow_audit verdict trio (GREEN/YELLOW/RED)
+# is complete.
+
+class TestVerdictVocabularyRegistration:
+    """Phase A.0 — verdict-vocabulary covers every conditional + implicit gate."""
+
+    def _gate_nodes_with_conditional_edges(self):
+        # These are the gates declared via add_conditional_edges in
+        # _add_common_nodes_and_edges + build_graph (live variant).
+        return {
+            "validate_circuit_breaker",
+            "select_recipe",
+            "resolve_dependencies",
+            "validate_types",
+            "shadow_audit",
+        }
+
+    def test_every_conditional_gate_is_registered(self):
+        from orchestration.graph import get_verdict_labels
+        registered = set(get_verdict_labels().keys())
+        assert registered == self._gate_nodes_with_conditional_edges()
+
+    def test_every_gate_declares_terminal_and_continue_verdicts(self):
+        from orchestration.graph import get_verdict_labels
+        for gate, labels in get_verdict_labels().items():
+            keys = set(labels.keys())
+            has_terminal = any(k.startswith("terminal_") for k in keys)
+            has_continue = any(k.startswith("continue_") for k in keys)
+            assert has_terminal, f"{gate} missing a terminal_* verdict"
+            assert has_continue, f"{gate} missing a continue_* verdict"
+
+    def test_shadow_audit_covers_green_yellow_red(self):
+        from orchestration.graph import get_verdict_labels
+        shadow = get_verdict_labels()["shadow_audit"]
+        assert shadow["terminal_red"] == "build_analysis"
+        assert shadow["terminal_yellow"] == "build_analysis"
+        assert shadow["continue_green"] == "execute_recipe"
+
+    def test_every_downstream_is_a_real_node_in_compiled_graph(self):
+        from orchestration.graph import build_graph, get_verdict_labels
+        compiled_nodes = set(build_graph().get_graph().nodes.keys())
+        for gate, labels in get_verdict_labels().items():
+            assert gate in compiled_nodes, f"gate {gate} not in compiled graph"
+            for verdict, downstream in labels.items():
+                assert downstream in compiled_nodes, (
+                    f"{gate} verdict {verdict} → {downstream} is not a node "
+                    f"in the compiled graph"
+                )
+
+    def test_implicit_classify_gate_is_registered(self):
+        from orchestration.graph import get_implicit_verdict_labels
+        labels = get_implicit_verdict_labels()
+        assert "classify" in labels
+        assert (
+            labels["classify"]["implicit_terminal_cross_check_disagreement"]
+            == "build_analysis"
+        )
+        assert labels["classify"]["implicit_continue_ok"] == "load_skill"
+
+    def test_no_overlap_between_explicit_and_implicit_registries(self):
+        from orchestration.graph import (
+            get_implicit_verdict_labels,
+            get_verdict_labels,
+        )
+        explicit = set(get_verdict_labels().keys())
+        implicit = set(get_implicit_verdict_labels().keys())
+        assert explicit.isdisjoint(implicit), (
+            "a gate is both explicit (add_conditional_edges) and implicit "
+            "(final_status set in-node) — choose one"
+        )

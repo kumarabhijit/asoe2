@@ -39,6 +39,7 @@ from __future__ import annotations
 #                  MANUAL_REVIEW_REQUIRED with a dry-run summary
 
 from functools import cache
+from typing import Mapping
 
 from langgraph.graph import END, StateGraph
 from contracts.models import GraphState
@@ -50,6 +51,105 @@ from hardening.explain_mode import is_explain_mode_active
 def route_after_gate(state: GraphState) -> str:
     """Route to terminal END if any node set final_status, else continue."""
     return "terminal" if state.final_status is not None else "continue"
+
+
+# ---------------------------------------------------------------------------
+# ADR-027 Phase A.0 — verdict-vocabulary registration
+# ---------------------------------------------------------------------------
+#
+# `route_after_gate` collapses every conditional into {terminal, continue}
+# based on `state.final_status`. The HUMAN verdict that drove the route
+# (GREEN | YELLOW | RED, breach | ok, no recipe | ok, …) lives on state
+# side-effects (`state.shadow.status`, ad-hoc `final_status` reasons) and
+# never reaches the compiled-graph topology. Compiled-graph introspection
+# alone therefore exposes only `terminal/continue` keys — insufficient for
+# the audit-first DAG view ADR-027 ships.
+#
+# This registry is the load-bearing prerequisite for ADR-027 Phase A: it
+# declares per-gate verdict labels alongside each `add_conditional_edges`
+# call so Phase A's introspection helper can join them with the compiled
+# graph and produce a verdict-labelled `PipelineTopology`. The per-record
+# execution trace (Phase B) supplies which verdict actually fired on each
+# record's `executed_nodes` entry.
+#
+# Layout: gate_node -> {verdict_route_key: downstream_node}
+#   - `terminal_*` keys correspond to the `terminal` branch of
+#     `route_after_gate` (the gate halted execution).
+#   - `continue_*` keys correspond to the `continue` branch (the gate
+#     allowed execution to proceed).
+#   - The verdict suffix (e.g. `_red`, `_breach`, `_no_recipe`) is the
+#     human label that will appear on the DAG edge.
+#
+# The shadow_audit gate has TWO terminal verdicts (RED and YELLOW) sharing
+# the same `terminal` route — both target `build_analysis` but the verdict
+# label on the edge differs per record. The introspection helper resolves
+# which terminal verdict fired by reading the `ExecutedNode` for
+# shadow_audit (its `decision`/`exit_verdict`), not by reading the edge.
+#
+# Live-graph form. The explain-mode graph swaps `execute_recipe` →
+# `explain_only` on the GREEN continuation; that swap is owned by
+# `build_explain_graph` and applied by Phase A's introspection helper at
+# topology-fetch time. v4.1 may register an explain-overrides map if
+# explain-mode topology becomes a separately-rendered surface.
+_VERDICT_LABELS: Mapping[str, Mapping[str, str]] = {
+    "validate_circuit_breaker": {
+        "terminal_breach": "build_analysis",
+        "continue_ok": "select_recipe",
+    },
+    "select_recipe": {
+        "terminal_no_recipe": "build_analysis",
+        "continue_ok": "resolve_dependencies",
+    },
+    "resolve_dependencies": {
+        "terminal_required_gw_fail": "build_analysis",
+        "continue_ok": "validate_types",
+    },
+    "validate_types": {
+        "terminal_invocation_fail": "build_analysis",
+        "continue_ok": "shadow_audit",
+    },
+    "shadow_audit": {
+        "terminal_red": "build_analysis",
+        "terminal_yellow": "build_analysis",
+        "continue_green": "execute_recipe",
+    },
+}
+
+# Implicit gates — nodes that set `final_status` themselves rather than
+# routing via `add_conditional_edges`. The compiled graph has no edge to
+# attach a verdict to; Phase D's DAG renderer draws an implicit highlighted
+# edge (classify → build_analysis) when an `ExecutedNode` for classify
+# carries `exit_verdict="cross_check_disagreement"` (architecture_v4 §4
+# v4 amendment, ADR-027 Open Question §7).
+#
+# Registered here so the verdict vocabulary is the single source of truth
+# across both explicit (add_conditional_edges) and implicit (final_status-
+# set-in-node) gates — ADR-027 Phase A.0 review-board criterion.
+_IMPLICIT_VERDICT_LABELS: Mapping[str, Mapping[str, str]] = {
+    "classify": {
+        "implicit_terminal_cross_check_disagreement": "build_analysis",
+        "implicit_continue_ok": "load_skill",
+    },
+}
+
+
+def get_verdict_labels() -> Mapping[str, Mapping[str, str]]:
+    """Per-gate verdict-vocabulary registration for the live graph.
+
+    Phase A's introspection helper joins this with `compiled_graph.get_graph()`
+    to produce the verdict-labelled `PipelineTopology` consumed by the DAG view.
+    """
+    return _VERDICT_LABELS
+
+
+def get_implicit_verdict_labels() -> Mapping[str, Mapping[str, str]]:
+    """Verdict labels for implicit gates (nodes that set `final_status` directly).
+
+    Today this covers only `classify` (LLM/deterministic cross-check
+    disagreement). Phase D's DAG renderer draws these as implicit edges
+    when the matching `exit_verdict` appears on the executed node.
+    """
+    return _IMPLICIT_VERDICT_LABELS
 
 
 def _add_common_nodes_and_edges(graph: StateGraph) -> None:
