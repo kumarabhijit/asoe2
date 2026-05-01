@@ -19,8 +19,11 @@ from __future__ import annotations
 #   - shadow verdict constrained to GREEN|YELLOW|RED via backend.shadow_decision()
 
 import concurrent.futures
+from datetime import datetime, timezone
 
 from contracts.models import (
+    ExecutedNode,
+    GatewayCallSpan,
     GatewayRequest,
     GraphState,
     Intent,
@@ -65,6 +68,72 @@ from contracts.policy import (
 import logging
 
 _node_logger = logging.getLogger("asoe.nodes")
+
+
+# ---------------------------------------------------------------------------
+# ADR-027 Phase B — per-node executed-trace recording helper
+# ---------------------------------------------------------------------------
+#
+# Each node calls `_record(state, ...)` once before every `return state`.
+# The helper appends an `ExecutedNode` to `state.execution_trace` carrying
+# the node's name, timing, decision payload, and the verdict-on-exit
+# (when the node exits via a conditional gate or implicit halt).
+#
+# `entered_at` is captured at the top of each node; `_record` stamps
+# `completed_at` and computes `duration_ms`. The status is "halted" when
+# the node set `final_status` itself (terminal route) and "completed"
+# otherwise. "errored" is reserved for nodes that catch an unexpected
+# exception — today only ingest's NodeValidationError flows through this
+# path; future error paths can opt in.
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _record(
+    state: GraphState,
+    *,
+    node: str,
+    entered_at: str,
+    decision: dict | None = None,
+    exit_verdict: str | None = None,
+    policy_hits: list[str] | None = None,
+    sub_spans: list[GatewayCallSpan] | None = None,
+    status: str | None = None,
+) -> None:
+    """Append one `ExecutedNode` entry to `state.execution_trace`.
+
+    `status` defaults to "halted" if `state.final_status` is set,
+    "completed" otherwise. Pass `status="errored"` explicitly for
+    exception-caught paths.
+    """
+    completed_at = _now_iso()
+    try:
+        delta = (
+            datetime.fromisoformat(completed_at)
+            - datetime.fromisoformat(entered_at)
+        )
+        duration_ms = max(0, int(delta.total_seconds() * 1000))
+    except (TypeError, ValueError):
+        duration_ms = None
+
+    if status is None:
+        status = "halted" if state.final_status is not None else "completed"
+
+    state.execution_trace.append(
+        ExecutedNode(
+            node=node,
+            entered_at=entered_at,
+            completed_at=completed_at,
+            duration_ms=duration_ms,
+            timestamp=entered_at,
+            status=status,  # type: ignore[arg-type]
+            decision=decision or {},
+            exit_verdict=exit_verdict,
+            policy_hits=policy_hits or [],
+            sub_spans=sub_spans or [],
+        )
+    )
 
 # Per-task backend cache. The router resolves to a different provider
 # per task ('intent' / 'recipe' / 'shadow') based on ASOE_LLM_PROVIDER
@@ -142,12 +211,18 @@ def _validate_event(state: GraphState) -> None:
 # ---------------------------------------------------------------------------
 
 def ingest(state: GraphState) -> GraphState:
+    entered_at = _now_iso()
     try:
         _validate_event(state)
     except NodeValidationError as exc:
         _node_logger.error("ingest_validation_failed: %s", exc)
         state.final_status = TerminalStatus.FAIL_TO_HUMAN
         state.explanation = f"Input validation failed: {exc}"
+        _record(
+            state, node="ingest", entered_at=entered_at,
+            decision={"validation_error": str(exc)},
+            status="errored",
+        )
         return state
 
     # Stamp a request-scoped trace ID before any node fans out — used
@@ -162,6 +237,13 @@ def ingest(state: GraphState) -> GraphState:
     state.batch_total_variance = abs(
         (state.event.po_price - state.event.sap_base_price) * state.event.line_count
     )
+    _record(
+        state, node="ingest", entered_at=entered_at,
+        decision={
+            "order_id": state.event.order_id,
+            "request_trace_id": state.request_trace_id,
+        },
+    )
     return state
 
 
@@ -170,6 +252,7 @@ def ingest(state: GraphState) -> GraphState:
 # ---------------------------------------------------------------------------
 
 def classify(state: GraphState) -> GraphState:
+    entered_at = _now_iso()
     state.discrepancy = compute_discrepancy(state.event.po_price, state.event.sap_base_price)
     backend = _backend(task="intent")
     decision = backend.classify_intent(state)
@@ -224,6 +307,17 @@ def classify(state: GraphState) -> GraphState:
                     "order_id": state.event.order_id,
                 },
             )
+            _record(
+                state, node="classify", entered_at=entered_at,
+                decision={
+                    "intent": state.intent.value,
+                    "confidence": state.confidence,
+                    "llm_intent": check.llm_intent,
+                    "deterministic_intent": check.deterministic_intent,
+                    "cross_check_reason": check.reason,
+                },
+                exit_verdict="cross_check_disagreement",
+            )
             return state
     else:
         # Deterministic-only path — no LLM trace to drain, but the
@@ -232,6 +326,14 @@ def classify(state: GraphState) -> GraphState:
 
     state.intent = Intent(decision.intent)
     state.confidence = decision.confidence
+    _record(
+        state, node="classify", entered_at=entered_at,
+        decision={
+            "intent": state.intent.value,
+            "confidence": state.confidence,
+        },
+        exit_verdict="ok",
+    )
     return state
 
 
@@ -240,10 +342,15 @@ def classify(state: GraphState) -> GraphState:
 # ---------------------------------------------------------------------------
 
 def load_skill(state: GraphState) -> GraphState:
+    entered_at = _now_iso()
     loader = SkillLoader("skills")
     state.skill = loader.select_for_event(
         state.event.event_type,
         metadata=state.event.metadata,
+    )
+    _record(
+        state, node="load_skill", entered_at=entered_at,
+        decision={"skill_name": state.skill.name if state.skill else None},
     )
     return state
 
@@ -253,6 +360,7 @@ def load_skill(state: GraphState) -> GraphState:
 # ---------------------------------------------------------------------------
 
 def validate_circuit_breaker(state: GraphState) -> GraphState:
+    entered_at = _now_iso()
     decision = circuit_breaker(
         update_count=state.update_count,
         batch_total_variance=state.batch_total_variance,
@@ -260,6 +368,24 @@ def validate_circuit_breaker(state: GraphState) -> GraphState:
     if not decision.allowed:
         state.final_status = TerminalStatus.FAIL_TO_HUMAN
         state.explanation = "; ".join(decision.reasons)
+        _record(
+            state, node="validate_circuit_breaker", entered_at=entered_at,
+            decision={
+                "update_count": state.update_count,
+                "batch_total_variance": state.batch_total_variance,
+                "reasons": decision.reasons,
+            },
+            exit_verdict="breach",
+        )
+        return state
+    _record(
+        state, node="validate_circuit_breaker", entered_at=entered_at,
+        decision={
+            "update_count": state.update_count,
+            "batch_total_variance": state.batch_total_variance,
+        },
+        exit_verdict="ok",
+    )
     return state
 
 
@@ -268,6 +394,7 @@ def validate_circuit_breaker(state: GraphState) -> GraphState:
 # ---------------------------------------------------------------------------
 
 def shadow_audit(state: GraphState) -> GraphState:
+    entered_at = _now_iso()
     # Per-task backend selection: shadow defaults to deterministic in
     # V1 PR-1 (compliance integrity) and can be flipped per-tenant
     # via ASOE_LLM_PROVIDER_SHADOW only after compliance sign-off.
@@ -283,10 +410,39 @@ def shadow_audit(state: GraphState) -> GraphState:
     if enforcement.action == "BLOCK":
         state.final_status = TerminalStatus.BLOCKED
         state.explanation = enforcement.explanation
-    elif enforcement.action == "ESCALATE":
+        _record(
+            state, node="shadow_audit", entered_at=entered_at,
+            decision={
+                "shadow_status": state.shadow.status.value,
+                "trace_id": state.shadow.trace_id,
+            },
+            exit_verdict="red",
+            policy_hits=list(state.shadow.policy_hits or []),
+        )
+        return state
+    if enforcement.action == "ESCALATE":
         state.final_status = TerminalStatus.MANUAL_REVIEW_REQUIRED
         state.explanation = enforcement.explanation
+        _record(
+            state, node="shadow_audit", entered_at=entered_at,
+            decision={
+                "shadow_status": state.shadow.status.value,
+                "trace_id": state.shadow.trace_id,
+            },
+            exit_verdict="yellow",
+            policy_hits=list(state.shadow.policy_hits or []),
+        )
+        return state
     # PROCEED: leave final_status unset so routing continues
+    _record(
+        state, node="shadow_audit", entered_at=entered_at,
+        decision={
+            "shadow_status": state.shadow.status.value,
+            "trace_id": state.shadow.trace_id,
+        },
+        exit_verdict="green",
+        policy_hits=list(state.shadow.policy_hits or []),
+    )
     return state
 
 
@@ -295,6 +451,7 @@ def shadow_audit(state: GraphState) -> GraphState:
 # ---------------------------------------------------------------------------
 
 def select_recipe(state: GraphState) -> GraphState:
+    entered_at = _now_iso()
     backend = _backend(task="recipe")
     proposal = backend.propose_recipe(state)
     _drain_llm_trace(state, backend)
@@ -309,9 +466,19 @@ def select_recipe(state: GraphState) -> GraphState:
         # recipe-less intents — required by the 2026-04-22 reorder
         # which moved shadow_audit after select_recipe.
         state.explanation = "No deterministic recipe available for this intent."
+        _record(
+            state, node="select_recipe", entered_at=entered_at,
+            decision={"recipe_name": None},
+            exit_verdict="no_recipe",
+        )
         return state
 
     state.selected_recipe = proposal.recipe_name
+    _record(
+        state, node="select_recipe", entered_at=entered_at,
+        decision={"recipe_name": state.selected_recipe},
+        exit_verdict="ok",
+    )
     return state
 
 
@@ -320,6 +487,7 @@ def select_recipe(state: GraphState) -> GraphState:
 # ---------------------------------------------------------------------------
 
 def validate_types(state: GraphState) -> GraphState:
+    entered_at = _now_iso()
     if state.selected_recipe == "PriceAdjustmentRecipe.py":
         state.invocation = RecipeInvocation(
             recipe_name=state.selected_recipe,
@@ -380,6 +548,15 @@ def validate_types(state: GraphState) -> GraphState:
                 f"PriceHoldReleaseRecipe requires sap_base_price > 0; "
                 f"got {state.event.sap_base_price!r}. Order cannot be "
                 f"classified deterministically; routing to human review."
+            )
+            _record(
+                state, node="validate_types", entered_at=entered_at,
+                decision={
+                    "recipe": state.selected_recipe,
+                    "guard": "sap_base_price_non_positive",
+                    "sap_base_price": state.event.sap_base_price,
+                },
+                exit_verdict="invocation_fail",
             )
             return state
         # Optional per-event tolerance override via metadata.tolerance_pct.
@@ -501,6 +678,23 @@ def validate_types(state: GraphState) -> GraphState:
             f"{state.selected_recipe!r}; refusing to execute an unvalidated "
             f"invocation."
         )
+        _record(
+            state, node="validate_types", entered_at=entered_at,
+            decision={"recipe": state.selected_recipe, "guard": "no_branch"},
+            exit_verdict="invocation_fail",
+        )
+        return state
+    _record(
+        state, node="validate_types", entered_at=entered_at,
+        decision={
+            "recipe": state.selected_recipe,
+            "param_keys": (
+                sorted(state.invocation.params.keys())
+                if state.invocation else []
+            ),
+        },
+        exit_verdict="ok",
+    )
     return state
 
 
@@ -520,6 +714,7 @@ def explain_only(state: GraphState) -> GraphState:
     The Compliance Shadow and circuit breaker both run before this node, so
     the explanation includes the real shadow verdict.
     """
+    entered_at = _now_iso()
     intent_val = state.intent.value if state.intent else None
     shadow_verdict = None
     policy_hits: list = []
@@ -539,6 +734,14 @@ def explain_only(state: GraphState) -> GraphState:
         invocation_params=invocation_params,
     )
     state.final_status = TerminalStatus.MANUAL_REVIEW_REQUIRED
+    _record(
+        state, node="explain_only", entered_at=entered_at,
+        decision={
+            "intent": intent_val,
+            "shadow_verdict": shadow_verdict,
+            "selected_recipe": state.selected_recipe,
+        },
+    )
     return state
 
 
@@ -562,11 +765,22 @@ def resolve_dependencies(state: GraphState) -> GraphState:
     If any dependency fails, halt with FAIL_TO_HUMAN.
     If the recipe has no dependencies, this is a no-op.
     """
+    entered_at = _now_iso()
     if state.selected_recipe is None:
+        _record(
+            state, node="resolve_dependencies", entered_at=entered_at,
+            decision={"recipe": None, "gateway_count": 0},
+            exit_verdict="ok",
+        )
         return state
 
     spec = get_recipe(state.selected_recipe)
     if not spec.dependencies:
+        _record(
+            state, node="resolve_dependencies", entered_at=entered_at,
+            decision={"recipe": state.selected_recipe, "gateway_count": 0},
+            exit_verdict="ok",
+        )
         return state
 
     executor = GatewayExecutor()
@@ -598,14 +812,41 @@ def resolve_dependencies(state: GraphState) -> GraphState:
             trace_id=trace_id,
         )))
 
+    sub_spans: list[GatewayCallSpan] = []
+    # Track per-gateway start time keyed by future so we can compute
+    # per-call duration even when futures complete out of submission
+    # order.
+    gateway_started_at: dict[concurrent.futures.Future, str] = {}
+
     # Resolve independent dependencies concurrently.
-    future_to_dep = {
-        executor._pool.submit(executor.run, req): dep
-        for dep, req in requests
-    }
+    future_to_dep = {}
+    for dep, req in requests:
+        future = executor._pool.submit(executor.run, req)
+        future_to_dep[future] = dep
+        gateway_started_at[future] = _now_iso()
     for future in concurrent.futures.as_completed(future_to_dep):
         dep = future_to_dep[future]
         response = future.result()
+        finished_at = _now_iso()
+        started_at = gateway_started_at[future]
+        try:
+            duration_ms = max(0, int(
+                (datetime.fromisoformat(finished_at)
+                 - datetime.fromisoformat(started_at)).total_seconds() * 1000
+            ))
+        except (TypeError, ValueError):
+            duration_ms = None
+
+        sub_spans.append(GatewayCallSpan(
+            gateway=f"{dep.gateway_name}/{dep.operation}",
+            started_at=started_at,
+            finished_at=finished_at,
+            duration_ms=duration_ms,
+            status=(
+                "ok" if response.status == "SUCCESS"
+                else ("timeout" if response.status == "TIMEOUT" else "error")
+            ),
+        ))
 
         if response.status != "SUCCESS":
             if dep.required_for_audit:
@@ -616,6 +857,18 @@ def resolve_dependencies(state: GraphState) -> GraphState:
                     f"Gateway dependency failed: "
                     f"{dep.gateway_name}/{dep.operation}"
                     f" — {response.error or response.status}"
+                )
+                _record(
+                    state, node="resolve_dependencies", entered_at=entered_at,
+                    decision={
+                        "recipe": state.selected_recipe,
+                        "gateway_count": len(spec.dependencies),
+                        "failed_gateway": (
+                            f"{dep.gateway_name}/{dep.operation}"
+                        ),
+                    },
+                    exit_verdict="required_gw_fail",
+                    sub_spans=sub_spans,
                 )
                 return state
             # Soft-fail: write an empty bag and continue. The
@@ -637,6 +890,15 @@ def resolve_dependencies(state: GraphState) -> GraphState:
 
         state.enrichment_context[dep.result_key] = response.data
 
+    _record(
+        state, node="resolve_dependencies", entered_at=entered_at,
+        decision={
+            "recipe": state.selected_recipe,
+            "gateway_count": len(spec.dependencies),
+        },
+        exit_verdict="ok",
+        sub_spans=sub_spans,
+    )
     return state
 
 
@@ -645,6 +907,7 @@ def resolve_dependencies(state: GraphState) -> GraphState:
 # ---------------------------------------------------------------------------
 
 def execute_recipe(state: GraphState) -> GraphState:
+    entered_at = _now_iso()
     # Explicit guard — assert is disabled in optimized Python (-O flag).
     if state.invocation is None:
         state.final_status = TerminalStatus.FAIL_TO_HUMAN
@@ -656,6 +919,10 @@ def execute_recipe(state: GraphState) -> GraphState:
                 "No recipe invocation available; "
                 "validate_types may have found no recipe."
             )
+        _record(
+            state, node="execute_recipe", entered_at=entered_at,
+            decision={"recipe": None, "guard": "no_invocation"},
+        )
         return state
 
     # Delegate execution to RecipeExecutor (Phase 3).
@@ -687,6 +954,13 @@ def execute_recipe(state: GraphState) -> GraphState:
     if log.errors:
         state.final_status = TerminalStatus.FAIL_TO_HUMAN
         state.explanation = "; ".join(log.errors)
+        _record(
+            state, node="execute_recipe", entered_at=entered_at,
+            decision={
+                "recipe": state.invocation.recipe_name,
+                "errors": list(log.errors),
+            },
+        )
         return state
 
     recipe_status = log.outputs.get("status")
@@ -716,6 +990,17 @@ def execute_recipe(state: GraphState) -> GraphState:
         state.final_status = TerminalStatus.COMPLETE
         state.explanation = "Deterministic execution completed successfully."
 
+    _record(
+        state, node="execute_recipe", entered_at=entered_at,
+        decision={
+            "recipe": state.invocation.recipe_name,
+            "recipe_status": recipe_status,
+            "autonomy_level": autonomy,
+            "final_status": (
+                state.final_status.value if state.final_status else None
+            ),
+        },
+    )
     return state
 
 
@@ -738,11 +1023,20 @@ def apply_effects(state: GraphState) -> GraphState:
 
     If the recipe has no effects, this is a no-op.
     """
+    entered_at = _now_iso()
     if state.selected_recipe is None or state.execution_log is None:
+        _record(
+            state, node="apply_effects", entered_at=entered_at,
+            decision={"recipe": state.selected_recipe, "effect_count": 0},
+        )
         return state
 
     spec = get_recipe(state.selected_recipe)
     if not spec.effects:
+        _record(
+            state, node="apply_effects", entered_at=entered_at,
+            decision={"recipe": state.selected_recipe, "effect_count": 0},
+        )
         return state
 
     executor = GatewayExecutor()
@@ -775,6 +1069,16 @@ def apply_effects(state: GraphState) -> GraphState:
                 f"Recipe completed but side effect requires manual follow-up."
             )
 
+    _record(
+        state, node="apply_effects", entered_at=entered_at,
+        decision={
+            "recipe": state.selected_recipe,
+            "effect_count": len(state.effect_results),
+            "effects_ok": sum(
+                1 for r in state.effect_results if r.status == "SUCCESS"
+            ),
+        },
+    )
     return state
 
 
@@ -802,10 +1106,18 @@ def apply_effects(state: GraphState) -> GraphState:
 
 
 def build_analysis(state: GraphState) -> GraphState:
+    entered_at = _now_iso()
     # Defensive re-entry guard: if a prior node already set
     # AUDIT_CONTEXT_MISSING, leave it alone. Don't double-append
     # missing-field lists.
     if state.final_status == TerminalStatus.AUDIT_CONTEXT_MISSING:
+        _record(
+            state, node="build_analysis", entered_at=entered_at,
+            decision={
+                "final_status": state.final_status.value,
+                "guard": "audit_context_missing_re_entry",
+            },
+        )
         return state
     # FAIL_TO_HUMAN is the system's "this exception needs human
     # investigation outside the normal flow" terminal — typically
@@ -815,6 +1127,13 @@ def build_analysis(state: GraphState) -> GraphState:
     # operator review surface; preserve FAIL_TO_HUMAN so circuit
     # breaker / validation failures stay debuggable.
     if state.final_status == TerminalStatus.FAIL_TO_HUMAN:
+        _record(
+            state, node="build_analysis", entered_at=entered_at,
+            decision={
+                "final_status": state.final_status.value,
+                "guard": "fail_to_human_skip",
+            },
+        )
         return state
 
     # Lazy import — keeps orchestration independent of the API layer
@@ -824,6 +1143,15 @@ def build_analysis(state: GraphState) -> GraphState:
     composed = compose_from_state(state)
 
     if not composed.should_route_to_audit_context_missing:
+        _record(
+            state, node="build_analysis", entered_at=entered_at,
+            decision={
+                "final_status": (
+                    state.final_status.value if state.final_status else None
+                ),
+                "audit_coverage": "complete",
+            },
+        )
         return state
 
     missing_list = ", ".join(composed.missing_audit_fields)
@@ -837,4 +1165,13 @@ def build_analysis(state: GraphState) -> GraphState:
     )
     state.final_status = TerminalStatus.AUDIT_CONTEXT_MISSING
     state.explanation = f"{preamble}\n\n{suffix}" if preamble else suffix
+    _record(
+        state, node="build_analysis", entered_at=entered_at,
+        decision={
+            "final_status": state.final_status.value,
+            "audit_coverage": "incomplete",
+            "missing_class": composed.class_name,
+            "missing_fields": list(composed.missing_audit_fields),
+        },
+    )
     return state

@@ -238,6 +238,12 @@ def _persist_exception(
         "explanation": state.explanation,
         "audit_context_missing_class": audit_missing_class,
         "audit_context_missing_fields": audit_missing_fields,
+        # ADR-027 Phase B — per-node executed-trace evidence. Persisted
+        # so the UI's EventsTimeline + PipelineDAG can reconstruct the
+        # path the record took. Empty list when state.execution_trace
+        # was not populated (e.g. an explain-mode dry-run with a
+        # custom invocation that bypasses run_graph).
+        "executed_nodes": [n.model_dump(mode="json") for n in state.execution_trace],
     }
     exception_store.store_trace(record.id, trace_data)
     return record.id
@@ -250,8 +256,30 @@ def _publish_task_complete(
     state: GraphState,
     task_id: Optional[str] = None,
 ) -> None:
-    """Publish a task_complete event to the pub/sub channel (§10)."""
+    """Publish a task_complete event to the pub/sub channel (§10).
+
+    ADR-027 Phase B also emits a single batched pipeline_progress event
+    carrying the full executed_nodes list — one per record state change,
+    not one per node completion (rev. 2 §"WebSocket batching").
+    """
     final = state.final_status.value if state.final_status else "UNKNOWN"
+
+    # ADR-027 Phase B emits pipeline_progress FIRST so subscribed UIs
+    # can reconcile the executed-path snapshot before task_complete
+    # flips the lifecycle. Single batched event per record state
+    # change (rev. 2 §"WebSocket batching") rather than 11x per-node
+    # events that would amplify pressure on the WS path.
+    progress = WSEvent.pipeline_progress(
+        trace_id=trace_id,
+        exception_id=exception_id,
+        tenant_id=tenant_id,
+        executed_nodes=[
+            n.model_dump(mode="json") for n in state.execution_trace
+        ],
+        final_status=final,
+    )
+    event_publisher.publish(tenant_id, progress)
+
     event = WSEvent.task_complete(
         trace_id=trace_id,
         exception_id=exception_id,
@@ -1190,6 +1218,15 @@ async def reanalyze_exception(
         ),
     )
 
+    # ADR-027 Phase B — capture the prior attempt's executed_nodes
+    # BEFORE store_trace overwrites trace_data. Without this, the path
+    # the prior attempt took is destroyed; the SOX surface cannot
+    # accept that audit-evidence loss. The captured list lands on
+    # prior_entry["executed_nodes"] so reanalysis_history preserves
+    # full per-node evidence per attempt.
+    prior_trace_data = exception_store.get_trace(exception_id) or {}
+    prior_executed_nodes = list(prior_trace_data.get("executed_nodes") or [])
+
     state = GraphState(event=event)
     try:
         final_state = _run_graph_safe(state)
@@ -1217,6 +1254,8 @@ async def reanalyze_exception(
     )
 
     # Capture the prior outcome before mutating so the audit trail is exact.
+    # ADR-027 Phase B: include the prior attempt's executed_nodes so the
+    # path-evidence is preserved when the new trace overwrites trace_data.
     prior_entry = {
         "attempt": attempts_so_far + 1,
         "triggered_at": datetime.now(timezone.utc).isoformat(),
@@ -1230,6 +1269,7 @@ async def reanalyze_exception(
         "new_shadow_verdict": new_verdict,
         "new_final_status": new_final_status,
         "new_lifecycle_state": new_lifecycle,
+        "executed_nodes": prior_executed_nodes,
     }
 
     # Persist the new trace data, then update the record fields, then
@@ -1255,6 +1295,13 @@ async def reanalyze_exception(
         "is_fallback_generated": True,
         "final_status": new_final_status,
         "explanation": final_state.explanation,
+        # ADR-027 Phase B — fresh executed_nodes for this attempt. The
+        # prior attempt's list is captured on the corresponding
+        # ReanalysisHistoryEntry above, so reanalysis preserves
+        # per-node audit evidence across attempts.
+        "executed_nodes": [
+            n.model_dump(mode="json") for n in final_state.execution_trace
+        ],
     }
     exception_store.store_trace(exception_id, trace_data)
 

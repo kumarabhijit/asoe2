@@ -1178,6 +1178,145 @@
         "title": "ExceptionSummary",
         "type": "object"
       },
+      "ExecutedNode": {
+        "additionalProperties": false,
+        "description": "Per-node execution evidence (Phase B).\n\nAppended by every orchestration node to `state.execution_trace`.\nPersisted by `build_analysis` into `trace_data[\"executed_nodes\"]`\nand surfaced on `TraceResponse.executed_nodes` for the UI's\nEventsTimeline + PipelineDAG.\n\nReanalysis: each invoke produces a fresh list; reanalysis preserves\nprior attempts on `ReanalysisHistoryEntry.executed_nodes` rather\nthan overwriting trace_data \u2014 the SOX surface cannot accept the\naudit-evidence loss.\n\nField semantics:\n  - `node`           \u2014 canonical orchestration node name\n  - `entered_at`     \u2014 ISO-8601, node start\n  - `completed_at`   \u2014 ISO-8601, node end (None if errored)\n  - `duration_ms`    \u2014 wall-clock; for resolve_dependencies the\n                        fan-out span \u2014 sub_spans hold per-gateway\n  - `timestamp`      \u2014 convenience top-level (matches existing trace\n                        style) \u2014 always equals `entered_at`\n  - `status`         \u2014 completed / halted / errored\n  - `decision`       \u2014 node-specific payload: intent+confidence on\n                        classify, recipe on select_recipe, verdict\n                        on shadow_audit, etc.\n  - `exit_verdict`   \u2014 the verdict label that drove the next route\n                        (`green` | `red` | `yellow` | `breach` |\n                         `cross_check_disagreement` | `ok` | \u2026)\n                        None for nodes whose exit isn't a\n                        conditional gate (e.g. ingest, load_skill).\n  - `policy_hits`    \u2014 populated on shadow_audit; [] elsewhere\n  - `sub_spans`      \u2014 populated on resolve_dependencies; [] elsewhere",
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "decision": {
+            "additionalProperties": true,
+            "title": "Decision",
+            "type": "object"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "entered_at": {
+            "title": "Entered At",
+            "type": "string"
+          },
+          "exit_verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Verdict"
+          },
+          "node": {
+            "title": "Node",
+            "type": "string"
+          },
+          "policy_hits": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Policy Hits",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "completed",
+              "halted",
+              "errored"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "sub_spans": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayCallSpan"
+            },
+            "title": "Sub Spans",
+            "type": "array"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node",
+          "entered_at",
+          "timestamp",
+          "status"
+        ],
+        "title": "ExecutedNode",
+        "type": "object"
+      },
+      "GatewayCallSpan": {
+        "additionalProperties": false,
+        "description": "Per-gateway sub-span emitted by `resolve_dependencies` (Phase B).\n\n`resolve_dependencies` fans gateway calls out via concurrent.futures.\nThe single `ExecutedNode.duration_ms` is the wall-clock fan-out span;\nper-gateway timing lives here so the timeline can render a nested\nexpand without the DAG view having to render N sub-nodes (which would\ndiverge from the orchestration topology \u2014 the DAG renders ONE node,\nnot N).",
+        "properties": {
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "gateway": {
+            "title": "Gateway",
+            "type": "string"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "error",
+              "timeout"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "gateway",
+          "started_at",
+          "status"
+        ],
+        "title": "GatewayCallSpan",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2963,6 +3102,13 @@
           "event_id": {
             "title": "Event Id",
             "type": "string"
+          },
+          "executed_nodes": {
+            "items": {
+              "$ref": "#/components/schemas/ExecutedNode"
+            },
+            "title": "Executed Nodes",
+            "type": "array"
           },
           "explanation": {
             "anyOf": [

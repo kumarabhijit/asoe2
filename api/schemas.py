@@ -9,7 +9,13 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from contracts.models import OrderEvent
+from contracts.models import ExecutedNode, GatewayCallSpan, OrderEvent
+
+# Re-exported so OpenAPI consumers see ExecutedNode / GatewayCallSpan
+# under api.schemas. The domain definitions live in contracts/models.py
+# (orchestration appends to state.execution_trace and must not import
+# api/).
+__all__ = ["ExecutedNode", "GatewayCallSpan"]
 
 
 # ---------------------------------------------------------------------------
@@ -317,6 +323,14 @@ class TraceResponse(BaseModel):
     compliance/audit_bearing_registry.yaml that could not be
     populated for this record. Empty = coverage OK."""
 
+    # ADR-027 Phase B — per-node executed-trace evidence.
+    executed_nodes: List[ExecutedNode] = Field(default_factory=list)
+    """Ordered list of nodes that ran for this trace, with timing,
+    decision payload, and exit verdict. Sourced from
+    `state.execution_trace` and persisted into
+    `trace_data["executed_nodes"]`. Empty for traces written before
+    Phase B's instrumentation landed."""
+
 
 class StatsResponse(BaseModel):
     """GET /api/v1/exceptions/stats — dashboard metrics."""
@@ -391,66 +405,6 @@ class PipelineTopology(BaseModel):
     topology_hash: str
     nodes: List[PipelineTopologyNode]
     edges: List[PipelineTopologyEdge]
-
-
-class GatewayCallSpan(BaseModel):
-    """Per-gateway sub-span emitted by `resolve_dependencies` (Phase B).
-
-    `resolve_dependencies` fans gateway calls out via concurrent.futures.
-    The single `ExecutedNode.duration_ms` is the wall-clock fan-out span;
-    per-gateway timing lives here so the timeline can render a nested
-    expand without the DAG view having to render N sub-nodes.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    gateway: str
-    started_at: str  # ISO-8601; matches `entered_at` on ExecutedNode
-    finished_at: Optional[str] = None
-    duration_ms: Optional[int] = None
-    status: Literal["ok", "error", "timeout"]
-
-
-class ExecutedNode(BaseModel):
-    """Per-node execution evidence appended to `state.execution_trace` (Phase B).
-
-    Persisted into `trace_data["executed_nodes"]` and surfaced on the
-    `TraceResponse` for the UI's EventsTimeline + PipelineDAG. For
-    reanalysis, the same shape lands on every
-    `ReanalysisHistoryEntry.executed_nodes` so prior paths' audit
-    evidence is preserved.
-
-    Field semantics:
-      - `node`           — canonical orchestration node name
-      - `entered_at`     — node start (ISO-8601)
-      - `completed_at`   — node end (None if errored mid-flight)
-      - `duration_ms`    — wall-clock; for resolve_dependencies this is
-                            the fan-out span, sub_spans hold per-gateway
-      - `timestamp`      — convenience top-level for trace-style consistency
-                            (always equals `entered_at`)
-      - `status`         — completed / halted / errored
-      - `decision`       — node-specific payload (intent + confidence
-                            on classify, recipe on select_recipe, etc.)
-      - `exit_verdict`   — the verdict label that drove the next route
-                            (`green` | `red` | `yellow` | `breach` |
-                             `cross_check_disagreement` | …); None for
-                             nodes whose exit isn't a conditional gate
-      - `policy_hits`    — populated on shadow_audit; [] elsewhere
-      - `sub_spans`      — populated on resolve_dependencies; [] elsewhere
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    node: str
-    entered_at: str
-    completed_at: Optional[str] = None
-    duration_ms: Optional[int] = None
-    timestamp: str
-    status: Literal["completed", "halted", "errored"]
-    decision: Dict[str, Any] = Field(default_factory=dict)
-    exit_verdict: Optional[str] = None
-    policy_hits: List[str] = Field(default_factory=list)
-    sub_spans: List[GatewayCallSpan] = Field(default_factory=list)
 
 
 class ReanalysisHistoryEntry(BaseModel):
