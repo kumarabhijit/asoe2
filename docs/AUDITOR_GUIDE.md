@@ -48,6 +48,36 @@ for human-facing explanations.
 Any value outside the allowed set causes a `ValidationError` before the state
 machine advances.  The system routes to `FAIL_TO_HUMAN`.
 
+#### Confidence — the real classifier value, not a synthesised default
+
+`AnalysisResponse.confidence` (the 0-100 integer surfaced on the
+operator's Agent Recommendation card and on `GET /api/v1/exceptions/{id}/analysis`)
+is the **real** classifier output, not a fabricated mid-range default.
+
+* **Source:** the active backend's `IntentDecision.confidence` (a 0.0-1.0
+  float; `DeterministicFallbackBackend` produces 0.80-0.95 by intent;
+  remote LLMs produce whatever the model returns).
+* **Persistence:** `state.confidence` is written to `trace_data["intent_confidence"]`
+  at every `/resolve` and `/reanalyze` write site
+  (`api/routes/exceptions.py` ~L229 and ~L1245).
+* **Read:** `GET /api/v1/exceptions/{id}/analysis` scales the persisted
+  float to a 0-100 int, clamped via `max(0, min(100, ...))`. A missing,
+  zero, or negative value returns 0 — never a fabricated mid-range
+  default.
+* **Cross-check:** when LLM and deterministic classifiers disagree, the
+  graph forces `final_status = MANUAL_REVIEW_REQUIRED` and
+  `state.confidence = check.winning_decision.confidence` (the
+  deterministic decision, per `constraints/cross_check.py`). The audit
+  trail records both intents on the `LLMCallTrace` so the disagreement
+  is reconstructible.
+
+This is a Verdict 2026-04-22 / Guardrail #6 commitment: the operator
+must be able to distinguish a real classifier output from a synthesised
+default. The legacy `confidence = 80 if intent_selected else 0`
+hardcode (the source of the deployed-system "every record at 80%"
+appearance) is removed; its regression is locked by the four tests in
+`tests/test_analysis_confidence_persistence.py`.
+
 ### 2.2 Compliance Shadow Verdict
 
 | Property | Value |
@@ -601,6 +631,8 @@ exclusively in recipes and skill documents.
 | `ASOE_EXPLAIN_MODE` | `0` | `1` / `true` / `yes` → dry-run only, no recipe execution |
 | `ASOE_ENV` | `sandbox` | `sandbox` or `production` — JWT `env` claim must match (mismatch → 403) |
 | `ASOE_JWT_SECRET` | _(dev fallback)_ | JWT signing secret — **required for production** |
+| `ASOE_ACCESS_TOKEN_TTL_SECONDS` | sandbox `86400` (24h) / production `3600` (60min) | Access-token lifetime. Empty / malformed / zero / negative values fall back to the per-`ASOE_ENV` default (`api/deps.py::_resolve_token_ttls`). Bicep param `accessTokenTtlSeconds`. |
+| `ASOE_REFRESH_TOKEN_TTL_SECONDS` | sandbox `2592000` (30d) / production `604800` (7d) | Refresh-token lifetime. Same defensive resolution as access TTL. Bicep param `refreshTokenTtlSeconds`. |
 | `DATABASE_URL` | _(unset)_ | PostgreSQL connection; when set, API uses database-backed persistence |
 | `USE_OUTLINES_BACKEND` | `0` | `1` → use `OutlinesConstrainedBackend` (requires `outlines` package) |
 
