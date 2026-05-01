@@ -41,7 +41,7 @@ Phase sequence and build prompts:
   22  — UI Intent Parity (BACK_ORDER / OVER_MAX / MIN_ORDER_QTY / PALLET_CONFIG / DELIVERY_DELAY) → see tasks.md PHASE 22
   23  — Verdict three-pillar architecture              → see tasks.md PHASE 23
   24  — Verdict Full-Close (retire all grandfather clauses + ADR-025 graph reorder) → prompts/phase_24_verdict_full_close.md
-  25  — Provider-agnostic remote-LLM tier + LLM/deterministic cross-check + LLMProvenance audit registry → see tasks.md PHASE 25 (no retroactive prompt; tasks.md is the record per the asoe-ui pattern note)
+  25  — Provider-agnostic remote-LLM tier + LLM/deterministic cross-check + LLMProvenance audit registry → prompts/phase_25_llm_support.md
   26  — Post-deploy fixes + operational hardening (env-driven JWT TTLs, real classifier confidence persistence, V005 drop intent CHECK constraint, ADR-026/027 drafts) → prompts/phase_26_post_deploy_fixes.md
 ```
 
