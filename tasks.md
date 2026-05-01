@@ -1509,3 +1509,92 @@ egress block + audit registry + cross-check + budget cap +
 circuit breaker) is in place. Production rollout requires only
 the LLMProvenance compliance sign-off + the operator's per-tenant
 provider config.
+
+---
+
+## PHASE 26 — Post-deploy fixes + operational hardening (in flight)
+
+This phase tracks fixes and hardening that landed after
+architecture_v3.md was finalised. Items are shipped on
+`core_ui_integration` unless otherwise noted; v4 absorbs them.
+
+### 26.1 Env-driven JWT TTLs (operator-tunable)
+- [x] `_resolve_token_ttls()` pure function in `api/deps.py` —
+      env-driven access/refresh TTL resolution.
+      Defaults: sandbox 24h access / 30d refresh; production
+      60min access / 7d refresh. Read from
+      `ASOE_ACCESS_TOKEN_TTL_SECONDS` and
+      `ASOE_REFRESH_TOKEN_TTL_SECONDS`.
+- [x] Defensive against empty / malformed / zero / negative
+      values — falls back to per-environment defaults rather than
+      crashing on bad operator input.
+- [x] `infra/main.bicep` — `accessTokenTtlSeconds` /
+      `refreshTokenTtlSeconds` params surfaced as `@secure()`
+      strings, wired as env vars on the API container. Operator-
+      friendly presets (15min / 1h / 24h) documented in the
+      bicep deployment guide.
+- [x] Tests cover the empty-string, malformed-int, zero, and
+      negative branches plus the env-driven happy path.
+✅ Outcome: JWT TTL is configurable without redeploy for sandbox
+shakeout vs production posture. (See ADR-021 §JWT for the
+deployment contract.)
+
+### 26.2 Confidence persistence + scaled read (Verdict 2026-04-22 / Guardrail #6)
+- [x] `api/routes/exceptions.py` resolve write site (~L229) —
+      persist `intent_confidence: state.confidence` (0.0-1.0
+      float) into `trace_data` alongside `intent_selected`.
+- [x] `api/routes/exceptions.py` reanalyze write site (~L1245)
+      — same persistence on the reanalysis path so reanalysed
+      records carry the new attempt's classifier confidence.
+- [x] `api/routes/exceptions.py` read path (~L1501) —
+      `AnalysisResponse.confidence` scales from the persisted
+      0.0-1.0 float to 0-100 int with `max(0, min(100, ...))`
+      clamp; missing / zero / negative values fall back to 0
+      (never a fabricated mid-range default).
+- [x] 4 new tests in `tests/test_analysis_confidence_persistence.py`
+      — fallback-classifier confidence (0.90 → 90 for
+      CONTRACTUAL_CORRECTION); no-trace records → 0 (was
+      fabricated 70); malformed string → 0; out-of-range 1.5 →
+      clamped to 100.
+✅ Outcome: AgentReasoningCard's confidence pill is the real
+classifier output, not a synthesised 80 sentinel. Closes the
+partial-truth state Compliance held veto over (Pillar 2 / Guardrail
+#6 in `compliance/audit_bearing_registry.yaml` parlance).
+
+### 26.3 V005 — drop intent CHECK constraint + UUID/datetime coercion
+- [x] `db/migrations/V005__drop_intent_check.sql` — drops the
+      `chk_exceptions_intent` CHECK constraint that pinned the
+      intent enum at the DB layer. Intent vocabulary now lives
+      exclusively in `contracts/models.py::Intent`; adding a
+      new intent value requires zero DB migration coordination.
+- [x] `db/repository.py` row-to-dict — UUID and datetime values
+      coerced to strings on read so JSON serialisation doesn't
+      crash on Postgres native types.
+✅ Outcome: New intents ship through `contracts/models.py` only.
+
+### 26.4 ADR drafts (Proposed; not yet shipped)
+- [x] **ADR-026** — Event-driven ingestion (Phase B) via Azure
+      Event Hubs + M365 email connector + bus consumer. Status:
+      Proposed. Phase B.2 documents per-node real WaterfallStepper
+      timings as deferred (orchestrator emission gap —
+      `WSEvent.pipeline_progress` factory exists but is uncalled).
+- [x] **ADR-027** — Pipeline visualization hybrid (trace-derived
+      EventsTimeline + compliance DAG). Status: Proposed (rev. 3
+      — reanalysis attempt-scoping added). Reviewer chain:
+      AI/LangGraph → Compliance → Tools Admin → Frontend Platform
+      → Compliance veto holder.
+✅ Outcome: Both ADRs route past the right reviewers before any
+code moves. Architecture v4 references them as "Proposed;
+absorption deferred to v4.1 when shipped."
+
+### 26.5 Tests
+Final suite: 1688 passed, 35 skipped (vs Phase 25 baseline 1592
+passed, 35 skipped). +96 net new tests across §26.1 / §26.2 /
+§26.3 plus an architectural lock test on the asoe-ui side asserting
+every `LIVE_METHODS` entry has its `if (USE_REAL_API)` branch.
+
+✅ Phase 26 outcome: post-deploy stabilisation. The deployed
+sandbox now serves real classifier confidence values,
+operator-tunable JWT TTLs, and a DB schema that no longer pins
+the intent enum at two places. Two architectural decisions
+(ADR-026/027) are queued for review board sign-off.
