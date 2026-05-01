@@ -1161,6 +1161,8 @@ k8s/                Kubernetes manifests for AKS production deployment
 | `ASOE_EXPLAIN_MODE` | `0` | `1` / `true` / `yes` — dry-run only; shadow audits but no recipe executes |
 | `ASOE_ENV` | `sandbox` | `sandbox` or `production` — JWT `env` claim must match (§11.6) |
 | `ASOE_JWT_SECRET` | _(dev fallback)_ | JWT signing secret — **required for production** (Key Vault-managed) |
+| `ASOE_ACCESS_TOKEN_TTL_SECONDS` | sandbox `86400` (24h) / production `3600` (60min) | Access-token lifetime. Resolved by `api/deps.py::_resolve_token_ttls`; empty / malformed / zero / negative values fall back to the per-`ASOE_ENV` default. Bicep param: `accessTokenTtlSeconds`. Operator-friendly presets: `900` (15min) / `3600` (1h) / `86400` (24h). |
+| `ASOE_REFRESH_TOKEN_TTL_SECONDS` | sandbox `2592000` (30d) / production `604800` (7d) | Refresh-token lifetime. Same defensive resolution as the access TTL. Bicep param: `refreshTokenTtlSeconds`. |
 | `DATABASE_URL` | _(unset)_ | PostgreSQL connection string; when set, API uses database-backed store |
 | `ASOE_TEST_POSTGRES_URL` | _(unset)_ | PostgreSQL connection string for integration tests; when unset, PostgreSQL tests are skipped |
 | `REDIS_URL` | _(unset)_ | Redis connection string for pub/sub, task queue, cache |
