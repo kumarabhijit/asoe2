@@ -1955,6 +1955,99 @@
         "title": "PalletSuggestion",
         "type": "object"
       },
+      "PipelineTopology": {
+        "description": "Response shape for GET /api/v1/pipeline/topology (Phase A).\n\n`topology_hash` is a stable SHA-256 over the canonical JSON of\n(nodes, edges); the UI caches by hash and revalidates on\n`useHealth` polling tick (ADR-027 Open Question \u00a71).",
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineTopologyEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineTopologyNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "topology_hash": {
+            "title": "Topology Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "topology_hash",
+          "nodes",
+          "edges"
+        ],
+        "title": "PipelineTopology",
+        "type": "object"
+      },
+      "PipelineTopologyEdge": {
+        "description": "A directed edge in the pipeline topology (Phase A).\n\n`verdict_label` is populated for every conditional edge \u2014 both the\nexplicit ones (registered in `_VERDICT_LABELS`) and the implicit\nclassify-time disagreement gate (registered in\n`_IMPLICIT_VERDICT_LABELS`). Unconditional edges carry\n`verdict_label=None`.\n\nA single compiled-graph conditional edge can produce multiple\nrows when one route key (e.g. `terminal`) corresponds to multiple\nverdicts (e.g. RED + YELLOW both terminate `shadow_audit`). The\nintrospection helper expands accordingly; the DAG renderer draws\neach as a distinct labelled edge.",
+        "properties": {
+          "conditional": {
+            "title": "Conditional",
+            "type": "boolean"
+          },
+          "from_node": {
+            "title": "From Node",
+            "type": "string"
+          },
+          "to_node": {
+            "title": "To Node",
+            "type": "string"
+          },
+          "verdict_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict Label"
+          }
+        },
+        "required": [
+          "from_node",
+          "to_node",
+          "conditional"
+        ],
+        "title": "PipelineTopologyEdge",
+        "type": "object"
+      },
+      "PipelineTopologyNode": {
+        "description": "A node in the pipeline topology (Phase A).",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "node",
+              "terminal"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "kind"
+        ],
+        "title": "PipelineTopologyNode",
+        "type": "object"
+      },
       "PolicyOverrideResponse": {
         "description": "Response for policy update.",
         "properties": {
@@ -4715,6 +4808,56 @@
         "summary": "Health",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/api/v1/pipeline/topology": {
+      "get": {
+        "description": "Return the live-graph topology + per-gate verdict labels.\n\nAuthentication required; no additional permission. ADR-027 \u00a7\n\"Backend changes\" #2: adding `dashboard:read` here would be\npermission theater (no per-tenant data to leak).",
+        "operationId": "get_topology_api_v1_pipeline_topology_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineTopology"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Topology",
+        "tags": [
+          "pipeline"
         ]
       }
     },
