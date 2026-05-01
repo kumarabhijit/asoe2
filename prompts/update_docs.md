@@ -1,7 +1,7 @@
 # Documentation Update Prompt
 
 ```text
-Read architecture_v3.md, DESIGN.md, CLAUDE.md, and tasks.md in full before making any changes.
+Read architecture_v4.md (current; v3 superseded 2026-05-01 — read v3 only for the foundational sections v4 explicitly defers to via "See architecture_v3.md §X.Y — unchanged" pointers), DESIGN.md, CLAUDE.md, and tasks.md in full before making any changes.
 
 Also read each document you are about to update so you understand its current state.
 

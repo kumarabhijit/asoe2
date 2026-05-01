@@ -7,7 +7,7 @@ distinct focus area, evaluation criteria, and grading scale.
 
 Before starting, read:
 - CLAUDE.md (architecture guardrails and engineering rules)
-- architecture_v3.md (system design and Skill-Shadow-Recipe architecture)
+- architecture_v4.md (system design and Skill-Shadow-Recipe architecture; current as of 2026-05-01 — supersedes v3, absorbs ADR-025 graph reorder + Verdict 2026-04-22 three-pillar governance + audit_bearing_registry mechanism). Read v3 only for foundational sections v4 explicitly defers to via "See architecture_v3.md §X.Y — unchanged" pointers.
 - DESIGN.md (implementation details: file names, class names, wiring)
 - tasks.md (implementation status and open items)
 - All source files under: contracts/, compliance/, constraints/, orchestration/,
