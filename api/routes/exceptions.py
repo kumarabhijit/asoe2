@@ -219,6 +219,14 @@ def _persist_exception(
         "event_id": state.event.order_id,
         "skill_name": state.skill.name if state.skill else None,
         "intent_selected": state.intent.value if state.intent else None,
+        # Persist the real classifier confidence (0.0-1.0 float). This is
+        # the value the IntentClassifier's backend produced — fallback
+        # backends produce 0.80–0.95 by intent; remote LLMs produce
+        # whatever the model returned. Without persisting it here the
+        # /analysis read path had no source for AnalysisResponse.confidence
+        # and resorted to a hardcoded 80, making every UI pill display
+        # 80% regardless of the LLM's actual output.
+        "intent_confidence": state.confidence,
         "shadow_verdict": state.shadow.status.value if state.shadow else None,
         "shadow_policy_hits": state.shadow.policy_hits if state.shadow else [],
         "recipe_name": state.selected_recipe,
@@ -1232,6 +1240,9 @@ async def reanalyze_exception(
         "event_id": final_state.event.order_id,
         "skill_name": final_state.skill.name if final_state.skill else None,
         "intent_selected": final_state.intent.value if final_state.intent else None,
+        # Persist the real classifier confidence on the reanalysis path
+        # too — same rationale as the /resolve write site.
+        "intent_confidence": final_state.confidence,
         "shadow_verdict": new_verdict,
         "shadow_policy_hits": final_state.shadow.policy_hits if final_state.shadow else [],
         "recipe_name": final_state.selected_recipe,
@@ -1479,7 +1490,19 @@ async def get_analysis(
         risk = "low" if trace_data.get("shadow_verdict") == "GREEN" else (
             "medium" if trace_data.get("shadow_verdict") == "YELLOW" else "high"
         )
-        confidence = 80 if trace_data.get("intent_selected") else 0
+        # Read the real classifier confidence persisted alongside
+        # intent_selected (see _store_trace at line ~217). The value is
+        # stored as a 0.0-1.0 float (IntentDecision.confidence); the
+        # AnalysisResponse contract is 0-100 int, so scale + clamp here.
+        # A missing/null confidence falls back to 0 — never a fabricated
+        # mid-range default. Verdict 2026-04-22 / Guardrail #6: do not
+        # surface synthetic values that the operator can't distinguish
+        # from real LLM output.
+        raw_conf = trace_data.get("intent_confidence")
+        if isinstance(raw_conf, (int, float)) and raw_conf > 0:
+            confidence = max(0, min(100, int(round(raw_conf * 100))))
+        else:
+            confidence = 0
         resolution = trace_data.get("final_status") or resolution
 
         # Extract per-line analysis if present
@@ -1498,7 +1521,10 @@ async def get_analysis(
         # Construct basic response from record fields
         if record.intent:
             diagnosis = f"Intent classified as {record.intent}"
-            confidence = 70
+            # No trace data → no real confidence available. Stay at 0
+            # rather than fabricating 70; the UI hides the bar when
+            # confidence is missing/zero.
+            confidence = 0
         if record.shadow_verdict:
             risk = "low" if record.shadow_verdict == "GREEN" else (
                 "medium" if record.shadow_verdict == "YELLOW" else "high"

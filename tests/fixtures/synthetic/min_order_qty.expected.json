@@ -1,0 +1,6 @@
+{
+  "intent": "MIN_ORDER_QTY",
+  "selected_recipe": "MOQRoundUpRecipe.py",
+  "allowed_shadow_verdicts": ["YELLOW"],
+  "allowed_final_statuses": ["MANUAL_REVIEW_REQUIRED"]
+}

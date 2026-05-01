@@ -1,0 +1,6 @@
+{
+  "intent": "EDI_MISMATCH",
+  "selected_recipe": "EdiMismatchRecipe.py",
+  "allowed_shadow_verdicts": ["GREEN", "YELLOW", "RED"],
+  "allowed_final_statuses": ["COMPLETE", "MANUAL_REVIEW_REQUIRED", "BLOCKED"]
+}

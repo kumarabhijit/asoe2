@@ -323,6 +323,22 @@ class ExceptionRepository:
         # have inserted via the in-memory bridge with no value).
         if r.get("enrichment_context") is None:
             r["enrichment_context"] = {}
+        # Postgres returns UUID columns as ``uuid.UUID`` objects and
+        # TIMESTAMPTZ columns as ``datetime`` objects. The downstream
+        # ExceptionSummary / ExceptionDetailResponse pydantic models
+        # declare these as ``str``, so unconverted values trigger
+        # ValidationError(type=string_type) and the API 500s on
+        # GET /api/v1/exceptions. SQLite returns plain strings already,
+        # so the isinstance guards are no-ops there.
+        for uuid_col in ("id", "trace_id"):
+            v = r.get(uuid_col)
+            if v is not None and not isinstance(v, str):
+                r[uuid_col] = str(v)
+        for ts_col in ("created_at", "updated_at"):
+            v = r.get(ts_col)
+            if v is not None and not isinstance(v, str):
+                # datetime → ISO 8601; anything else stringifies safely.
+                r[ts_col] = v.isoformat() if hasattr(v, "isoformat") else str(v)
         return r
 
 

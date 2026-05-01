@@ -1,0 +1,6 @@
+{
+  "intent": "CONTRACTUAL_CORRECTION",
+  "selected_recipe": "PriceAdjustmentRecipe.py",
+  "allowed_shadow_verdicts": ["GREEN", "YELLOW"],
+  "allowed_final_statuses": ["COMPLETE", "MANUAL_REVIEW_REQUIRED", "PENDING_COSIGN"]
+}

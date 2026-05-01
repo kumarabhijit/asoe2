@@ -162,6 +162,14 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
+# Bicep — compiled ARM JSON output of `az bicep build`. The bicep
+# template is the source of truth; the .json is regenerated on demand
+# and `az deployment group create --template-file *.bicep` compiles
+# in-memory anyway. Committing the .json would create drift / merge
+# conflicts every time main.bicep changes.
+infra/*.json
+!infra/parameters*.json
+
 # pytype static type analyzer
 .pytype/
 

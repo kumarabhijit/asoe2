@@ -1,0 +1,6 @@
+{
+  "intent": "DUPLICATE_PO",
+  "selected_recipe": "DuplicatePORecipe.py",
+  "allowed_shadow_verdicts": ["GREEN", "YELLOW", "RED"],
+  "allowed_final_statuses": ["COMPLETE", "MANUAL_REVIEW_REQUIRED", "BLOCKED"]
+}

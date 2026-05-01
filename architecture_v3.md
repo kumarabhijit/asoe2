@@ -1,5 +1,17 @@
 # Architecture Spec: CPG Agentic AI Exception Management System (V3 — Unified Core Specification)
 
+> **⚠ SUPERSEDED — 2026-05-01.** This document is superseded by
+> [`architecture_v4.md`](architecture_v4.md), which absorbs ADR-025
+> (gateway reads before shadow), the Verdict 2026-04-22 three-pillar
+> audit-evidence governance, the `compliance/audit_bearing_registry.yaml`
+> mechanism, V004 + V005 migrations, env-driven JWT TTLs, the
+> LLM/deterministic cross-check disagreement routing, and real
+> classifier confidence persistence. v3's foundational sections
+> (§1 base, §2, §3, §4 base, §7 base, §8 base, §9 base, §10)
+> remain authoritative prose unless v4 explicitly amends them — v4
+> carries explicit `See architecture_v3.md §X.Y — unchanged`
+> pointers for that case. Read v4 first.
+
 **Document Owner:** Principal AI Systems Architect
 **Domain:** Consumer Packaged Goods (CPG) Supply Chain (Order-to-Cash)
 **Scope:** V1.0 is strictly constrained to **Pricing & Promotional Exceptions**.

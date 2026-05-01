@@ -1,6 +1,6 @@
 # Full Project Sequence Prompt
 ```text
-Read architecture_v3.md, DESIGN.md, CLAUDE.md, the sample recipes, the sample skill, and tasks.md.
+Read architecture_v4.md (current; v3 superseded 2026-05-01 — read v3 only for foundational sections v4 defers to), DESIGN.md, CLAUDE.md, the sample recipes, the sample skill, and tasks.md.
 Work phase-by-phase only.
 For the current response:
 1. identify the exact phase being implemented
@@ -41,4 +41,28 @@ Phase sequence and build prompts:
   22  — UI Intent Parity (BACK_ORDER / OVER_MAX / MIN_ORDER_QTY / PALLET_CONFIG / DELIVERY_DELAY) → see tasks.md PHASE 22
   23  — Verdict three-pillar architecture              → see tasks.md PHASE 23
   24  — Verdict Full-Close (retire all grandfather clauses + ADR-025 graph reorder) → prompts/phase_24_verdict_full_close.md
+  25  — Provider-agnostic remote-LLM tier + LLM/deterministic cross-check + LLMProvenance audit registry → see tasks.md PHASE 25 (no retroactive prompt; tasks.md is the record per the asoe-ui pattern note)
+  26  — Post-deploy fixes + operational hardening (env-driven JWT TTLs, real classifier confidence persistence, V005 drop intent CHECK constraint, ADR-026/027 drafts) → prompts/phase_26_post_deploy_fixes.md
 ```
+
+## Architectural Decision Records
+
+ADRs document load-bearing architectural decisions that ripple
+across the codebase. Read them as a set when onboarding; they are
+the historical record of "why this shape" decisions.
+
+| # | ADR | Status |
+|---|---|---|
+| 021 | Core deployment model (Container Apps) | Ratified |
+| 022 | Database access pattern | Ratified |
+| 023 | Disposition + hash-chained audit | Ratified |
+| 024 | OM coverage expansion (PRICE_HOLD_RELEASE + EDI_MISMATCH) | Ratified |
+| 025 | Gateway reads moved before shadow_audit | Ratified — absorbed into architecture_v4.md §5 |
+| 026 | Event-driven ingestion via Azure Event Hubs (Phase B) | Proposed — not yet shipped |
+| 027 | Pipeline visualization hybrid (rev. 3 — reanalysis attempt-scoping) | Proposed — not yet shipped; reviewer chain AI/LangGraph → Compliance → Tools Admin → Frontend Platform → Compliance veto holder |
+
+## Future architecture revisions
+
+architecture_v4.md (2026-05-01) is the current synthesis. v4.1
+absorbs ADR-026 + ADR-027 once they ship + are ratified.
+Versioning discipline is documented in architecture_v4.md §14.
