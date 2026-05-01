@@ -37,9 +37,51 @@ def _get_jwt_secret() -> str:
 
 _ALGORITHM = "HS256"
 
-# Token lifetimes (architecture_v3.md §11.1)
-ACCESS_TOKEN_EXPIRE_SECONDS = 15 * 60       # 15 minutes
-REFRESH_TOKEN_EXPIRE_SECONDS = 7 * 24 * 3600  # 7 days
+
+# Token lifetimes (architecture_v3.md §11.1).
+#
+# Defaults are intentionally environment-aware rather than hardcoded:
+#   * sandbox      — 24h access, 30d refresh. Pre-prod demos and
+#                    Playwright smoke runs need a session that survives
+#                    a coffee break without the operator hitting a
+#                    silent 401 on every WebSocket-driven detail
+#                    refresh. The previous fixed 15-minute access token
+#                    caused ExceptionDetailPanel to render an empty
+#                    "Exception not found" state after exactly 15
+#                    minutes of inactivity.
+#   * production   — 60min access, 7d refresh. Standard short-lived
+#                    access tokens with refresh-token rotation;
+#                    matches the §11.1 baseline.
+#
+# Both can be overridden per deployment via env vars without a code
+# change:
+#   ASOE_ACCESS_TOKEN_TTL_SECONDS  — int, overrides access token lifetime
+#   ASOE_REFRESH_TOKEN_TTL_SECONDS — int, overrides refresh token lifetime
+#
+# Resolved once at module import. Container Apps re-imports on every
+# revision restart, so a deploy with an updated env var picks up the
+# new value on the next rollout without any further intervention.
+
+def _resolve_token_ttls() -> tuple[int, int]:
+    """Return (access_ttl_seconds, refresh_ttl_seconds) for this deployment.
+
+    Pure helper so the resolution logic is unit-testable without
+    process-env mutation in the test body.
+    """
+    env = os.getenv("ASOE_ENV", "production").lower()
+    if env == "sandbox":
+        default_access = 24 * 3600          # 24 hours
+        default_refresh = 30 * 24 * 3600    # 30 days
+    else:
+        default_access = 60 * 60            # 60 minutes
+        default_refresh = 7 * 24 * 3600     # 7 days
+
+    access = int(os.getenv("ASOE_ACCESS_TOKEN_TTL_SECONDS", str(default_access)))
+    refresh = int(os.getenv("ASOE_REFRESH_TOKEN_TTL_SECONDS", str(default_refresh)))
+    return access, refresh
+
+
+ACCESS_TOKEN_EXPIRE_SECONDS, REFRESH_TOKEN_EXPIRE_SECONDS = _resolve_token_ttls()
 
 
 # ---------------------------------------------------------------------------
