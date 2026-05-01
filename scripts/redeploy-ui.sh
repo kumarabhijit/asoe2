@@ -27,7 +27,14 @@ set -euo pipefail
 : "${APP_NAME:=${NAME_PREFIX}api}"
 : "${UI_APP_NAME:=${NAME_PREFIX}ui}"
 : "${UI_IMAGE_NAME:=asoe-ui}"
-: "${IMAGE_TAG:=$(git rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M%S)}"
+# IMAGE_TAG is intentionally NOT defaulted here. The default depends on
+# the asoe-ui repo HEAD (not asoe2's), so we resolve it after the
+# checkout sync below — once we know `${ASOE_UI_PATH}` is on the right
+# branch and at the right commit. Defaulting from `git rev-parse HEAD`
+# of the script's CWD (asoe2) was a real bug: a UI-only commit produced
+# an image tag identical to the previously-deployed one, the
+# `az containerapp update --image <unchanged>` call was a no-op, and
+# the running revision kept serving the stale code.
 : "${ASOE_UI_PATH:=../asoe-ui}"
 
 command -v az >/dev/null || { echo "az CLI not found"; exit 1; }
@@ -93,6 +100,14 @@ actual_branch=$(git -C "${ASOE_UI_PATH}" rev-parse --abbrev-ref HEAD 2>/dev/null
 actual_sha=$(git -C "${ASOE_UI_PATH}" rev-parse --short HEAD 2>/dev/null || echo "<unknown>")
 echo "asoe-ui checkout: branch=${actual_branch} sha=${actual_sha}"
 
+# Now that we know the asoe-ui HEAD, derive IMAGE_TAG from it (unless
+# the caller passed an override). Using the asoe-ui sha guarantees the
+# tag changes whenever the UI source changes, which guarantees the
+# subsequent `az containerapp update --image` call carries a different
+# image reference and therefore creates a new Container App revision
+# that picks up the rebuilt content.
+: "${IMAGE_TAG:=${actual_sha}}"
+
 if [[ ! -f "${ASOE_UI_PATH}/Dockerfile" ]]; then
     echo "ERROR: ${ASOE_UI_PATH}/Dockerfile not found." >&2
     echo "       Branch in the checkout: ${actual_branch}" >&2
@@ -148,12 +163,40 @@ az containerapp update \
     --image "${UI_FULL_IMAGE}" \
     --output none
 
+# Safety belt: if the image reference happened to match what was already
+# running (e.g. a re-run with no source change), `az containerapp update`
+# above is a no-op — no new revision, the running pod keeps serving its
+# cached layers. Force a restart of the active revision so it re-pulls
+# from ACR. Cheap when not needed (~5s); essential when it is.
+ACTIVE_REV=$(az containerapp revision list \
+    -n "${UI_APP_NAME}" -g "${RG}" \
+    --query "[?properties.active].name | [0]" -o tsv 2>/dev/null || true)
+if [[ -n "${ACTIVE_REV}" ]]; then
+    echo "Restarting active revision ${ACTIVE_REV} so the new image is picked up ..."
+    az containerapp revision restart \
+        --revision "${ACTIVE_REV}" \
+        --name "${UI_APP_NAME}" \
+        --resource-group "${RG}" \
+        --output none || true
+fi
+
 UI_FQDN=$(az containerapp show --name "${UI_APP_NAME}" --resource-group "${RG}" \
     --query properties.configuration.ingress.fqdn -o tsv)
 
+# Surface the now-active revision + image so the operator can verify
+# the rollout actually flipped. The image column in particular is the
+# canonical confirmation that the new tag is being served.
 echo
 echo "── UI REDEPLOY COMPLETE ─────────────────────────────────────"
 echo "UI URL       : https://${UI_FQDN}"
 echo "UI sign-in   : https://${UI_FQDN}/login"
+echo "asoe-ui src  : branch=${actual_branch} sha=${actual_sha}"
+echo "Image tag    : ${IMAGE_TAG}"
+echo "Active revision (image column should match the tag above):"
+az containerapp revision list \
+    -n "${UI_APP_NAME}" -g "${RG}" \
+    --query "[?properties.active].{name:name, image:properties.template.containers[0].image, healthState:properties.healthState}" \
+    -o table
+echo
 echo "Tail UI logs : az containerapp logs show -n ${UI_APP_NAME} -g ${RG} --follow"
 echo "─────────────────────────────────────────────────────────────"

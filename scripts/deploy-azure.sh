@@ -494,6 +494,14 @@ if [[ "${DEPLOY_UI}" == "1" ]]; then
         fi
     fi
 
+    # UI image tag must derive from asoe-ui's HEAD, not asoe2's. Otherwise
+    # a UI-only commit (asoe-ui changed, asoe2 didn't) produces a tag
+    # identical to the previously-deployed image; `az containerapp update
+    # --image <unchanged>` is then a no-op and the stale revision keeps
+    # serving. Allow caller override via UI_IMAGE_TAG; otherwise track
+    # the asoe-ui sha we just synced to.
+    : "${UI_IMAGE_TAG:=${actual_sha}}"
+
     echo "Building UI image in ACR with NEXT_PUBLIC_API_URL=https://${FQDN} ..."
     # Run az acr build from inside the asoe-ui checkout so `--file Dockerfile .`
     # is unambiguous regardless of how az resolves --file for sibling-path
@@ -502,7 +510,7 @@ if [[ "${DEPLOY_UI}" == "1" ]]; then
         cd "${ASOE_UI_PATH}"
         az acr build \
             --registry "${ACR_NAME}" \
-            --image "${UI_IMAGE_NAME}:${IMAGE_TAG}" \
+            --image "${UI_IMAGE_NAME}:${UI_IMAGE_TAG}" \
             --image "${UI_IMAGE_NAME}:latest" \
             --file Dockerfile \
             --build-arg "NEXT_PUBLIC_API_URL=https://${FQDN}" \
@@ -510,7 +518,7 @@ if [[ "${DEPLOY_UI}" == "1" ]]; then
             .
     )
 
-    UI_FULL_IMAGE="${ACR_NAME}.azurecr.io/${UI_IMAGE_NAME}:${IMAGE_TAG}"
+    UI_FULL_IMAGE="${ACR_NAME}.azurecr.io/${UI_IMAGE_NAME}:${UI_IMAGE_TAG}"
     echo "STAGE 3 bicep deploy: UI Container App with ${UI_FULL_IMAGE} (~3 min)..."
     bicep_deploy stage3 \
         "deployContainerApp=true" \
