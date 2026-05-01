@@ -66,7 +66,11 @@ def _resolve_token_ttls() -> tuple[int, int]:
     """Return (access_ttl_seconds, refresh_ttl_seconds) for this deployment.
 
     Pure helper so the resolution logic is unit-testable without
-    process-env mutation in the test body.
+    process-env mutation in the test body. Empty-string env values are
+    treated the same as unset — bicep declares the env vars
+    unconditionally and passes ``''`` as the default, so an empty
+    string must mean "use the env-driven default", not "TTL of zero
+    seconds".
     """
     env = os.getenv("ASOE_ENV", "production").lower()
     if env == "sandbox":
@@ -76,8 +80,22 @@ def _resolve_token_ttls() -> tuple[int, int]:
         default_access = 60 * 60            # 60 minutes
         default_refresh = 7 * 24 * 3600     # 7 days
 
-    access = int(os.getenv("ASOE_ACCESS_TOKEN_TTL_SECONDS", str(default_access)))
-    refresh = int(os.getenv("ASOE_REFRESH_TOKEN_TTL_SECONDS", str(default_refresh)))
+    def _ttl_or_default(env_var: str, default: int) -> int:
+        raw = os.getenv(env_var, "").strip()
+        if not raw:
+            return default
+        try:
+            value = int(raw)
+        except ValueError:
+            # Malformed override (non-integer) — fall back to default
+            # rather than crash the worker on startup. The deploy script
+            # validates ints already; this guards against hand edits.
+            return default
+        # Negative or zero is meaningless for a TTL; treat as default.
+        return value if value > 0 else default
+
+    access = _ttl_or_default("ASOE_ACCESS_TOKEN_TTL_SECONDS", default_access)
+    refresh = _ttl_or_default("ASOE_REFRESH_TOKEN_TTL_SECONDS", default_refresh)
     return access, refresh
 
 

@@ -299,6 +299,40 @@ ANTHROPIC_API_KEY='sk-ant-<your-key>' \
 issued JWTs valid, you'll need this exact value. Otherwise the next
 auto-generation invalidates all in-flight tokens.
 
+### Tune JWT access-token lifetime per deployment
+
+The default access-token TTL is env-aware:
+
+- `ASOE_ENV=sandbox` → **24h** access, 30d refresh (lets demos / Playwright
+  runs survive coffee breaks without silent 401s)
+- `ASOE_ENV=production` → **60min** access, 7d refresh (standard
+  short-lived access with rotation)
+
+Override per deployment by setting the matching bicep params (or the
+underlying env vars directly on the Container App). Operator-friendly
+presets:
+
+| Lifetime | `accessTokenTtlSeconds` | Use case |
+|---|---|---|
+| 15 minutes | `900` | Strict short-lived tokens; tighter security envelope |
+| 1 hour | `3600` | Production default — quick rotation with refresh |
+| 24 hours | `86400` | Sandbox / demo default — survives idle |
+
+To change for the running app without re-running the full deploy:
+
+```bash
+az containerapp update -n asoepreprodapi -g $RG \
+    --set-env-vars "ASOE_ACCESS_TOKEN_TTL_SECONDS=3600"
+```
+
+The change takes effect on the next revision (Container Apps re-imports
+`api.deps` on every restart). Existing tokens keep their original
+expiry; only newly issued ones use the new value.
+
+Empty / unset / malformed values fall back to the env-driven default —
+the resolver in `api/deps.py::_resolve_token_ttls()` is defensive so
+a hand-edit accident can't crash startup.
+
 ### Re-deploy (code change, env var change, infra tweak)
 
 ```bash

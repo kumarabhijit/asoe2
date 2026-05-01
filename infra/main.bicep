@@ -57,6 +57,12 @@ param corsAllowedOriginsCsv string = ''
 @description('Optional regex applied to the request Origin (allow_origin_regex). Use to match Vercel preview URLs like https://asoe-ui-git-<branch>-<team>.vercel.app without listing each. Empty string disables.')
 param corsAllowedOriginRegex string = ''
 
+@description('JWT access-token lifetime in seconds. Empty string lets api/deps.py pick the env-driven default (sandbox=86400 / production=3600). Set to e.g. 900 for 15min, 3600 for 1h, 86400 for 24h to override.')
+param accessTokenTtlSeconds string = ''
+
+@description('JWT refresh-token lifetime in seconds. Empty string lets api/deps.py pick the env-driven default (sandbox=2592000 / production=604800). Set to override per deployment.')
+param refreshTokenTtlSeconds string = ''
+
 @description('LLM provider routing. fallback = deterministic only, no outbound LLM traffic.')
 @allowed([
   'fallback'
@@ -446,6 +452,14 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (deployContainerApp) 
             { name: 'CORS_ALLOWED_ORIGIN',        value: corsAllowedOrigin }
             { name: 'CORS_ALLOWED_ORIGINS',       value: corsAllowedFinalCsv }
             { name: 'CORS_ALLOWED_ORIGIN_REGEX',  value: corsAllowedOriginRegex }
+            // Empty string defers to api/deps.py:_resolve_token_ttls()
+            // which picks the env-driven default (sandbox=24h /
+            // production=60min). Set the bicep param to a positive
+            // integer string (e.g. '900' for 15min, '3600' for 1h,
+            // '86400' for 24h) to override per deployment without a
+            // code change.
+            { name: 'ASOE_ACCESS_TOKEN_TTL_SECONDS',  value: accessTokenTtlSeconds }
+            { name: 'ASOE_REFRESH_TOKEN_TTL_SECONDS', value: refreshTokenTtlSeconds }
             { name: 'PORT',               value: '8000' }
             { name: 'ANTHROPIC_API_KEY',  secretRef: 'anthropic-api-key' }
             { name: 'ASOE_JWT_SECRET',    secretRef: 'asoe-jwt-secret' }

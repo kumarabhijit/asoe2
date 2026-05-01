@@ -66,3 +66,50 @@ def test_missing_env_var_falls_back_to_production_defaults(monkeypatch):
     access, refresh = _resolve_token_ttls()
     assert access == 60 * 60
     assert refresh == 7 * 24 * 3600
+
+
+def test_empty_string_is_treated_as_default_not_zero(monkeypatch):
+    """Bicep declares the env var unconditionally with default ''.
+    An empty value must mean 'use env-driven default', NOT 'TTL=0'."""
+    monkeypatch.setenv("ASOE_ENV", "sandbox")
+    monkeypatch.setenv("ASOE_ACCESS_TOKEN_TTL_SECONDS", "")
+    monkeypatch.setenv("ASOE_REFRESH_TOKEN_TTL_SECONDS", "")
+    access, refresh = _resolve_token_ttls()
+    assert access == 24 * 3600
+    assert refresh == 30 * 24 * 3600
+
+
+def test_whitespace_only_treated_as_unset(monkeypatch):
+    monkeypatch.setenv("ASOE_ENV", "sandbox")
+    monkeypatch.setenv("ASOE_ACCESS_TOKEN_TTL_SECONDS", "   ")
+    access, _ = _resolve_token_ttls()
+    assert access == 24 * 3600
+
+
+def test_malformed_override_falls_back_to_default(monkeypatch):
+    """Hand-edit accidents (e.g. 'one_hour') must not crash startup."""
+    monkeypatch.setenv("ASOE_ENV", "production")
+    monkeypatch.setenv("ASOE_ACCESS_TOKEN_TTL_SECONDS", "one_hour")
+    access, _ = _resolve_token_ttls()
+    assert access == 60 * 60
+
+
+def test_zero_or_negative_override_falls_back_to_default(monkeypatch):
+    """A zero / negative TTL is meaningless; use the env default."""
+    monkeypatch.setenv("ASOE_ENV", "sandbox")
+    monkeypatch.setenv("ASOE_ACCESS_TOKEN_TTL_SECONDS", "0")
+    access, _ = _resolve_token_ttls()
+    assert access == 24 * 3600
+    monkeypatch.setenv("ASOE_ACCESS_TOKEN_TTL_SECONDS", "-1")
+    access, _ = _resolve_token_ttls()
+    assert access == 24 * 3600
+
+
+def test_user_facing_presets_round_trip(monkeypatch):
+    """The three operator-friendly presets we expose in the README:
+    900 (15min), 3600 (1h), 86400 (24h)."""
+    monkeypatch.setenv("ASOE_ENV", "sandbox")
+    for preset in (900, 3600, 86_400):
+        monkeypatch.setenv("ASOE_ACCESS_TOKEN_TTL_SECONDS", str(preset))
+        access, _ = _resolve_token_ttls()
+        assert access == preset
