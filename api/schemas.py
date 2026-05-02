@@ -9,7 +9,13 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from contracts.models import OrderEvent
+from contracts.models import ExecutedNode, GatewayCallSpan, OrderEvent
+
+# Re-exported so OpenAPI consumers see ExecutedNode / GatewayCallSpan
+# under api.schemas. The domain definitions live in contracts/models.py
+# (orchestration appends to state.execution_trace and must not import
+# api/).
+__all__ = ["ExecutedNode", "GatewayCallSpan"]
 
 
 # ---------------------------------------------------------------------------
@@ -317,6 +323,14 @@ class TraceResponse(BaseModel):
     compliance/audit_bearing_registry.yaml that could not be
     populated for this record. Empty = coverage OK."""
 
+    # ADR-027 Phase B — per-node executed-trace evidence.
+    executed_nodes: List[ExecutedNode] = Field(default_factory=list)
+    """Ordered list of nodes that ran for this trace, with timing,
+    decision payload, and exit verdict. Sourced from
+    `state.execution_trace` and persisted into
+    `trace_data["executed_nodes"]`. Empty for traces written before
+    Phase B's instrumentation landed."""
+
 
 class StatsResponse(BaseModel):
     """GET /api/v1/exceptions/stats — dashboard metrics."""
@@ -331,6 +345,99 @@ class StatsResponse(BaseModel):
     by_intent: Dict[str, int] = Field(default_factory=dict)
     by_lifecycle_state: Dict[str, int] = Field(default_factory=dict)
     by_shadow_verdict: Dict[str, int] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# ADR-027 — pipeline visualization (Phase A topology, Phase B trace)
+# ---------------------------------------------------------------------------
+#
+# Topology surface (Phase A): authentication-required GET
+# /api/v1/pipeline/topology returns the compiled-graph topology + A.0
+# verdict labels. The schema is intentionally narrow — no per-record
+# data, just the graph shape — so it can be cached aggressively by
+# `topology_hash`.
+#
+# Per-record execution evidence (Phase B): `ExecutedNode` lives on the
+# extended trace and carries the verdict that actually fired for each
+# record's traversal. Reanalysis attempts are captured in the typed
+# `ReanalysisHistoryEntry` so prior paths' per-node audit evidence is
+# preserved when subsequent reanalyses overwrite `trace_data`.
+
+
+class PipelineTopologyNode(BaseModel):
+    """A node in the pipeline topology (Phase A)."""
+
+    id: str          # canonical orchestration node name
+    label: str       # human-readable; today same as id
+    kind: Literal["node", "terminal"]
+
+
+class PipelineTopologyEdge(BaseModel):
+    """A directed edge in the pipeline topology (Phase A).
+
+    `verdict_label` is populated for every conditional edge — both the
+    explicit ones (registered in `_VERDICT_LABELS`) and the implicit
+    classify-time disagreement gate (registered in
+    `_IMPLICIT_VERDICT_LABELS`). Unconditional edges carry
+    `verdict_label=None`.
+
+    A single compiled-graph conditional edge can produce multiple
+    rows when one route key (e.g. `terminal`) corresponds to multiple
+    verdicts (e.g. RED + YELLOW both terminate `shadow_audit`). The
+    introspection helper expands accordingly; the DAG renderer draws
+    each as a distinct labelled edge.
+    """
+
+    from_node: str
+    to_node: str
+    conditional: bool
+    verdict_label: Optional[str] = None
+
+
+class PipelineTopology(BaseModel):
+    """Response shape for GET /api/v1/pipeline/topology (Phase A).
+
+    `topology_hash` is a stable SHA-256 over the canonical JSON of
+    (nodes, edges); the UI caches by hash and revalidates on
+    `useHealth` polling tick (ADR-027 Open Question §1).
+    """
+
+    topology_hash: str
+    nodes: List[PipelineTopologyNode]
+    edges: List[PipelineTopologyEdge]
+
+
+class ReanalysisHistoryEntry(BaseModel):
+    """Typed replacement for the legacy `List[Dict[str, Any]]` reanalysis_history (Phase B).
+
+    Each entry captures one reanalysis attempt's snapshot AND its
+    `executed_nodes` list, so the prior path's per-node audit
+    evidence is preserved when the next attempt overwrites
+    `trace_data`. Without this, reanalysing a record destroys
+    audit evidence — unacceptable on the SOX surface.
+
+    The legacy untyped shape (List[Dict[str, Any]]) remains the
+    persisted form on records written before Phase B; the API
+    layer projects untyped entries by populating only the
+    `prior_*` / `new_*` scalars and leaving `executed_nodes=[]`
+    with the documented "pre-Phase-B" banner surfaced by the UI.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    attempt: int
+    attempted_at: str
+    attempted_by: str
+    reason: Optional[str] = None
+    prior_trace_id: str
+    prior_shadow_verdict: Optional[str] = None
+    prior_final_status: Optional[str] = None
+    prior_lifecycle_state: str
+    new_trace_id: str
+    new_shadow_verdict: Optional[str] = None
+    new_final_status: Optional[str] = None
+    new_lifecycle_state: str
+    executed_nodes: List[ExecutedNode] = Field(default_factory=list)
 
 
 class AsyncResolveResponse(BaseModel):

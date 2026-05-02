@@ -484,9 +484,103 @@ class GraphState(BaseModel):
     # Tracer at terminal-state emit time and forwarded to LangFuse as
     # generation spans (one per call).
     llm_call_traces: List["LLMCallTrace"] = Field(default_factory=list)
+    # ADR-027 Phase B — per-node executed-trace evidence. Each node
+    # appends one `ExecutedNode` entry as it runs; `build_analysis`
+    # serialises the list into `trace_data["executed_nodes"]` so the
+    # UI's EventsTimeline + PipelineDAG can reconstruct the path the
+    # record took. Reanalysis preserves prior attempts on
+    # `ReanalysisHistoryEntry.executed_nodes` rather than overwriting.
+    execution_trace: List["ExecutedNode"] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _explanation_for_terminal_state(self) -> "GraphState":
         if self.final_status and not self.explanation:
             self.explanation = f"Workflow terminated with status: {self.final_status.value}"
         return self
+
+
+# ---------------------------------------------------------------------------
+# ADR-027 Phase B — per-node execution evidence
+# ---------------------------------------------------------------------------
+#
+# Domain model for the `executed_nodes` audit-bearing surface. Lives in
+# contracts (not api/) so the orchestration layer can append entries
+# without depending on api/. The api/schemas.py module re-exports these
+# names so OpenAPI consumers see them under the API surface they're
+# served from.
+#
+# Field semantics: see the docstrings on each model. A single ExecutedNode
+# represents one node's traversal within one LangGraph invoke(). The list
+# is ordered by invocation; each entry's `entered_at` is monotonic in
+# practice (the orchestrator runs nodes serially per record).
+
+
+class GatewayCallSpan(BaseModel):
+    """Per-gateway sub-span emitted by `resolve_dependencies` (Phase B).
+
+    `resolve_dependencies` fans gateway calls out via concurrent.futures.
+    The single `ExecutedNode.duration_ms` is the wall-clock fan-out span;
+    per-gateway timing lives here so the timeline can render a nested
+    expand without the DAG view having to render N sub-nodes (which would
+    diverge from the orchestration topology — the DAG renders ONE node,
+    not N).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    gateway: str
+    started_at: str  # ISO-8601
+    finished_at: Optional[str] = None
+    duration_ms: Optional[int] = None
+    status: Literal["ok", "error", "timeout"]
+
+
+class ExecutedNode(BaseModel):
+    """Per-node execution evidence (Phase B).
+
+    Appended by every orchestration node to `state.execution_trace`.
+    Persisted by `build_analysis` into `trace_data["executed_nodes"]`
+    and surfaced on `TraceResponse.executed_nodes` for the UI's
+    EventsTimeline + PipelineDAG.
+
+    Reanalysis: each invoke produces a fresh list; reanalysis preserves
+    prior attempts on `ReanalysisHistoryEntry.executed_nodes` rather
+    than overwriting trace_data — the SOX surface cannot accept the
+    audit-evidence loss.
+
+    Field semantics:
+      - `node`           — canonical orchestration node name
+      - `entered_at`     — ISO-8601, node start
+      - `completed_at`   — ISO-8601, node end (None if errored)
+      - `duration_ms`    — wall-clock; for resolve_dependencies the
+                            fan-out span — sub_spans hold per-gateway
+      - `timestamp`      — convenience top-level (matches existing trace
+                            style) — always equals `entered_at`
+      - `status`         — completed / halted / errored
+      - `decision`       — node-specific payload: intent+confidence on
+                            classify, recipe on select_recipe, verdict
+                            on shadow_audit, etc.
+      - `exit_verdict`   — the verdict label that drove the next route
+                            (`green` | `red` | `yellow` | `breach` |
+                             `cross_check_disagreement` | `ok` | …)
+                            None for nodes whose exit isn't a
+                            conditional gate (e.g. ingest, load_skill).
+      - `policy_hits`    — populated on shadow_audit; [] elsewhere
+      - `sub_spans`      — populated on resolve_dependencies; [] elsewhere
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    node: str
+    entered_at: str
+    completed_at: Optional[str] = None
+    duration_ms: Optional[int] = None
+    timestamp: str
+    status: Literal["completed", "halted", "errored"]
+    decision: Dict[str, Any] = Field(default_factory=dict)
+    exit_verdict: Optional[str] = None
+    policy_hits: List[str] = Field(default_factory=list)
+    sub_spans: List[GatewayCallSpan] = Field(default_factory=list)
+
+
+GraphState.model_rebuild()

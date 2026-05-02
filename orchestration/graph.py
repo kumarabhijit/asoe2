@@ -39,6 +39,7 @@ from __future__ import annotations
 #                  MANUAL_REVIEW_REQUIRED with a dry-run summary
 
 from functools import cache
+from typing import Mapping
 
 from langgraph.graph import END, StateGraph
 from contracts.models import GraphState
@@ -50,6 +51,276 @@ from hardening.explain_mode import is_explain_mode_active
 def route_after_gate(state: GraphState) -> str:
     """Route to terminal END if any node set final_status, else continue."""
     return "terminal" if state.final_status is not None else "continue"
+
+
+# ---------------------------------------------------------------------------
+# ADR-027 Phase A.0 — verdict-vocabulary registration
+# ---------------------------------------------------------------------------
+#
+# `route_after_gate` collapses every conditional into {terminal, continue}
+# based on `state.final_status`. The HUMAN verdict that drove the route
+# (GREEN | YELLOW | RED, breach | ok, no recipe | ok, …) lives on state
+# side-effects (`state.shadow.status`, ad-hoc `final_status` reasons) and
+# never reaches the compiled-graph topology. Compiled-graph introspection
+# alone therefore exposes only `terminal/continue` keys — insufficient for
+# the audit-first DAG view ADR-027 ships.
+#
+# This registry is the load-bearing prerequisite for ADR-027 Phase A: it
+# declares per-gate verdict labels alongside each `add_conditional_edges`
+# call so Phase A's introspection helper can join them with the compiled
+# graph and produce a verdict-labelled `PipelineTopology`. The per-record
+# execution trace (Phase B) supplies which verdict actually fired on each
+# record's `executed_nodes` entry.
+#
+# Layout: gate_node -> {verdict_route_key: downstream_node}
+#   - `terminal_*` keys correspond to the `terminal` branch of
+#     `route_after_gate` (the gate halted execution).
+#   - `continue_*` keys correspond to the `continue` branch (the gate
+#     allowed execution to proceed).
+#   - The verdict suffix (e.g. `_red`, `_breach`, `_no_recipe`) is the
+#     human label that will appear on the DAG edge.
+#
+# The shadow_audit gate has TWO terminal verdicts (RED and YELLOW) sharing
+# the same `terminal` route — both target `build_analysis` but the verdict
+# label on the edge differs per record. The introspection helper resolves
+# which terminal verdict fired by reading the `ExecutedNode` for
+# shadow_audit (its `decision`/`exit_verdict`), not by reading the edge.
+#
+# Live-graph form. The explain-mode graph swaps `execute_recipe` →
+# `explain_only` on the GREEN continuation; that swap is owned by
+# `build_explain_graph` and applied by Phase A's introspection helper at
+# topology-fetch time. v4.1 may register an explain-overrides map if
+# explain-mode topology becomes a separately-rendered surface.
+_VERDICT_LABELS: Mapping[str, Mapping[str, str]] = {
+    "validate_circuit_breaker": {
+        "terminal_breach": "build_analysis",
+        "continue_ok": "select_recipe",
+    },
+    "select_recipe": {
+        "terminal_no_recipe": "build_analysis",
+        "continue_ok": "resolve_dependencies",
+    },
+    "resolve_dependencies": {
+        "terminal_required_gw_fail": "build_analysis",
+        "continue_ok": "validate_types",
+    },
+    "validate_types": {
+        "terminal_invocation_fail": "build_analysis",
+        "continue_ok": "shadow_audit",
+    },
+    "shadow_audit": {
+        "terminal_red": "build_analysis",
+        "terminal_yellow": "build_analysis",
+        "continue_green": "execute_recipe",
+    },
+}
+
+# Implicit gates — nodes that set `final_status` themselves rather than
+# routing via `add_conditional_edges`. The compiled graph has no edge to
+# attach a verdict to; Phase D's DAG renderer draws an implicit highlighted
+# edge (classify → build_analysis) when an `ExecutedNode` for classify
+# carries `exit_verdict="cross_check_disagreement"` (architecture_v4 §4
+# v4 amendment, ADR-027 Open Question §7).
+#
+# Registered here so the verdict vocabulary is the single source of truth
+# across both explicit (add_conditional_edges) and implicit (final_status-
+# set-in-node) gates — ADR-027 Phase A.0 review-board criterion.
+_IMPLICIT_VERDICT_LABELS: Mapping[str, Mapping[str, str]] = {
+    "classify": {
+        "implicit_terminal_cross_check_disagreement": "build_analysis",
+        "implicit_continue_ok": "load_skill",
+    },
+}
+
+
+def get_verdict_labels() -> Mapping[str, Mapping[str, str]]:
+    """Per-gate verdict-vocabulary registration for the live graph.
+
+    Phase A's introspection helper joins this with `compiled_graph.get_graph()`
+    to produce the verdict-labelled `PipelineTopology` consumed by the DAG view.
+    """
+    return _VERDICT_LABELS
+
+
+def get_implicit_verdict_labels() -> Mapping[str, Mapping[str, str]]:
+    """Verdict labels for implicit gates (nodes that set `final_status` directly).
+
+    Today this covers only `classify` (LLM/deterministic cross-check
+    disagreement). Phase D's DAG renderer draws these as implicit edges
+    when the matching `exit_verdict` appears on the executed node.
+    """
+    return _IMPLICIT_VERDICT_LABELS
+
+
+# ---------------------------------------------------------------------------
+# ADR-027 Phase A — pipeline-topology introspection
+# ---------------------------------------------------------------------------
+#
+# Pure projection of the compiled-graph + the A.0 verdict registries into
+# the `PipelineTopology` schema the UI consumes. No string parsing of the
+# graph DSL — we read `compiled_graph.get_graph()` and join verdict labels
+# from `_VERDICT_LABELS` / `_IMPLICIT_VERDICT_LABELS` by source/target.
+#
+# `topology_hash` is a stable SHA-256 over the canonical JSON of
+# (nodes, edges) so the UI can cache aggressively and revalidate on
+# topology change (e.g. an ADR-025-class reorder).
+
+_LANGGRAPH_SYNTHETIC_NODES = frozenset({"__start__", "__end__"})
+
+
+def _verdict_label_from_route_key(route_key: str) -> str:
+    """Extract the human-facing verdict suffix from a registry route key.
+
+    `terminal_red`              → `red`
+    `continue_green`            → `green`
+    `terminal_no_recipe`        → `no_recipe`
+    `terminal_required_gw_fail` → `required_gw_fail`
+    `implicit_terminal_cross_check_disagreement`
+                                → `cross_check_disagreement`
+    """
+    suffix = route_key
+    for prefix in ("implicit_terminal_", "implicit_continue_",
+                   "terminal_", "continue_"):
+        if suffix.startswith(prefix):
+            return suffix[len(prefix):]
+    return suffix
+
+
+def get_pipeline_topology():
+    """Derive `PipelineTopology` from the compiled live graph + A.0 registries.
+
+    Returns the `PipelineTopology` schema declared in `api/schemas.py`.
+    The function is pure (no I/O, no state mutation) and safe to cache by
+    the returned `topology_hash`. The compiled live graph (`build_graph()`)
+    is the source of truth — ADR-025-style reorders flow through
+    automatically; explain-mode topology is not exposed here (Phase A
+    scope: live graph only).
+
+    Edge expansion. Conditional edges in the compiled graph carry only
+    `data="terminal" | "continue"`. Each is expanded into one or more
+    `PipelineTopologyEdge` rows by joining against `_VERDICT_LABELS`:
+    one row per verdict whose downstream matches the compiled-graph
+    target. The `shadow_audit → build_analysis` `terminal` edge therefore
+    expands to two rows (`red`, `yellow`) — both are the same compiled
+    edge but the DAG renders them with distinct verdict labels.
+
+    Implicit gates from `_IMPLICIT_VERDICT_LABELS` are emitted as edges
+    with `conditional=True` and `verdict_label` set; `from_node` /
+    `to_node` come from the registry. They are tagged via the verdict
+    label (e.g. `cross_check_disagreement`) so the UI can render them
+    with the documented "implicit edge" style. No edge is fabricated
+    that doesn't appear in either the compiled graph or the implicit
+    registry.
+    """
+    # Local imports keep the orchestration layer free of api/ imports
+    # at module load time (avoids a circular import; api/schemas.py
+    # doesn't import orchestration but we want symmetry).
+    import hashlib
+    import json
+
+    from api.schemas import (
+        PipelineTopology,
+        PipelineTopologyEdge,
+        PipelineTopologyNode,
+    )
+
+    compiled = build_graph().get_graph()
+
+    nodes: list[PipelineTopologyNode] = []
+    for node_id in compiled.nodes.keys():
+        if node_id in _LANGGRAPH_SYNTHETIC_NODES:
+            continue
+        nodes.append(
+            PipelineTopologyNode(
+                id=node_id,
+                label=node_id,
+                kind="terminal" if node_id == "build_analysis" else "node",
+            )
+        )
+    nodes.sort(key=lambda n: n.id)
+
+    edges: list[PipelineTopologyEdge] = []
+    for edge in compiled.edges:
+        if edge.source in _LANGGRAPH_SYNTHETIC_NODES:
+            continue
+        if edge.target in _LANGGRAPH_SYNTHETIC_NODES:
+            continue
+        if not edge.conditional:
+            edges.append(
+                PipelineTopologyEdge(
+                    from_node=edge.source,
+                    to_node=edge.target,
+                    conditional=False,
+                    verdict_label=None,
+                )
+            )
+            continue
+        gate_labels = _VERDICT_LABELS.get(edge.source, {})
+        matching_keys = [
+            k for k, downstream in gate_labels.items()
+            if downstream == edge.target
+        ]
+        if not matching_keys:
+            edges.append(
+                PipelineTopologyEdge(
+                    from_node=edge.source,
+                    to_node=edge.target,
+                    conditional=True,
+                    verdict_label=None,
+                )
+            )
+            continue
+        for key in matching_keys:
+            edges.append(
+                PipelineTopologyEdge(
+                    from_node=edge.source,
+                    to_node=edge.target,
+                    conditional=True,
+                    verdict_label=_verdict_label_from_route_key(key),
+                )
+            )
+
+    # Implicit gates: a node sets `final_status` itself and the next
+    # `route_after_gate` call carries the record to terminal. Emit only
+    # the (source, target) pairs that the compiled graph does not
+    # already carry as a real edge — those compiled edges represent
+    # the "continue" path under their own semantics; the implicit
+    # registry's continue label would be redundant.
+    existing_pairs = {
+        (e.source, e.target) for e in compiled.edges
+    }
+    for source, gate_labels in _IMPLICIT_VERDICT_LABELS.items():
+        for key, downstream in gate_labels.items():
+            if (source, downstream) in existing_pairs:
+                continue
+            edges.append(
+                PipelineTopologyEdge(
+                    from_node=source,
+                    to_node=downstream,
+                    conditional=True,
+                    verdict_label=_verdict_label_from_route_key(key),
+                )
+            )
+
+    edges.sort(
+        key=lambda e: (e.from_node, e.to_node, e.verdict_label or "")
+    )
+
+    canonical = json.dumps(
+        {
+            "nodes": [n.model_dump() for n in nodes],
+            "edges": [e.model_dump() for e in edges],
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    topology_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    return PipelineTopology(
+        topology_hash=topology_hash,
+        nodes=nodes,
+        edges=edges,
+    )
 
 
 def _add_common_nodes_and_edges(graph: StateGraph) -> None:

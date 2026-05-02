@@ -41,7 +41,11 @@
 #                                              # https://github.com/
 #                                              # kumarabhijit/asoe-ui.git) at
 #                                              # ${ASOE_UI_BRANCH} (default
-#                                              # core_ui_integration) into it.
+#                                              # claude/dag-pipeline-representation-LQyx0;
+#                                              # checked out locally as
+#                                              # ${ASOE_UI_BRANCH_LOCAL},
+#                                              # default dag-pipeline-representation)
+#                                              # into it.
 #   GITHUB_TOKEN=ghp_... \                     # required for the auto-clone
 #                                              # if asoe-ui is a private repo.
 #                                              # Falls back to GH_TOKEN or
@@ -98,7 +102,7 @@ echo "Container App: ${APP_NAME}"
 echo "Image tag    : ${IMAGE_NAME}:${IMAGE_TAG}"
 if [[ "${DEPLOY_UI}" == "1" ]]; then
     echo "UI Container : ${UI_APP_NAME} (DEPLOY_UI=1)"
-    echo "UI source    : ${ASOE_UI_PATH} (branch: ${ASOE_UI_BRANCH:-core_ui_integration})"
+    echo "UI source    : ${ASOE_UI_PATH} (remote: ${ASOE_UI_BRANCH:-claude/dag-pipeline-representation-LQyx0}, local: ${ASOE_UI_BRANCH_LOCAL:-dag-pipeline-representation})"
 fi
 echo "─────────────────────────────────────────────────────────────"
 
@@ -354,13 +358,28 @@ if [[ "${DEPLOY_UI}" == "1" ]]; then
     # Resolve / fetch the asoe-ui checkout. Three modes:
     #   * Path exists with a .git directory   → use as-is.
     #   * Path doesn't exist                   → clone from ASOE_UI_REPO_URL
-    #     into ASOE_UI_PATH (defaults to ../asoe-ui sibling). Branch defaults
-    #     to ASOE_UI_BRANCH (default core_ui_integration to match this PR;
-    #     override to 'main' once merged).
+    #     into ASOE_UI_PATH (defaults to ../asoe-ui sibling). The remote
+    #     branch defaults to ASOE_UI_BRANCH
+    #     (claude/dag-pipeline-representation-LQyx0 — the active ADR-027
+    #     PR); the local checkout name defaults to ASOE_UI_BRANCH_LOCAL
+    #     (dag-pipeline-representation). Override either when working
+    #     against a different branch, e.g.:
+    #       ASOE_UI_BRANCH=main ASOE_UI_BRANCH_LOCAL=main ./scripts/deploy-azure.sh
+    #     Local always tracks origin/${ASOE_UI_BRANCH}; the script
+    #     resets the local branch to that ref on every run.
     #   * Path exists but is empty / has no Dockerfile → error (don't risk
     #     overwriting unrelated work).
     : "${ASOE_UI_REPO_URL:=https://github.com/kumarabhijit/asoe-ui.git}"
-    : "${ASOE_UI_BRANCH:=core_ui_integration}"
+    # Remote branch on origin (the ref the script fetches from GitHub).
+    # Override for feature branches:
+    #   ASOE_UI_BRANCH=main ./scripts/deploy-azure.sh
+    : "${ASOE_UI_BRANCH:=claude/dag-pipeline-representation-LQyx0}"
+    # Local checkout branch name. Defaults to a tidier hand-friendly
+    # name than the auto-generated remote ref so the developer's
+    # working tree carries the local-branch name they expect. Set
+    # ASOE_UI_BRANCH_LOCAL explicitly when remote and local share a
+    # name (e.g. ASOE_UI_BRANCH=main with ASOE_UI_BRANCH_LOCAL=main).
+    : "${ASOE_UI_BRANCH_LOCAL:=dag-pipeline-representation}"
 
     # PAT support — kumarabhijit/asoe-ui is private. Look for a token in
     # the conventional env vars and splice it into the clone URL using
@@ -371,18 +390,20 @@ if [[ "${DEPLOY_UI}" == "1" ]]; then
 
     fetch_asoe_ui() {
         # Fresh clone (no existing .git) — use --branch + --depth 1 so
-        # we land directly on the right branch with minimum bandwidth.
+        # we land directly on the right remote branch with minimum
+        # bandwidth, then rename the resulting local branch to
+        # ASOE_UI_BRANCH_LOCAL when the names differ.
         local target="$1"
         if [[ -n "${GH_PAT}" ]]; then
             local authed_url="${ASOE_UI_REPO_URL/https:\/\//https://x-access-token:${GH_PAT}@}"
-            echo "Cloning asoe-ui (${ASOE_UI_BRANCH}) into ${target} (using PAT) ..."
+            echo "Cloning asoe-ui (remote=${ASOE_UI_BRANCH} local=${ASOE_UI_BRANCH_LOCAL}) into ${target} (using PAT) ..."
             git clone --branch "${ASOE_UI_BRANCH}" --depth 1 \
                 "${authed_url}" "${target}"
             # Scrub the PAT from the remote URL so it doesn't sit in
             # .git/config on disk.
             git -C "${target}" remote set-url origin "${ASOE_UI_REPO_URL}"
         else
-            echo "Cloning asoe-ui (${ASOE_UI_BRANCH}) into ${target} ..."
+            echo "Cloning asoe-ui (remote=${ASOE_UI_BRANCH} local=${ASOE_UI_BRANCH_LOCAL}) into ${target} ..."
             if ! git clone --branch "${ASOE_UI_BRANCH}" --depth 1 \
                 "${ASOE_UI_REPO_URL}" "${target}" 2>/dev/null; then
                 echo "ERROR: clone failed. asoe-ui is private — set a PAT in one of:" >&2
@@ -394,11 +415,22 @@ if [[ "${DEPLOY_UI}" == "1" ]]; then
                 exit 1
             fi
         fi
+
+        # `git clone --branch X` lands on a local branch named X.
+        # Rename so the working tree carries ASOE_UI_BRANCH_LOCAL.
+        if [[ "${ASOE_UI_BRANCH_LOCAL}" != "${ASOE_UI_BRANCH}" ]]; then
+            git -C "${target}" branch -m "${ASOE_UI_BRANCH_LOCAL}"
+            git -C "${target}" branch \
+                --set-upstream-to="origin/${ASOE_UI_BRANCH}" \
+                "${ASOE_UI_BRANCH_LOCAL}" >/dev/null 2>&1 || true
+        fi
     }
 
     sync_asoe_ui_to_branch() {
-        # Existing checkout — make sure it's on ${ASOE_UI_BRANCH} and
-        # current with origin. Belt-and-braces: handles
+        # Existing checkout — make sure the local branch
+        # (ASOE_UI_BRANCH_LOCAL) is checked out, tracking
+        # origin/${ASOE_UI_BRANCH}, and reset to that ref. Belt-and-
+        # braces: handles
         #   (a) the case where the user previously cloned the default
         #       branch (main) and didn't notice; or where a `--branch`
         #       clone silently fell back for some provider/proxy reason;
@@ -425,17 +457,18 @@ if [[ "${DEPLOY_UI}" == "1" ]]; then
             fetch_url="${ASOE_UI_REPO_URL/https:\/\//https://x-access-token:${GH_PAT}@}"
         fi
 
-        if [[ "${current_branch}" != "${ASOE_UI_BRANCH}" ]]; then
-            echo "asoe-ui is on '${current_branch}'; switching to '${ASOE_UI_BRANCH}' ..."
+        if [[ "${current_branch}" != "${ASOE_UI_BRANCH_LOCAL}" ]]; then
+            echo "asoe-ui is on '${current_branch}'; switching to '${ASOE_UI_BRANCH_LOCAL}' (remote: ${ASOE_UI_BRANCH}) ..."
             git -C "${target}" fetch "${fetch_url}" \
                 "+refs/heads/${ASOE_UI_BRANCH}:refs/remotes/origin/${ASOE_UI_BRANCH}"
-            git -C "${target}" checkout -B "${ASOE_UI_BRANCH}" "origin/${ASOE_UI_BRANCH}"
+            git -C "${target}" checkout -B "${ASOE_UI_BRANCH_LOCAL}" "origin/${ASOE_UI_BRANCH}"
         else
-            # Already on the right branch — make sure it's current. Use
-            # fetch + reset --hard rather than pull/merge so we don't
-            # error out on local divergence (the script treats this
-            # checkout as a deploy artefact, not the user's workspace).
-            echo "asoe-ui is on '${ASOE_UI_BRANCH}'; fetching latest from origin ..."
+            # Already on the right local branch — make sure it's
+            # current. Use fetch + reset --hard rather than pull/merge
+            # so we don't error out on local divergence (the script
+            # treats this checkout as a deploy artefact, not the user's
+            # workspace).
+            echo "asoe-ui is on '${ASOE_UI_BRANCH_LOCAL}'; fetching latest from origin/${ASOE_UI_BRANCH} ..."
             git -C "${target}" fetch "${fetch_url}" \
                 "+refs/heads/${ASOE_UI_BRANCH}:refs/remotes/origin/${ASOE_UI_BRANCH}"
             git -C "${target}" reset --hard "origin/${ASOE_UI_BRANCH}"
