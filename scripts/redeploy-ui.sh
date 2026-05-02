@@ -42,7 +42,17 @@ az account show >/dev/null 2>&1 || { echo "Run 'az login' first"; exit 1; }
 az account set --subscription "${SUBSCRIPTION_ID}"
 
 : "${ASOE_UI_REPO_URL:=https://github.com/kumarabhijit/asoe-ui.git}"
-: "${ASOE_UI_BRANCH:=core_ui_integration}"
+# Remote branch on origin (the ref the script fetches from GitHub).
+# Override for feature branches:
+#   ASOE_UI_BRANCH=main ./scripts/redeploy-ui.sh
+: "${ASOE_UI_BRANCH:=claude/dag-pipeline-representation-LQyx0}"
+# Local checkout branch name. Defaults to a tidier hand-friendly name
+# than the auto-generated remote ref so a developer pulling against the
+# checkout sees the local branch they expect. Set ASOE_UI_BRANCH_LOCAL
+# explicitly when the remote you point at via ASOE_UI_BRANCH is named
+# the same as the local branch you want (e.g. ASOE_UI_BRANCH=main with
+# ASOE_UI_BRANCH_LOCAL=main).
+: "${ASOE_UI_BRANCH_LOCAL:=dag-pipeline-representation}"
 
 # PAT support — same as deploy-azure.sh. Token spliced into the clone
 # URL only for the duration of the clone / fetch, then scrubbed from
@@ -58,12 +68,12 @@ if [[ ! -d "${ASOE_UI_PATH}/.git" ]]; then
 
     if [[ -n "${GH_PAT}" ]]; then
         authed_url="${ASOE_UI_REPO_URL/https:\/\//https://x-access-token:${GH_PAT}@}"
-        echo "Cloning asoe-ui (${ASOE_UI_BRANCH}) into ${ASOE_UI_PATH} (using PAT) ..."
+        echo "Cloning asoe-ui (remote=${ASOE_UI_BRANCH} local=${ASOE_UI_BRANCH_LOCAL}) into ${ASOE_UI_PATH} (using PAT) ..."
         git clone --branch "${ASOE_UI_BRANCH}" --depth 1 \
             "${authed_url}" "${ASOE_UI_PATH}"
         git -C "${ASOE_UI_PATH}" remote set-url origin "${ASOE_UI_REPO_URL}"
     else
-        echo "Cloning asoe-ui (${ASOE_UI_BRANCH}) into ${ASOE_UI_PATH} ..."
+        echo "Cloning asoe-ui (remote=${ASOE_UI_BRANCH} local=${ASOE_UI_BRANCH_LOCAL}) into ${ASOE_UI_PATH} ..."
         if ! git clone --branch "${ASOE_UI_BRANCH}" --depth 1 \
             "${ASOE_UI_REPO_URL}" "${ASOE_UI_PATH}" 2>/dev/null; then
             echo "ERROR: clone failed. asoe-ui is private — set a PAT in one of:" >&2
@@ -71,25 +81,36 @@ if [[ ! -d "${ASOE_UI_PATH}/.git" ]]; then
             exit 1
         fi
     fi
+
+    # `git clone --branch X` lands on a local branch named X. Rename
+    # so the developer's working tree carries ASOE_UI_BRANCH_LOCAL.
+    if [[ "${ASOE_UI_BRANCH_LOCAL}" != "${ASOE_UI_BRANCH}" ]]; then
+        git -C "${ASOE_UI_PATH}" branch -m "${ASOE_UI_BRANCH_LOCAL}"
+        git -C "${ASOE_UI_PATH}" branch \
+            --set-upstream-to="origin/${ASOE_UI_BRANCH}" \
+            "${ASOE_UI_BRANCH_LOCAL}" >/dev/null 2>&1 || true
+    fi
 else
-    # Existing checkout — make sure it's on ${ASOE_UI_BRANCH} and current
-    # with origin. Fetches against an in-URL-authed remote so we get
-    # GitHub's tested git-HTTPS auth path (the `extraHeader: bearer`
-    # form is unreliable for git-over-HTTPS — see deploy-azure.sh's
-    # sync_asoe_ui_to_branch for the rationale).
+    # Existing checkout — make sure the local branch
+    # (ASOE_UI_BRANCH_LOCAL) is checked out, tracking
+    # origin/${ASOE_UI_BRANCH}, and reset to that ref. Fetches against
+    # an in-URL-authed remote so we get GitHub's tested git-HTTPS auth
+    # path (the `extraHeader: bearer` form is unreliable for
+    # git-over-HTTPS — see deploy-azure.sh's sync_asoe_ui_to_branch
+    # for the rationale).
     fetch_url="${ASOE_UI_REPO_URL}"
     if [[ -n "${GH_PAT}" ]]; then
         fetch_url="${ASOE_UI_REPO_URL/https:\/\//https://x-access-token:${GH_PAT}@}"
     fi
 
     current_branch=$(git -C "${ASOE_UI_PATH}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-    if [[ "${current_branch}" != "${ASOE_UI_BRANCH}" ]]; then
-        echo "asoe-ui is on '${current_branch}'; switching to '${ASOE_UI_BRANCH}' ..."
+    if [[ "${current_branch}" != "${ASOE_UI_BRANCH_LOCAL}" ]]; then
+        echo "asoe-ui is on '${current_branch}'; switching to '${ASOE_UI_BRANCH_LOCAL}' (remote: ${ASOE_UI_BRANCH}) ..."
         git -C "${ASOE_UI_PATH}" fetch "${fetch_url}" \
             "+refs/heads/${ASOE_UI_BRANCH}:refs/remotes/origin/${ASOE_UI_BRANCH}"
-        git -C "${ASOE_UI_PATH}" checkout -B "${ASOE_UI_BRANCH}" "origin/${ASOE_UI_BRANCH}"
+        git -C "${ASOE_UI_PATH}" checkout -B "${ASOE_UI_BRANCH_LOCAL}" "origin/${ASOE_UI_BRANCH}"
     else
-        echo "asoe-ui is on '${ASOE_UI_BRANCH}'; fetching latest from origin ..."
+        echo "asoe-ui is on '${ASOE_UI_BRANCH_LOCAL}'; fetching latest from origin/${ASOE_UI_BRANCH} ..."
         git -C "${ASOE_UI_PATH}" fetch "${fetch_url}" \
             "+refs/heads/${ASOE_UI_BRANCH}:refs/remotes/origin/${ASOE_UI_BRANCH}"
         git -C "${ASOE_UI_PATH}" reset --hard "origin/${ASOE_UI_BRANCH}"
