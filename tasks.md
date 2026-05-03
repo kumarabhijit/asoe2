@@ -1598,3 +1598,73 @@ sandbox now serves real classifier confidence values,
 operator-tunable JWT TTLs, and a DB schema that no longer pins
 the intent enum at two places. Two architectural decisions
 (ADR-026/027) are queued for review board sign-off.
+
+---
+
+## Phase 26.x — Order-level enrichment composer + SoD self-override allowance (closed 2026-05-03)
+
+Paired with asoe-ui PR #118 / #119. Both shipped together to close
+gaps the PO observed on the Azure deployment.
+
+### `api/profile_composer.py` (new module — 2026-05-03)
+- [x] `compose_entity_profile(record)` — Account master-data lookup
+      via `api.users.get_account` (id), with synthesis fallback
+      onto `record.account_name` when the id is unknown. Returns
+      `None` when no Account linkage exists.
+- [x] `compose_impact_metrics(record)` — deterministic line-item
+      math (delta, revenue at risk, fulfilment gap %, SLA priority
+      mapped from `shadow_verdict`). Returns `None` when no line
+      items so the UI omits a zero-filled column.
+- [x] `compose_narrative(record, trace_data)` — order-level
+      `root_cause` + `recommendation` prose, sourced from
+      `record.resolution_data` first (`root_cause`,
+      `root_cause_summary`, `recommendation`, `recommended_action`,
+      `summary`), falling through to `trace.narrative` (first
+      paragraph) and `trace.resolution_steps[0]`. Returns
+      `(None, None)` when nothing is available.
+- [x] All three composers wired into `routes/exceptions.get_analysis`.
+- [x] 15 unit tests in `tests/test_profile_composer.py` covering
+      account lookup, synthesis fallback, line-item math, fulfilment-
+      gap presence rules, SLA-priority mapping, narrative source
+      precedence, partial-truth guards.
+
+### `api/schemas.py` (`AnalysisResponse` extension)
+- [x] New Pydantic models `EntityProfile` and `ImpactMetrics`
+      mirroring the UI contract in
+      `asoe-ui/src/types/exceptions.ts`.
+- [x] `AnalysisResponse` extended with optional `entity_profile`,
+      `impact_metrics`, `root_cause`, `recommendation` (all four
+      Optional — composer returns None when backing data absent).
+
+### `compliance/audit_bearing_registry.yaml`
+- [x] Registered all 14 new fields under `EntityProfile` (7 — 2
+      audit-bearing, 5 contextual) and `ImpactMetrics` (7 — 4
+      audit-bearing, 3 contextual).
+- [x] Added `entity_profile_master_gap` grandfather clause for
+      `vip_status` / `credit_standing` / `location` (deadline
+      2026-08-01 — re-evaluate at next compliance workshop).
+- [x] Added `impact_metrics_sla_gap` grandfather clause for
+      `sla_deadline` (deadline 2026-08-01).
+- [x] Updated `summary` tally to 124 / 92 / 5 / 27 — verified by
+      `tests/test_audit_registry_coverage.py`.
+
+### SoD self-override allowance (PO ruling 2026-05-03)
+- [x] Removed the SoD self-block at `routes/exceptions.py:902-916`.
+      The same user can now re-override their own prior resolution
+      via `PATCH /exceptions/{id}/disposition`. Operators reported
+      legitimate "I need to correct my earlier override" cases were
+      forced into escalation churn.
+- [x] Audit-trail evidence preserved: `reanalysis_history` records
+      every override attempt with initiator / timestamp / reason_tag.
+- [x] Four-eyes high-value-override rule (`POLICY_FOUR_EYES_THRESHOLD`
+      → `PENDING_COSIGN` → distinct cosigner) **unchanged** —
+      remains the SOX §404 control of record. The cosign self-block
+      at `routes/exceptions.py:666-674` is still in force.
+- [x] `tests/test_override_escalate.TestSegregationOfDuties` flipped
+      the existing test to assert the new behaviour
+      (`test_same_user_can_override_own_resolution`); the
+      different-user override test stays unchanged.
+- [x] Documented under `docs/AUDITOR_GUIDE.md §18.1` with an
+      explicit scope note distinguishing the relaxed disposition
+      self-block from the still-active cosign self-block.
+
