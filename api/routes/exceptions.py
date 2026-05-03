@@ -53,6 +53,11 @@ from api.analysis_adapters import (
     resolve_adapter_key,
 )
 from api.analysis_composer import compose as compose_analysis
+from api.profile_composer import (
+    compose_entity_profile,
+    compose_impact_metrics,
+    compose_narrative,
+)
 from api.errors import ASOEError
 from api.schemas import (
     AdminReleaseRequest,
@@ -895,20 +900,19 @@ async def disposition_exception(
                 status_code=409,
             )
         _require_state(record, HITL_OVERRIDE_STATES, "override")
-        prior_resolver = record.resolved_by
-        if (
-            prior_resolver
-            and not prior_resolver.startswith("system:")
-            and prior_resolver == user.sub
-        ):
-            raise ASOEError(
-                code="SOD_VIOLATION",
-                message=(
-                    "Segregation of duties: the user who previously resolved "
-                    "this exception cannot override it."
-                ),
-                status_code=403,
-            )
+        # Self-override of a prior resolution by the same user is now
+        # allowed (PO ruling 2026-05-03). The previous SoD self-block
+        # raised SOD_VIOLATION when prior_resolved_by == caller.sub;
+        # operators reported that legitimate "I made a mistake on my
+        # earlier override and need to correct it" cases were being
+        # blocked, forcing escalation churn.
+        #
+        # The four-eyes cosign rule on high-value overrides
+        # (POLICY_FOUR_EYES_THRESHOLD via PENDING_COSIGN — see line ~666
+        # below) is the SOX §404 control that remains in force; that
+        # rule still requires a different authorized user. The
+        # reanalysis_history audit trail records every override
+        # initiator/timestamp so SOX evidence-of-control is preserved.
         # Four-eyes: high-value overrides stage to PENDING_COSIGN.
         impact = _financial_impact_usd(record)
         if impact is not None and impact >= HIGH_VALUE_OVERRIDE_THRESHOLD_USD:
@@ -1618,11 +1622,26 @@ async def get_analysis(
                     if sec_proj is not None:
                         extras[sec_field] = sec_proj
 
+    # Order-level enrichment: entity profile, impact metrics, and
+    # the narrative pair (root_cause + recommendation). These are
+    # composed by `api.profile_composer`, which is the SOLE source
+    # of truth for these fields per the Verdict 2026-04-22 commitment
+    # — no recipe/UI synthesis. Each composer returns None when its
+    # backing data is absent so the UI structurally omits that
+    # surface (Guardrail #6 — no partial-truth fallbacks).
+    entity_profile = compose_entity_profile(record)
+    impact_metrics = compose_impact_metrics(record)
+    root_cause, recommendation = compose_narrative(record, trace_data)
+
     return AnalysisResponse(
         diagnosis=diagnosis,
         confidence=confidence,
         risk=risk,
         resolution=resolution,
         lines=lines,
+        root_cause=root_cause,
+        recommendation=recommendation,
+        entity_profile=entity_profile,
+        impact_metrics=impact_metrics,
         **extras,
     )

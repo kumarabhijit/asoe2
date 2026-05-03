@@ -616,7 +616,116 @@ LLMProvenance:
       cross-system audit chain that links our TraceRecord to
       the provider's own server-side log.
 
+EntityProfile:
+  customer_name:
+    tier: audit-bearing
+    source: master-data
+    rationale: >-
+      The customer-of-record on the resolution. Operators authorise
+      financially-binding action against this name; downstream SOX
+      attestation references it in the four-eyes audit row.
+  bp_number:
+    tier: audit-bearing
+    source: master-data
+    rationale: >-
+      SAP Business Partner number — the deterministic identifier
+      that ties UI display back to the SAP master record. Required
+      for cross-system reconciliation.
+  customer_tier:
+    tier: contextual
+    source: master-data
+    rationale: >-
+      Account tier (enterprise / strategic / standard). Influences
+      visual treatment on the operator surface but is not itself
+      a deterministic gate on any policy decision.
+  vip_status:
+    tier: contextual
+    source: backend-gap
+    rationale: >-
+      Operator-facing VIP indicator. No producer wired today; tracked
+      under EntityProfile grandfather clause. Reclassify to
+      audit-bearing once a customer-master gateway lands and
+      compliance signs off on a deadline.
+  credit_standing:
+    tier: contextual
+    source: backend-gap
+    rationale: >-
+      Credit standing display string. No producer wired today;
+      tracked under EntityProfile grandfather clause.
+  location:
+    tier: contextual
+    source: master-data
+    rationale: >-
+      Free-text location label (city / DC). Decorative on the
+      operator surface; absence is acceptable.
+  region:
+    tier: contextual
+    source: master-data
+    rationale: >-
+      Account region (e.g., National / Midwest / West). Sourced
+      from the seed Account row; absence is acceptable.
+
+ImpactMetrics:
+  revenue_at_risk:
+    tier: audit-bearing
+    source: derived
+    rationale: >-
+      Quantitative blast radius the operator weighs when authorising
+      an action. Computed deterministically from line-item totals;
+      MUST be present whenever line items are.
+  delta_amount:
+    tier: audit-bearing
+    source: derived
+    rationale: >-
+      Signed PO-vs-ERP variance in dollars. Together with
+      delta_percentage these are the two numbers the four-eyes
+      threshold gate (POLICY_FOUR_EYES_THRESHOLD) reads against.
+  delta_percentage:
+    tier: audit-bearing
+    source: derived
+    rationale: >-
+      PO-vs-ERP variance as a percentage of ERP price. Used in
+      conjunction with delta_amount.
+  fulfillment_gap_pct:
+    tier: contextual
+    source: derived
+    rationale: >-
+      Optional fulfilment gap as a percentage. Present only when
+      line items carry fulfilled_quantity; absence is structural,
+      not a partial-truth.
+  sla_priority:
+    tier: audit-bearing
+    source: derived
+    rationale: >-
+      Coarse SLA priority label (P1-P4). Presentation mapping over
+      shadow_verdict + lifecycle; the deterministic source values
+      are themselves audit-bearing, so the projection inherits.
+  sla_deadline:
+    tier: contextual
+    source: backend-gap
+    rationale: >-
+      Wall-clock SLA deadline. No producer wired today; tracked
+      under ImpactMetrics grandfather clause. Reclassify once a
+      contract-SLA gateway populates the deadline.
+  affected_lines:
+    tier: audit-bearing
+    source: derived
+    rationale: >-
+      Number of line items in scope of the resolution. Drives the
+      operator's review checklist; trivially derived from the
+      line-items list, MUST agree with it.
+
 grandfather_clauses:
+  # entity_profile_master_gap (added 2026-05-02): customer_tier ships
+  # from the seed Account table today, but vip_status, credit_standing,
+  # and location have no producer. The fields stay declared so the UI
+  # can render them once a customer-master gateway lands.
+  # Deadline: 2026-08-01 (re-evaluate at next compliance workshop).
+
+  # impact_metrics_sla_gap (added 2026-05-02): sla_deadline is
+  # declared but unpopulated until the contract-SLA gateway lands.
+  # Deadline: 2026-08-01.
+
   # price_analysis_gateway_gap retired (T4, 2026-04-22): SAP doc /
   # contract / promotion gateways are wired on
   # PriceAdjustmentRecipe; doc_type / doc_number / rule_id /
@@ -653,9 +762,17 @@ summary:
   # the actual totals below are re-derived from the live rows.
   # +3 audit-bearing under LLMProvenance (V1 PR-1 — provider /
   # model / request_id) pending compliance sign-off.
-  total_fields: 110
-  audit_bearing: 85
+  # 2026-05-02: +14 rows (EntityProfile 7, ImpactMetrics 7) for the
+  # order-level enrichment surface. 7 audit-bearing
+  # (customer_name, bp_number, revenue_at_risk, delta_amount,
+  # delta_percentage, sla_priority, affected_lines) and 7 contextual
+  # (customer_tier, vip_status, credit_standing, location, region,
+  # fulfillment_gap_pct, sla_deadline). Three of the contextuals
+  # are tracked under the new entity_profile_master_gap +
+  # impact_metrics_sla_gap grandfather clauses.
+  total_fields: 124
+  audit_bearing: 92
   conditional: 5
-  contextual: 20
+  contextual: 27
   backend_gap_fields: 0
   gateway_dependent_fields: 13
