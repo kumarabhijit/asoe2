@@ -1,8 +1,8 @@
 # ADR-033: Override Reason-Code Vocabulary Lifecycle (Per-Intent Curation)
 
-**Status:** Accepted
-**Date:** 2026-05-03
-**Deciders:** Same as ADR-028 (review session 2026-05-03). Product + ML jointly owned per the meeting action item.
+**Status:** Accepted (revisions per 2026-05-10 review)
+**Date:** 2026-05-03 (initial); 2026-05-10 (revisions)
+**Deciders:** Same as ADR-028 (review session 2026-05-03; sign-off review 2026-05-10). Product + ML jointly owned per the meeting action item.
 **Applies to:** `constraints/specs.py` (`INTENT_REASON_TAGS`, `AllowedOverrideReasonTag`), `api/routes/health.py` (`/health.allowed_override_reason_tags_by_intent`), `asoe-ui/src/app/exceptions/OverrideChooserDialog.tsx`, `tests/test_constraints.py`.
 **Related:** ADR-028, ADR-029, ADR-030, ADR-032.
 
@@ -39,7 +39,7 @@ ADR-032 establishes that calibration is deferred but customer-supplied. The labe
 
 End-user (CS associate U1) feedback in the design review:
 - Eight options on a hot queue is too many; will default to `OTHER` if the modal is too dense.
-- Visual grouping into 3 clusters (agent-was-wrong / agent-was-right-but-business-decision / edge-case) is more usable than a flat 8-item list.
+- Visual grouping into clusters is more usable than a flat 8-item list.
 - Free-text alongside the structured code remains valuable for audit narrative; should be optional except for `OTHER`.
 
 This ADR establishes the lifecycle for per-intent reason-code vocabularies so future intents can land their own curated sets without re-architecting.
@@ -67,6 +67,19 @@ INTENT_REASON_TAGS["DUPLICATE_PO"] = (
 
 `OTHER` is mandatory in every per-intent set as the workflow-safety fallback (already documented in `constraints/specs.py`). `CONFIRMED_DUPLICATE` deliberately included even though it represents agreement with the agent — distinguishing "confirmed" from "no-override" is itself useful training signal (it indicates a human verified the agent's recommendation rather than letting it pass unreviewed).
 
+#### Code-level guidance for CSRs (informative)
+
+| Code | When to use | Example |
+|---|---|---|
+| `INTENTIONAL_REORDER` | Buyer genuinely placed a second order with the same SKU set | "Customer reorders the same monthly stock; second PO is intentional, not a retry." |
+| `AMENDED_PO` | The incoming PO is a revision of the existing one; quantities or lines changed | "Existing PO had qty 500; incoming has qty 600 with same PO#. Buyer's amendment." |
+| `BLANKET_RELEASE` | Customer uses a blanket PO and this is a release against it | "PO# is the blanket umbrella; this release is one of several legitimate draws." |
+| `SYSTEM_RETRY_VALID` | Middleware retry was intentional and the duplicate represents a valid resubmission | "EDI VAN retransmitted after timeout; the second event is the actual successful delivery." |
+| `DIFFERENT_SHIP_TO` | Same PO# but different ship-to addresses indicates distinct orders | "Same PO# routed to two DCs in different regions; treat as two distinct fulfillments." |
+| `CONFIRMED_DUPLICATE` | Agent was correct; CSR is confirming the recommendation | "Agent recommended BLOCK_AND_NOTIFY; CSR verifies and confirms." |
+| `PARTIAL_OVERLAP` | Some lines match an existing PO but the order is meaningfully distinct | "5 of 10 lines match the existing PO; the other 5 are new SKUs. CSR judges this is a distinct order with reused SKUs, not a duplicate." (Per 2026-05-10 review revision: example added because the code was previously under-specified.) |
+| `OTHER` | None of the above fits; free-text explanation required | "Buyer manually re-keyed the PO into the portal after EDI partial-failure; not in any standard pattern." |
+
 ### B. Per-intent vocabulary takes precedence over global
 
 `INTENT_REASON_TAGS["DUPLICATE_PO"]` is no longer `_GLOBAL_REASON_TAGS`. The framework already documented this fall-back behavior:
@@ -92,13 +105,15 @@ When a new intent ships or an existing intent gains curated reasons:
 `asoe-ui/src/app/exceptions/OverrideChooserDialog.tsx`:
 
 1. Reads the per-intent reason set from cached `/health.allowed_override_reason_tags_by_intent`.
-2. Renders codes in **3 visual clusters**, not a flat list, when the per-intent set has ≥6 codes. For `DUPLICATE_PO` specifically:
+2. Renders codes in **3 visual clusters**, not a flat list. For `DUPLICATE_PO` specifically:
 
 | Cluster | Codes | Meaning |
 |---|---|---|
-| **Agent was right** | `CONFIRMED_DUPLICATE` | Confirms the recommendation |
-| **Agent was wrong** | `INTENTIONAL_REORDER`, `AMENDED_PO`, `DIFFERENT_SHIP_TO`, `BLANKET_RELEASE`, `SYSTEM_RETRY_VALID`, `PARTIAL_OVERLAP` | Override with a structured reason |
-| **Edge case** | `OTHER` | Free-text required |
+| **Confirm the agent** | `CONFIRMED_DUPLICATE` | Single-item cluster — analyst is verifying the recommendation. Cluster name explicitly chosen so the single-item presentation is intentional, not a UX accident. |
+| **Override with a structured reason** | `INTENTIONAL_REORDER`, `AMENDED_PO`, `DIFFERENT_SHIP_TO`, `BLANKET_RELEASE`, `SYSTEM_RETRY_VALID`, `PARTIAL_OVERLAP` | Agent was wrong; choose the operational reason. |
+| **Edge case** | `OTHER` | Free-text required. |
+
+> **2026-05-10 review revision (U1):** The first cluster was originally labeled "Agent was right" with a single member, which read as an accidental UX. Renamed to "Confirm the agent" to make the single-item presentation intentional; the visual separation from the "override" cluster is preserved.
 
 Cluster mapping for `DUPLICATE_PO` is a UI-side constant; mapping for future intents is added when their vocabulary lands.
 
@@ -136,15 +151,17 @@ This ADR thus discharges one of ADR-032's "future calibration prerequisites" as 
    - Add test ensuring `OTHER` is the last entry in every per-intent set.
 3. `asoe-ui/src/app/exceptions/OverrideChooserDialog.tsx`:
    - Read per-intent set from `/health.allowed_override_reason_tags_by_intent`.
-   - Render in 3 clusters per D for `DUPLICATE_PO`.
+   - Render in 3 clusters per D for `DUPLICATE_PO` (cluster names per the 2026-05-10 revision).
    - Make free-text optional except on `OTHER`.
    - Optional: keyboard-shortcut numbering 1–8.
-4. Documentation: brief CSR training note describing the 8 codes (lives outside the codebase, owned by CS Operations).
+4. Documentation: brief CSR training note describing the 8 codes (lives outside the codebase, owned by CS Operations) — reuses the example table from §A above.
 
 ### V1.5
 
-- Manager-facing dashboard of override-reason distribution by customer + analyst, surfacing the early-warning signal for drift (CS Manager U2's request from design review).
-- Per-intent reason curation for the next intent that needs it (likely `BACK_ORDER` or `EDI_MISMATCH`).
+> **2026-05-10 review revision (U2):** Wording tightened to clarify that **the data is captured from V1**; the V1.5 dashboard is a presentation layer over existing data, not a new data-collection effort.
+
+- **Manager-facing dashboard** (purely a presentation layer over V1-captured data) showing override-reason distribution by customer + analyst. Surfaces the early-warning signal for drift. The structured codes captured in V1 are what the dashboard reads — no V1.5 schema or instrumentation work.
+- **Per-intent reason curation for the next intent** that needs it (likely `BACK_ORDER` or `EDI_MISMATCH`).
 
 ### V2+
 
@@ -161,6 +178,7 @@ This ADR thus discharges one of ADR-032's "future calibration prerequisites" as 
 - CSR experience improves: clustered presentation, optional notes, keyboard shortcuts.
 - Future per-intent vocabulary additions follow a documented lifecycle.
 - Audit narrative is structured + free-text combined, not either/or.
+- "Confirm the agent" cluster captures positive signal as labeled training data, not just overrides.
 
 ### Negative
 
@@ -172,7 +190,6 @@ This ADR thus discharges one of ADR-032's "future calibration prerequisites" as 
 
 - Every override now carries a reason code + (where applicable) free-text note; both written to `audit_hash_chain` via `ExecutionLog.resolution_notes` (free-text) and a new `ExecutionLog.resolution_reason_tag` field (structured).
 - `resolution_reason_tag` constrained to the intent's allowed set at write time; invalid codes rejected at the API boundary.
-- Historical overrides without a reason code (pre-ADR-033) are tagged `LEGACY_NO_REASON` for clean separation; not added to the active vocabulary.
 
 ---
 
@@ -185,13 +202,13 @@ This ADR thus discharges one of ADR-032's "future calibration prerequisites" as 
 | **Free-text only, no structured codes** | Unusable for calibration. Audit narrative is fine but training-data extraction would require NLP retroactively. Compounds the calibration-deferral cost. |
 | **Tenant-configurable reason vocabularies** | Reason codes are product policy, not tenant config. Tenant-configurable codes would fragment the cross-tenant training corpus and create UX inconsistency. Hard reject. |
 | **More than 8 codes** | CSR (U1) feedback was that 8 is already the upper bound for ergonomic clustering. More codes would push more overrides into `OTHER`, defeating the structured-code purpose. |
+| **Cluster labeled "Agent was right" (single-item cluster)** | Read as an accidental UX. Renamed to "Confirm the agent" per 2026-05-10 review so the single-item presentation is intentional. |
 
 ---
 
 ## Open questions
 
-- Whether `CONFIRMED_DUPLICATE` should appear in the override dialog at all, given that confirming the agent is technically a *non-override*. Current decision: yes, because explicit confirmation is itself training signal. UI-side decision whether to label that cluster differently ("Confirm" vs "Override"). UX detail; not blocking.
-- Whether to add `LEGACY_NO_REASON` to the global vocabulary so historical records with a NULL reason are queryable without special-casing. Lean yes; deferred to implementation.
+- Whether `CONFIRMED_DUPLICATE` should appear in the override dialog at all, given that confirming the agent is technically a *non-override*. Current decision: yes, because explicit confirmation is itself training signal. The "Confirm the agent" cluster name (per 2026-05-10 revision) makes the intentional inclusion clear.
 - Per-intent reason curation cadence — currently ad-hoc per intent. Likely formalize as part of each new-intent ADR going forward.
 
 ---
@@ -201,5 +218,6 @@ This ADR thus discharges one of ADR-032's "future calibration prerequisites" as 
 - `constraints/specs.py` (current `INTENT_REASON_TAGS` placeholder)
 - `docs/specs/duplicate-po/calibration-methodology.md` (Override Reason Codes section)
 - `docs/specs/duplicate-po/2026-05-03-design-review.md` (Item 5)
+- `docs/specs/duplicate-po/2026-05-10-adr-review.md` (revisions)
 - `api/routes/health.py` (existing `/health.allowed_override_reason_tags_by_intent`)
 - ADR-028, ADR-029, ADR-030, ADR-032
