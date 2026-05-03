@@ -1,8 +1,8 @@
 # ADR-028: Duplicate-PO Storage Shape — Unified Exception Lifecycle with Four Guard-Rails
 
-**Status:** Accepted
-**Date:** 2026-05-03
-**Deciders:** Architecture review chair; backend tech lead; data architect; SOX/compliance lead; ML/feature-store lead; B2B/ERP integration lead; CS associate, CS manager, tenant admin (end-user representation). Multi-perspective review session 2026-05-03 (`docs/specs/duplicate-po/2026-05-03-design-review.md`).
+**Status:** Accepted (revisions per 2026-05-10 review)
+**Date:** 2026-05-03 (initial); 2026-05-10 (revisions)
+**Deciders:** Architecture review chair; backend tech lead; data architect; SOX/compliance lead; ML/feature-store lead; B2B/ERP integration lead; CS associate, CS manager, tenant admin (end-user representation). Multi-perspective review session 2026-05-03 (`docs/specs/duplicate-po/2026-05-03-design-review.md`); sign-off review 2026-05-10 (`docs/specs/duplicate-po/2026-05-10-adr-review.md`).
 **Applies to:** `db/migrations/`, `db/repository.py`, `api/analysis_composer.py`, `api/routes/exceptions.py`, `contracts/models.py`, `recipes/DuplicatePORecipe.py`, `recipes/registry.py`, `tests/test_repository.py`, `tests/test_audit_chain.py`.
 **Supersedes / relates to:** ADR-022 (database access pattern), ADR-023 (disposition + hash-chained audit), ADR-024 (OM coverage expansion).
 
@@ -109,8 +109,8 @@ Response envelope:
 {
   "exception_id": "...",
   "tenant_id": "...",
-  "incoming_po": { ... },           // projected from OrderEvent + metadata
-  "matched_po": { ... } | null,     // projected from gateway-resolved data
+  "incoming_po": { ... },
+  "matched_po": { ... },
   "detection": {
     "composite_score": 0.847,
     "classification": "REVIEW_REQUIRED",
@@ -119,8 +119,8 @@ Response envelope:
     "agent_reasoning": "...",
     "signal_breakdown": { ... }
   },
-  "human_actions": [ ... ],         // resolved_by/action/notes if present
-  "audit_trail": [ ... ]            // ordered audit_hash_chain entries
+  "human_actions": [],
+  "audit_trail": []
 }
 ```
 
@@ -137,7 +137,15 @@ Two CI-enforced checks land alongside V1:
 1. **Hash-chain coverage test** (`tests/test_audit_chain.py::test_jsonb_mutation_chained`): for each write path that mutates `OrderEvent.metadata` or `ExecutionLog.recipe_output`, a corresponding entry must appear in `audit_hash_chain` within the same transaction. Test harness uses a `MutatingRepositoryProxy` that records every mutation and asserts a chain entry exists with the matching content hash. SOX requirement, non-negotiable.
 2. **Tenant-isolation lint** (`tests/test_repository.py::test_all_queries_filter_tenant`): static walk over `db/repository.py` AST asserts every `SELECT`/`UPDATE`/`DELETE` either includes a `tenant_id` predicate or is annotated `# pragma: cross-tenant <reason>`. Build fails on missing pragma.
 
-Latency budget for the read API (`GET /api/v1/exceptions/duplicates/:id`): **P95 ≤ 400 ms** at V1 volume; breach triggers ADR-031 evaluation.
+> **2026-05-10 review revision (E5):** Both checks are **CI-enforced only** in V1. They catch new code that violates the rule before it merges. They do *not* enforce at runtime — a hot patch or a write path that bypasses `db/repository.py` would not be caught. This is a known gap for V1; runtime write-path interception is a tracked follow-up (V2 per "deferred" list).
+
+**Latency budget for the read API** (`GET /api/v1/exceptions/duplicates/:id`):
+
+> **2026-05-10 review revision (E2):** Budget is split warm-vs-cold:
+> - **Warm-cache P95 ≤ 200 ms** at V1 volume — the typical-operation budget. Implementations must use a sensible cache to meet this.
+> - **Cold-cache P95 ≤ 800 ms** — first request after restart / cache eviction. Generous because not the steady state.
+>
+> Steady-state breach (warm > 200ms sustained) triggers ADR-031 evaluation. Cold-cache breach is a cache-design issue, not a storage-shape issue.
 
 ---
 
@@ -178,9 +186,10 @@ End-user representation:
 - Bulk export endpoint `GET /api/v1/exceptions/duplicates/export?from=…&to=…&format=csv|jsonl` (CS-manager request).
 - Apply Guard-rail 1 contract enforcement retroactively to the other 8 intents (each gets its own contract block in `metadata_schemas.py`).
 
-### V2 (conditional on ADR-031 trigger firing)
+### V2 (conditional on ADR-031 trigger firing or other)
 
 - Materialized view `mv_duplicate_check_results` projecting from `OrderEvent` + `ExecutionLog` for fast analytics and (future) calibration training data.
+- Runtime hash-chain interception (write-path interceptor) — see Guard-rail 4 review revision above.
 
 ---
 
@@ -198,6 +207,7 @@ End-user representation:
 - Querying duplicate-PO-specific shapes goes through JSONB operators (`metadata->>'matched_po_id'`, `recipe_output->>'composite_score'`). Acceptable at V1 volume; ADR-031 trigger handles the future.
 - Metadata-contract enforcement adds a write-path validator. Cost is microseconds; benefit is preventing silent schema drift.
 - The "what does `Exception` actually mean" DDD critique is partially mitigated, not eliminated. Future intents that genuinely don't fit this aggregate (e.g., a multi-document workflow spanning several events) will need their own ADR.
+- Guard-rail 4 enforcement is CI-only in V1; runtime interception is a known gap (see review revision).
 
 ### Compliance notes
 
@@ -220,7 +230,7 @@ End-user representation:
 
 ## Open questions
 
-- Performance budget for the read envelope when `audit_hash_chain` is large (>10k entries per exception). Likely needs a `?audit_limit=N` parameter; deferred to first integration test that breaches budget.
+- Performance budget for the read envelope when `audit_hash_chain` is large (>10k entries per exception). Likely needs a `?audit_limit=N` parameter; deferred to first integration test that breaches budget. (Per 2026-05-10 review, U1 also requested this for the queue list view; tracked as implementation-PR scope.)
 - Whether `MatchedPOProjection` should embed the matched PO's full lines or just a reference. Current decision: full lines (UI Layer-2 needs them); revisit if envelope size becomes a problem.
 - Cross-tenant aggregate analytics (a question ML will surface eventually) — out of scope for this ADR; will need its own ADR with explicit cross-tenant authorization model.
 
@@ -230,6 +240,7 @@ End-user representation:
 
 - `docs/specs/duplicate-po-product-spec.md` — full spec
 - `docs/specs/duplicate-po/schema.sql` — original spec schema (preserved as reference, not implemented)
-- `docs/specs/duplicate-po/2026-05-03-design-review.md` — meeting transcript
+- `docs/specs/duplicate-po/2026-05-03-design-review.md` — initial review meeting transcript
+- `docs/specs/duplicate-po/2026-05-10-adr-review.md` — sign-off review meeting transcript
 - ADR-022, ADR-023, ADR-024, ADR-025
 - ADR-029 (override merge policy), ADR-030 (config hierarchy), ADR-031 (split trigger), ADR-032 (calibration deferral), ADR-033 (reason-code vocabulary)
