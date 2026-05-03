@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import concurrent.futures
 from datetime import datetime, timezone
+from typing import Any
 
 from contracts.models import (
     ExecutedNode,
@@ -515,11 +516,16 @@ def validate_types(state: GraphState) -> GraphState:
             },
         )
     elif state.selected_recipe == "DuplicatePORecipe.py":
-        # Resolution context — resolved by gateway dependencies (Phase B).
-        # Falls back to None when gateways have not been called (e.g. tests
-        # without gateway setup).
+        # Gateway-resolved context (Phase B + ADR-029). All three values
+        # default to {} when gateways have not been called — keeps
+        # standalone-test paths working without orchestration setup.
+        #   fulfillment_status / matched_po_details — OMS reads (Phase B)
+        #   tenant_config — 5-level config resolver (ADR-029); the recipe
+        #     uses .get("weights") which returns None when absent so the
+        #     recipe falls back to its module-default _WEIGHTS map.
         fulfillment = state.enrichment_context.get("fulfillment_status", {})
         matched_details = state.enrichment_context.get("matched_po_details", {})
+        tenant_config = state.enrichment_context.get("tenant_config", {})
         state.invocation = RecipeInvocation(
             recipe_name=state.selected_recipe,
             params={
@@ -533,6 +539,7 @@ def validate_types(state: GraphState) -> GraphState:
                 "has_revision_indicator": matched_details.get("has_revision_indicator", None),
                 "line_items_identical": matched_details.get("line_items_identical", None),
                 "autonomy_levels": DUPLICATE_PO_AUTONOMY_LEVELS,
+                "weights": tenant_config.get("weights"),
             },
         )
     elif state.selected_recipe == "PriceHoldReleaseRecipe.py":
