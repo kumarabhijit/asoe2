@@ -7,6 +7,7 @@ from gateways.registry import (
 )
 from gateways.executor import GatewayExecutor
 from gateways.stub import StubGateway
+from gateways.tenant_config import TenantConfigGateway
 
 __all__ = [
     "InfrastructureGateway",
@@ -16,4 +17,5 @@ __all__ = [
     "clear_registry",
     "GatewayExecutor",
     "StubGateway",
+    "TenantConfigGateway",
 ]
