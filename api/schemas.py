@@ -1106,6 +1106,44 @@ class OrderComparisonData(BaseModel):
     differing_fields: List[str] = Field(default_factory=list)
 
 
+class EntityProfile(BaseModel):
+    """Master-data context for the exception's customer entity.
+
+    Mirrors `EntityProfile` in `asoe-ui/src/types/exceptions.ts`.
+    Composed by `api.profile_composer.compose_entity_profile` from a
+    seed `Account` lookup; tier / VIP / credit-standing fields are
+    optional today (no producer wired) and tracked under the
+    `EntityProfile` grandfather clause in the audit-bearing registry.
+    """
+
+    customer_name: str
+    bp_number: str
+    customer_tier: Optional[str] = None
+    vip_status: Optional[bool] = None
+    credit_standing: Optional[str] = None
+    location: Optional[str] = None
+    region: Optional[str] = None
+
+
+class ImpactMetrics(BaseModel):
+    """Quantitative blast radius of the exception.
+
+    Mirrors `ImpactMetrics` in `asoe-ui/src/types/exceptions.ts`.
+    Composed deterministically from line-item totals and record
+    metadata. SLA-priority is rendered as a string so the UI can
+    map verdicts → display variants without a hardcoded enum
+    (Guardrail #2 on the UI side).
+    """
+
+    revenue_at_risk: float
+    delta_amount: float
+    delta_percentage: float
+    fulfillment_gap_pct: Optional[float] = None
+    sla_priority: str
+    sla_deadline: Optional[str] = None
+    affected_lines: int
+
+
 class AnalysisResponse(BaseModel):
     """GET /api/v1/exceptions/{id}/analysis"""
 
@@ -1114,6 +1152,27 @@ class AnalysisResponse(BaseModel):
     risk: str
     resolution: str
     lines: List[LineAnalysis] = Field(default_factory=list)
+
+    # ── Order-level narrative fields ────────────────────────────────
+    # Mirrors `OrderAnalysis` in `asoe-ui/src/types/exceptions.ts`.
+    # These are the prose layer the UI's `AgentAnalysisSection` reads
+    # for the "Root Cause" and "Recommendation" blocks. Both are
+    # optional because (a) the composer fills them only when there is
+    # enough recipe / shadow context to do so honestly, and (b) the
+    # operator must be able to distinguish "agent had no narrative"
+    # from a fabricated default — Verdict 2026-04-22 partial-truth
+    # guard. Empty → UI structurally omits the block.
+    root_cause: Optional[str] = None
+    recommendation: Optional[str] = None
+
+    # ── Entity / impact context (Verdict 2026-04-22 commitment) ─────
+    # The two-pane Layer-2 evidence the UI's `ContextStrip` renders:
+    # entity master data (Account lookup) + the quantitative blast
+    # radius. The composer at `api.profile_composer` is the single
+    # source of truth for these projections — recipes do not assemble
+    # them. Either field absent → UI suppresses its column.
+    entity_profile: Optional[EntityProfile] = None
+    impact_metrics: Optional[ImpactMetrics] = None
 
     # Data-presence enrichment fields (review L2). Populated by
     # `api.analysis_adapters.ANALYSIS_ADAPTERS` keyed on

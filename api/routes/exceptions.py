@@ -53,6 +53,11 @@ from api.analysis_adapters import (
     resolve_adapter_key,
 )
 from api.analysis_composer import compose as compose_analysis
+from api.profile_composer import (
+    compose_entity_profile,
+    compose_impact_metrics,
+    compose_narrative,
+)
 from api.errors import ASOEError
 from api.schemas import (
     AdminReleaseRequest,
@@ -1618,11 +1623,26 @@ async def get_analysis(
                     if sec_proj is not None:
                         extras[sec_field] = sec_proj
 
+    # Order-level enrichment: entity profile, impact metrics, and
+    # the narrative pair (root_cause + recommendation). These are
+    # composed by `api.profile_composer`, which is the SOLE source
+    # of truth for these fields per the Verdict 2026-04-22 commitment
+    # — no recipe/UI synthesis. Each composer returns None when its
+    # backing data is absent so the UI structurally omits that
+    # surface (Guardrail #6 — no partial-truth fallbacks).
+    entity_profile = compose_entity_profile(record)
+    impact_metrics = compose_impact_metrics(record)
+    root_cause, recommendation = compose_narrative(record, trace_data)
+
     return AnalysisResponse(
         diagnosis=diagnosis,
         confidence=confidence,
         risk=risk,
         resolution=resolution,
         lines=lines,
+        root_cause=root_cause,
+        recommendation=recommendation,
+        entity_profile=entity_profile,
+        impact_metrics=impact_metrics,
         **extras,
     )
