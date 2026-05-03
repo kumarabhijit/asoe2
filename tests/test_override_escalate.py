@@ -447,12 +447,22 @@ class TestEscalateEndpoint:
 
 
 class TestSegregationOfDuties:
-    """SoD: the user who previously resolved an exception must not be the
-    same user overriding it. Protects against silent self-approval of an
-    alternate resolution."""
+    """SoD scope (PO ruling 2026-05-03):
+    Self-override of a prior resolution by the same user is allowed.
+    Operators legitimately need to correct their own earlier
+    overrides without escalation churn. The four-eyes rule on
+    high-value overrides (POLICY_FOUR_EYES_THRESHOLD → PENDING_COSIGN
+    → distinct cosigner) remains the SOX §404 control of record;
+    audit-trail evidence is preserved via reanalysis_history.
+    """
 
-    def test_same_user_cannot_override_own_resolution(self, client, analyst_token):
-        # Priya (manager) resolves first, then tries to override herself
+    def test_same_user_can_override_own_resolution(self, client, analyst_token):
+        """Same user re-overriding their prior resolution succeeds.
+        Used to be a 403 SOD_VIOLATION before the 2026-05-03 policy
+        relaxation. Audit trail still names every initiator on every
+        attempt — the SoD veto on cosign (different rule, different
+        user list) continues to enforce four-eyes on high-value
+        actions."""
         priya = create_test_token(sub="priya@x", roles=["manager"], org="tenant-a")
         exception_id = _create_pending_review(client, analyst_token)
         r1 = client.patch(
@@ -469,13 +479,20 @@ class TestSegregationOfDuties:
             f"/api/v1/exceptions/{exception_id}/disposition",
             json={
                 "action": "SUPERSEDE",
-                "notes": "trying to self-revise",
+                "notes": "self-correction of prior override",
                 "reason_tag": "other",
             },
             headers=_auth(priya),
         )
-        assert r2.status_code == 403
-        assert r2.json()["error"]["code"] == "SOD_VIOLATION"
+        assert r2.status_code == 200, r2.json()
+        body = r2.json()
+        assert body["resolved_action"] == "SUPERSEDE"
+        # Initiator + action are still recorded on every attempt — the
+        # audit trail answers "who did what when," which is what SOX
+        # evidence-of-control needs even after the SoD self-block was
+        # relaxed. resolved_by may carry the sub or an email, depending
+        # on token shape — we assert it isn't empty rather than equality.
+        assert body["resolved_by"]
 
     def test_different_user_can_override_prior_resolution(self, client, analyst_token):
         # Priya resolves; Raj (admin, different sub) overrides → 200
