@@ -1,0 +1,64 @@
+{
+  "_meta": {
+    "_status": "REFERENCE — preserved from original product spec.",
+    "_v1_implementation": "Per ADR-029 and ADR-030, V1 reads this file as the platform-default + customer-tier-default seed for the gateways/tenant_config.py resolver. Customer-specific (L4) and customer-channel (L5) overrides land in the tenant_config table, not here.",
+    "_partial_overrides": "Per ADR-029, customer_behavior_overrides supply PARTIAL weight maps. The V1 resolver fills missing keys from the next-higher level in the hierarchy and asserts sum==1.0 within 1e-4 tolerance. No silent renormalization.",
+    "_notes": [
+      "drop_ship.line_items=0.10 looks counter-intuitive vs. ERP-veteran reviewer expectation (drop-ship usually wants line-items emphasized, not de-emphasized). Flagged for product-owner review per ADR-029 Notes; admin can override per customer.",
+      "customer_behavior_overrides are applied to the customer-specific layer (L4) by admin tooling; they are not a sixth layer in the hierarchy."
+    ]
+  },
+  "duplicate_detection": {
+    "enabled": true,
+    "lookback_window_days": 30,
+    "score_weights": {
+      "po_number": 0.30,
+      "customer_id": 0.15,
+      "line_items": 0.20,
+      "amount": 0.10,
+      "timestamp": 0.10,
+      "ship_to": 0.05,
+      "channel": 0.05,
+      "delivery_date": 0.05
+    },
+    "thresholds": {
+      "auto_block": 0.90,
+      "review_required": 0.70,
+      "soft_flag": 0.50
+    },
+    "amount_tolerance_pct": 2.0,
+    "timestamp_window_hours": 72,
+    "delivery_date_tolerance_days": 3,
+    "auto_block_autonomy": "L3",
+    "review_autonomy": "L2",
+    "customer_tier_overrides": {
+      "strategic": {
+        "lookback_window_days": 90,
+        "timestamp_window_hours": 168
+      },
+      "standard": {
+        "lookback_window_days": 30,
+        "timestamp_window_hours": 72
+      },
+      "smb": {
+        "lookback_window_days": 14,
+        "timestamp_window_hours": 48
+      }
+    },
+    "customer_behavior_overrides": {
+      "blanket_po": {
+        "description": "Same PO number used across multiple releases — reduce PO number weight",
+        "score_weights_override": { "po_number": 0.10, "line_items": 0.35 }
+      },
+      "drop_ship": {
+        "description": "Different ship-to per order is normal — reduce ship-to weight",
+        "score_weights_override": { "ship_to": 0.00, "line_items": 0.10 }
+      },
+      "high_frequency": {
+        "description": "Frequent reorders — tighten timestamp, increase line-item weight",
+        "score_weights_override": { "timestamp": 0.15, "line_items": 0.25 },
+        "timestamp_window_hours": 24
+      }
+    }
+  }
+}
