@@ -1044,6 +1044,9 @@ api/                FastAPI API layer (architecture_v3.md §8, §11)
   errors.py         Standard error envelope
   schemas.py        Request/Response Pydantic models
   store.py          Exception store (in-memory or database-backed via DATABASE_URL)
+  analysis_composer.py  Per-recipe enrichment projection wrapped with audit_bearing_registry coverage check
+  analysis_adapters.py  Recipe → *AnalysisData adapters (price_hold, edi_mismatch, …)
+  profile_composer.py   Order-level enrichment composer (Phase 26 / 2026-05-03): entity_profile (Account master-data lookup), impact_metrics (line-item math), root_cause + recommendation (resolution_data → trace fallback). Returns None when backing data is absent so the UI structurally omits the surface.
   routes/           health, exceptions, workflows, policies, auth endpoints
 db/                 Database layer (architecture_v3.md §9)
   connection.py     SQLiteAdapter / PostgresAdapter + _QmarkCursorWrapper (?→%s), create_adapter() factory

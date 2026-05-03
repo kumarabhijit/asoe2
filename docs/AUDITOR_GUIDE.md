@@ -687,10 +687,10 @@ by the hash-chained audit log in §13.1.1.
 
 | Property | Value |
 |---|---|
-| **Where** | `PATCH /exceptions/{id}/disposition` (OVERRIDE sub-type) and `POST /exceptions/{id}/override/cosign` |
-| **Rule** | On an override, the caller's `user.sub` must not equal the record's prior `resolved_by`. On a cosign, the caller's `user.sub` must not equal `resolution_data.pending_override.initiator`. |
-| **Principals exempt** | Prior resolvers whose subject starts with `system:` are exempt — the control targets human self-approval, not agent auto-resolutions that humans must still be able to correct. |
-| **Failure mode** | `403 SOD_VIOLATION` with a message naming the boundary violated. Idempotency-Key lookups run **before** the SoD check so a retry of a successful first call still returns the cached success. |
+| **Where** | `POST /exceptions/{id}/override/cosign` (cosign self-block only). |
+| **Rule** | On a cosign, the caller's `user.sub` must not equal `resolution_data.pending_override.initiator`. |
+| **Failure mode** | `403 SOD_VIOLATION` naming the cosign boundary. Idempotency-Key lookups run **before** the SoD check so a retry of a successful first call still returns the cached success. |
+| **Scope note (PO ruling 2026-05-03)** | The earlier self-block on `PATCH /exceptions/{id}/disposition` (a user could not run a second OVERRIDE on a record they themselves resolved) was **removed**. Operators legitimately need to correct their own earlier overrides without escalation churn. The audit trail still records every override attempt — initiator, timestamp, reason_tag, action — via `reanalysis_history`, so SOX evidence-of-control is preserved. The four-eyes high-value override rule in §18.2 remains the SOX §404 control of record. Regression locked by `tests/test_override_escalate.TestSegregationOfDuties.test_same_user_can_override_own_resolution` and the asoe-ui `tests/browser/override-and-sod.spec.ts` Playwright spec. |
 
 ### 18.2 Four-Eyes High-Value Override
 
