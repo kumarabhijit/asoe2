@@ -67,40 +67,68 @@ AllowedResolutionAction = Literal[
     "REQUEST_BUYER_CONFIRMATION",
 ]
 
-# Controlled vocabulary for categorizing an override's justification. Kept
-# deliberately small and intent-agnostic so clustering downstream is stable;
-# free-text notes on OverrideRequest capture the specifics. ML retraining
-# consumes (intent, recommended_action, chosen_action, reason_tag) tuples.
+# Controlled vocabulary for categorizing an override's justification.
+#
+# Per ADR-033 V1 §1, this Literal is the *union* of every per-intent
+# vocabulary. Pre-existing legacy codes are lowercase; per-intent
+# vocabularies curated under the ADR-033 lifecycle use SCREAMING_SNAKE_CASE.
+# The two coexist: a value's case identifies which vocabulary it belongs to.
+#
+# Per-intent narrowing happens at the API surface — see INTENT_REASON_TAGS
+# below and `/api/v1/health.allowed_override_reason_tags_by_intent`. The
+# /disposition endpoint validates the chosen reason against the *per-intent*
+# set, not against this global Literal.
+#
+# Adding a new per-intent vocabulary: extend this Literal with the new codes,
+# add a tuple constant (`_<INTENT>_REASON_TAGS`), and assign it into
+# INTENT_REASON_TAGS[<INTENT>]. Tests in `tests/test_constraints.py` enforce
+# that every intent's set ends with `OTHER` (or legacy `other`) and that
+# every tuple entry is a member of this Literal.
 AllowedOverrideReasonTag = Literal[
+    # Legacy / global fallback codes (lowercase). Predate the
+    # SCREAMING_SNAKE_CASE convention; retained for intents whose
+    # vocabulary has not yet been curated.
     "customer_concession",
     "contract_stale",
     "data_error",
     "policy_exception",
     "agent_misclassification",
     "other",
+    # DUPLICATE_PO curated codes (ADR-033 §A). SCREAMING_SNAKE_CASE per
+    # the lifecycle (ADR-033 §C.2). `OTHER` is the workflow-safety
+    # fallback and is mandatory in every per-intent set.
+    "INTENTIONAL_REORDER",
+    "AMENDED_PO",
+    "BLANKET_RELEASE",
+    "SYSTEM_RETRY_VALID",
+    "DIFFERENT_SHIP_TO",
+    "CONFIRMED_DUPLICATE",
+    "PARTIAL_OVERLAP",
+    "OTHER",
 ]
 
-# Per-intent override-reason vocabulary (Phase 3 follow-up — Option A).
+# Per-intent override-reason vocabulary (ADR-033).
 #
-# Framework only: every intent currently points at the full global
-# AllowedOverrideReasonTag set, so clustering by (intent, reason_tag)
-# produces the same signal the global vocab gives today. The value-add
-# of per-intent tags arrives in a follow-up when product / compliance
-# supplies curated categories — e.g. PRICE_MISMATCH might narrow to
-# {customer_concession, contract_stale, promo_window, data_error, other}
-# and DUPLICATE_PO to
-# {confirmed_separate_orders, customer_intent, data_error, other}.
-# Swapping those in is a DATA change — no schema, API, or UI work.
-#
-# ``other`` is mandatory in every set so operators always have a fallback
-# when the real reason doesn't fit a listed category (prevents workflow
-# dead-ends while the vocabulary is being curated).
-#
-# Falls-back behavior: the /disposition endpoint uses the per-intent set
-# when the record carries a known intent, and the global set otherwise
-# (FAILED lifecycle records and any unlisted intent). The UI reads the
-# map from /api/v1/health.allowed_override_reason_tags_by_intent and
+# The /disposition endpoint validates the chosen reason against the
+# *per-intent* set when the record carries a known intent, and falls
+# back to `_GLOBAL_REASON_TAGS` for FAILED-lifecycle records or any
+# intent without a curated vocabulary. The UI reads the per-intent map
+# from `/api/v1/health.allowed_override_reason_tags_by_intent` and
 # narrows its chooser accordingly.
+#
+# Lifecycle (ADR-033 §C):
+#   1. Source: product + compliance + (where applicable) ML jointly draft
+#      candidate codes. Calibration use case considered explicitly.
+#   2. Constraints: every set must include `OTHER`/`other` as the last
+#      entry; new codes are SCREAMING_SNAKE_CASE; intent-meaningful.
+#   3. Storage: tuple literal here (no dynamic generation — the literal
+#      is the contract).
+#   4. API: /health surfaces the per-intent map automatically.
+#   5. UI: OverrideChooserDialog reads the per-intent set; cluster
+#      mapping is a UI-side constant.
+#   6. Tests: vocabulary-sync test in tests/test_constraints.py.
+#   7. Audit: changes are versioned in git; no runtime config surface
+#      (reason vocabulary is product policy, not tenant config).
 _GLOBAL_REASON_TAGS: tuple[str, ...] = (
     "customer_concession",
     "contract_stale",
@@ -109,9 +137,27 @@ _GLOBAL_REASON_TAGS: tuple[str, ...] = (
     "agent_misclassification",
     "other",
 )
+
+# DUPLICATE_PO — first curated per-intent vocabulary (ADR-033 §A).
+# These 8 codes align with `docs/specs/duplicate-po/calibration-methodology.md`
+# so the eventual calibration loop (ADR-032) can consume override-reason
+# tuples directly as labeled training data — no schema bridge or
+# vocabulary translation needed.
+_DUPLICATE_PO_REASON_TAGS: tuple[str, ...] = (
+    "INTENTIONAL_REORDER",     # buyer genuinely placed a second order
+    "AMENDED_PO",              # incoming PO is a revision, not a duplicate
+    "BLANKET_RELEASE",         # release against a blanket umbrella PO
+    "SYSTEM_RETRY_VALID",      # middleware retransmit was intentional/valid
+    "DIFFERENT_SHIP_TO",       # same PO# routed to different destinations
+    "CONFIRMED_DUPLICATE",     # agent was correct; analyst confirms
+    "PARTIAL_OVERLAP",         # some lines overlap but the order is distinct
+    "OTHER",                   # free-text required (ADR-033 §D)
+)
+
 INTENT_REASON_TAGS: dict[str, tuple[str, ...]] = {
     intent: _GLOBAL_REASON_TAGS for intent in AllowedIntent.__args__  # type: ignore[attr-defined]
 }
+INTENT_REASON_TAGS["DUPLICATE_PO"] = _DUPLICATE_PO_REASON_TAGS
 
 
 class IntentDecision(BaseModel):

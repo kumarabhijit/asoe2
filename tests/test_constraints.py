@@ -7,7 +7,16 @@ import pytest
 
 from constraints.fallback_backend import DeterministicFallbackBackend
 from constraints.guidance_backend import GuidanceRegexBackend
-from constraints.specs import AllowedIntent, AllowedRecipeName, AllowedResolutionAction, AllowedShadowStatus
+from constraints.specs import (
+    AllowedIntent,
+    AllowedOverrideReasonTag,
+    AllowedRecipeName,
+    AllowedResolutionAction,
+    AllowedShadowStatus,
+    INTENT_REASON_TAGS,
+    _DUPLICATE_PO_REASON_TAGS,
+    _GLOBAL_REASON_TAGS,
+)
 from contracts.models import Intent
 
 
@@ -270,4 +279,127 @@ class TestVocabularySyncGuidanceToLiterals:
         for unknown in ("ANNOTATE_AND_PASS", "ALLOW", "DENY", ""):
             assert not pattern.fullmatch(unknown), (
                 f"resolution_action_regex() accepted {unknown!r} which is not a valid resolution action"
+            )
+
+
+# ---------------------------------------------------------------------------
+# ADR-033 — Override reason-code vocabulary lifecycle
+#
+# Per ADR-033 §A: DUPLICATE_PO has a curated 8-code vocabulary in
+# SCREAMING_SNAKE_CASE. Other intents fall back to the legacy global
+# lowercase set until their own vocabularies are curated. The
+# AllowedOverrideReasonTag Literal is the union of all per-intent
+# vocabularies.
+#
+# Per ADR-033 §C.2: every per-intent set MUST end with `OTHER`/`other`
+# as the workflow-safety fallback — operators always have a way to
+# break out of the modal when the real reason doesn't fit a category.
+# ---------------------------------------------------------------------------
+
+
+class TestOverrideReasonTagVocabulary:
+    """ADR-033 V1 §2 — per-intent reason-code vocabulary."""
+
+    def test_duplicate_po_uses_curated_eight_code_vocabulary(self):
+        """ADR-033 §A — DUPLICATE_PO maps to the 8 curated codes."""
+        assert INTENT_REASON_TAGS["DUPLICATE_PO"] == (
+            "INTENTIONAL_REORDER",
+            "AMENDED_PO",
+            "BLANKET_RELEASE",
+            "SYSTEM_RETRY_VALID",
+            "DIFFERENT_SHIP_TO",
+            "CONFIRMED_DUPLICATE",
+            "PARTIAL_OVERLAP",
+            "OTHER",
+        )
+
+    def test_duplicate_po_vocabulary_is_distinct_from_global(self):
+        """ADR-033 §B — per-intent vocabulary takes precedence over global."""
+        assert INTENT_REASON_TAGS["DUPLICATE_PO"] is not _GLOBAL_REASON_TAGS
+        assert set(INTENT_REASON_TAGS["DUPLICATE_PO"]) != set(_GLOBAL_REASON_TAGS)
+
+    def test_other_intents_still_use_global_fallback(self):
+        """Intents without a curated vocabulary fall back to _GLOBAL_REASON_TAGS."""
+        for intent in get_args(AllowedIntent):
+            if intent == "DUPLICATE_PO":
+                continue
+            assert INTENT_REASON_TAGS[intent] is _GLOBAL_REASON_TAGS, (
+                f"{intent} should fall back to the global vocabulary "
+                f"until its own is curated (ADR-033 lifecycle)"
+            )
+
+    def test_every_intent_has_a_reason_vocabulary(self):
+        """No intent may be missing from INTENT_REASON_TAGS — would
+        leave the /disposition endpoint unable to validate overrides."""
+        for intent in get_args(AllowedIntent):
+            assert intent in INTENT_REASON_TAGS, (
+                f"INTENT_REASON_TAGS missing entry for {intent}"
+            )
+
+    def test_every_intent_vocabulary_ends_with_other_or_OTHER(self):
+        """ADR-033 §C.2 — workflow-safety fallback is mandatory.
+
+        Per the lifecycle, every per-intent set MUST include `OTHER`
+        (curated) or `other` (legacy) as the LAST entry so operators
+        always have an escape hatch.
+        """
+        for intent, vocab in INTENT_REASON_TAGS.items():
+            assert vocab[-1] in ("OTHER", "other"), (
+                f"{intent} vocabulary {vocab!r} must end with OTHER or other "
+                f"(ADR-033 §C.2 — workflow-safety fallback)"
+            )
+
+    def test_duplicate_po_vocabulary_ends_with_OTHER_uppercase(self):
+        """Curated SCREAMING_SNAKE_CASE vocabularies use uppercase OTHER."""
+        assert INTENT_REASON_TAGS["DUPLICATE_PO"][-1] == "OTHER"
+
+    def test_global_vocabulary_ends_with_lowercase_other(self):
+        """Legacy lowercase vocabulary uses lowercase other."""
+        assert _GLOBAL_REASON_TAGS[-1] == "other"
+
+    def test_per_intent_codes_subset_of_allowed_literal(self):
+        """Every code in any INTENT_REASON_TAGS tuple must be a valid
+        AllowedOverrideReasonTag — drift would let the /disposition
+        endpoint accept codes that aren't in the Literal."""
+        allowed = set(get_args(AllowedOverrideReasonTag))
+        for intent, vocab in INTENT_REASON_TAGS.items():
+            for code in vocab:
+                assert code in allowed, (
+                    f"INTENT_REASON_TAGS[{intent!r}] contains {code!r} which "
+                    f"is not in AllowedOverrideReasonTag — vocabulary drift"
+                )
+
+    def test_allowed_literal_contains_curated_duplicate_po_codes(self):
+        """ADR-033 V1 §1 — AllowedOverrideReasonTag is the union of all
+        per-intent codes. The 8 DUPLICATE_PO codes must be present."""
+        allowed = set(get_args(AllowedOverrideReasonTag))
+        for code in _DUPLICATE_PO_REASON_TAGS:
+            assert code in allowed, (
+                f"AllowedOverrideReasonTag missing curated code {code!r}"
+            )
+
+    def test_allowed_literal_retains_legacy_codes(self):
+        """ADR-033 keeps legacy lowercase codes available for intents
+        that still fall back to the global vocabulary."""
+        allowed = set(get_args(AllowedOverrideReasonTag))
+        for code in _GLOBAL_REASON_TAGS:
+            assert code in allowed, (
+                f"AllowedOverrideReasonTag missing legacy code {code!r}"
+            )
+
+    def test_all_curated_codes_are_screaming_snake_case(self):
+        """ADR-033 §C.2 — curated codes are SCREAMING_SNAKE_CASE."""
+        for code in _DUPLICATE_PO_REASON_TAGS:
+            assert code == code.upper(), (
+                f"{code!r} should be SCREAMING_SNAKE_CASE per ADR-033 §C.2"
+            )
+            # No internal whitespace; underscores between words.
+            assert " " not in code
+            assert "-" not in code
+
+    def test_no_duplicates_within_intent_vocabulary(self):
+        """Every per-intent vocabulary tuple has unique entries."""
+        for intent, vocab in INTENT_REASON_TAGS.items():
+            assert len(vocab) == len(set(vocab)), (
+                f"{intent} vocabulary contains duplicates: {vocab!r}"
             )

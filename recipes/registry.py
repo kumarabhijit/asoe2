@@ -95,6 +95,23 @@ REGISTRY = {
                 params_from_state={"order_id": "event.order_id", "customer_id": "event.retailer_id"},
                 result_key="matched_po_details",
             ),
+            # ADR-029 — 5-level config resolver. V1 file-backed (reads
+            # docs/specs/duplicate-po/config-defaults.json); production-grade
+            # backing store + tenant/tier/channel/behavior context deferred
+            # to A9 (ADR-030). Result.data["weights"] is plumbed into
+            # detect_duplicate_po(weights=...) by orchestration/nodes.py
+            # ::validate_types. Result.data["contribution_trace"] is the
+            # per-layer audit envelope consumed by ADR-028 G2's canonical
+            # read endpoint (A6).
+            GatewayDependency(
+                gateway_name="tenant_config",
+                operation="resolve_for_event",
+                params_from_state={
+                    "customer_id": "event.retailer_id",
+                    "order_id": "event.order_id",
+                },
+                result_key="tenant_config",
+            ),
         ),
         effects=(
             GatewayEffect(

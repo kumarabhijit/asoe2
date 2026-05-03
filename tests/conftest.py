@@ -6,6 +6,7 @@ import pytest
 from contracts.models import GatewayResponse, GraphState, OrderEvent
 from gateways.registry import clear_registry, register_gateway
 from gateways.stub import StubGateway
+from gateways.tenant_config import TenantConfigGateway
 
 
 @pytest.fixture(autouse=True)
@@ -294,6 +295,12 @@ def _register_oms_stub():
     register_gateway(sap_block_stub)
     register_gateway(sap_customer_master_stub)
     register_gateway(sla_contract_stub)
+    # ADR-029: tenant_config is registered as the real file-backed
+    # gateway (not a stub) — it's pure in-process I/O against
+    # docs/specs/duplicate-po/config-defaults.json, so graph tests
+    # exercise the actual resolver path. Dedicated unit tests for the
+    # gateway itself live in tests/test_tenant_config_gateway.py.
+    register_gateway(TenantConfigGateway())
     yield
     clear_registry()
 
