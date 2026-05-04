@@ -220,3 +220,144 @@ def test_narrative_does_not_synthesise_from_empty_strings():
     rc, reco = compose_narrative(rec, trace_data=None)
     assert rc is None
     assert reco is None
+
+
+# ---------------------------------------------------------------------------
+# Narrative — Tier-4 deterministic projection from recipe output
+#
+# These templates summarise what the recipe + event already decided —
+# they do NOT introduce new business logic, thresholds, or "best guess"
+# narrative. Each template returns None when its underlying data is
+# absent so the UI keeps the section structurally omitted.
+# ---------------------------------------------------------------------------
+
+
+def test_narrative_synthesises_contractual_correction_root_cause_from_event_prices():
+    """Contractual-correction: root_cause is the price delta between PO and ERP master."""
+    rec = _record(
+        intent="CONTRACTUAL_CORRECTION",
+        resolution_data={},  # recipe didn't write narrative
+        original_event={
+            "order_id": "SO-1",
+            "line_item": 1,
+            "po_price": 90.0,
+            "sap_base_price": 100.0,
+            "event_type": "EDI_850_PRICE_MISMATCH",
+            "line_count": 1,
+        },
+    )
+    rc, _ = compose_narrative(rec, trace_data=None)
+    assert rc is not None
+    assert "$90.00" in rc and "$100.00" in rc
+    assert "-10.0%" in rc
+
+
+def test_narrative_synthesises_credit_block_root_cause_from_event_amounts():
+    """Credit-block: root_cause shows exposure-vs-limit math."""
+    rec = _record(
+        intent="CREDIT_BLOCK",
+        resolution_data={},
+        original_event={
+            "order_id": "SO-2",
+            "line_item": 1,
+            "po_price": 100.0,
+            "sap_base_price": 100.0,
+            "event_type": "CREDIT_LIMIT_BREACH",
+            "credit_limit": 50000.0,
+            "current_exposure": 52000.0,
+            "line_count": 1,
+        },
+    )
+    rc, _ = compose_narrative(rec, trace_data=None)
+    assert rc is not None
+    assert "$52,000" in rc
+    assert "$50,000" in rc
+    assert "$2,000" in rc
+
+
+def test_narrative_synthesises_duplicate_po_root_cause_from_recipe_score():
+    """Duplicate-PO: root_cause cites composite score + matched PO."""
+    rec = _record(
+        intent="DUPLICATE_PO",
+        resolution_data={
+            "composite_score": 0.94,
+            "classification": "AUTO_BLOCK",
+        },
+        original_event={
+            "order_id": "PO-DUP-NEW",
+            "line_item": 1,
+            "po_price": 100.0,
+            "sap_base_price": 100.0,
+            "event_type": "EDI_850_DUPLICATE_PO",
+            "metadata": {"matched_po_id": "PO-DUP-PRIOR"},
+            "line_count": 1,
+        },
+    )
+    rc, _ = compose_narrative(rec, trace_data=None)
+    assert rc is not None
+    assert "PO-DUP-PRIOR" in rc
+    assert "0.94" in rc
+    assert "AUTO_BLOCK" in rc
+
+
+def test_narrative_humanises_recommended_action_token():
+    """recommended_action is humanised into prose by the synthesiser."""
+    rec = _record(
+        intent="DUPLICATE_PO",
+        resolution_data={"recommended_action": "BLOCK_AND_NOTIFY"},
+    )
+    _, reco = compose_narrative(rec, trace_data=None)
+    assert reco is not None
+    # Tier 1 wins (raw recipe string returned) — synthesiser only fires
+    # on Tier-4 fallback. Verify the value is the raw token.
+    assert reco == "BLOCK_AND_NOTIFY"
+
+
+def test_narrative_synthesises_recommendation_from_applied_condition():
+    """When the recipe wrote applied_condition + new_net_price (the
+    contractual-correction shape) but no recommended_action, the
+    synthesiser produces a sentence."""
+    rec = _record(
+        intent="CONTRACTUAL_CORRECTION",
+        resolution_data={
+            "applied_condition": "YK07",
+            "new_net_price": 95.5,
+            "status": "SUCCESS",
+        },
+    )
+    _, reco = compose_narrative(rec, trace_data=None)
+    assert reco is not None
+    assert "YK07" in reco
+    assert "$95.50" in reco
+
+
+def test_narrative_synthesises_recommendation_from_final_status_fallback():
+    """When the recipe halted before writing any action prose, the
+    final_status surfaces as the fallback recommendation."""
+    rec = _record(
+        intent="EDI_MISMATCH",
+        resolution_data={},  # no recommended_action, no applied_condition
+        final_status="MANUAL_REVIEW_REQUIRED",
+    )
+    _, reco = compose_narrative(rec, trace_data=None)
+    assert reco is not None
+    assert "manual review" in reco.lower()
+
+
+def test_narrative_synthesiser_returns_none_when_underlying_data_absent():
+    """Critical invariant: synthesiser never fabricates. CONTRACTUAL_CORRECTION
+    intent with neither prices on the event nor recipe output → None."""
+    rec = _record(
+        intent="CONTRACTUAL_CORRECTION",
+        resolution_data={},
+        original_event={  # no po_price / sap_base_price
+            "order_id": "SO-X",
+            "line_item": 1,
+            "po_price": 0.0,
+            "sap_base_price": 0.0,
+            "event_type": "EDI_850_PRICE_MISMATCH",
+            "line_count": 1,
+        },
+    )
+    rc, _ = compose_narrative(rec, trace_data=None)
+    assert rc is None  # erp_price=0 makes division undefined → None

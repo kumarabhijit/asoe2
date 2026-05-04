@@ -168,11 +168,27 @@ def compose_narrative(
     """Extract order-level root_cause + recommendation prose.
 
     Sources, in priority order:
-      1. `record.resolution_data` keys (recipe-supplied narrative)
-      2. `trace_data.narrative` for the root cause
-      3. `trace_data.resolution_steps[0]` for the recommendation
-    Returns (None, None) when nothing is available — the UI hides
-    each block individually rather than showing an empty bar.
+      1. ``record.resolution_data`` keys (recipe-supplied narrative).
+      2. ``trace_data.narrative`` for the root cause.
+      3. ``trace_data.resolution_steps[0]`` for the recommendation.
+      4. **Deterministic projection from recipe output** (per-intent
+         templates that read already-decided fields like
+         ``composite_score``, ``classification``, ``applied_condition``,
+         and the inbound event's pricing / credit fields). Each
+         template requires its underlying data to be present — when
+         the data is missing, the template returns ``None`` and the UI
+         keeps the section structurally omitted.
+
+    The fourth tier is projection, not fabrication: the prose
+    summarises what the recipe already decided. No new business logic
+    or thresholds are introduced. This is the same architectural
+    pattern the audit-bearing field projections use — the composer
+    reads recipe / event / shadow output and types it into the UI
+    contract (CLAUDE.md Guardrail #6).
+
+    Returns (None, None) only when neither the recipe nor the
+    deterministic projection produces text — the UI then hides each
+    block individually rather than showing an empty bar.
     """
     rd = record.resolution_data or {}
     root_cause = _first_string(rd, ("root_cause", "root_cause_summary"))
@@ -195,7 +211,140 @@ def compose_narrative(
                 if isinstance(first, str) and first.strip():
                     recommendation = first.strip()
 
+    # Tier 4 — deterministic projection from recipe output. Runs only
+    # for fields that are still ``None`` after the previous tiers, so
+    # an explicit recipe-supplied string always wins.
+    if root_cause is None:
+        root_cause = _synthesise_root_cause(record)
+    if recommendation is None:
+        recommendation = _synthesise_recommendation(record)
+
     return root_cause, recommendation
+
+
+# ---------------------------------------------------------------------------
+# Deterministic prose templates (Tier 4 in compose_narrative).
+#
+# Each helper reads already-computed fields from `record.resolution_data`
+# / `record.original_event` and projects them into a one-paragraph
+# narrative. NEVER introduces new thresholds, decisions, or business
+# logic — that lives in recipes. NEVER falls back to a generic phrase
+# when the underlying data is absent — returns None so the UI omits
+# the section.
+# ---------------------------------------------------------------------------
+
+
+def _synthesise_root_cause(record: ExceptionRecord) -> Optional[str]:
+    intent = (record.intent or "").upper() if record.intent else ""
+    rd = record.resolution_data or {}
+    event = record.original_event or {}
+
+    if intent == "CONTRACTUAL_CORRECTION":
+        po_price = _as_float(event.get("po_price"))
+        erp_price = _as_float(event.get("sap_base_price"))
+        if po_price is not None and erp_price not in (None, 0.0):
+            delta_pct = (po_price - erp_price) / erp_price * 100.0
+            return (
+                f"PO price ${po_price:.2f} differs from ERP master "
+                f"${erp_price:.2f} by {delta_pct:+.1f}%."
+            )
+        return None
+
+    if intent == "CREDIT_BLOCK":
+        limit = _as_float(event.get("credit_limit"))
+        exposure = _as_float(event.get("current_exposure"))
+        if limit is not None and exposure is not None:
+            delta = exposure - limit
+            if delta > 0:
+                return (
+                    f"Current exposure ${exposure:,.0f} exceeds credit "
+                    f"limit ${limit:,.0f} by ${delta:,.0f}."
+                )
+            return (
+                f"Credit hold raised on order despite exposure "
+                f"${exposure:,.0f} within limit ${limit:,.0f}."
+            )
+        return None
+
+    if intent == "DUPLICATE_PO":
+        score = _as_float(rd.get("composite_score"))
+        classification = rd.get("classification")
+        meta = event.get("metadata", {}) if isinstance(event, dict) else {}
+        matched = (
+            rd.get("matched_po_id")
+            or (meta.get("matched_po_id") if isinstance(meta, dict) else None)
+        )
+        if score is not None and matched:
+            label = classification or "match"
+            return (
+                f"Inbound PO matches prior PO {matched} with composite "
+                f"score {score:.2f} ({label})."
+            )
+        return None
+
+    if intent == "MASS_PRICING_ERROR":
+        line_count = event.get("line_count") if isinstance(event, dict) else None
+        if isinstance(line_count, (int, float)) and line_count > 0:
+            return (
+                f"Mass-pricing error spanning {int(line_count)} line item"
+                f"{'' if line_count == 1 else 's'} on the inbound order."
+            )
+        return None
+
+    return None
+
+
+def _synthesise_recommendation(record: ExceptionRecord) -> Optional[str]:
+    rd = record.resolution_data or {}
+    intent = (record.intent or "").upper() if record.intent else ""
+
+    # Most recipes already write a ``recommended_action`` token (e.g.
+    # ``BLOCK_AND_NOTIFY``, ``ALLOW_BOTH``). Surface it as a sentence
+    # rather than an opaque enum so the UI's Recommendation block
+    # reads as prose.
+    action = rd.get("recommended_action")
+    if isinstance(action, str) and action.strip():
+        humanised = action.replace("_", " ").lower()
+        if intent == "DUPLICATE_PO":
+            return f"Recipe recommends: {humanised}."
+        if intent == "CREDIT_BLOCK":
+            return f"Route to Finance review with action: {humanised}."
+        return f"Recommended action: {humanised}."
+
+    # CONTRACTUAL_CORRECTION recipe writes ``applied_condition`` +
+    # ``new_net_price`` instead of ``recommended_action``.
+    cond = rd.get("applied_condition")
+    new_price = _as_float(rd.get("new_net_price"))
+    if isinstance(cond, str) and cond.strip() and new_price is not None:
+        return (
+            f"Apply SAP condition {cond} at new net price "
+            f"${new_price:.2f}."
+        )
+
+    # Final status is the last-resort signal — when the recipe halted
+    # without writing a recommendation, surface the terminal state
+    # so the operator at least sees what happened.
+    final = (record.final_status or "").upper()
+    if final == "MANUAL_REVIEW_REQUIRED":
+        return "Route to manual review per Compliance Shadow verdict."
+    if final == "BLOCKED":
+        return "Hold the order until policy permits release."
+    if final == "REJECTED":
+        return "Reject the inbound order and notify the buyer."
+    if final == "FAIL_TO_HUMAN":
+        return "Escalate to a human operator — deterministic path unavailable."
+
+    return None
+
+
+def _as_float(value: Any) -> Optional[float]:
+    """Coerce a recipe / event field to float; return None on failure."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _first_string(d: Dict[str, Any], keys: Tuple[str, ...]) -> Optional[str]:
