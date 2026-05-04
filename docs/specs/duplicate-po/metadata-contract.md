@@ -1,7 +1,7 @@
 # Duplicate-PO Metadata Contract (ADR-028 Guard-rail 1)
 
-**Status:** Documented contract — V1 (this PR).
-**Write-time enforcement:** deferred to action item A5 (sprint following kickoff).
+**Status:** V1 enforcement — orchestration-tail (`build_analysis`).
+**Write-time DB-level enforcement:** deferred to V1.5 (see §V1.5 below).
 **Source:** ADR-028 §"Guard-rail 1: Documented metadata contract".
 **Owners:** Backend (write path) + Compliance (audit-bearing field
 classification per `compliance/audit_bearing_registry.yaml`).
@@ -45,6 +45,12 @@ For events that route to `DuplicatePORecipe.py`
   for cross-cutting concerns (tracing, debugging, propagation) but
   **MUST NOT** influence the recipe's scoring or routing.
 
+The Pydantic submodel `contracts.duplicate_po_contract.DuplicatePOEventMetadata`
+encodes these rules. Cross-cutting keys flow through opaquely
+(`extra="allow"`); declared keys are typed; `signal_scores` keys + range
+are checked outside the model so per-key diagnostics surface in the
+audit-trail explanation.
+
 ---
 
 ## ExecutionLog.outputs (recipe_output) — output contract
@@ -68,6 +74,10 @@ the contract simply mirrors its declared output shape):
 
 **Forbidden keys:** any key not listed above. The recipe MUST NOT emit
 unstructured payloads on `outputs` for this intent.
+
+The Pydantic submodel `contracts.duplicate_po_contract.DuplicatePORecipeOutput`
+encodes these rules with `extra="forbid"` — the recipe surface is fixed,
+any drift is a contract bug regardless of intent.
 
 ---
 
@@ -96,44 +106,88 @@ config-trace section.
 
 ---
 
-## Write-time enforcement (A5 — deferred to next sprint)
+## V1 enforcement (live — `orchestration/nodes.py::build_analysis`)
 
-The follow-up implementation will:
+`build_analysis` runs a contract-coverage check before the existing
+registry-coverage check, scoped to records whose `state.intent ==
+DUPLICATE_PO`. Two validations:
 
-1. Add a Pydantic submodel for the keys listed above (one per
-   direction: `DuplicatePOEventMetadata`, `DuplicatePORecipeOutput`).
-2. Wire the persistence path (`db/repository.py` writes for
-   `OrderEvent`, `ExecutionLog`) to validate the JSONB payload against
-   the relevant submodel **before** insertion.
-3. On contract violation: route to `AUDIT_CONTEXT_MISSING` with an
-   explanation that names the offending key(s) — never silently drop or
-   truncate the payload.
-4. Surface metrics on the existing observability pipeline so contract
-   drift is visible without waiting for an audit.
-5. Tests in `tests/test_metadata_contract.py` covering:
-   - happy path: every required key present, recipe runs end-to-end
-   - missing required key on event: write-time rejection
-   - extra disallowed key on event: write-time rejection
-   - extra disallowed key on recipe output: write-time rejection
-   - audit registry coverage matches this document
+1. **Input contract:** `state.event.metadata` validated via
+   `validate_duplicate_po_event_metadata`.
+2. **Output contract:** `state.execution_log.outputs` validated via
+   `validate_duplicate_po_recipe_output`, but only when the recipe
+   actually executed (execution_log present + outputs populated +
+   `selected_recipe == "DuplicatePORecipe.py"`). Earlier halt paths
+   — BLOCKED by shadow, no_recipe, etc. — leave `execution_log` empty;
+   those records are legitimately absent the recipe-output dict.
 
-Until A5 lands, contributors are responsible for honoring the contract
-manually. The CI grep-style guard in `tests/test_metadata_contract.py`
-(also A5) will provide a backstop.
+On violation: route to `TerminalStatus.AUDIT_CONTEXT_MISSING` with an
+explanation that names the offending key(s) and the contract name.
+Same routing the registry-coverage check uses, so auditors see
+"compliance data was malformed" rather than a Pydantic ValidationError
+stack trace. The contract gate runs **before** the registry-coverage
+check so a contract violation surfaces as the precise root cause
+rather than as a downstream missing-field symptom.
+
+Tests: `tests/test_metadata_contract.py` (unit + integration paths
+including build_analysis routing).
+
+### Limits of V1 enforcement
+
+- Records that take a path NOT going through `build_analysis`
+  (currently none — `build_analysis` is the tail of every graph
+  invocation) are not validated. If a future code path bypasses
+  `build_analysis`, V1 enforcement is silent on those writes.
+- Direct callers of `db/repository.py::ExceptionRepository.create()`
+  outside the standard graph flow (admin tooling, data migrations,
+  re-import scripts) are not validated. V1.5 closes this gap.
+
+---
+
+## V1.5 enforcement (deferred — `db/repository.py` write-time check)
+
+The follow-up implementation will add a write-time check inside
+`ExceptionRepository.create()` and `update()` that re-runs the same
+validators as the V1 orchestration gate. Goals:
+
+1. **Last line of defense.** Any path that writes to the exception
+   store, including non-graph callers, sees the contract enforced.
+2. **No duplicated logic.** The DB-level check imports the SAME
+   validators from `contracts.duplicate_po_contract` — single source
+   of truth (compare WeightContractViolation pattern in
+   `recipes/DuplicatePORecipe.py`).
+3. **Failure routing.** On violation: raise
+   `MetadataContractViolation` (the existing exception type). Callers
+   are responsible for catching and routing to AUDIT_CONTEXT_MISSING
+   the same way the V1 gate does. The DB layer never silently
+   downgrades an audit failure to a generic 500.
+4. **Observability.** Surface a `metadata_contract_violation` metric
+   on the existing observability pipeline so contract drift is visible
+   without waiting for an audit.
+5. **Tests.**
+   - `test_repository_metadata_contract_v15.py` — write-time rejection
+     paths for all three contract failure modes.
+   - Audit-registry coverage matches this document (verified by the
+     existing `tests/test_audit_registry_coverage.py`).
+
+A backstop CI grep / static check is not needed — the DB-layer check
+itself is the backstop.
 
 ---
 
 ## How to evolve this contract
 
-1. Open a PR that updates this document **and** any matching
-   `compliance/audit_bearing_registry.yaml` rows in the same PR.
-2. The compliance team is CODEOWNERS of the registry; they review
+1. Open a PR that updates this document **and** the matching Pydantic
+   submodel in `contracts/duplicate_po_contract.py` in the same PR.
+2. Update any matching `compliance/audit_bearing_registry.yaml` rows
+   in the same PR.
+3. The compliance team is CODEOWNERS of the registry; they review
    the audit-bearing classification.
-3. Run vocabulary-sync tests in `tests/test_constraints.py` and
-   metadata-contract tests in `tests/test_metadata_contract.py` (post
-   A5).
-4. Update `recipes/DuplicatePORecipe.py` if the recipe surface changes.
-5. Update `recipes/registry.py::expected_metadata_keys` for
+4. Run vocabulary-sync tests in `tests/test_constraints.py`,
+   metadata-contract tests in `tests/test_metadata_contract.py`, and
+   (post V1.5) `tests/test_repository_metadata_contract_v15.py`.
+5. Update `recipes/DuplicatePORecipe.py` if the recipe surface changes.
+6. Update `recipes/registry.py::expected_metadata_keys` for
    DuplicatePORecipe to reflect any added/removed event-side keys.
 
 ---
@@ -144,6 +198,8 @@ manually. The CI grep-style guard in `tests/test_metadata_contract.py`
 - `docs/specs/duplicate-po/2026-05-03-design-review.md` — Item 1 / D1 + Item 2
 - `docs/specs/duplicate-po/2026-05-04-step0-bucketed-mapping.md` — §7
   metadata contract row
+- `contracts/duplicate_po_contract.py` — Pydantic submodels + validators
+- `orchestration/nodes.py::build_analysis` — V1 enforcement point
 - `recipes/DuplicatePORecipe.py` — recipe surface
 - `recipes/registry.py` — `expected_metadata_keys` declaration
 - `compliance/audit_bearing_registry.yaml` — audit-bearing field
