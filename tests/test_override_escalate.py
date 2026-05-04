@@ -194,7 +194,8 @@ class TestOverrideEligibilityMatrix:
         exc_id = _create_blocked(client, analyst_token)
         r = client.patch(
             f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "ALLOW_BOTH", "notes": "risk acknowledged", "reason_tag": "other"},
+            # ADR-033 §C.2 — DUPLICATE_PO uses curated SCREAMING_SNAKE_CASE codes.
+            json={"action": "ALLOW_BOTH", "notes": "risk acknowledged", "reason_tag": "OTHER"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200, r.json()
@@ -279,7 +280,8 @@ class TestAuditRecommendedAction:
 
         r = client.patch(
             f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "ALLOW_BOTH", "notes": "override block", "reason_tag": "other"},
+            # ADR-033 §C.2 — DUPLICATE_PO uses curated SCREAMING_SNAKE_CASE codes.
+            json={"action": "ALLOW_BOTH", "notes": "override block", "reason_tag": "OTHER"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200

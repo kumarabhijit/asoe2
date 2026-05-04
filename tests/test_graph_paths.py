@@ -238,14 +238,24 @@ class TestDuplicatePOPath:
         assert result.explanation is not None
 
     def test_duplicate_po_low_signals_pass(self):
-        """Empty signal scores → PASS → COMPLETE terminal status."""
+        """Empty signal scores → PASS → COMPLETE terminal status.
+
+        ADR-028 G1 requires every DUPLICATE_PO event to carry a
+        ``matched_po_id`` (the candidate the upstream classifier
+        scored against). The recipe still emits PASS when the per-
+        signal scores are zero — no actual match — so this test
+        exercises the no-match-but-classifier-attempted path.
+        """
         state = GraphState(event=OrderEvent(
             order_id="PO-LOW01",
             po_price=100.0,
             sap_base_price=100.0,
             event_type="EDI_850_DUPLICATE_PO",
             retailer_id="R-10",
-            metadata={"signal_scores": {}},
+            metadata={
+                "signal_scores": {},
+                "matched_po_id": "PO-LOW01-CANDIDATE",
+            },
         ))
         result = run_graph(state)
         assert result.final_status == TerminalStatus.COMPLETE
@@ -271,7 +281,10 @@ class TestDuplicatePOPath:
         state = GraphState(event=OrderEvent(
             order_id="PO-NTF01", po_price=100.0, sap_base_price=100.0,
             event_type="EDI_850_DUPLICATE_PO", retailer_id="R-10",
-            metadata={"signal_scores": {}},
+            metadata={
+                "signal_scores": {},
+                "matched_po_id": "PO-NTF01-CANDIDATE",
+            },
         ))
         result = run_graph(state)
         assert result.execution_log.outputs.get("notification_template") is None

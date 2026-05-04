@@ -112,8 +112,14 @@ class TestHealth:
         assert isinstance(per_intent, dict)
         for intent in data["allowed_intents"]:
             assert intent in per_intent, f"missing intent in reason-tag map: {intent}"
-            assert "other" in per_intent[intent], (
-                f"'other' must be a fallback tag for every intent; missing for {intent}"
+            # ADR-033 §C.2 — curated DUPLICATE_PO vocabulary uses
+            # SCREAMING_SNAKE_CASE (`OTHER`); legacy intents retain
+            # lowercase `other`. Either form satisfies the workflow-
+            # safety requirement that every intent carry a fallback.
+            tags = per_intent[intent]
+            assert "other" in tags or "OTHER" in tags, (
+                f"a fallback tag (`other` or `OTHER`) must be present for every "
+                f"intent; missing for {intent}"
             )
 
 

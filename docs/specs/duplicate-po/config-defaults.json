@@ -47,16 +47,16 @@
     },
     "customer_behavior_overrides": {
       "blanket_po": {
-        "description": "Same PO number used across multiple releases — reduce PO number weight",
-        "score_weights_override": { "po_number": 0.10, "line_items": 0.35 }
+        "description": "Same PO number used across multiple releases — reduce PO number weight, raise line-items, and bump channel since the EDI/portal channel is the most stable signal across releases",
+        "score_weights_override": { "po_number": 0.10, "line_items": 0.35, "channel": 0.10 }
       },
       "drop_ship": {
-        "description": "Different ship-to per order is normal — reduce ship-to weight",
-        "score_weights_override": { "ship_to": 0.00, "line_items": 0.10 }
+        "description": "Different ship-to per order is normal — zero ship-to weight, halve line-items (drop-ship line counts vary), and shift the released weight onto amount (totals match across re-routes)",
+        "score_weights_override": { "ship_to": 0.00, "line_items": 0.10, "amount": 0.25 }
       },
       "high_frequency": {
-        "description": "Frequent reorders — tighten timestamp, increase line-item weight",
-        "score_weights_override": { "timestamp": 0.15, "line_items": 0.25 },
+        "description": "Frequent reorders — tighten timestamp and line-items; release weight from amount and delivery_date which are noisy on rapid resends",
+        "score_weights_override": { "timestamp": 0.15, "line_items": 0.25, "amount": 0.05, "delivery_date": 0.00 },
         "timestamp_window_hours": 24
       }
     }

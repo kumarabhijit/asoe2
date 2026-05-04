@@ -235,7 +235,12 @@ class TestGoldenDuplicatePO:
             event_type="EDI_850_DUPLICATE_PO",
             retailer_id="R-10",
         )
-        state.event.metadata = {"signal_scores": {}}
+        # ADR-028 G1 — DUPLICATE_PO events MUST carry matched_po_id
+        # even when no real candidate matched (composite_score 0 → PASS).
+        state.event.metadata = {
+            "signal_scores": {},
+            "matched_po_id": "PO-GLOW01-CANDIDATE",
+        }
         result = run_graph(state)
         assert result.final_status == TerminalStatus.COMPLETE
         assert result.execution_log.outputs.get("classification") == "PASS"

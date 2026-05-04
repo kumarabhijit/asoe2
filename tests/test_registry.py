@@ -152,14 +152,19 @@ class TestDuplicatePOSpec:
             self.spec.name = "tampered"  # type: ignore[misc]
 
     def test_gateway_dependencies_declared(self):
-        assert len(self.spec.dependencies) == 2
+        # ADR-029: tenant_config gateway joins the two original OMS deps
+        # (PR #93). Every additional dependency must be declared here so
+        # the registry's contract surface stays exact.
+        assert len(self.spec.dependencies) == 3
         dep_ops = {d.operation for d in self.spec.dependencies}
         assert "get_fulfillment_status" in dep_ops
         assert "get_matched_po_details" in dep_ops
+        assert "resolve_for_event" in dep_ops  # tenant_config (ADR-029)
 
-    def test_gateway_dependencies_target_oms(self):
-        for dep in self.spec.dependencies:
-            assert dep.gateway_name == "oms"
+    def test_gateway_dependencies_target_oms_and_tenant_config(self):
+        # The two OMS deps remain; the third dep is tenant_config.
+        gateways = {d.gateway_name for d in self.spec.dependencies}
+        assert gateways == {"oms", "tenant_config"}
 
     def test_gateway_effects_declared(self):
         assert len(self.spec.effects) == 1

@@ -502,7 +502,7 @@ class TestDuplicatePOHitlActions:
         exc_id = self._create_pending_duplicate_po(client, analyst_token)
 
         r = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "ALLOW_BOTH", "reason_tag": "other", "notes": "Verified — duplicate confirmed by buyer"},
+            json={"action": "ALLOW_BOTH", "reason_tag": "OTHER", "notes": "Verified — duplicate confirmed by buyer"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200
@@ -514,7 +514,7 @@ class TestDuplicatePOHitlActions:
         exc_id = self._create_pending_duplicate_po(client, analyst_token)
 
         r = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "NO_ACTION", "reason_tag": "other", "notes": "Not a duplicate — different delivery date"},
+            json={"action": "NO_ACTION", "reason_tag": "OTHER", "notes": "Not a duplicate — different delivery date"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200
@@ -530,7 +530,8 @@ class TestDuplicatePOHitlActions:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "Buyer confirmed both POs are intentional",
-                "reason_tag": "other",
+                # ADR-033 §C.2 — DUPLICATE_PO uses curated SCREAMING_SNAKE_CASE codes.
+                "reason_tag": "OTHER",
             },
             headers=_auth(manager_token),
         )
@@ -550,7 +551,7 @@ class TestDuplicatePOHitlActions:
             json={
                 "action": "SUPERSEDE",
                 "notes": "Original PO superseded",
-                "reason_tag": "other",
+                "reason_tag": "OTHER",
             },
             headers=_auth(manager_token),
         )
