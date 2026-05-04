@@ -37,10 +37,6 @@ CREATE TABLE IF NOT EXISTS exceptions (
     tenant_id         TEXT NOT NULL,
     order_id          TEXT NOT NULL,
     event_type        TEXT NOT NULL,
-    -- Intent enum is enforced at the Python layer (contracts.models.Intent);
-    -- a SQL CHECK constraint here drifts every time a new intent ships,
-    -- so it's intentionally absent. The set of valid intents is owned by
-    -- the Intent enum and exposed via /api/v1/health.allowed_intents.
     intent            TEXT,
     lifecycle_state   TEXT NOT NULL DEFAULT 'INGESTED',
     shadow_verdict    TEXT,
@@ -122,14 +118,6 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 """
 
 
-# ---------------------------------------------------------------------------
-# V002 — promote original_event and reanalysis_history to dedicated columns
-# ---------------------------------------------------------------------------
-#
-# Idempotent: probes pragma_table_info before each ADD COLUMN so re-runs and
-# fresh databases alike converge to the same shape. SQLite lacks
-# ADD COLUMN IF NOT EXISTS before 3.35, hence the explicit guard.
-
 def _sqlite_column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
     cur = conn.execute(f"PRAGMA table_info({table})")
     return any(row[1] == column for row in cur.fetchall())
@@ -160,16 +148,7 @@ def _apply_sqlite_v002(conn: sqlite3.Connection) -> None:
     logger.info("SQLite schema V002 applied")
 
 
-# ---------------------------------------------------------------------------
-# V003 — Hash-chained, append-only policy_audit_log (Phase 4)
-# ---------------------------------------------------------------------------
-#
-# SQLite has no built-in sha256 / digest, so the per-row hash backfill is
-# implemented in Python here. The Postgres path (V003__audit_hash_chain.sql)
-# uses pgcrypto's digest() in a single statement.
-
 def _audit_event_hash(prev_hash: str, row: dict) -> str:
-    """Mirror api/store.py::log_audit_event hashing — keep them in lockstep."""
     import hashlib
     import json as _json
     fields = {
@@ -192,7 +171,6 @@ def _audit_event_hash(prev_hash: str, row: dict) -> str:
 
 
 def _apply_sqlite_v003(conn: sqlite3.Connection) -> None:
-    # Columns -----------------------------------------------------------
     if not _sqlite_column_exists(conn, "policy_audit_log", "prev_hash"):
         conn.execute(
             "ALTER TABLE policy_audit_log ADD COLUMN prev_hash TEXT "
@@ -203,10 +181,6 @@ def _apply_sqlite_v003(conn: sqlite3.Connection) -> None:
             "ALTER TABLE policy_audit_log ADD COLUMN event_hash TEXT "
             "NOT NULL DEFAULT ''"
         )
-
-    # Backfill ---------------------------------------------------------
-    # Walk per-tenant in (created_at, id) order; assign the chain. Skip
-    # rows that already carry a hash (re-entrant migration).
     cur = conn.execute(
         "SELECT id, tenant_id, policy_key, previous_value, new_value, "
         "       changed_by, change_reason, created_at "
@@ -233,10 +207,6 @@ def _apply_sqlite_v003(conn: sqlite3.Connection) -> None:
         )
         last_hash_by_tenant[row["tenant_id"]] = h
 
-    # Triggers ----------------------------------------------------------
-    # SQLite trigger syntax differs from Postgres but the contract is
-    # the same: any UPDATE/DELETE against policy_audit_log raises an
-    # error and the transaction is rolled back.
     conn.executescript(
         """
         DROP TRIGGER IF EXISTS policy_audit_log_no_update;
@@ -257,7 +227,6 @@ def _apply_sqlite_v003(conn: sqlite3.Connection) -> None:
             ON policy_audit_log (tenant_id, created_at, id);
         """
     )
-
     now = datetime.now(timezone.utc).isoformat()
     conn.execute(
         "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
@@ -268,12 +237,6 @@ def _apply_sqlite_v003(conn: sqlite3.Connection) -> None:
 
 
 def _apply_sqlite_v004(conn: sqlite3.Connection) -> None:
-    """V004 — Persist enrichment_context as a first-class column.
-
-    Verdict Pillar 1 (2026-04-22 compliance workshop). Mirrors the
-    Postgres migration in V004__enrichment_context.sql; the in-memory
-    bridge in DbExceptionStore.create() retires once this lands.
-    """
     if not _sqlite_column_exists(conn, "exceptions", "enrichment_context"):
         conn.execute(
             "ALTER TABLE exceptions ADD COLUMN enrichment_context TEXT "
@@ -289,19 +252,7 @@ def _apply_sqlite_v004(conn: sqlite3.Connection) -> None:
 
 
 def _apply_sqlite_v006(conn: sqlite3.Connection) -> None:
-    """V006 — tenant_config table for ADR-030 5-level hierarchy storage.
-
-    Stores layers 2-5 (tenant / tier / customer / channel) of the
-    DUPLICATE_PO score-weight hierarchy. Layer 1 (platform) stays on
-    disk as docs/specs/duplicate-po/config-defaults.json. Audit history
-    flows through the existing policy_audit_log via PolicyRepository.
-
-    SQLite-compatible subset:
-      * UUID → TEXT
-      * JSONB → TEXT (the repository serialises with json.dumps)
-      * No RLS — application-layer tenant filtering only
-      * CREATE TABLE IF NOT EXISTS for idempotency
-    """
+    """V006 — tenant_config table for ADR-030 5-level hierarchy storage."""
     if not _sqlite_table_exists(conn, "tenant_config"):
         conn.executescript(
             """
@@ -332,6 +283,71 @@ def _apply_sqlite_v006(conn: sqlite3.Connection) -> None:
     logger.info("SQLite schema V006 applied (tenant_config table)")
 
 
+def _apply_sqlite_v007(conn: sqlite3.Connection) -> None:
+    """V007 — DB-level metadata-contract enforcement for DUPLICATE_PO rows.
+
+    Mirrors V007__duplicate_po_metadata_contract.sql. SQLite triggers
+    use ``json_extract`` instead of the Postgres jsonb ? operator and
+    use ``RAISE(ABORT, ...)`` instead of plpgsql ``RAISE EXCEPTION``.
+
+    Rejects DUPLICATE_PO rows that have reached a terminal state
+    (final_status IS NOT NULL) but are missing any of the four
+    contract-required resolution_data keys: signal_breakdown,
+    composite_score, classification, recommended_action.
+
+    The trigger runs on both INSERT and UPDATE; SQLite syntax requires
+    a separate CREATE TRIGGER statement per event so we declare two.
+    """
+    conn.executescript(
+        """
+        DROP TRIGGER IF EXISTS exceptions_duplicate_po_metadata_contract_insert;
+        CREATE TRIGGER exceptions_duplicate_po_metadata_contract_insert
+        BEFORE INSERT ON exceptions
+        WHEN NEW.intent = 'DUPLICATE_PO' AND NEW.final_status IS NOT NULL
+        BEGIN
+            SELECT CASE
+                WHEN NEW.resolution_data IS NULL
+                  OR json_extract(NEW.resolution_data, '$.signal_breakdown') IS NULL
+                    THEN RAISE(ABORT, 'metadata-contract violation: DUPLICATE_PO row missing resolution_data.signal_breakdown')
+                WHEN json_extract(NEW.resolution_data, '$.composite_score') IS NULL
+                    THEN RAISE(ABORT, 'metadata-contract violation: DUPLICATE_PO row missing resolution_data.composite_score')
+                WHEN json_extract(NEW.resolution_data, '$.classification') IS NULL
+                    THEN RAISE(ABORT, 'metadata-contract violation: DUPLICATE_PO row missing resolution_data.classification')
+                WHEN json_extract(NEW.resolution_data, '$.recommended_action') IS NULL
+                    THEN RAISE(ABORT, 'metadata-contract violation: DUPLICATE_PO row missing resolution_data.recommended_action')
+            END;
+        END;
+
+        DROP TRIGGER IF EXISTS exceptions_duplicate_po_metadata_contract_update;
+        CREATE TRIGGER exceptions_duplicate_po_metadata_contract_update
+        BEFORE UPDATE ON exceptions
+        WHEN NEW.intent = 'DUPLICATE_PO' AND NEW.final_status IS NOT NULL
+        BEGIN
+            SELECT CASE
+                WHEN NEW.resolution_data IS NULL
+                  OR json_extract(NEW.resolution_data, '$.signal_breakdown') IS NULL
+                    THEN RAISE(ABORT, 'metadata-contract violation: DUPLICATE_PO row missing resolution_data.signal_breakdown')
+                WHEN json_extract(NEW.resolution_data, '$.composite_score') IS NULL
+                    THEN RAISE(ABORT, 'metadata-contract violation: DUPLICATE_PO row missing resolution_data.composite_score')
+                WHEN json_extract(NEW.resolution_data, '$.classification') IS NULL
+                    THEN RAISE(ABORT, 'metadata-contract violation: DUPLICATE_PO row missing resolution_data.classification')
+                WHEN json_extract(NEW.resolution_data, '$.recommended_action') IS NULL
+                    THEN RAISE(ABORT, 'metadata-contract violation: DUPLICATE_PO row missing resolution_data.recommended_action')
+            END;
+        END;
+        """
+    )
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+        ("V007", now),
+    )
+    conn.commit()
+    logger.info(
+        "SQLite schema V007 applied (DUPLICATE_PO metadata-contract trigger)",
+    )
+
+
 def apply_sqlite(conn: sqlite3.Connection) -> None:
     """Apply the SQLite-compatible schema (V001 + subsequent migrations)."""
     conn.executescript(_SQLITE_SCHEMA)
@@ -354,6 +370,7 @@ def apply_sqlite(conn: sqlite3.Connection) -> None:
     )
     conn.commit()
     _apply_sqlite_v006(conn)
+    _apply_sqlite_v007(conn)
 
 
 def apply_postgres(database_url: str) -> None:
@@ -375,7 +392,6 @@ def apply_postgres(database_url: str) -> None:
 
     try:
         cur = conn.cursor()
-        # Check if migrations table exists and V001 is already applied
         cur.execute("""
             SELECT EXISTS (
                 SELECT FROM information_schema.tables
@@ -394,7 +410,6 @@ def apply_postgres(database_url: str) -> None:
                 v001_applied = True
 
         if not v001_applied:
-            # Read and execute the full migration SQL
             sql_path = _MIGRATIONS_DIR / "V001__initial_schema.sql"
             sql = sql_path.read_text()
             cur.execute(sql)
@@ -406,87 +421,28 @@ def apply_postgres(database_url: str) -> None:
         else:
             logger.info("PostgreSQL schema V001 already applied, skipping")
 
-        # V002 — reanalyze columns. Idempotent via IF NOT EXISTS in SQL.
-        cur.execute(
-            "SELECT version FROM schema_migrations WHERE version = %s",
-            ("V002",),
-        )
-        if not cur.fetchone():
-            v002_sql = (_MIGRATIONS_DIR / "V002__reanalyze_columns.sql").read_text()
-            cur.execute(v002_sql)
+        for version, filename, log_msg in (
+            ("V002", "V002__reanalyze_columns.sql", "PostgreSQL schema V002 applied"),
+            ("V003", "V003__audit_hash_chain.sql", "PostgreSQL schema V003 applied (hash-chained audit log)"),
+            ("V004", "V004__enrichment_context.sql", "PostgreSQL schema V004 applied (enrichment_context column)"),
+            ("V005", "V005__drop_intent_check.sql", "PostgreSQL schema V005 applied (dropped intent CHECK)"),
+            ("V006", "V006__tenant_config.sql", "PostgreSQL schema V006 applied (tenant_config table)"),
+            ("V007", "V007__duplicate_po_metadata_contract.sql", "PostgreSQL schema V007 applied (DUPLICATE_PO metadata-contract trigger)"),
+        ):
+            cur.execute(
+                "SELECT version FROM schema_migrations WHERE version = %s",
+                (version,),
+            )
+            if cur.fetchone():
+                logger.info("PostgreSQL schema %s already applied, skipping", version)
+                continue
+            sql_path = _MIGRATIONS_DIR / filename
+            cur.execute(sql_path.read_text())
             cur.execute(
                 "INSERT INTO schema_migrations (version) VALUES (%s)",
-                ("V002",),
+                (version,),
             )
-            logger.info("PostgreSQL schema V002 applied")
-        else:
-            logger.info("PostgreSQL schema V002 already applied, skipping")
-
-        # V003 — hash-chained, append-only policy_audit_log (Phase 4).
-        cur.execute(
-            "SELECT version FROM schema_migrations WHERE version = %s",
-            ("V003",),
-        )
-        if not cur.fetchone():
-            v003_sql = (_MIGRATIONS_DIR / "V003__audit_hash_chain.sql").read_text()
-            cur.execute(v003_sql)
-            cur.execute(
-                "INSERT INTO schema_migrations (version) VALUES (%s)",
-                ("V003",),
-            )
-            logger.info("PostgreSQL schema V003 applied (hash-chained audit log)")
-        else:
-            logger.info("PostgreSQL schema V003 already applied, skipping")
-
-        # V004 — enrichment_context column (Verdict Pillar 1).
-        cur.execute(
-            "SELECT version FROM schema_migrations WHERE version = %s",
-            ("V004",),
-        )
-        if not cur.fetchone():
-            v004_sql = (_MIGRATIONS_DIR / "V004__enrichment_context.sql").read_text()
-            cur.execute(v004_sql)
-            cur.execute(
-                "INSERT INTO schema_migrations (version) VALUES (%s)",
-                ("V004",),
-            )
-            logger.info("PostgreSQL schema V004 applied (enrichment_context column)")
-        else:
-            logger.info("PostgreSQL schema V004 already applied, skipping")
-
-        # V005 — drop the over-restrictive intent CHECK constraint that
-        # only listed 5 of the 11 intents the system classifies. SQLite
-        # path never had it; bring Postgres in line.
-        cur.execute(
-            "SELECT version FROM schema_migrations WHERE version = %s",
-            ("V005",),
-        )
-        if not cur.fetchone():
-            v005_sql = (_MIGRATIONS_DIR / "V005__drop_intent_check.sql").read_text()
-            cur.execute(v005_sql)
-            cur.execute(
-                "INSERT INTO schema_migrations (version) VALUES (%s)",
-                ("V005",),
-            )
-            logger.info("PostgreSQL schema V005 applied (dropped intent CHECK)")
-        else:
-            logger.info("PostgreSQL schema V005 already applied, skipping")
-
-        # V006 — tenant_config table (ADR-030 5-level hierarchy storage).
-        cur.execute(
-            "SELECT version FROM schema_migrations WHERE version = %s",
-            ("V006",),
-        )
-        if not cur.fetchone():
-            v006_sql = (_MIGRATIONS_DIR / "V006__tenant_config.sql").read_text()
-            cur.execute(v006_sql)
-            cur.execute(
-                "INSERT INTO schema_migrations (version) VALUES (%s)",
-                ("V006",),
-            )
-            logger.info("PostgreSQL schema V006 applied (tenant_config table)")
-        else:
-            logger.info("PostgreSQL schema V006 already applied, skipping")
+            logger.info(log_msg)
 
         conn.commit()
     except Exception:
