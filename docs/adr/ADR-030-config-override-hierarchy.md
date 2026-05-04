@@ -277,7 +277,7 @@ Also exposed: `GET /api/v1/health.allowed_override_reason_tags_by_intent` (alrea
 
 ## References
 
-- `docs/specs/duplicate-po/config-defaults.json`
+- `gateways/configs/duplicate_po/defaults.json`
 - `docs/specs/duplicate-po/calibration-methodology.md`
 - `docs/specs/duplicate-po/2026-05-03-design-review.md` (Item 3)
 - `docs/specs/duplicate-po/2026-05-10-adr-review.md` (revisions)

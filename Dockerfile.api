@@ -62,13 +62,6 @@ COPY llm/          llm/
 COPY prompts/      prompts/
 COPY api/          api/
 COPY db/           db/
-# ADR-029: gateways/tenant_config.py reads
-# docs/specs/duplicate-po/config-defaults.json at gateway-instantiation time
-# (api/sandbox_gateways.py registers the gateway when ASOE_ENV=sandbox).
-# Without this, uvicorn boot raises FileNotFoundError and the Container App
-# crashloops. Only the duplicate-po sub-tree is needed at runtime; the rest
-# of docs/ is review-only.
-COPY docs/specs/duplicate-po/ docs/specs/duplicate-po/
 
 # ── Runtime config ──────────────────────────────────────────────────────────
 ENV PYTHONPATH=/app

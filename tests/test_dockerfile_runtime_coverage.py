@@ -9,13 +9,18 @@ copies ``api/``, ``contracts/`` etc. — and the runtime-loaded resource
 lives outside any copied directory.
 
 Concrete instance (PR introducing this test): PR-C added
-``gateways/tenant_config.py`` which loads
-``docs/specs/duplicate-po/config-defaults.json`` at gateway instantiation
+``gateways/tenant_config.py`` which loaded
+``docs/specs/duplicate-po/config-defaults.json`` (the file's runtime
+home is now ``gateways/configs/duplicate_po/defaults.json``; the
+docs/-rooted path described here is the original-bug context) at gateway instantiation
 (``api/sandbox_gateways.py`` registers the gateway when ``ASOE_ENV=sandbox``
-which is true on pre-prod). ``Dockerfile.api`` had no ``COPY docs/...``
-line, so the pre-prod Container App crashloops with FileNotFoundError on
-boot. Tests were green (the file exists locally); only an end-to-end
-``docker build`` would have caught it.
+which is true on pre-prod). The original PR didn't bundle ``docs/`` into
+the image, so the pre-prod Container App crashloops with
+FileNotFoundError on boot. Tests were green (the file exists locally);
+only an end-to-end ``docker build`` would have caught it. The follow-up
+relocated the JSON to ``gateways/configs/duplicate_po/defaults.json``
+(co-located with its consumer in an already-COPYed package directory)
+and this fitness test guards the new contract going forward.
 
 How this test catches it (two layers):
 
@@ -73,9 +78,13 @@ _KNOWN_RUNTIME_PATHS: List[Tuple[str, str, str]] = [
         "gateways/tenant_config.py::_PLATFORM_DEFAULTS_PATH "
         "(loaded at TenantConfigGateway.__init__; "
         "register_sandbox_gateways instantiates the gateway when "
-        "ASOE_ENV=sandbox — pre-prod default)",
-        "docs",
-        "docs/specs/duplicate-po/config-defaults.json",
+        "ASOE_ENV=sandbox — pre-prod default). The defaults file lives "
+        "under gateways/configs/<intent>/ so each exception type's "
+        "configs are clearly grouped by folder name and future configs "
+        "(calibration targets, behavior presets, etc.) can be added as "
+        "siblings without renaming.",
+        "gateways",
+        "gateways/configs/duplicate_po/defaults.json",
     ),
     (
         "api/analysis_composer.py — audit_bearing_registry.yaml "

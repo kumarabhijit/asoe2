@@ -10,7 +10,7 @@
 
 ## Context
 
-The new duplicate-PO spec defines a 5-level config override hierarchy (platform → tenant → customer-tier → customer-specific → customer-channel). Each level can supply *partial* score-weight maps. Example from `docs/specs/duplicate-po/config-defaults.json`:
+The new duplicate-PO spec defines a 5-level config override hierarchy (platform → tenant → customer-tier → customer-specific → customer-channel). Each level can supply *partial* score-weight maps. Example from `gateways/configs/duplicate_po/defaults.json`:
 
 ```json
 "customer_behavior_overrides": {
@@ -135,7 +135,7 @@ The merge runs in `gateways/tenant_config.py::resolve_for_event` (new gateway, r
 
 1. Add `_assert_weight_contract` to `recipes/DuplicatePORecipe.py`; promote sum/key/range checks from module-load to runtime; tolerance `1e-4`.
 2. Add `weights` param to `detect_duplicate_po`; default `None` → use `_WEIGHTS`.
-3. Implement `gateways/tenant_config.py` with `resolve_for_event(tenant_id, customer_id, customer_tier, channel) -> ResolvedConfig` — V1 reads from `docs/specs/duplicate-po/config-defaults.json` on disk; production-grade backing store deferred (see ADR-030).
+3. Implement `gateways/tenant_config.py` with `resolve_for_event(tenant_id, customer_id, customer_tier, channel) -> ResolvedConfig` — V1 reads from `gateways/configs/duplicate_po/defaults.json` on disk; production-grade backing store deferred (see ADR-030).
 4. Register `tenant_config` `GatewayDependency` on `DuplicatePORecipe.py` in `recipes/registry.py`. Result key: `tenant_config`.
 5. Extend `orchestration/nodes.py::validate_types` for `DuplicatePORecipe.py` to extract `weights` from `state.resolved_data["tenant_config"]`.
 6. Emit per-layer contribution trace in `tenant_config` gateway response for the audit envelope (consumed by ADR-028 Guard-rail 2 read API).
@@ -199,13 +199,13 @@ The merge runs in `gateways/tenant_config.py::resolve_for_event` (new gateway, r
 
 ## Notes (non-blocking)
 
-- The `drop_ship` preset in `docs/specs/duplicate-po/config-defaults.json` sets `line_items: 0.10` (lower than default 0.20). Direction looks counter-intuitive to ERP veteran reviewer ("drop-ship usually wants line-items emphasized, not de-emphasized"); flagged for product owner review but not blocking — admin can override per customer.
+- The `drop_ship` preset in `gateways/configs/duplicate_po/defaults.json` sets `line_items: 0.10` (lower than default 0.20). Direction looks counter-intuitive to ERP veteran reviewer ("drop-ship usually wants line-items emphasized, not de-emphasized"); flagged for product owner review but not blocking — admin can override per customer.
 
 ---
 
 ## References
 
-- `docs/specs/duplicate-po/config-defaults.json`
+- `gateways/configs/duplicate_po/defaults.json`
 - `docs/specs/duplicate-po/calibration-methodology.md` (informs the future direction; calibration itself deferred per ADR-032)
 - `docs/specs/duplicate-po/2026-05-03-design-review.md` (Item 4)
 - `docs/specs/duplicate-po/2026-05-10-adr-review.md` (revisions)

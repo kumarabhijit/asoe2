@@ -96,7 +96,7 @@ REGISTRY = {
                 result_key="matched_po_details",
             ),
             # ADR-029 — 5-level config resolver. V1 file-backed (reads
-            # docs/specs/duplicate-po/config-defaults.json); production-grade
+            # gateways/configs/duplicate_po/defaults.json); production-grade
             # backing store + tenant/tier/channel/behavior context deferred
             # to A9 (ADR-030). Result.data["weights"] is plumbed into
             # detect_duplicate_po(weights=...) by orchestration/nodes.py
