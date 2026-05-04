@@ -1,0 +1,84 @@
+# Python test suite — primary CI gate for asoe2.
+#
+# Runs the full pytest tests/ tree on every PR and on push to main.
+# This single job covers what the codebase already structures as
+# distinct tiers:
+#
+#   * Unit tests (tests/test_*.py): contracts, recipes, gateways,
+#     skills, llm clients, executor, router, etc.
+#   * Determinism / compliance tests: test_audit_chain,
+#     test_audit_registry_coverage, test_v1_guardrails,
+#     test_constraints, test_three_tier_hitl. CLAUDE.md §2 makes
+#     these non-negotiable.
+#   * Contract tests: test_openapi_contract, test_metadata_contract,
+#     test_db_metadata_contract.
+#   * Graph / topology tests: test_pipeline_topology,
+#     test_graph_paths, test_executed_trace.
+#   * Synthetic-fixture lint: test_synthetic_fixtures_shape (offline
+#     guard for scripts/smoke-e2e.sh).
+#   * Sandbox integration tier (tests/sandbox/): auth flow,
+#     websocket events, db persistence, compliance simulation,
+#     recipe integrity, and a multi-intent integration suite. All
+#     drive the FastAPI app via TestClient — no Postgres/Redis
+#     required.
+#
+# Heavy LLM extras (outlines / torch / transformers) are *not*
+# installed: they are sandbox-runtime deps for constrained
+# generation, not test deps. The dev extra in pyproject.toml is
+# sufficient for the entire test tree.
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    name: pytest tests/
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          # Pinned to the version in .python-version (3.14.3).
+          # The repo targets 3.14 because pydantic 2.12 + LangGraph
+          # need the new typing API; do not downgrade without
+          # updating Dockerfile.api / Dockerfile.core in lockstep.
+          python-version-file: .python-version
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+          restore-keys: |
+            pip-${{ runner.os }}-
+
+      - name: Install package + dev extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Apply pydantic 3.14 typing patch
+        # Mirror Dockerfile.api: pydantic 2.12.5 still uses the
+        # pre-3.14 typing._eval_type kwarg. The patch is a no-op
+        # once pydantic >=2.12.6 ships.
+        run: bash scripts/apply-patches.sh python
+
+      - name: Run pytest
+        env:
+          # conftest.py auto-pins ASOE_ENV=sandbox unless already
+          # set. Make it explicit here so the value is visible in
+          # the CI log when something flakes.
+          ASOE_ENV: sandbox
+        run: pytest -q tests/
