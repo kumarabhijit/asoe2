@@ -273,7 +273,8 @@ class TestYellowOverride:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "Red verdict overridden with risk acknowledged",
-                "reason_tag": "other",
+                # ADR-033 §C.2 — DUPLICATE_PO uses curated SCREAMING_SNAKE_CASE codes.
+                "reason_tag": "OTHER",
             },
             headers=_auth(manager_token),
         )
@@ -457,7 +458,7 @@ class TestRedAdminRelease:
 
         # Step 2: Admin approves from PENDING_ADMIN_REVIEW
         r = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "ALLOW_BOTH", "reason_tag": "other", "notes": "Proceeding after admin review"},
+            json={"action": "ALLOW_BOTH", "reason_tag": "OTHER", "notes": "Proceeding after admin review"},
             headers=_auth(admin_token),
         )
         assert r.status_code == 200
@@ -475,7 +476,7 @@ class TestRedAdminRelease:
         assert r.json()["lifecycle_state"] == "PENDING_ADMIN_REVIEW"
 
         r = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "NO_ACTION", "reason_tag": "other", "notes": "After review, RED verdict was correct"},
+            json={"action": "NO_ACTION", "reason_tag": "OTHER", "notes": "After review, RED verdict was correct"},
             headers=_auth(admin_token),
         )
         assert r.status_code == 200
@@ -496,7 +497,7 @@ class TestRedAdminRelease:
         # or we could use override from PENDING_ADMIN_REVIEW if we add it.
         # For now, admin approves then the exception enters EXECUTING.
         r = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "ALLOW_BOTH", "reason_tag": "other", "notes": "Releasing with admin approval"},
+            json={"action": "ALLOW_BOTH", "reason_tag": "OTHER", "notes": "Releasing with admin approval"},
             headers=_auth(admin_token),
         )
         assert r.status_code == 200

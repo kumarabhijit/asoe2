@@ -229,6 +229,26 @@
               }
             ]
           },
+          "entity_profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EntityProfile"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "impact_metrics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImpactMetrics"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "lines": {
             "items": {
               "$ref": "#/components/schemas/LineAnalysis"
@@ -296,6 +316,17 @@
               }
             ]
           },
+          "recommendation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recommendation"
+          },
           "resolution": {
             "title": "Resolution",
             "type": "string"
@@ -303,6 +334,17 @@
           "risk": {
             "title": "Risk",
             "type": "string"
+          },
+          "root_cause": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Cause"
           }
         },
         "required": [
@@ -331,6 +373,42 @@
           "task_id"
         ],
         "title": "AsyncResolveResponse",
+        "type": "object"
+      },
+      "AuditTrailEntry": {
+        "additionalProperties": false,
+        "description": "One chronological audit-chain event for ADR-028 G2's\naudit_trail. Mirrors policy_audit_log row shape, including the\nSOX hash so a downstream verifier can attest to chain integrity\nwithout re-querying the log table.\n\nThe composer filters the per-tenant audit log to entries whose\n``previous_value`` or ``new_value`` payload references the\nrecord's exception_id. See ``_entry_relates_to_exception`` for\nthe predicate.",
+        "properties": {
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "event_hash": {
+            "title": "Event Hash",
+            "type": "string"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_type",
+          "timestamp",
+          "actor",
+          "payload",
+          "event_hash"
+        ],
+        "title": "AuditTrailEntry",
         "type": "object"
       },
       "AuthTokenResponse": {
@@ -573,6 +651,231 @@
         "title": "ComparisonOrder",
         "type": "object"
       },
+      "ConfigAuditEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "change_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Reason"
+          },
+          "changed_by": {
+            "title": "Changed By",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "event_hash": {
+            "title": "Event Hash",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "new_value": {
+            "title": "New Value"
+          },
+          "policy_key": {
+            "title": "Policy Key",
+            "type": "string"
+          },
+          "prev_hash": {
+            "title": "Prev Hash",
+            "type": "string"
+          },
+          "previous_value": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Value"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "policy_key",
+          "new_value",
+          "changed_by",
+          "created_at",
+          "prev_hash",
+          "event_hash"
+        ],
+        "title": "ConfigAuditEntry",
+        "type": "object"
+      },
+      "ConfigAuditResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigAuditEntry"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant_id",
+          "entries"
+        ],
+        "title": "ConfigAuditResponse",
+        "type": "object"
+      },
+      "ConfigDeleteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "deleted": {
+            "title": "Deleted",
+            "type": "boolean"
+          },
+          "layer": {
+            "title": "Layer",
+            "type": "string"
+          },
+          "scope": {
+            "additionalProperties": true,
+            "title": "Scope",
+            "type": "object"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "deleted",
+          "tenant_id",
+          "layer",
+          "scope"
+        ],
+        "title": "ConfigDeleteResponse",
+        "type": "object"
+      },
+      "ConfigLayerEntry": {
+        "additionalProperties": false,
+        "description": "One row of the ADR-029 per-layer config-resolution trace.\n\nSurfaces in DuplicatePOEnvelope so the operator can see WHICH of\nthe 5 layers (platform \u2192 tenant \u2192 tier \u2192 customer \u2192 channel)\nsupplied each final weight value. Sourced from the\n``tenant_config`` gateway response's ``contribution_trace``.",
+        "properties": {
+          "signal": {
+            "title": "Signal",
+            "type": "string"
+          },
+          "source_layer": {
+            "title": "Source Layer",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "signal",
+          "value",
+          "source_layer"
+        ],
+        "title": "ConfigLayerEntry",
+        "type": "object"
+      },
+      "ConfigLayerListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "layer": {
+            "title": "Layer",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/TenantConfigRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant_id",
+          "layer",
+          "rows"
+        ],
+        "title": "ConfigLayerListResponse",
+        "type": "object"
+      },
+      "ConfigResolveResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "contribution_trace": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Contribution Trace",
+            "type": "array"
+          },
+          "scope": {
+            "additionalProperties": true,
+            "title": "Scope",
+            "type": "object"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "validation_status": {
+            "title": "Validation Status",
+            "type": "string"
+          },
+          "violation_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Violation Reason"
+          },
+          "weights": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Weights",
+            "type": "object"
+          }
+        },
+        "required": [
+          "tenant_id",
+          "weights",
+          "contribution_trace",
+          "validation_status",
+          "scope"
+        ],
+        "title": "ConfigResolveResponse",
+        "type": "object"
+      },
       "CosignRequest": {
         "additionalProperties": false,
         "description": "POST /api/v1/exceptions/{id}/override/cosign \u2014 second-reviewer decision\non a pending high-value override (Phase 2 four-eyes control).\n\n``approve=True`` applies the pending override (lifecycle \u2192 RESOLVED);\n``approve=False`` rejects it and restores the prior lifecycle. Notes\nare mandatory (SOX) in both cases.\n\nThe cosigner's identity comes from the authenticated user and must\ndiffer from the initiator \u2014 same-person cosign is a SOD violation.",
@@ -780,6 +1083,156 @@
         "title": "DuplicateDetectionData",
         "type": "object"
       },
+      "DuplicatePOEnvelope": {
+        "additionalProperties": false,
+        "description": "ADR-028 Guard-rail 2 canonical envelope for DUPLICATE_PO records.\n\nReturned by ``GET /api/v1/exceptions/duplicates/{id}``. The UI\nconsumes this single payload for both Layer 1 (recommendation +\naction buttons) and Layer 2 (evidence \u2014 matched PO, signals,\nconfig trace, audit + human-action history).\n\nAudit-bearing classification: see\n``compliance/audit_bearing_registry.yaml::DuplicatePOEnvelope``.",
+        "properties": {
+          "agent_reasoning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Reasoning"
+          },
+          "audit_trail": {
+            "items": {
+              "$ref": "#/components/schemas/AuditTrailEntry"
+            },
+            "title": "Audit Trail",
+            "type": "array"
+          },
+          "autonomy_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Autonomy Level"
+          },
+          "classification": {
+            "title": "Classification",
+            "type": "string"
+          },
+          "composite_score": {
+            "title": "Composite Score",
+            "type": "number"
+          },
+          "config_layer_trace": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ConfigLayerEntry"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Layer Trace"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "exception_id": {
+            "title": "Exception Id",
+            "type": "string"
+          },
+          "final_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Status"
+          },
+          "human_actions": {
+            "items": {
+              "$ref": "#/components/schemas/HumanActionEntry"
+            },
+            "title": "Human Actions",
+            "type": "array"
+          },
+          "incoming_po": {
+            "$ref": "#/components/schemas/OrderSnapshot"
+          },
+          "intent": {
+            "const": "DUPLICATE_PO",
+            "title": "Intent",
+            "type": "string"
+          },
+          "lifecycle_state": {
+            "title": "Lifecycle State",
+            "type": "string"
+          },
+          "matched_po": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrderSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recommended_action": {
+            "title": "Recommended Action",
+            "type": "string"
+          },
+          "shadow_verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shadow Verdict"
+          },
+          "signal_breakdown": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Signal Breakdown",
+            "type": "object"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "exception_id",
+          "tenant_id",
+          "intent",
+          "lifecycle_state",
+          "incoming_po",
+          "signal_breakdown",
+          "composite_score",
+          "classification",
+          "recommended_action",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "DuplicatePOEnvelope",
+        "type": "object"
+      },
       "EdiMismatchAnalysisData": {
         "additionalProperties": false,
         "description": "EdiMismatchRecipe \u2192 UI `edi_mismatch_analysis`.\n\n`sub_type` is intentionally untyped-string (not a Literal) so the UI\ncan render new sub_types added in the recipe without a contract\nbump. `expected_value` / `received_value` are `Any` because EDI 850\nline fields are heterogeneous (SKU strings, qty integers, ship-to\ndicts).\n\nNote: PRICE_MISMATCH never reaches this recipe \u2014 the classifier\nroutes it to CONTRACTUAL_CORRECTION / PriceAdjustmentRecipe.py to\npreserve the single-source-of-truth invariant. The adapter returns\nNone for FAILED recipe outputs, so PRICE_MISMATCH routing-error\nrecords never surface this field.",
@@ -835,6 +1288,80 @@
           "autonomy_level"
         ],
         "title": "EdiMismatchAnalysisData",
+        "type": "object"
+      },
+      "EntityProfile": {
+        "description": "Master-data context for the exception's customer entity.\n\nMirrors `EntityProfile` in `asoe-ui/src/types/exceptions.ts`.\nComposed by `api.profile_composer.compose_entity_profile` from a\nseed `Account` lookup; tier / VIP / credit-standing fields are\noptional today (no producer wired) and tracked under the\n`EntityProfile` grandfather clause in the audit-bearing registry.",
+        "properties": {
+          "bp_number": {
+            "title": "Bp Number",
+            "type": "string"
+          },
+          "credit_standing": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credit Standing"
+          },
+          "customer_name": {
+            "title": "Customer Name",
+            "type": "string"
+          },
+          "customer_tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Tier"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
+          "vip_status": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vip Status"
+          }
+        },
+        "required": [
+          "customer_name",
+          "bp_number"
+        ],
+        "title": "EntityProfile",
         "type": "object"
       },
       "EscalateRequest": {
@@ -1408,6 +1935,123 @@
           "allowed_override_reason_tags_by_intent"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "HumanActionEntry": {
+        "additionalProperties": false,
+        "description": "One chronological human-action entry for ADR-028 G2's\nhuman_actions. Synthesised from ``record.resolved_*`` fields,\ncosign metadata in ``resolution_data[\"cosign\"]``, and the\n``pending_override`` snapshot when the record is mid-cosign.\n\nDistinct from audit_trail: human_actions are domain-language\nsummaries (APPROVE / OVERRIDE / ESCALATE / COSIGN_APPROVE /\nCOSIGN_REJECT), audit_trail entries are the SOX log rows. The\ntwo complement \u2014 operators read human_actions; auditors read\naudit_trail.",
+        "properties": {
+          "action": {
+            "enum": [
+              "APPROVE",
+              "REJECT",
+              "OVERRIDE",
+              "ESCALATE",
+              "COSIGN_APPROVE",
+              "COSIGN_REJECT",
+              "REANALYZE"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "reason_tag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Tag"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "actor",
+          "timestamp"
+        ],
+        "title": "HumanActionEntry",
+        "type": "object"
+      },
+      "ImpactMetrics": {
+        "description": "Quantitative blast radius of the exception.\n\nMirrors `ImpactMetrics` in `asoe-ui/src/types/exceptions.ts`.\nComposed deterministically from line-item totals and record\nmetadata. SLA-priority is rendered as a string so the UI can\nmap verdicts \u2192 display variants without a hardcoded enum\n(Guardrail #2 on the UI side).",
+        "properties": {
+          "affected_lines": {
+            "title": "Affected Lines",
+            "type": "integer"
+          },
+          "delta_amount": {
+            "title": "Delta Amount",
+            "type": "number"
+          },
+          "delta_percentage": {
+            "title": "Delta Percentage",
+            "type": "number"
+          },
+          "fulfillment_gap_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fulfillment Gap Pct"
+          },
+          "revenue_at_risk": {
+            "title": "Revenue At Risk",
+            "type": "number"
+          },
+          "sla_deadline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sla Deadline"
+          },
+          "sla_priority": {
+            "title": "Sla Priority",
+            "type": "string"
+          }
+        },
+        "required": [
+          "revenue_at_risk",
+          "delta_amount",
+          "delta_percentage",
+          "sla_priority",
+          "affected_lines"
+        ],
+        "title": "ImpactMetrics",
         "type": "object"
       },
       "InboundOrder": {
@@ -3031,6 +3675,120 @@
         "title": "SubstituteSKU",
         "type": "object"
       },
+      "TenantConfigDeleteRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "change_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Reason"
+          },
+          "scope": {
+            "additionalProperties": true,
+            "title": "Scope",
+            "type": "object"
+          }
+        },
+        "title": "TenantConfigDeleteRequest",
+        "type": "object"
+      },
+      "TenantConfigRow": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "layer": {
+            "title": "Layer",
+            "type": "string"
+          },
+          "scope": {
+            "additionalProperties": true,
+            "title": "Scope",
+            "type": "object"
+          },
+          "scope_hash": {
+            "title": "Scope Hash",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "weights": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Weights",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "layer",
+          "scope_hash",
+          "scope",
+          "weights",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "TenantConfigRow",
+        "type": "object"
+      },
+      "TenantConfigUpsertRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "change_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Reason"
+          },
+          "scope": {
+            "additionalProperties": true,
+            "title": "Scope",
+            "type": "object"
+          },
+          "weights": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Weights",
+            "type": "object"
+          }
+        },
+        "required": [
+          "weights"
+        ],
+        "title": "TenantConfigUpsertRequest",
+        "type": "object"
+      },
       "TenantResetRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3901,6 +4659,422 @@
         ]
       }
     },
+    "/api/v1/config/tenants/{tenant_id}/audit": {
+      "get": {
+        "description": "List ConfigChange audit entries for the tenant, newest first.\n\nFiltered by policy_key prefix ``duplicate_po.weights.`` so unrelated\naudit rows (policy threshold tunings, exception lifecycle events)\ndon't leak into the config-admin view.",
+        "operationId": "list_audit_api_v1_config_tenants__tenant_id__audit_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigAuditResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Audit",
+        "tags": [
+          "config"
+        ]
+      }
+    },
+    "/api/v1/config/tenants/{tenant_id}/layers/{layer}": {
+      "delete": {
+        "operationId": "delete_layer_api_v1_config_tenants__tenant_id__layers__layer__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "layer",
+            "required": true,
+            "schema": {
+              "title": "Layer",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantConfigDeleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigDeleteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Layer",
+        "tags": [
+          "config"
+        ]
+      },
+      "get": {
+        "operationId": "list_layer_api_v1_config_tenants__tenant_id__layers__layer__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "layer",
+            "required": true,
+            "schema": {
+              "title": "Layer",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigLayerListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Layer",
+        "tags": [
+          "config"
+        ]
+      },
+      "put": {
+        "operationId": "upsert_layer_api_v1_config_tenants__tenant_id__layers__layer__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "layer",
+            "required": true,
+            "schema": {
+              "title": "Layer",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantConfigUpsertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantConfigRow"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upsert Layer",
+        "tags": [
+          "config"
+        ]
+      }
+    },
+    "/api/v1/config/tenants/{tenant_id}/resolve": {
+      "get": {
+        "description": "Resolve the full 5-layer hierarchy for the requested scope.\n\nDelegates to the registered ``tenant_config`` gateway so the\nresolver path is identical to what the orchestration node sees\non every event \u2014 the API surface and the runtime path can never\ndiverge.",
+        "operationId": "resolve_config_api_v1_config_tenants__tenant_id__resolve_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "customer_tier",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "strategic",
+                    "standard",
+                    "smb"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Customer Tier"
+            }
+          },
+          {
+            "in": "query",
+            "name": "customer_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Customer Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Channel"
+            }
+          },
+          {
+            "in": "query",
+            "name": "behavior_tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Behavior Tag"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigResolveResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Config",
+        "tags": [
+          "config"
+        ]
+      }
+    },
     "/api/v1/exceptions": {
       "get": {
         "operationId": "list_exceptions_api_v1_exceptions_get",
@@ -4011,6 +5185,65 @@
           }
         },
         "summary": "List Exceptions",
+        "tags": [
+          "exceptions"
+        ]
+      }
+    },
+    "/api/v1/exceptions/duplicates/{exception_id}": {
+      "get": {
+        "description": "ADR-028 Guard-rail 2 \u2014 canonical DUPLICATE_PO envelope.",
+        "operationId": "get_duplicate_po_envelope_api_v1_exceptions_duplicates__exception_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "exception_id",
+            "required": true,
+            "schema": {
+              "title": "Exception Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DuplicatePOEnvelope"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Duplicate Po Envelope",
         "tags": [
           "exceptions"
         ]

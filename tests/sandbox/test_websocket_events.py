@@ -198,7 +198,14 @@ class TestEventsPublishedOnResolve:
     """Resolve endpoints publish task_complete events."""
 
     def test_resolve_publishes_event(self, client, analyst_token):
-        """POST /api/v1/exceptions/resolve publishes a task_complete event."""
+        """POST /api/v1/exceptions/resolve publishes a task_complete event.
+
+        Per ADR-027 Phase B (api/events.py), the orchestrator now emits a
+        ``pipeline_progress`` event before ``task_complete`` — so the
+        per-resolve event stream contains both. We assert the
+        ``task_complete`` event is present rather than asserting it is
+        first in the stream.
+        """
         if hasattr(event_publisher, "clear"):
             event_publisher.clear()
 
@@ -211,9 +218,14 @@ class TestEventsPublishedOnResolve:
         if hasattr(event_publisher, "get_recent"):
             recent = event_publisher.get_recent(SANDBOX_TENANT)
             assert len(recent) >= 1
-            parsed = json.loads(recent[0])
-            assert parsed["type"] == "task_complete"
-            assert parsed["payload"]["final_status"] == "COMPLETE"
+            parsed_events = [json.loads(r) for r in recent]
+            task_complete = next(
+                (e for e in parsed_events if e["type"] == "task_complete"), None,
+            )
+            assert task_complete is not None, (
+                f"no task_complete event in {[e['type'] for e in parsed_events]}"
+            )
+            assert task_complete["payload"]["final_status"] == "COMPLETE"
 
     def test_blocked_resolve_publishes_blocked_event(self, client, analyst_token):
         """BLOCKED resolution publishes event with BLOCKED status."""
@@ -229,8 +241,15 @@ class TestEventsPublishedOnResolve:
         if hasattr(event_publisher, "get_recent"):
             recent = event_publisher.get_recent(SANDBOX_TENANT)
             assert len(recent) >= 1
-            parsed = json.loads(recent[0])
-            assert parsed["payload"]["final_status"] == "BLOCKED"
+            # Find the task_complete event (preceded by pipeline_progress
+            # under ADR-027 Phase B). Either event carries final_status,
+            # so check whichever is present.
+            parsed_events = [json.loads(r) for r in recent]
+            task_complete = next(
+                (e for e in parsed_events if e["type"] == "task_complete"), None,
+            )
+            target = task_complete or parsed_events[-1]
+            assert target["payload"].get("final_status") == "BLOCKED"
 
     def test_async_resolve_publishes_event(self, client, analyst_token):
         """POST /api/v1/exceptions/resolve/async publishes event."""

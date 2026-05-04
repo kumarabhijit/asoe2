@@ -356,6 +356,13 @@ def duplicate_po_resend_event() -> GraphState:
                     "channel": 1.0,
                     "delivery_date": 1.0,
                 },
+                # ADR-028 G1: matched_po_id is required by the
+                # DUPLICATE_PO event-metadata contract — every event the
+                # upstream classifier routes to DUPLICATE_PO must carry
+                # the candidate it scored against. EC04 is a resend of
+                # PO-88424 — the candidate is the originally-transmitted
+                # PO of the same number.
+                "matched_po_id": "PO-88424-original",
             },
         )
     )
@@ -363,7 +370,13 @@ def duplicate_po_resend_event() -> GraphState:
 
 @pytest.fixture
 def duplicate_po_batch_event() -> GraphState:
-    """EC08: one PO from a multi-PO batch (Amazon-style) — no match → PASS."""
+    """EC08: one PO from a multi-PO batch (Amazon-style) — no match → PASS.
+
+    Even when the recipe's composite_score will be low (no real match),
+    the upstream classifier still routes DUPLICATE_PO because it
+    *attempted* a candidate match against PO-AMZ-CANDIDATE — the recipe
+    then scores 0 across signals and correctly emits PASS.
+    """
     return GraphState(
         event=OrderEvent(
             order_id="PO-AMZ-003",
@@ -384,6 +397,7 @@ def duplicate_po_batch_event() -> GraphState:
                     "channel": 1.0,
                     "delivery_date": 0.0,
                 },
+                "matched_po_id": "PO-AMZ-CANDIDATE",
                 "source_email_id": "EC08-multiple-pos-amazon",
                 "batch_po_index": 3,
             },

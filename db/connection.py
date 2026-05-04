@@ -21,6 +21,7 @@ import sqlite3
 import threading
 from contextlib import contextmanager
 from typing import Any, Dict, Generator, List, Optional, Protocol, Tuple
+from uuid import uuid4
 
 logger = logging.getLogger("asoe.db")
 
@@ -40,17 +41,43 @@ class DatabaseConnection(Protocol):
 # ---------------------------------------------------------------------------
 
 class SQLiteAdapter:
-    """SQLite connection wrapper with dict-row support."""
+    """SQLite connection wrapper with dict-row support.
+
+    Per-thread connections are cached under a ``threading.local()`` so a
+    request handler running on a worker thread doesn't crash on the
+    "SQLite objects created in a thread can only be used in that same
+    thread" guard. For ``:memory:`` databases this means we MUST use
+    SQLite's shared-cache URI (``file:NAME?mode=memory&cache=shared``)
+    — without it, every thread's first connection creates an empty new
+    in-memory DB and the schema applied by the test/setup thread is
+    invisible to handler threads. The shared-cache form makes one in-
+    memory DB visible to every connection that opens the same URI in
+    the same process.
+    """
 
     def __init__(self, db_path: str = ":memory:") -> None:
-        self._db_path = db_path
+        if db_path == ":memory:":
+            # Generate a per-instance unique name so different adapter
+            # instances in the same process don't collide. The
+            # ``mode=memory&cache=shared`` query string is what makes
+            # the DB shared across connections; ``file:`` opens it via
+            # the URI form (``uri=True`` on connect).
+            self._db_path = f"file:asoe-mem-{uuid4().hex}?mode=memory&cache=shared"
+            self._uri = True
+        else:
+            self._db_path = db_path
+            self._uri = False
         self._local = threading.local()
 
     def _get_conn(self) -> sqlite3.Connection:
         if not hasattr(self._local, "conn") or self._local.conn is None:
-            conn = sqlite3.connect(self._db_path)
+            conn = sqlite3.connect(self._db_path, uri=self._uri)
             conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA journal_mode=WAL")
+            # WAL only makes sense for file-backed DBs. ``:memory:``
+            # (shared cache) cannot be WAL — SQLite silently rejects
+            # the pragma but we skip it to avoid noise in the log.
+            if not self._uri:
+                conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
             self._local.conn = conn
         return self._local.conn

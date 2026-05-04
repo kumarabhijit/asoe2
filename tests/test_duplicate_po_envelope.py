@@ -474,14 +474,20 @@ def _clear_store():
 
 def _seed_duplicate_po_record(tenant_id: str = "acme") -> str:
     """Seed an in-memory record with the same shape compose() expects.
-    Returns the exception_id."""
+    Returns the exception_id.
+
+    ``ExceptionStore.create`` derives ``lifecycle_state`` from
+    ``final_status`` via ``STATUS_TO_LIFECYCLE`` — passing it explicitly
+    is rejected. ``MANUAL_REVIEW_REQUIRED`` → ``PENDING_REVIEW``.
+    """
+    import uuid as _uuid
     from api.store import exception_store
     record = exception_store.create(
         tenant_id=tenant_id,
         order_id="PO-DUP-INCOMING",
         event_type="EDI_850_DUPLICATE_PO",
+        trace_id=str(_uuid.uuid4()),
         intent="DUPLICATE_PO",
-        lifecycle_state="PENDING_REVIEW",
         shadow_verdict="GREEN",
         selected_recipe="DuplicatePORecipe.py",
         final_status="MANUAL_REVIEW_REQUIRED",
@@ -527,13 +533,16 @@ class TestEndpointIntegration:
         assert resp.status_code == 404
 
     def test_returns_404_when_record_intent_is_not_duplicate_po(self, client):
+        import uuid as _uuid
         from api.store import exception_store
+        # ``lifecycle_state`` is derived from ``final_status`` by the store;
+        # ``COMPLETE`` → ``RESOLVED``.
         record = exception_store.create(
             tenant_id="acme",
             order_id="PO-CC-1",
             event_type="EDI_850_PRICE_MISMATCH",
+            trace_id=str(_uuid.uuid4()),
             intent="CONTRACTUAL_CORRECTION",
-            lifecycle_state="PENDING_REVIEW",
             shadow_verdict="GREEN",
             selected_recipe="PriceAdjustmentRecipe.py",
             final_status="COMPLETE",
