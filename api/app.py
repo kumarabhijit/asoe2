@@ -19,6 +19,7 @@ from api.middleware import TraceIDMiddleware
 import os
 
 from api.routes import accounts, auth, exceptions, health, pipeline, policies, workflows, ws
+from api.routes import config as _config_routes
 from api.routes import duplicate_envelope as _duplicate_envelope_routes
 from api.routes import sandbox as _sandbox_routes
 
@@ -87,11 +88,6 @@ def create_app() -> FastAPI:
         description="Deterministic, compliance-aware exception management API.",
     )
 
-    # CORS — driven by env vars so the bicep template / parameter file is
-    # the single source of truth, not a hardcoded list. ``allow_credentials``
-    # is required (NextAuth + ``Authorization: Bearer``); that means we can
-    # never use ``allow_origins=["*"]``, so the resolver always produces an
-    # explicit list (and an optional regex for Vercel preview URLs).
     cors_origins, cors_regex = _resolve_cors_config()
     if cors_origins or cors_regex:
         application.add_middleware(
@@ -104,21 +100,13 @@ def create_app() -> FastAPI:
             expose_headers=["X-Trace-ID"],
         )
 
-    # Middleware (§11.4 — X-Trace-ID propagation)
     application.add_middleware(TraceIDMiddleware)
 
-    # Register error handlers
     application.add_exception_handler(ASOEError, asoe_error_handler)  # type: ignore[arg-type]
     application.add_exception_handler(Exception, unhandled_error_handler)  # type: ignore[arg-type]
 
-    # Mount route groups
     application.include_router(health.router, prefix="/api/v1", tags=["health"])
     application.include_router(exceptions.router, prefix="/api/v1", tags=["exceptions"])
-    # Intent-specific canonical envelopes (ADR-028 G2 / action item A6).
-    # Path scheme: /api/v1/exceptions/duplicates/{id} (and future siblings
-    # /exceptions/back-orders/{id} etc.). Mounted under the same /api/v1
-    # prefix as exceptions.router; each route in the module declares its
-    # own absolute path under that prefix.
     application.include_router(
         _duplicate_envelope_routes.router, prefix="/api/v1", tags=["exceptions"],
     )
@@ -128,19 +116,17 @@ def create_app() -> FastAPI:
     application.include_router(ws.router, prefix="/api/v1", tags=["websocket"])
     application.include_router(pipeline.router, prefix="/api/v1", tags=["pipeline"])
     application.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+    # ADR-030 / A9 — tenant-config admin surface (PR-C.2). Five endpoints
+    # under /api/v1/config/tenants/{tenant_id}/**. Audit-chain wiring
+    # uses the existing PolicyRepository hash chain.
+    application.include_router(
+        _config_routes.router, prefix="/api/v1", tags=["config"],
+    )
 
-    # Sandbox-only test-fixture endpoints (Playwright browser e2e). Mounted
-    # only when ASOE_ENV=sandbox; each handler additionally re-checks the
-    # env at call time (defence in depth against accidental mis-include).
     if os.getenv("ASOE_ENV", "production").lower() == "sandbox":
         application.include_router(
             _sandbox_routes.router, prefix="/api/v1", tags=["sandbox"],
         )
-        # Register stub gateways so recipes that declare GatewayDependency
-        # entries (oms / sap_doc / sap_contract / sap_block / sla_contract /
-        # sap_customer_master / promotion / buyer_notification) resolve at
-        # runtime. In production the platform team wires real adapters at
-        # startup; in sandbox these mirror tests/conftest.py.
         from api.sandbox_gateways import register_sandbox_gateways
         register_sandbox_gateways()
 
