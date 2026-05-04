@@ -25,6 +25,14 @@ tests/sandbox/db/*.db
 k8s/
 infra/
 docs/
+# Re-include the duplicate-po config-defaults sub-tree —
+# `gateways/tenant_config.py::_PLATFORM_DEFAULTS_PATH` reads
+# `docs/specs/duplicate-po/config-defaults.json` at gateway-
+# instantiation time. Without this exception the docker build
+# context omits the file even when Dockerfile.api COPYs it
+# explicitly, producing "file not found in build context" at COPY
+# time and a Container App that crashloops on first start.
+!docs/specs/duplicate-po/
 .github/
 .claude/
 tests/

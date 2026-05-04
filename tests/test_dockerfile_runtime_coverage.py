@@ -169,6 +169,87 @@ def _dockerfile_runtime_resource_dirs(df_path: Path) -> Set[str]:
 
 
 # ---------------------------------------------------------------------------
+# .dockerignore evaluation
+#
+# A `COPY foo/bar /app/foo/bar` line in the Dockerfile is silently a no-op
+# (or, with strict BuildKit, a hard error) when `foo/bar` is excluded
+# from the build context by `.dockerignore`. The fitness test layers
+# above check that the COPY line EXISTS — they don't check that the
+# corresponding source path is actually present in the context.
+#
+# Concrete instance: PR #104 added `COPY docs/specs/duplicate-po/`
+# to Dockerfile.api, but `.dockerignore` line 27 (`docs/`) excluded
+# the entire docs/ tree from the build context. The build failed with
+# "file not found in build context or excluded by .dockerignore".
+# This sub-suite simulates Docker's gitignore-style matching against
+# the runtime resource paths declared in `_KNOWN_RUNTIME_PATHS` and
+# fails the test when any of them is excluded.
+# ---------------------------------------------------------------------------
+
+
+def _parse_dockerignore(path: Path) -> List[tuple]:
+    """Parse `.dockerignore` into an ordered list of (negate, pattern)."""
+    rules: List[tuple] = []
+    if not path.exists():
+        return rules
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        negate = line.startswith("!")
+        pat = line[1:] if negate else line
+        rules.append((negate, pat))
+    return rules
+
+
+def _glob_segment(pat: str, seg: str) -> bool:
+    if pat == "**":
+        return True
+    rx = re.escape(pat).replace(r"\*", "[^/]*").replace(r"\?", "[^/]")
+    return re.fullmatch(rx, seg) is not None
+
+
+def _gitignore_match(pattern: str, repo_path: str) -> bool:
+    """Approximate Docker's gitignore-style match.
+
+    Implements: anchored leading-slash patterns, trailing-slash
+    directory-only patterns, ``*`` non-separator wildcard. Sufficient
+    for the patterns this repo's `.dockerignore` actually uses; a more
+    exhaustive implementation would pull in `pathspec`, but we want
+    zero new test deps here.
+    """
+    anchored = pattern.startswith("/")
+    if anchored:
+        pattern = pattern[1:]
+    if pattern.endswith("/"):
+        pattern = pattern.rstrip("/")
+    parts = repo_path.split("/")
+    pat_parts = pattern.split("/")
+    if anchored:
+        if len(pat_parts) > len(parts):
+            return False
+        return all(
+            _glob_segment(pp, p) for pp, p in zip(pat_parts, parts)
+        )
+    # Unanchored: match anywhere
+    for i in range(len(parts) - len(pat_parts) + 1):
+        if all(
+            _glob_segment(pp, parts[i + j]) for j, pp in enumerate(pat_parts)
+        ):
+            return True
+    return False
+
+
+def _is_excluded_by_dockerignore(rules: List[tuple], repo_path: str) -> bool:
+    """Last-matching-rule-wins evaluation matching Docker's semantics."""
+    excluded = False
+    for negate, pattern in rules:
+        if _gitignore_match(pattern, repo_path):
+            excluded = not negate
+    return excluded
+
+
+# ---------------------------------------------------------------------------
 # Test cases
 # ---------------------------------------------------------------------------
 
@@ -218,6 +299,33 @@ def test_known_runtime_path_in_dockerfile_api(
         f"Dockerfile.api does not COPY '{top_dir}/' but the application "
         f"loads {full_path} at runtime. Add a COPY line for the "
         f"directory.\n\nLoad point: {description}"
+    )
+
+
+@pytest.mark.parametrize(
+    "description,top_dir,full_path",
+    _KNOWN_RUNTIME_PATHS,
+    ids=[p[2] for p in _KNOWN_RUNTIME_PATHS],
+)
+def test_known_runtime_path_not_excluded_by_dockerignore(
+    description: str, top_dir: str, full_path: str,
+) -> None:
+    """Every known runtime-load point's repo-relative path MUST NOT be
+    excluded by `.dockerignore`. A COPY directive in the Dockerfile is
+    silently a no-op (or a hard error under BuildKit) when the source
+    path is excluded from the build context — the bug PR #104 missed,
+    surfaced when the Container App build failed with 'file not found
+    in build context or excluded by .dockerignore'.
+    """
+    rules = _parse_dockerignore(_REPO / ".dockerignore")
+    assert not _is_excluded_by_dockerignore(rules, full_path), (
+        f"`.dockerignore` excludes {full_path}, but the application "
+        f"loads it at runtime via:\n  {description}\n\n"
+        f"Add a `!{full_path}` (or a parent path like "
+        f"`!{top_dir}/<sub>/`) entry AFTER the broader exclusion to "
+        f"re-include this resource in the build context. Without this "
+        f"the docker build context omits the file even when "
+        f"Dockerfile.api COPYs it explicitly."
     )
 
 
