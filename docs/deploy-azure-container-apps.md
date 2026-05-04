@@ -113,6 +113,33 @@ Stage 1 is mostly idempotent.
 | `PG_ADMIN_PASSWORD` | **required** | **required** (must match Postgres admin password) |
 | `ANTHROPIC_API_KEY` | **required** | optional — preserved unless overridden to rotate |
 | `ASOE_JWT_SECRET` | optional — auto-generated if unset | optional — preserved unless overridden; pass `auto` to rotate |
+| `LANGFUSE_PUBLIC_KEY` | optional — sink stays disabled if unset | optional — preserved unless overridden to rotate |
+| `LANGFUSE_SECRET_KEY` | optional — sink stays disabled if unset | optional — preserved unless overridden to rotate |
+
+**LangFuse Cloud (Hobby plan)** is the default observability destination
+(`langfuseHost = https://us.cloud.langfuse.com` in
+`infra/parameters.sandbox.json`). The bicep template wires
+`LANGFUSE_HOST`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` onto the
+API container; `observability/langfuse_sink.py` activates only when all
+three are non-empty. To enable forwarding:
+
+1. Create a LangFuse Cloud project at <https://cloud.langfuse.com>
+   (US region — matches the configured host) and mint a public/secret
+   key pair on the **Settings → API Keys** page.
+2. Pass them to the deploy or to `set-secrets.sh`:
+   ```bash
+   LANGFUSE_PUBLIC_KEY='pk-lf-…' LANGFUSE_SECRET_KEY='sk-lf-…' \
+       ./scripts/set-secrets.sh
+   ```
+3. The active revision restarts automatically; new graph runs forward
+   traces + spans + per-LLM-call generation observations to LangFuse.
+   Stdlib logging continues unchanged regardless.
+
+Hobby-tier limits (50k observations/month at time of writing — verify
+at <https://langfuse.com/pricing>) cover sandbox traffic comfortably
+(~10 observations per graph run → ~5,000 runs/month). For a self-hosted
+LangFuse stack, point `langfuseHost` at the self-hosted URL and supply
+keys minted on that instance.
 
 > **Why two stages?** The Container App resource refuses to be created
 > until its first revision reaches a healthy state. Pre-Stage 2, the
@@ -378,6 +405,21 @@ ASOE_JWT_SECRET=auto ./scripts/set-secrets.sh
 
 This invalidates **all currently-issued JWTs** — every authenticated
 client must re-login. The script prints the new value once; save it.
+
+### Rotate the LangFuse keys
+
+LangFuse keys are paired — `set-secrets.sh` refuses to set just one of
+the two, since the sink only activates when both are present.
+
+```bash
+LANGFUSE_PUBLIC_KEY='pk-lf-NEW' LANGFUSE_SECRET_KEY='sk-lf-NEW' \
+    ./scripts/set-secrets.sh
+```
+
+Use the LangFuse Cloud "Rotate keys" workflow on the project's
+**Settings → API Keys** page first, then run the command above. Trace
+forwarding pauses for a few seconds during the revision restart; stdlib
+logging continues uninterrupted.
 
 ### Rotate the Postgres admin password
 

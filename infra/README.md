@@ -43,8 +43,11 @@ vCPU-second + GiB-second + request, so quiet periods cost very little.
 ## What is NOT in bicep (set after deploy)
 
 - Container App secrets (`anthropic-api-key`, `asoe-jwt-secret`,
-  `database-url`, `redis-url`) — declared empty in bicep and populated
-  by `scripts/set-secrets.sh`.
+  `database-url`, `redis-url`, `langfuse-public-key`,
+  `langfuse-secret-key`) — declared empty in bicep and populated by
+  `scripts/set-secrets.sh`. The LangFuse pair is optional; when unset,
+  `observability/langfuse_sink.py` no-ops and stdlib logging stays
+  authoritative.
 - Container image tag — bicep deploys a placeholder; the deploy script
   pushes the real image to ACR and updates the revision.
 - Postgres firewall rules beyond `AllowAllAzureServices`. For local
