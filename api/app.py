@@ -19,6 +19,7 @@ from api.middleware import TraceIDMiddleware
 import os
 
 from api.routes import accounts, auth, exceptions, health, pipeline, policies, workflows, ws
+from api.routes import duplicate_envelope as _duplicate_envelope_routes
 from api.routes import sandbox as _sandbox_routes
 
 
@@ -113,6 +114,14 @@ def create_app() -> FastAPI:
     # Mount route groups
     application.include_router(health.router, prefix="/api/v1", tags=["health"])
     application.include_router(exceptions.router, prefix="/api/v1", tags=["exceptions"])
+    # Intent-specific canonical envelopes (ADR-028 G2 / action item A6).
+    # Path scheme: /api/v1/exceptions/duplicates/{id} (and future siblings
+    # /exceptions/back-orders/{id} etc.). Mounted under the same /api/v1
+    # prefix as exceptions.router; each route in the module declares its
+    # own absolute path under that prefix.
+    application.include_router(
+        _duplicate_envelope_routes.router, prefix="/api/v1", tags=["exceptions"],
+    )
     application.include_router(workflows.router, prefix="/api/v1", tags=["workflows"])
     application.include_router(policies.router, prefix="/api/v1", tags=["policies"])
     application.include_router(accounts.router, prefix="/api/v1", tags=["accounts"])
