@@ -14,9 +14,9 @@ from recipes.DuplicatePORecipe import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# Repo-relative path to the platform-default config seed. V1 reads this
-# file on every construction; production-grade backing store (DB + API
-# endpoints) deferred to A9 per ADR-030.
+# Repo-relative path to the platform-default config seed. The platform
+# layer (L1) always reads from disk; layers 2-5 come from the DB when
+# a TenantConfigRepository is provided to the gateway.
 _PLATFORM_DEFAULTS_PATH = (
     Path(__file__).resolve().parent.parent
     / "docs"
@@ -31,9 +31,9 @@ _PLATFORM_DEFAULTS_PATH = (
 _LAYER_NAMES: tuple[str, ...] = (
     "platform",   # L1 — config-defaults.json
     "tenant",     # L2 — tenant_config table (A9)
-    "tier",       # L3 — customer_tier_overrides (V1 carries no weights)
-    "customer",   # L4 — customer_specific_overrides; behavior_tag materialises here
-    "channel",    # L5 — customer_channel_overrides (A9)
+    "tier",       # L3 — tenant_config table (A9)
+    "customer",   # L4 — tenant_config table OR behavior_tag materialisation
+    "channel",    # L5 — tenant_config table (A9)
 )
 
 
@@ -49,7 +49,7 @@ def resolve_weights(
     customer_overrides: Dict[str, float],
     channel_overrides: Dict[str, float],
 ) -> tuple[Dict[str, float], List[Dict[str, Any]]]:
-    """Layered merge of weight maps per ADR-029 §"Algorithm".
+    """Layered merge of weight maps per ADR-029 §\"Algorithm\".
 
     Walks the hierarchy top-to-bottom, layering partial weight maps on
     top of inherited values. Records per-key the layer that supplied the
@@ -57,7 +57,7 @@ def resolve_weights(
 
     Validation is the caller's responsibility — this function is
     deliberately pure so the gateway can catch ``WeightContractViolation``
-    and decide between "succeed with merged" and "fall back to platform".
+    and decide between \"succeed with merged\" and \"fall back to platform\".
 
     Returns:
         (merged_weights, contribution_trace)
@@ -89,26 +89,41 @@ def resolve_weights(
 
 
 class TenantConfigGateway:
-    """File-backed config resolver for V1 (ADR-029, ADR-030).
+    """Config resolver for ADR-029 / ADR-030.
 
-    Responsibilities:
-      1. Load platform defaults from ``config-defaults.json`` on disk.
-      2. Resolve the 5-level hierarchy for a given event context.
-      3. Validate the merged weight map; fall back to platform defaults
-         on contract violation; emit structured warning for the alert
-         pipeline.
-      4. Return a typed ``GatewayResponse`` whose ``data`` field carries
-         the resolved weights, the per-layer contribution trace, and the
-         validation status (audit-chain consumers read this dict).
+    Two operating modes:
+      * **File-only** (V1 baseline) — when ``repository`` is None,
+        layers 2-5 are empty unless ``behavior_tag`` materialises into
+        the customer layer. Mirrors the original V1 file-backed
+        implementation; preserved so tests / setups that don't init the
+        DB keep working unchanged.
+      * **DB-backed** (V1.5 / A9) — when ``repository`` is a
+        ``TenantConfigRepository``, layers 2-5 are read from the
+        ``tenant_config`` table via ``resolve_layered_overrides``.
+        DB customer rows take precedence over ``behavior_tag``
+        materialisation; the materialisation kicks in only when no DB
+        customer row exists for the inbound (tenant, customer_id)
+        scope.
 
-    Production-grade backing store (tenant_config table + API endpoints
-    + ConfigChange events) lands in A9 — see ADR-030 §V1 / V1.5.
+    Validation runs on the merged map; on ``WeightContractViolation``
+    the gateway falls back to platform defaults and surfaces the
+    violation in ``response.data`` for audit consumers.
     """
 
-    def __init__(self, defaults_path: Optional[Path] = None) -> None:
+    def __init__(
+        self,
+        defaults_path: Optional[Path] = None,
+        repository: Optional[Any] = None,
+    ) -> None:
         path = defaults_path or _PLATFORM_DEFAULTS_PATH
         self._defaults_path = path
         self._defaults = self._load_defaults(path)
+        # Optional — typed loosely (Any) to avoid an import cycle with
+        # db/repository.py. Expected to expose the
+        # ``resolve_layered_overrides(tenant_id, customer_tier=..., 
+        # customer_id=..., channel=...) -> Dict[layer_name, Dict[str, float]]``
+        # protocol.
+        self._repository = repository
 
     # -- protocol surface -----------------------------------------------------
 
@@ -122,8 +137,9 @@ class TenantConfigGateway:
     def execute(self, request: GatewayRequest) -> GatewayResponse:
         """Resolve config for the requested event scope.
 
-        ``request.params`` keys (all optional except tenant_id):
-          tenant_id        (str, required)
+        ``request.params`` keys (all optional except tenant_id when the
+        gateway is DB-backed):
+          tenant_id        (str, required for DB-backed mode)
           customer_id      (str)
           customer_tier    ("strategic" | "standard" | "smb")
           channel          (str — provider-defined; e.g. "EDI", "PORTAL")
@@ -146,10 +162,32 @@ class TenantConfigGateway:
         behavior_tag = params.get("behavior_tag")
 
         platform_weights = dict(self._defaults["score_weights"])
-        tenant_overrides: Dict[str, float] = {}      # L2 — A9 will populate
-        tier_overrides: Dict[str, float] = {}        # L3 — V1 file has no tier weights
-        customer_overrides = self._customer_overrides_from_behavior(behavior_tag)
-        channel_overrides: Dict[str, float] = {}     # L5 — A9 will populate
+
+        if self._repository is not None and tenant_id:
+            db_layers = self._repository.resolve_layered_overrides(
+                tenant_id=tenant_id,
+                customer_tier=customer_tier,
+                customer_id=customer_id,
+                channel=channel,
+            )
+            tenant_overrides = db_layers["tenant"]
+            tier_overrides = db_layers["tier"]
+            # DB customer-layer wins over behavior_tag materialisation
+            # (admin explicitly wrote the customer override). Fall back
+            # to behavior_tag-derived map only when no DB customer row
+            # exists — preserves V1 file-only semantics for tenants
+            # that haven't migrated to DB-backed admin tooling yet.
+            customer_overrides = (
+                db_layers["customer"]
+                if db_layers["customer"]
+                else self._customer_overrides_from_behavior(behavior_tag)
+            )
+            channel_overrides = db_layers["channel"]
+        else:
+            tenant_overrides: Dict[str, float] = {}
+            tier_overrides: Dict[str, float] = {}
+            customer_overrides = self._customer_overrides_from_behavior(behavior_tag)
+            channel_overrides: Dict[str, float] = {}
 
         merged, trace = resolve_weights(
             platform_weights=platform_weights,
@@ -170,8 +208,9 @@ class TenantConfigGateway:
         try:
             assert_weight_contract(merged)
         except WeightContractViolation as exc:
-            # Fail-closed: log + return platform defaults. Recipe runs with
-            # safe weights; admin sees the alert + audit-chain entry.
+            # Fail-closed: log + return platform defaults. Recipe runs
+            # with safe weights; admin sees the alert + audit-chain
+            # entry.
             _LOGGER.warning(
                 "config_validation_alert: WEIGHT_CONTRACT_VIOLATION — %s",
                 exc,
@@ -226,7 +265,9 @@ class TenantConfigGateway:
         tags are not a sixth layer — admin tooling tags a customer with
         a behavior, and the behavior's score_weights_override becomes the
         customer-specific (L4) override. V1 file-backed resolver
-        replicates that materialisation directly.
+        replicates that materialisation directly. PR-C.2 keeps it as a
+        fallback so events whose tenant has no DB customer-row yet
+        still benefit from the admin-configured behaviour vocabulary.
         """
         if not behavior_tag:
             return {}
