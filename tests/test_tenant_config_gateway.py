@@ -139,7 +139,7 @@ class TestTenantConfigGatewayProtocol:
         ))
         assert response.status == "SUCCESS"
         assert response.data["validation_status"] == "ok"
-        # Platform defaults (config-defaults.json's score_weights block).
+        # Platform defaults (gateways/configs/duplicate_po/defaults.json's score_weights block).
         assert response.data["weights"] == _WEIGHTS
         # Trace covers every signal, all sourced from platform.
         sources = {t["source_layer"] for t in response.data["contribution_trace"]}

@@ -56,11 +56,6 @@ COPY hardening/    hardening/
 COPY llm/          llm/
 COPY prompts/      prompts/
 COPY main.py       main.py
-# ADR-029: gateways/tenant_config.py reads
-# docs/specs/duplicate-po/config-defaults.json at gateway-instantiation time.
-# Bundled here so any future entry point that registers the gateway works
-# regardless of which Dockerfile sourced the image.
-COPY docs/specs/duplicate-po/ docs/specs/duplicate-po/
 
 # ── Runtime config ────────────────────────────────────────────────────────────
 ENV PYTHONPATH=/app

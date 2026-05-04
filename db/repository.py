@@ -19,7 +19,7 @@ sides stay in lockstep.
 
 A9 (PR-C.1): ``TenantConfigRepository`` persists layers 2-5 of the
 DUPLICATE_PO score-weight hierarchy. Layer 1 (platform) lives on disk
-in docs/specs/duplicate-po/config-defaults.json. Edit history flows
+in gateways/configs/duplicate_po/defaults.json. Edit history flows
 through policy_audit_log via PolicyRepository.create_audit_event so
 the SOX surface remains a single hash-chained log.
 
@@ -571,7 +571,7 @@ class PolicyRepository:
 # Tenant Config Repository (ADR-030 — 5-level hierarchy, layers 2-5)
 # ---------------------------------------------------------------------------
 #
-# Layer 1 (platform) lives on disk in docs/specs/duplicate-po/config-defaults.json
+# Layer 1 (platform) lives on disk in gateways/configs/duplicate_po/defaults.json
 # and is read by gateways/tenant_config.py. Layers 2-5 (tenant / tier /
 # customer / channel) live in the tenant_config table and are managed
 # through this repository.

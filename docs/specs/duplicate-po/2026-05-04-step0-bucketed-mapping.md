@@ -70,7 +70,7 @@ minimum) covers:
    `_WEIGHTS` (platform default), runtime `_assert_weight_contract` with
    `1e-4` tolerance per ADR-029. New `WeightContractViolation` exception.
 4. **§8 config resolver (V1 minimum)** — `gateways/tenant_config.py`
-   reads `docs/specs/duplicate-po/config-defaults.json`, applies the
+   reads `gateways/configs/duplicate_po/defaults.json`, applies the
    layered merge per ADR-029 (platform → tenant → tier → customer →
    channel), returns the validated weight map plus per-layer
    contribution trace. Fail-closed-to-platform on

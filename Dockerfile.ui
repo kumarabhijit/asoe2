@@ -54,11 +54,6 @@ COPY llm/          llm/
 COPY prompts/      prompts/
 COPY tests/sandbox/ tests/sandbox/
 COPY main.py        main.py
-# ADR-029: gateways/tenant_config.py reads
-# docs/specs/duplicate-po/config-defaults.json at gateway-instantiation time.
-# Bundled here so the Streamlit sandbox UI's run_graph path works for
-# DUPLICATE_PO events when the operator wires the gateway.
-COPY docs/specs/duplicate-po/ docs/specs/duplicate-po/
 
 # ── Entrypoint — auto-seed sandbox DB on first start ─────────────────────────
 COPY scripts/sandbox-entrypoint.sh scripts/sandbox-entrypoint.sh

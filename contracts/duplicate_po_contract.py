@@ -148,7 +148,7 @@ class DuplicatePOEventMetadata(BaseModel):
         None,
         description=(
             "Behavior tag selecting a preset L4 partial weight override "
-            "from customer_behavior_overrides in config-defaults.json."
+            "from customer_behavior_overrides in gateways/configs/duplicate_po/defaults.json."
         ),
     )
 

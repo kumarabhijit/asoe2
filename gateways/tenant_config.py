@@ -17,19 +17,26 @@ _LOGGER = logging.getLogger(__name__)
 # Repo-relative path to the platform-default config seed. The platform
 # layer (L1) always reads from disk; layers 2-5 come from the DB when
 # a TenantConfigRepository is provided to the gateway.
+#
+# Per-exception configs live under ``gateways/configs/<intent>/`` so:
+#   * Each exception's defaults are clearly grouped (folder name = intent).
+#   * Future configs (e.g. calibration targets, behavior presets) can
+#     be added as siblings in the same folder without renaming.
+#   * The runtime path stays inside an already-COPYed package directory
+#     (``gateways/``) — no special-casing in Dockerfiles or .dockerignore,
+#     no docs/ leak into the container image.
 _PLATFORM_DEFAULTS_PATH = (
-    Path(__file__).resolve().parent.parent
-    / "docs"
-    / "specs"
-    / "duplicate-po"
-    / "config-defaults.json"
+    Path(__file__).resolve().parent
+    / "configs"
+    / "duplicate_po"
+    / "defaults.json"
 )
 
 # Ordered list of layer names — drives the merge order and the
 # contribution-trace labels. Index = layer depth in the 5-level hierarchy
 # (ADR-030).
 _LAYER_NAMES: tuple[str, ...] = (
-    "platform",   # L1 — config-defaults.json
+    "platform",   # L1 — gateways/configs/duplicate_po/defaults.json
     "tenant",     # L2 — tenant_config table (A9)
     "tier",       # L3 — tenant_config table (A9)
     "customer",   # L4 — tenant_config table OR behavior_tag materialisation
@@ -261,7 +268,7 @@ class TenantConfigGateway:
     ) -> Dict[str, float]:
         """Materialise customer_behavior_overrides into an L4 partial map.
 
-        Per the _meta block in config-defaults.json and ADR-029, behavior
+        Per the _meta block in defaults.json and ADR-029, behavior
         tags are not a sixth layer — admin tooling tags a customer with
         a behavior, and the behavior's score_weights_override becomes the
         customer-specific (L4) override. V1 file-backed resolver
@@ -284,7 +291,7 @@ class TenantConfigGateway:
 
     @staticmethod
     def _load_defaults(path: Path) -> Dict[str, Any]:
-        """Load config-defaults.json and return the duplicate_detection block.
+        """Load defaults.json and return the duplicate_detection block.
 
         The wider JSON document carries an ``_meta`` block (REFERENCE
         annotations) and the ``duplicate_detection`` payload. We extract

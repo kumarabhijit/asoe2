@@ -297,7 +297,7 @@ def _register_oms_stub():
     register_gateway(sla_contract_stub)
     # ADR-029: tenant_config is registered as the real file-backed
     # gateway (not a stub) — it's pure in-process I/O against
-    # docs/specs/duplicate-po/config-defaults.json, so graph tests
+    # gateways/configs/duplicate_po/defaults.json, so graph tests
     # exercise the actual resolver path. Dedicated unit tests for the
     # gateway itself live in tests/test_tenant_config_gateway.py.
     register_gateway(TenantConfigGateway())
