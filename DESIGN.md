@@ -520,12 +520,19 @@ When `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are set and the `langfuse` 
 | `trace.name` | `"asoe-graph-execution"` |
 | `trace.input` | `{ event_id }` |
 | `trace.output` | `{ final_status, explanation }` |
-| `trace.metadata` | `{ constrained_output_schemas, gateway_calls, rag_chunks }` |
-| span `classify` | `intent_selected` |
+| `trace.metadata` | `{ constrained_output_schemas, gateway_calls, rag_chunks, llm_total_input_tokens, llm_total_output_tokens, llm_total_cost_usd_estimate, llm_any_fallback, llm_cross_check_disagreement }` |
+| span `ingest` | `event_id` (always when graph ran) |
+| span `classify` | `intent_selected`; `metadata.backend_used = "<provider>:<model_id>"` or `"deterministic"`; `metadata.constrained_by = constrained_output_schemas["intent"]`; `level=WARNING` on cross-check disagreement |
 | span `load_skill` | `skill_name` |
-| span `shadow_audit` | `shadow_verdict`, `shadow_policy_hits` (level=WARNING if non-GREEN) |
-| span `execute_recipe` | `recipe_name` |
-| **generation** `llm.intent` / `llm.recipe` / `llm.shadow` | One per `LLMCallTrace`. Native LangFuse generation observation: `model` = resolved model_id, `usage` = `{input, output, total, unit:"TOKENS"}`, `metadata` = provider, request_id, prompt_hash, cache hits, cost, fallback flags, cross-check signals. `level=WARNING` on `fallback_to_deterministic` OR `cross_check_disagreement`. **Prompt content NEVER forwarded** — only hashes (Chen review §6 PII guard). |
+| span `validate_circuit_breaker` | always when graph ran; `output.breached = True` and `level=WARNING` when `final_status=FAIL_TO_HUMAN` with no recipe / no shadow signal |
+| span `select_recipe` | `recipe_name`; `metadata.backend_used`; `metadata.constrained_by = constrained_output_schemas["recipe"]` |
+| span `resolve_dependencies` | `gateway_calls` entries with `dep:` prefix |
+| span `validate_types` | `recipe_name` |
+| span `shadow_audit` | `shadow_verdict`, `shadow_policy_hits`; `metadata.backend_used`; `metadata.constrained_by = constrained_output_schemas["shadow"]`; `level=WARNING` if non-GREEN |
+| span `execute_recipe` | `recipe_name` (only when `shadow_verdict=GREEN` — YELLOW/RED halt at shadow); `metadata` carries `resolved_by` / `resolution_notes` for human overrides |
+| span `apply_effects` | `gateway_calls` entries without `dep:` prefix (effect WRITES) |
+| span `build_analysis` | `final_status`, `explanation` (Pillar 2 composer; always at terminal) |
+| **generation** `llm.intent` / `llm.recipe` / `llm.shadow` | One per `LLMCallTrace`. Attached as a **child of the owning step span** (intent → classify, recipe → select_recipe, shadow → shadow_audit) so the LangFuse UI surfaces the call inline with the step. Native LangFuse generation observation: `model` = resolved model_id, `usage` = `{input, output, total, unit:"TOKENS"}`, `metadata` = provider, request_id, prompt_hash, cache hits, cost, fallback flags, cross-check signals. `level=WARNING` on `fallback_to_deterministic` OR `cross_check_disagreement`. Orphan generations (LLM ran but the owning step span gated out) attach to the trace root rather than being dropped. **Prompt content NEVER forwarded** — only hashes (Chen review §6 PII guard). |
 | score `terminal_status` | 1.0 if COMPLETE, 0.0 otherwise |
 
 **`terminal_status` score values:**
