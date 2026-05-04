@@ -33,7 +33,7 @@
       "value": "1.0Gi"
     },
     "langfuseHost": {
-      "value": "https://us.cloud.langfuse.com"
+      "value": "https://cloud.langfuse.com"
     }
   }
 }
