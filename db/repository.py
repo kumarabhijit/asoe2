@@ -1,7 +1,8 @@
 """Database repository layer.
 
-Provides CRUD operations for exceptions, traces, and policy overrides
-backed by either PostgreSQL or SQLite via the connection adapter.
+Provides CRUD operations for exceptions, traces, policy overrides, and
+tenant_config (ADR-030 layers 2-5) backed by either PostgreSQL or
+SQLite via the connection adapter.
 
 Architecture_v3.md Section 9.2 (schema), Section 11.3 (tenant isolation).
 
@@ -15,6 +16,12 @@ so a casual ``DELETE FROM policy_audit_log`` is a hard error. The companion
 ``verify_audit_chain()`` walks the chain and reports the first broken
 event. Same hash function as ``api/store.py`` (in-memory store) — both
 sides stay in lockstep.
+
+A9 (PR-C.1): ``TenantConfigRepository`` persists layers 2-5 of the
+DUPLICATE_PO score-weight hierarchy. Layer 1 (platform) lives on disk
+in docs/specs/duplicate-po/config-defaults.json. Edit history flows
+through policy_audit_log via PolicyRepository.create_audit_event so
+the SOX surface remains a single hash-chained log.
 """
 
 from __future__ import annotations
@@ -661,3 +668,260 @@ class PolicyRepository:
                     pass
             results.append(r)
         return results
+
+
+# ---------------------------------------------------------------------------
+# Tenant Config Repository (ADR-030 — 5-level hierarchy, layers 2-5)
+# ---------------------------------------------------------------------------
+#
+# Layer 1 (platform) lives on disk in docs/specs/duplicate-po/config-defaults.json
+# and is read by gateways/tenant_config.py. Layers 2-5 (tenant / tier /
+# customer / channel) live in the tenant_config table and are managed
+# through this repository.
+#
+# Each row carries a partial weight map for its scope; resolution is
+# performed by gateways/tenant_config.py::resolve_weights(). The audit
+# history of every edit flows through PolicyRepository.create_audit_event
+# so the existing hash-chained policy_audit_log is the single SOX surface
+# for both policy threshold tunings and config-weight edits.
+
+_TENANT_CONFIG_VALID_LAYERS = ("tenant", "tier", "customer", "channel")
+
+
+def _canonical_scope(scope: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Return scope with None values dropped so the hash is stable across
+    callers that pass {"customer_id": None} vs {} for the tenant layer."""
+    return {k: v for k, v in (scope or {}).items() if v is not None}
+
+
+def _scope_hash(scope: Optional[Dict[str, Any]]) -> str:
+    """SHA-256 of canonical-JSON scope. Stable across Python invocations."""
+    canonical = _canonical_scope(scope)
+    payload = json.dumps(canonical, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+class TenantConfigRepository:
+    """CRUD for the ``tenant_config`` table (ADR-030 layers 2-5).
+
+    The four supported layers and their scope shapes:
+      * ``tenant``   — scope = {} (one row per tenant)
+      * ``tier``     — scope = {"customer_tier": "strategic"|"standard"|"smb"}
+      * ``customer`` — scope = {"customer_id": "..."}
+      * ``channel``  — scope = {"customer_id": "...", "channel": "..."}
+
+    Methods are intentionally narrow: upsert / get / list_by_layer /
+    delete cover the V1 admin-tooling surface; resolve_layered_overrides
+    fans the four reads needed by the gateway resolver in a single
+    round-trip.
+
+    Audit-chain coupling is the route handler's responsibility (see
+    api/routes/config.py in PR-C.2): on every upsert/delete it calls
+    PolicyRepository.create_audit_event with a ConfigChangeEvent
+    payload and the canonical policy_key produced by
+    contracts.config_events.policy_key_for_event.
+    """
+
+    def __init__(self, adapter=None):
+        self._adapter = adapter or create_adapter()
+
+    @staticmethod
+    def _validate_layer(layer: str) -> None:
+        if layer not in _TENANT_CONFIG_VALID_LAYERS:
+            raise ValueError(
+                f"invalid layer {layer!r}; expected one of "
+                f"{_TENANT_CONFIG_VALID_LAYERS}"
+            )
+
+    def upsert(
+        self,
+        tenant_id: str,
+        layer: str,
+        scope: Optional[Dict[str, Any]],
+        weights: Dict[str, float],
+        created_by: str,
+    ) -> Dict[str, Any]:
+        """Insert-or-update an active row for (tenant, layer, scope).
+
+        The unique key (tenant_id, layer, scope_hash) lets us upsert
+        without a transaction-scoped lookup: SELECT first, then
+        INSERT-or-UPDATE. SQLite + Postgres both support this pattern
+        without dialect-specific UPSERT syntax (which differs).
+        """
+        self._validate_layer(layer)
+        canonical_scope = _canonical_scope(scope)
+        sh = _scope_hash(canonical_scope)
+        now = _now()
+        scope_json = _json_dumps(canonical_scope)
+        weights_json = _json_dumps(weights)
+
+        existing = self.get(tenant_id, layer, canonical_scope)
+        with self._adapter.cursor(tenant_id) as cur:
+            if existing:
+                cur.execute(
+                    """UPDATE tenant_config
+                          SET weights = ?, created_by = ?, updated_at = ?
+                        WHERE tenant_id = ? AND layer = ? AND scope_hash = ?""",
+                    (weights_json, created_by, now,
+                     tenant_id, layer, sh),
+                )
+                record_id = existing["id"]
+                created_at = existing["created_at"]
+            else:
+                record_id = _uuid()
+                created_at = now
+                cur.execute(
+                    """INSERT INTO tenant_config
+                       (id, tenant_id, layer, scope_hash, scope, weights,
+                        created_by, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (record_id, tenant_id, layer, sh, scope_json,
+                     weights_json, created_by, created_at, now),
+                )
+
+        return {
+            "id": record_id,
+            "tenant_id": tenant_id,
+            "layer": layer,
+            "scope_hash": sh,
+            "scope": canonical_scope,
+            "weights": weights,
+            "created_by": created_by,
+            "created_at": created_at,
+            "updated_at": now,
+        }
+
+    def get(
+        self,
+        tenant_id: str,
+        layer: str,
+        scope: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        self._validate_layer(layer)
+        sh = _scope_hash(scope)
+        with self._adapter.cursor(tenant_id) as cur:
+            cur.execute(
+                """SELECT id, tenant_id, layer, scope_hash, scope, weights,
+                          created_by, created_at, updated_at
+                     FROM tenant_config
+                    WHERE tenant_id = ? AND layer = ? AND scope_hash = ?""",
+                (tenant_id, layer, sh),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        return self._to_dict(row)
+
+    def list_by_layer(
+        self, tenant_id: str, layer: str,
+    ) -> List[Dict[str, Any]]:
+        self._validate_layer(layer)
+        with self._adapter.cursor(tenant_id) as cur:
+            cur.execute(
+                """SELECT id, tenant_id, layer, scope_hash, scope, weights,
+                          created_by, created_at, updated_at
+                     FROM tenant_config
+                    WHERE tenant_id = ? AND layer = ?
+                    ORDER BY created_at, id""",
+                (tenant_id, layer),
+            )
+            rows = cur.fetchall()
+        return [self._to_dict(r) for r in rows]
+
+    def delete(
+        self,
+        tenant_id: str,
+        layer: str,
+        scope: Optional[Dict[str, Any]],
+    ) -> bool:
+        """Remove the active row for (tenant, layer, scope).
+
+        Returns True when a row was removed, False when no row matched.
+        Audit history is preserved on policy_audit_log; deleting the
+        live row does not erase the trail.
+        """
+        self._validate_layer(layer)
+        existing = self.get(tenant_id, layer, scope)
+        if not existing:
+            return False
+        sh = existing["scope_hash"]
+        with self._adapter.cursor(tenant_id) as cur:
+            cur.execute(
+                """DELETE FROM tenant_config
+                    WHERE tenant_id = ? AND layer = ? AND scope_hash = ?""",
+                (tenant_id, layer, sh),
+            )
+        return True
+
+    def resolve_layered_overrides(
+        self,
+        tenant_id: str,
+        customer_tier: Optional[str] = None,
+        customer_id: Optional[str] = None,
+        channel: Optional[str] = None,
+    ) -> Dict[str, Dict[str, float]]:
+        """Fan-out lookup for the four DB-backed layers.
+
+        Returns a dict keyed by layer name with the partial weight map
+        for each. Empty maps mean "no override at this layer" — the
+        gateway's resolve_weights() will then leave the inherited
+        value in place.
+
+        Layers whose scope is missing required parameters return ``{}``
+        rather than raising — the gateway can call this with whatever
+        scope information the inbound event carries, and missing
+        scope just means "skip that layer".
+        """
+        result: Dict[str, Dict[str, float]] = {
+            "tenant": {},
+            "tier": {},
+            "customer": {},
+            "channel": {},
+        }
+
+        tenant_row = self.get(tenant_id, "tenant", {})
+        if tenant_row:
+            result["tenant"] = tenant_row["weights"]
+
+        if customer_tier:
+            tier_row = self.get(
+                tenant_id, "tier", {"customer_tier": customer_tier},
+            )
+            if tier_row:
+                result["tier"] = tier_row["weights"]
+
+        if customer_id:
+            cust_row = self.get(
+                tenant_id, "customer", {"customer_id": customer_id},
+            )
+            if cust_row:
+                result["customer"] = cust_row["weights"]
+
+        if customer_id and channel:
+            chan_row = self.get(
+                tenant_id, "channel",
+                {"customer_id": customer_id, "channel": channel},
+            )
+            if chan_row:
+                result["channel"] = chan_row["weights"]
+
+        return result
+
+    _COLUMNS = (
+        "id", "tenant_id", "layer", "scope_hash", "scope", "weights",
+        "created_by", "created_at", "updated_at",
+    )
+
+    def _to_dict(self, row) -> Dict[str, Any]:
+        r = _row_to_dict(row, self._COLUMNS)
+        for json_col in ("scope", "weights"):
+            if isinstance(r.get(json_col), str):
+                r[json_col] = _json_loads(r[json_col]) or {}
+        # Postgres UUID + TIMESTAMPTZ stringification (mirrors ExceptionRepository).
+        if r.get("id") is not None and not isinstance(r["id"], str):
+            r["id"] = str(r["id"])
+        for ts_col in ("created_at", "updated_at"):
+            v = r.get(ts_col)
+            if v is not None and not isinstance(v, str):
+                r[ts_col] = v.isoformat() if hasattr(v, "isoformat") else str(v)
+        return r

@@ -135,6 +135,14 @@ def _sqlite_column_exists(conn: sqlite3.Connection, table: str, column: str) -> 
     return any(row[1] == column for row in cur.fetchall())
 
 
+def _sqlite_table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    cur = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+        (table,),
+    )
+    return cur.fetchone() is not None
+
+
 def _apply_sqlite_v002(conn: sqlite3.Connection) -> None:
     if not _sqlite_column_exists(conn, "exceptions", "original_event"):
         conn.execute("ALTER TABLE exceptions ADD COLUMN original_event TEXT")
@@ -280,6 +288,50 @@ def _apply_sqlite_v004(conn: sqlite3.Connection) -> None:
     logger.info("SQLite schema V004 applied (enrichment_context column)")
 
 
+def _apply_sqlite_v006(conn: sqlite3.Connection) -> None:
+    """V006 — tenant_config table for ADR-030 5-level hierarchy storage.
+
+    Stores layers 2-5 (tenant / tier / customer / channel) of the
+    DUPLICATE_PO score-weight hierarchy. Layer 1 (platform) stays on
+    disk as docs/specs/duplicate-po/config-defaults.json. Audit history
+    flows through the existing policy_audit_log via PolicyRepository.
+
+    SQLite-compatible subset:
+      * UUID → TEXT
+      * JSONB → TEXT (the repository serialises with json.dumps)
+      * No RLS — application-layer tenant filtering only
+      * CREATE TABLE IF NOT EXISTS for idempotency
+    """
+    if not _sqlite_table_exists(conn, "tenant_config"):
+        conn.executescript(
+            """
+            CREATE TABLE tenant_config (
+                id              TEXT PRIMARY KEY,
+                tenant_id       TEXT NOT NULL,
+                layer           TEXT NOT NULL,
+                scope_hash      TEXT NOT NULL,
+                scope           TEXT NOT NULL DEFAULT '{}',
+                weights         TEXT NOT NULL,
+                created_by      TEXT NOT NULL,
+                created_at      TEXT NOT NULL,
+                updated_at      TEXT NOT NULL,
+                UNIQUE (tenant_id, layer, scope_hash),
+                CHECK (layer IN ('tenant','tier','customer','channel'))
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_tenant_config_lookup
+                ON tenant_config (tenant_id, layer);
+            """
+        )
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+        ("V006", now),
+    )
+    conn.commit()
+    logger.info("SQLite schema V006 applied (tenant_config table)")
+
+
 def apply_sqlite(conn: sqlite3.Connection) -> None:
     """Apply the SQLite-compatible schema (V001 + subsequent migrations)."""
     conn.executescript(_SQLITE_SCHEMA)
@@ -293,6 +345,15 @@ def apply_sqlite(conn: sqlite3.Connection) -> None:
     _apply_sqlite_v002(conn)
     _apply_sqlite_v003(conn)
     _apply_sqlite_v004(conn)
+    # V005 (drop intent CHECK on Postgres) is a no-op on SQLite — the
+    # SQLite path never had the constraint. Still record it so version
+    # bookkeeping stays in sync across backends.
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+        ("V005", datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    _apply_sqlite_v006(conn)
 
 
 def apply_postgres(database_url: str) -> None:
@@ -410,6 +471,22 @@ def apply_postgres(database_url: str) -> None:
             logger.info("PostgreSQL schema V005 applied (dropped intent CHECK)")
         else:
             logger.info("PostgreSQL schema V005 already applied, skipping")
+
+        # V006 — tenant_config table (ADR-030 5-level hierarchy storage).
+        cur.execute(
+            "SELECT version FROM schema_migrations WHERE version = %s",
+            ("V006",),
+        )
+        if not cur.fetchone():
+            v006_sql = (_MIGRATIONS_DIR / "V006__tenant_config.sql").read_text()
+            cur.execute(v006_sql)
+            cur.execute(
+                "INSERT INTO schema_migrations (version) VALUES (%s)",
+                ("V006",),
+            )
+            logger.info("PostgreSQL schema V006 applied (tenant_config table)")
+        else:
+            logger.info("PostgreSQL schema V006 already applied, skipping")
 
         conn.commit()
     except Exception:
