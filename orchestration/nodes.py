@@ -1143,6 +1143,82 @@ def build_analysis(state: GraphState) -> GraphState:
         )
         return state
 
+    # ADR-028 G1 / action item A5 — DUPLICATE_PO metadata-contract gate.
+    # Validate the input event metadata + recipe output shape against
+    # the contract documented in
+    # docs/specs/duplicate-po/metadata-contract.md. On violation, route
+    # to AUDIT_CONTEXT_MISSING with a per-key offender explanation —
+    # same routing the registry-coverage check below uses, so auditors
+    # see "compliance data was malformed" rather than a Pydantic
+    # ValidationError stack trace. Runs BEFORE the registry-coverage
+    # check so a contract violation surfaces as the precise root cause
+    # rather than as a downstream missing-field symptom.
+    if state.intent == Intent.DUPLICATE_PO:
+        # Lazy import — same isolation reason as the composer below.
+        from contracts.duplicate_po_contract import (
+            MetadataContractViolation,
+            validate_duplicate_po_event_metadata,
+            validate_duplicate_po_recipe_output,
+        )
+
+        contract_offenders: list[tuple[str, str]] = []
+        contract_name: str | None = None
+        try:
+            validate_duplicate_po_event_metadata(state.event.metadata)
+        except MetadataContractViolation as exc:
+            contract_offenders.extend(exc.offenders)
+            contract_name = exc.contract_name
+
+        # Recipe-output validation only runs when the recipe actually
+        # executed (execution_log present + outputs populated). Earlier
+        # halt paths (BLOCKED by shadow, no_recipe, etc.) leave
+        # execution_log empty; those records are legitimately absent
+        # the recipe-output dict and shouldn't trigger a violation.
+        if (
+            state.execution_log is not None
+            and state.execution_log.outputs
+            and state.selected_recipe == "DuplicatePORecipe.py"
+        ):
+            try:
+                validate_duplicate_po_recipe_output(
+                    state.execution_log.outputs,
+                )
+            except MetadataContractViolation as exc:
+                contract_offenders.extend(exc.offenders)
+                # Output-side contract takes precedence in the
+                # explanation when both fail — operators are more
+                # likely to act on the recipe-side issue.
+                contract_name = exc.contract_name
+
+        if contract_offenders:
+            offender_summary = "; ".join(
+                f"{key}: {reason}" for key, reason in contract_offenders
+            )
+            preamble = state.explanation or ""
+            suffix = (
+                f"Metadata-contract violation in {contract_name}: "
+                f"[{offender_summary}]. See "
+                f"docs/specs/duplicate-po/metadata-contract.md for "
+                f"the binding key/type rules."
+            )
+            state.final_status = TerminalStatus.AUDIT_CONTEXT_MISSING
+            state.explanation = (
+                f"{preamble}\n\n{suffix}" if preamble else suffix
+            )
+            _record(
+                state, node="build_analysis", entered_at=entered_at,
+                decision={
+                    "final_status": state.final_status.value,
+                    "audit_coverage": "metadata_contract_violation",
+                    "contract": contract_name,
+                    "offenders": [
+                        {"key": k, "reason": r}
+                        for k, r in contract_offenders
+                    ],
+                },
+            )
+            return state
+
     # Lazy import — keeps orchestration independent of the API layer
     # in the import graph so test isolation stays clean.
     from api.analysis_composer import compose_from_state
