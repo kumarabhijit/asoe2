@@ -20,6 +20,8 @@ from __future__ import annotations
 import os
 
 from contracts.models import GatewayResponse
+from db.repository import TenantConfigRepository as _TenantConfigRepository
+from db.shared import get_shared_adapter
 from gateways.registry import clear_registry, register_gateway
 from gateways.stub import StubGateway
 from gateways.tenant_config import TenantConfigGateway
@@ -200,14 +202,15 @@ def register_sandbox_gateways() -> None:
         },
     ))
 
-    # ADR-029: tenant_config is the file-backed 5-level config resolver
-    # registered as a GatewayDependency on DuplicatePORecipe (see
-    # recipes/registry.py). It's not a stub — the real
-    # TenantConfigGateway runs in-process and reads
-    # docs/specs/duplicate-po/config-defaults.json. Without this
-    # registration, resolve_dependencies fails with
-    # "Gateway not registered: tenant_config" on every DUPLICATE_PO
-    # event, halting the graph at FAIL_TO_HUMAN before the recipe runs.
-    # Mirrors tests/conftest.py::_register_oms_stub which registers the
-    # same gateway for the pytest pipeline.
-    register_gateway(TenantConfigGateway())
+    # ADR-029 / ADR-030: tenant_config is the file-backed PLATFORM resolver
+    # for layer 1 + the DB-backed resolver for layers 2-5 (PR-C.2). It's
+    # not a stub — the platform JSON ships with the application and the
+    # DB-backed layers come from tenant_config table via the shared
+    # adapter (db.shared.get_shared_adapter). Without this registration,
+    # resolve_dependencies fails with "Gateway not registered:
+    # tenant_config" on every DUPLICATE_PO event, halting the graph at
+    # FAIL_TO_HUMAN before the recipe runs. Mirrors
+    # tests/conftest.py::_register_oms_stub for the pytest pipeline.
+    register_gateway(TenantConfigGateway(
+        repository=_TenantConfigRepository(adapter=get_shared_adapter()),
+    ))
