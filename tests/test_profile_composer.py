@@ -361,3 +361,78 @@ def test_narrative_synthesiser_returns_none_when_underlying_data_absent():
     )
     rc, _ = compose_narrative(rec, trace_data=None)
     assert rc is None  # erp_price=0 makes division undefined → None
+
+
+# ---------------------------------------------------------------------------
+# Narrative — universal fallback (any intent, any final_status)
+# ---------------------------------------------------------------------------
+
+
+def test_narrative_synthesises_root_cause_from_audit_context_missing():
+    """AUDIT_CONTEXT_MISSING records (any intent — DELIVERY_DELAY,
+    BACK_ORDER, etc.) get an operator-facing root_cause + recommendation
+    even when the per-intent template above didn't fire and the recipe
+    never wrote prose."""
+    rec = _record(
+        intent="DELIVERY_DELAY",
+        resolution_data={},
+        final_status="AUDIT_CONTEXT_MISSING",
+        shadow_verdict="YELLOW",
+    )
+    rc, reco = compose_narrative(rec, trace_data=None)
+    assert rc is not None
+    assert "Delivery Delay" in rc or "audit gap" in rc.lower()
+    assert reco is not None
+    assert "evidence" in reco.lower() or "grandfather" in reco.lower()
+
+
+def test_narrative_universal_fallback_for_unhandled_intent():
+    """An intent without a per-intent template still gets prose from
+    the universal verdict + final_status fallback so the UI Agent
+    Analysis pane shows root_cause + recommendation."""
+    rec = _record(
+        intent="OVER_MAX",
+        resolution_data={},
+        final_status="MANUAL_REVIEW_REQUIRED",
+        shadow_verdict="YELLOW",
+    )
+    rc, reco = compose_narrative(rec, trace_data=None)
+    assert rc is not None
+    assert "Over Max" in rc or "YELLOW" in rc or "MANUAL_REVIEW_REQUIRED" in rc
+    assert reco is not None
+    assert "manual review" in reco.lower()
+
+
+def test_narrative_reads_trace_explanation_when_narrative_absent():
+    """Tier 2b: trace.explanation is used as a root_cause source when
+    trace.narrative is not populated (the common shape on halt paths
+    like AUDIT_CONTEXT_MISSING and FAIL_TO_HUMAN)."""
+    rec = _record(intent="BACK_ORDER", resolution_data={})
+    trace = {
+        "explanation": (
+            "Compliance Shadow returned YELLOW. Routing to "
+            "MANUAL_REVIEW_REQUIRED.\n\nAdditional long-form context "
+            "for the Diagnostics panel."
+        ),
+    }
+    rc, _ = compose_narrative(rec, trace_data=trace)
+    assert rc is not None
+    # First paragraph only — the rest stays in the long-form
+    # Diagnostics view.
+    assert rc.startswith("Compliance Shadow returned YELLOW")
+    assert "long-form context" not in rc
+
+
+def test_narrative_complete_records_get_a_recommendation():
+    """COMPLETE records should produce a 'no further action' recommendation
+    so the operator sees a confirmation rather than an empty Recommendation
+    block (the AgentAnalysisSection structurally omits empty blocks, so a
+    non-None recommendation is required for the block to render)."""
+    rec = _record(
+        intent="CONTRACTUAL_CORRECTION",
+        resolution_data={},
+        final_status="COMPLETE",
+    )
+    _, reco = compose_narrative(rec, trace_data=None)
+    assert reco is not None
+    assert "no further action" in reco.lower() or "applied" in reco.lower()

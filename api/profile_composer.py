@@ -198,12 +198,21 @@ def compose_narrative(
 
     if trace_data:
         if root_cause is None:
+            # Tier 2 — trace `narrative` (long-form). Take the first
+            # paragraph; the rest is the long-form Layer-2 narrative
+            # the UI already surfaces in DiagnosticsSection.
             narrative = trace_data.get("narrative")
             if isinstance(narrative, str) and narrative.strip():
-                # Take the first paragraph as the root-cause prose;
-                # the rest is the long-form Layer-2 narrative the UI
-                # already surfaces in DiagnosticsSection.
                 root_cause = narrative.strip().split("\n\n", 1)[0]
+            else:
+                # Tier 2b — trace `explanation` (short-form, present on
+                # every halt path including AUDIT_CONTEXT_MISSING and
+                # FAIL_TO_HUMAN where `narrative` is rarely written).
+                # Same first-paragraph rule so the audit-gap detail
+                # stays in the long-form Diagnostics view.
+                explanation = trace_data.get("explanation")
+                if isinstance(explanation, str) and explanation.strip():
+                    root_cause = explanation.strip().split("\n\n", 1)[0]
         if recommendation is None:
             steps = trace_data.get("resolution_steps")
             if isinstance(steps, list) and steps:
@@ -291,6 +300,33 @@ def _synthesise_root_cause(record: ExceptionRecord) -> Optional[str]:
             )
         return None
 
+    # Universal fallback — applies to every intent (BACK_ORDER,
+    # DELIVERY_DELAY, EDI_MISMATCH, OVER_MAX, MIN_ORDER_QTY,
+    # PALLET_CONFIG, PRICE_HOLD_RELEASE, etc.) when the per-intent
+    # template above didn't fire. Composes from the
+    # already-decided shadow verdict + final status, which are the
+    # closest thing to a "what happened" summary that is universally
+    # available without inventing data. Returns None when neither is
+    # populated (the recipe / orchestrator never reached a verdict).
+    verdict = (record.shadow_verdict or "").upper()
+    final = (record.final_status or "").upper()
+    intent_label = intent.replace("_", " ").title() if intent else None
+
+    if final == "AUDIT_CONTEXT_MISSING" and intent_label:
+        return (
+            f"{intent_label} record reached a registry-enforced audit gap — "
+            f"required evidence fields were missing from the recipe / "
+            f"gateway output, so the record cannot be presented for "
+            f"operator action."
+        )
+    if verdict and final and intent_label:
+        return (
+            f"{intent_label} event evaluated by Compliance Shadow ({verdict}); "
+            f"orchestration concluded with terminal status {final}."
+        )
+    if final and intent_label:
+        return f"{intent_label} event concluded with terminal status {final}."
+
     return None
 
 
@@ -323,8 +359,12 @@ def _synthesise_recommendation(record: ExceptionRecord) -> Optional[str]:
 
     # Final status is the last-resort signal — when the recipe halted
     # without writing a recommendation, surface the terminal state
-    # so the operator at least sees what happened.
+    # so the operator at least sees what to do next.
     final = (record.final_status or "").upper()
+    if final == "COMPLETE":
+        return "Resolution applied — no further action required."
+    if final == "COMPLETE_WITH_CHILDREN":
+        return "Workflow steps applied — follow up on child resolutions."
     if final == "MANUAL_REVIEW_REQUIRED":
         return "Route to manual review per Compliance Shadow verdict."
     if final == "BLOCKED":
@@ -333,6 +373,15 @@ def _synthesise_recommendation(record: ExceptionRecord) -> Optional[str]:
         return "Reject the inbound order and notify the buyer."
     if final == "FAIL_TO_HUMAN":
         return "Escalate to a human operator — deterministic path unavailable."
+    if final == "AUDIT_CONTEXT_MISSING":
+        # The diagnosis surface enumerates the missing audit-bearing
+        # fields; the operator-facing action is to wire the missing
+        # gateway evidence and re-run, OR apply a registry
+        # grandfather clause per compliance/audit_bearing_registry.yaml.
+        return (
+            "Wire missing gateway evidence (or apply a compliance "
+            "grandfather clause) and re-run analysis."
+        )
 
     return None
 
