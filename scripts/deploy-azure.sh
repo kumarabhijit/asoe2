@@ -357,15 +357,27 @@ fi
 
 FULL_IMAGE="${ACR_NAME}.azurecr.io/${IMAGE_NAME}:${IMAGE_TAG}"
 echo "STAGE 2 bicep deploy: Container App with ${FULL_IMAGE} + real secrets (~3-5 min)..."
-bicep_deploy stage2 \
-    "deployContainerApp=true" \
-    "containerImage=${FULL_IMAGE}" \
-    "anthropicApiKey=${ANTHROPIC_API_KEY}" \
-    "asoeJwtSecret=${ASOE_JWT_SECRET}" \
-    "databaseUrl=${DATABASE_URL}" \
-    "redisUrl=${REDIS_URL}" \
-    "langfusePublicKey=${LANGFUSE_PUBLIC_KEY}" \
+
+# LANGFUSE_HOST is a non-secret env override for the bicep `langfuseHost`
+# parameter. Empty => let the parameter file's default win
+# (https://us.cloud.langfuse.com per parameters.sandbox.json). Set to
+# https://cloud.langfuse.com (EU), a self-hosted URL, or any other
+# region without editing the parameter file.
+stage2_args=(
+    "deployContainerApp=true"
+    "containerImage=${FULL_IMAGE}"
+    "anthropicApiKey=${ANTHROPIC_API_KEY}"
+    "asoeJwtSecret=${ASOE_JWT_SECRET}"
+    "databaseUrl=${DATABASE_URL}"
+    "redisUrl=${REDIS_URL}"
+    "langfusePublicKey=${LANGFUSE_PUBLIC_KEY}"
     "langfuseSecretKey=${LANGFUSE_SECRET_KEY}"
+)
+if [[ -n "${LANGFUSE_HOST:-}" ]]; then
+    stage2_args+=("langfuseHost=${LANGFUSE_HOST}")
+    echo "Overriding langfuseHost = ${LANGFUSE_HOST} (from LANGFUSE_HOST env)."
+fi
+bicep_deploy stage2 "${stage2_args[@]}"
 
 FQDN=$(az containerapp show --name "${APP_NAME}" --resource-group "${RG}" \
     --query properties.configuration.ingress.fqdn -o tsv)
