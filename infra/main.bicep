@@ -97,6 +97,17 @@ param databaseUrl string = 'placeholder-set-via-set-secrets-sh'
 @secure()
 param redisUrl string = 'placeholder-set-via-set-secrets-sh'
 
+@description('LangFuse Cloud (or self-hosted) host URL — e.g. https://us.cloud.langfuse.com (US region) or https://cloud.langfuse.com (EU region). Empty string disables LangFuse forwarding (the sink no-ops, stdlib logging continues unchanged).')
+param langfuseHost string = 'https://us.cloud.langfuse.com'
+
+@description('LangFuse project public key (pk-lf-...). Placeholder until set-secrets.sh is run; empty value keeps the sink disabled.')
+@secure()
+param langfusePublicKey string = 'placeholder-set-via-set-secrets-sh'
+
+@description('LangFuse project secret key (sk-lf-...). Placeholder until set-secrets.sh is run; empty value keeps the sink disabled.')
+@secure()
+param langfuseSecretKey string = 'placeholder-set-via-set-secrets-sh'
+
 @description('Container image reference (set by deploy script after ACR build, e.g. asoepreprodacr.azurecr.io/asoe-api:GIT_SHA).')
 param containerImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
 
@@ -433,6 +444,14 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (deployContainerApp) 
           name: 'redis-url'
           value: redisUrl
         }
+        {
+          name: 'langfuse-public-key'
+          value: langfusePublicKey
+        }
+        {
+          name: 'langfuse-secret-key'
+          value: langfuseSecretKey
+        }
       ]
     }
     template: {
@@ -465,6 +484,13 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (deployContainerApp) 
             { name: 'ASOE_JWT_SECRET',    secretRef: 'asoe-jwt-secret' }
             { name: 'DATABASE_URL',       secretRef: 'database-url' }
             { name: 'REDIS_URL',          secretRef: 'redis-url' }
+            // LangFuse (observability/langfuse_sink.py) — when all three
+            // are non-empty the sink forwards every TraceRecord (incl.
+            // per-LLM-call generation spans) to LangFuse. Empty values
+            // make the sink a no-op; stdlib logging stays authoritative.
+            { name: 'LANGFUSE_HOST',         value: langfuseHost }
+            { name: 'LANGFUSE_PUBLIC_KEY',   secretRef: 'langfuse-public-key' }
+            { name: 'LANGFUSE_SECRET_KEY',   secretRef: 'langfuse-secret-key' }
           ]
           probes: [
             {

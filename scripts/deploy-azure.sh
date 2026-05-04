@@ -330,6 +330,29 @@ elif [[ -z "${ASOE_JWT_SECRET:-}" ]]; then
     fi
 fi
 
+# LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY: optional. Preserved on
+# re-runs. If never set, the empty string flows through and the sink
+# stays disabled — stdlib logging continues unchanged.
+if [[ -z "${LANGFUSE_PUBLIC_KEY:-}" ]]; then
+    existing=$(read_existing_secret 'langfuse-public-key')
+    if [[ -n "${existing}" && "${existing}" != "${PLACEHOLDER}" ]]; then
+        LANGFUSE_PUBLIC_KEY="${existing}"
+        echo "Preserving existing LANGFUSE_PUBLIC_KEY (pass LANGFUSE_PUBLIC_KEY=... to rotate)."
+    else
+        LANGFUSE_PUBLIC_KEY=""
+        echo "LANGFUSE_PUBLIC_KEY unset — LangFuse forwarding will be disabled. Set with set-secrets.sh after deploy to enable."
+    fi
+fi
+if [[ -z "${LANGFUSE_SECRET_KEY:-}" ]]; then
+    existing=$(read_existing_secret 'langfuse-secret-key')
+    if [[ -n "${existing}" && "${existing}" != "${PLACEHOLDER}" ]]; then
+        LANGFUSE_SECRET_KEY="${existing}"
+        echo "Preserving existing LANGFUSE_SECRET_KEY."
+    else
+        LANGFUSE_SECRET_KEY=""
+    fi
+fi
+
 # ────────────────────────────────────── 7. STAGE 2 bicep: Container App
 
 FULL_IMAGE="${ACR_NAME}.azurecr.io/${IMAGE_NAME}:${IMAGE_TAG}"
@@ -340,7 +363,9 @@ bicep_deploy stage2 \
     "anthropicApiKey=${ANTHROPIC_API_KEY}" \
     "asoeJwtSecret=${ASOE_JWT_SECRET}" \
     "databaseUrl=${DATABASE_URL}" \
-    "redisUrl=${REDIS_URL}"
+    "redisUrl=${REDIS_URL}" \
+    "langfusePublicKey=${LANGFUSE_PUBLIC_KEY}" \
+    "langfuseSecretKey=${LANGFUSE_SECRET_KEY}"
 
 FQDN=$(az containerapp show --name "${APP_NAME}" --resource-group "${RG}" \
     --query properties.configuration.ingress.fqdn -o tsv)

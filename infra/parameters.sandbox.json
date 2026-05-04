@@ -31,6 +31,9 @@
     },
     "memory": {
       "value": "1.0Gi"
+    },
+    "langfuseHost": {
+      "value": "https://us.cloud.langfuse.com"
     }
   }
 }
