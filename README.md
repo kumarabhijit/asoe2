@@ -706,12 +706,19 @@ export LANGFUSE_SECRET_KEY=sk-lf-...
 | `trace.name` | `"asoe-graph-execution"` |
 | `trace.input` | `{ event_id }` |
 | `trace.output` | `{ final_status, explanation }` |
-| `trace.metadata` | `{ constrained_output_schemas, gateway_calls, rag_chunks }` |
-| span `classify` | `intent_selected` |
+| `trace.metadata` | `{ constrained_output_schemas, gateway_calls, rag_chunks, llm_total_*, llm_any_fallback, llm_cross_check_disagreement }` |
+| span `ingest` | `event_id` (always when graph ran) |
+| span `classify` | `intent_selected`; `metadata.backend_used = "<provider>:<model_id>"` or `"deterministic"`; level=WARNING on cross-check disagreement |
 | span `load_skill` | `skill_name` |
-| span `shadow_audit` | `shadow_verdict`, `shadow_policy_hits` (level=WARNING if non-GREEN) |
-| span `execute_recipe` | `recipe_name` |
-| **generation** `llm.intent` / `llm.recipe` / `llm.shadow` | One per LLM call when a remote provider serves the trio. Native LangFuse generation observation: `model` = resolved model_id, `usage` = `{input, output, total, unit:"TOKENS"}`, `metadata` = provider, request_id, prompt_hash, cache hits, cost_usd_estimate, fallback flags, cross-check signals. `level=WARNING` on fallback or cross-check disagreement. **Prompt content NEVER forwarded** — only hashes. |
+| span `validate_circuit_breaker` | always when graph ran; level=WARNING when breaker breached |
+| span `select_recipe` | `recipe_name`; `metadata.backend_used` |
+| span `resolve_dependencies` | `gateway_calls` entries with `dep:` prefix (READS) |
+| span `validate_types` | `recipe_name` |
+| span `shadow_audit` | `shadow_verdict`, `shadow_policy_hits`; `metadata.backend_used`; level=WARNING if non-GREEN |
+| span `execute_recipe` | `recipe_name` (only on `shadow_verdict=GREEN` — YELLOW/RED halt at shadow); metadata carries `resolved_by` / `resolution_notes` |
+| span `apply_effects` | `gateway_calls` entries without `dep:` prefix (effect WRITES) |
+| span `build_analysis` | `final_status`, `explanation` (Pillar 2 composer; always at terminal) |
+| **generation** `llm.intent` / `llm.recipe` / `llm.shadow` | One per LLM call. Attached as a **child of the owning step span** (intent → classify, recipe → select_recipe, shadow → shadow_audit) so the call shows inline with its step in the LangFuse UI. Native LangFuse generation observation: `model` = resolved model_id, `usage` = `{input, output, total, unit:"TOKENS"}`, `metadata` = provider, request_id, prompt_hash, cache hits, cost_usd_estimate, fallback flags, cross-check signals. `level=WARNING` on fallback or cross-check disagreement. **Prompt content NEVER forwarded** — only hashes. |
 | score `terminal_status` | 1.0 if COMPLETE, 0.0 otherwise |
 
 **`terminal_status` score values:** This score enables LangFuse dashboard
