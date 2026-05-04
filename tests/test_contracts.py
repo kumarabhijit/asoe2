@@ -34,6 +34,7 @@ class TestEnums:
             Intent.MIN_ORDER_QTY,
             Intent.PALLET_CONFIG,
             Intent.DELIVERY_DELAY,
+            Intent.EMAIL_ORDER_ENTRY,
             Intent.UNKNOWN,
         }
 

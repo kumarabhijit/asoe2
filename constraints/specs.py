@@ -15,6 +15,7 @@ AllowedIntent = Literal[
     "MIN_ORDER_QTY",
     "PALLET_CONFIG",
     "DELIVERY_DELAY",
+    "EMAIL_ORDER_ENTRY",
 ]
 
 AllowedShadowStatus = Literal["GREEN", "YELLOW", "RED"]
@@ -30,6 +31,7 @@ AllowedRecipeName = Literal[
     "MOQRoundUpRecipe.py",
     "PalletAlignmentRecipe.py",
     "DeliveryDelayResolutionRecipe.py",
+    "EmailOrderEntryRecipe.py",
 ]
 
 # EDI 850 line-mismatch sub_type vocabulary. PRICE_MISMATCH is intentionally
@@ -65,6 +67,13 @@ AllowedResolutionAction = Literal[
     "ALLOW_BOTH",
     "ESCALATE",
     "REQUEST_BUYER_CONFIRMATION",
+    # ADR-034 — EmailOrderEntryRecipe outputs.
+    "ONE_CLICK_APPROVE",
+    "STANDARD_REVIEW",
+    "LOW_CONFIDENCE_FLAG",
+    "AUTO_CORRECT",
+    "REQUEST_CLARIFICATION",
+    "REJECT",
 ]
 
 # Controlled vocabulary for categorizing an override's justification.

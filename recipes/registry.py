@@ -9,6 +9,7 @@ from recipes.CreditHoldReleaseRecipe import release_credit_hold
 from recipes.DeliveryDelayResolutionRecipe import resolve_delivery_delay
 from recipes.DuplicatePORecipe import detect_duplicate_po
 from recipes.EdiMismatchRecipe import detect_edi_mismatch
+from recipes.EmailOrderEntryRecipe import classify_email_order_entry
 from recipes.MOQRoundUpRecipe import round_up_moq
 from recipes.OverMaxTrimRecipe import trim_over_max
 from recipes.PalletAlignmentRecipe import align_pallets
@@ -291,6 +292,30 @@ REGISTRY = {
         ),
         allowed_intents=("PALLET_CONFIG",),
         expected_metadata_keys=("pallet_lines",),
+    ),
+    "EmailOrderEntryRecipe.py": RecipeSpec(
+        name="EmailOrderEntryRecipe.py",
+        func=classify_email_order_entry,
+        required_params=(
+            "order_id", "customer_id", "composite_confidence",
+            "validation_failures", "non_disableable_floor",
+            "autonomy_levels", "threshold_auto_approve",
+            "threshold_review_band_low", "threshold_auto_correct",
+        ),
+        allowed_intents=("EMAIL_ORDER_ENTRY",),
+        # ADR-034 Phase A: gateway dependencies are *declared* in the ADR
+        # (sender_auth, customer_resolver, duplicate_po_pre_check, credit_check
+        # — required_for_audit=True; document_extractor, pricing_variance,
+        # atp_check, delivery_feasibility — required_for_audit=False) but
+        # not registered here yet. Phase B ships the stubs + registrations
+        # together so resolve_dependencies has something to call. Until then,
+        # the recipe consumes its floor inputs from event.metadata, exactly
+        # like DuplicatePORecipe consumes signal_scores from metadata.
+        expected_metadata_keys=(
+            "composite_confidence",
+            "non_disableable_floor",
+            "validation_failures",
+        ),
     ),
     "DeliveryDelayResolutionRecipe.py": RecipeSpec(
         name="DeliveryDelayResolutionRecipe.py",

@@ -54,6 +54,10 @@ from contracts.policy import (
     DUPLICATE_PO_THRESHOLD_REVIEW_REQUIRED,
     DUPLICATE_PO_THRESHOLD_SOFT_FLAG,
     EDI_MISMATCH_AUTONOMY_LEVELS,
+    EMAIL_ORDER_AUTO_APPROVE_CONFIDENCE,
+    EMAIL_ORDER_AUTO_CORRECT_CONFIDENCE,
+    EMAIL_ORDER_ENTRY_AUTONOMY_LEVELS,
+    EMAIL_ORDER_REVIEW_BAND_LOW,
     MAX_DISCOUNT_ALLOWED,
     MOQ_SEVERE_SHORTFALL_PCT,
     MOQ_UPLIFT_REVIEW_PCT,
@@ -655,6 +659,32 @@ def validate_types(state: GraphState) -> GraphState:
                 "lines": meta.get("pallet_lines"),
                 "min_fill_pct": PALLET_CONFIG_MIN_FILL_PCT,
                 "broken_layer_fill_pct": PALLET_CONFIG_BROKEN_LAYER_FILL_PCT,
+            },
+        )
+    elif state.selected_recipe == "EmailOrderEntryRecipe.py":
+        # ADR-034 Phase A — gateway dependencies are deferred to Phase B.
+        # Floor inputs come straight from event.metadata, mirroring how
+        # DuplicatePORecipe pulls signal_scores from metadata.
+        meta = state.event.metadata
+        floor = meta.get("non_disableable_floor") or {}
+        if not isinstance(floor, dict):
+            floor = {}
+        failures = meta.get("validation_failures") or []
+        if not isinstance(failures, list):
+            failures = []
+        state.invocation = RecipeInvocation(
+            recipe_name=state.selected_recipe,
+            params={
+                "order_id": state.event.order_id,
+                "customer_id": state.event.retailer_id or "",
+                "composite_confidence": float(meta.get("composite_confidence") or 0.0),
+                "validation_failures": failures,
+                "non_disableable_floor": floor,
+                "autonomy_levels": EMAIL_ORDER_ENTRY_AUTONOMY_LEVELS,
+                "threshold_auto_approve": EMAIL_ORDER_AUTO_APPROVE_CONFIDENCE,
+                "threshold_review_band_low": EMAIL_ORDER_REVIEW_BAND_LOW,
+                "threshold_auto_correct": EMAIL_ORDER_AUTO_CORRECT_CONFIDENCE,
+                "reject_reason_code": meta.get("reject_reason_code"),
             },
         )
     elif state.selected_recipe == "DeliveryDelayResolutionRecipe.py":

@@ -76,6 +76,14 @@ class DeterministicFallbackBackend:
                 confidence=0.95,
                 rationale="delivery-delay event type",
             )
+        if state.event.event_type in (
+            "EMAIL_ORDER_ENTRY_REQUEST", "EMAIL_ORDER", "EMAIL_ORDER_ENTRY",
+        ):
+            return IntentDecision(
+                intent="EMAIL_ORDER_ENTRY",
+                confidence=0.95,
+                rationale="email-channel order intake event type",
+            )
         if state.event.requester_role and state.event.credit_limit is not None and state.event.current_exposure is not None:
             return IntentDecision(intent="CREDIT_BLOCK", confidence=0.80, rationale="credit fields present")
         return IntentDecision(intent="CONTRACTUAL_CORRECTION", confidence=0.90, rationale="within pricing path")
@@ -92,6 +100,7 @@ class DeterministicFallbackBackend:
             Intent.MIN_ORDER_QTY: "MOQRoundUpRecipe.py",
             Intent.PALLET_CONFIG: "PalletAlignmentRecipe.py",
             Intent.DELIVERY_DELAY: "DeliveryDelayResolutionRecipe.py",
+            Intent.EMAIL_ORDER_ENTRY: "EmailOrderEntryRecipe.py",
             Intent.MASS_PRICING_ERROR: None,
         }
         recipe_name = mapping.get(state.intent)
