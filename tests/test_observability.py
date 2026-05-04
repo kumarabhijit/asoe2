@@ -495,6 +495,44 @@ class TestLangFuseSinkWithMockClient:
             event_id="SO-LF-2",
             intent_selected="CREDIT_BLOCK",
             skill_name="credit-hold",
+            shadow_verdict="GREEN",
+            shadow_policy_hits=[],
+            recipe_name="CreditHoldReleaseRecipe.py",
+            gateway_calls=[
+                "dep:fulfillment_status:resolved",
+                "notification/send:SUCCESS",
+            ],
+            final_status="COMPLETE",
+        )
+        forward(record)
+
+        obs_names = [o["name"] for o in observations]
+        # All 11 graph nodes from architecture_v4.md §5.1 emit a span
+        # when their owning signal is present in TraceRecord. A GREEN
+        # full run touches every node.
+        assert "ingest" in obs_names
+        assert "classify" in obs_names
+        assert "load_skill" in obs_names
+        assert "validate_circuit_breaker" in obs_names
+        assert "select_recipe" in obs_names
+        assert "resolve_dependencies" in obs_names
+        assert "validate_types" in obs_names
+        assert "shadow_audit" in obs_names
+        assert "execute_recipe" in obs_names
+        assert "apply_effects" in obs_names
+        assert "build_analysis" in obs_names
+
+    def test_forward_skips_execute_recipe_on_yellow_shadow(self, monkeypatch):
+        """YELLOW / RED halt at shadow — execute_recipe never runs."""
+        import observability.langfuse_sink as sink
+
+        mock_client, observations, scores = _make_mock_client()
+        sink._langfuse_client = mock_client
+        sink._initialised = True
+
+        record = TraceRecord(
+            trace_id="t", event_id="e",
+            intent_selected="CREDIT_BLOCK",
             shadow_verdict="YELLOW",
             shadow_policy_hits=["CREDIT_RELEASE_REVIEW"],
             recipe_name="CreditHoldReleaseRecipe.py",
@@ -503,10 +541,44 @@ class TestLangFuseSinkWithMockClient:
         forward(record)
 
         obs_names = [o["name"] for o in observations]
-        assert "classify" in obs_names
-        assert "load_skill" in obs_names
         assert "shadow_audit" in obs_names
-        assert "execute_recipe" in obs_names
+        assert "select_recipe" in obs_names
+        assert "execute_recipe" not in obs_names
+
+    def test_forward_classify_carries_backend_used_metadata(self, monkeypatch):
+        """classify / select_recipe / shadow_audit metadata records the
+        backend tier (provider:model_id) that served each task — so an
+        operator can tell at a glance whether a remote LLM ran or the
+        deterministic backend served the call."""
+        import observability.langfuse_sink as sink
+        from contracts.models import LLMCallTrace
+
+        mock_client, observations, scores = _make_mock_client()
+        sink._langfuse_client = mock_client
+        sink._initialised = True
+
+        record = TraceRecord(
+            trace_id="t", event_id="e",
+            intent_selected="DUPLICATE_PO",
+            shadow_verdict="GREEN",
+            recipe_name="DuplicatePORecipe.py",
+            final_status="COMPLETE",
+            llm_calls=[
+                LLMCallTrace(
+                    task="intent",
+                    provider="anthropic",
+                    model_id="claude-sonnet-4-6",
+                    input_tokens=400, output_tokens=60,
+                ),
+            ],
+        )
+        forward(record)
+
+        classify = next(o for o in observations if o.get("name") == "classify")
+        assert classify["metadata"]["backend_used"] == "anthropic:claude-sonnet-4-6"
+        # No LLM call for shadow → deterministic
+        shadow = next(o for o in observations if o.get("name") == "shadow_audit")
+        assert shadow["metadata"]["backend_used"] == "deterministic"
 
     def test_forward_shadow_audit_span_warning_level_on_non_green(self, monkeypatch):
         import observability.langfuse_sink as sink
@@ -569,18 +641,20 @@ class TestLangFuseSinkWithMockClient:
         assert len(scores) == 1
         assert scores[0]["value"] == 0.0
 
-    def test_forward_skips_spans_when_fields_are_none(self, monkeypatch):
+    def test_forward_skips_spans_when_no_graph_signal(self, monkeypatch):
+        """A handcrafted minimal TraceRecord (no final_status, intent,
+        skill, shadow, or recipe) doesn't represent a real graph run, so
+        the sink emits only the root observation. Real graph runs always
+        carry at least final_status; that path is tested elsewhere."""
         import observability.langfuse_sink as sink
 
         mock_client, observations, scores = _make_mock_client()
         sink._langfuse_client = mock_client
         sink._initialised = True
 
-        # Minimal record — no intent, no skill, no shadow, no recipe
         record = TraceRecord(trace_id="t", event_id="e")
         forward(record)
 
-        # Only root observation, no child spans
         assert len(observations) == 1
         assert observations[0]["name"] == "asoe-graph-execution"
 
@@ -728,19 +802,25 @@ class TestLangFuseSinkWithMockClient:
         assert not any(o.get("name", "").startswith("llm.") for o in observations)
 
     def test_forward_v2_emits_generation(self, monkeypatch):
-        """v2 LangFuse SDK path: trace.generation(**kw) is called
-        once per LLMCallTrace."""
+        """v2 LangFuse SDK path: generations are attached as children of
+        their owning step span (intent → classify, recipe →
+        select_recipe, shadow → shadow_audit). Orphans fall back to
+        trace.generation()."""
         import observability.langfuse_sink as sink
         from contracts.models import LLMCallTrace
 
-        # Build a v2-shaped mock: has `trace()`, no `start_observation()`.
         spans: list = []
         gens: list = []
         scores: list = []
 
+        class V2Span:
+            def generation(self, **kw):
+                gens.append(kw)
+
         class V2Trace:
             def span(self, **kw):
                 spans.append(kw)
+                return V2Span()
 
             def generation(self, **kw):
                 gens.append(kw)
@@ -758,6 +838,8 @@ class TestLangFuseSinkWithMockClient:
         sink._langfuse_client = V2Client()
         sink._initialised = True
 
+        # task=shadow with no shadow_verdict → orphan, attaches to
+        # trace root (legacy v2 path).
         record = TraceRecord(
             trace_id="t-v2", event_id="e",
             llm_calls=[
@@ -775,6 +857,75 @@ class TestLangFuseSinkWithMockClient:
         assert gens[0]["model"] == "qwen2.5"
         # v2 generation does NOT carry as_type — that's a v4 concept
         assert "as_type" not in gens[0]
+
+    def test_forward_v2_attaches_generation_to_owning_span(self, monkeypatch):
+        """v2: when intent_selected is set, the classify span emits and
+        the intent generation lands as a child of classify (via
+        span.generation()), not as a sibling of the trace root."""
+        import observability.langfuse_sink as sink
+        from contracts.models import LLMCallTrace
+
+        # Track which span each generation was created on.
+        span_to_gens: dict[str, list] = {}
+        scores: list = []
+
+        class V2Span:
+            def __init__(self, name: str):
+                self.name = name
+                span_to_gens.setdefault(name, [])
+
+            def generation(self, **kw):
+                span_to_gens[self.name].append(kw)
+
+        root_gens: list = []
+
+        class V2Trace:
+            def span(self, **kw):
+                return V2Span(kw["name"])
+
+            def generation(self, **kw):
+                root_gens.append(kw)
+
+            def score(self, **kw):
+                scores.append(kw)
+
+        class V2Client:
+            def trace(self, **kw):
+                return V2Trace()
+
+            def flush(self):
+                pass
+
+        sink._langfuse_client = V2Client()
+        sink._initialised = True
+
+        record = TraceRecord(
+            trace_id="t-v2-c", event_id="e",
+            intent_selected="DUPLICATE_PO",
+            recipe_name="DuplicatePORecipe.py",
+            shadow_verdict="GREEN",
+            final_status="COMPLETE",
+            llm_calls=[
+                LLMCallTrace(
+                    task="intent", provider="anthropic",
+                    model_id="claude-sonnet-4-6",
+                    input_tokens=300, output_tokens=40,
+                ),
+                LLMCallTrace(
+                    task="recipe", provider="anthropic",
+                    model_id="claude-sonnet-4-6",
+                    input_tokens=200, output_tokens=20,
+                ),
+            ],
+        )
+        forward(record)
+
+        assert len(span_to_gens["classify"]) == 1
+        assert span_to_gens["classify"][0]["name"] == "llm.intent"
+        assert len(span_to_gens["select_recipe"]) == 1
+        assert span_to_gens["select_recipe"][0]["name"] == "llm.recipe"
+        # Nothing on the trace root — both LLM tasks had owners.
+        assert root_gens == []
 
     def test_forward_catches_client_exception(self, monkeypatch):
         import observability.langfuse_sink as sink

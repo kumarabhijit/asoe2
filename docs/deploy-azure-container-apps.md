@@ -141,6 +141,24 @@ at <https://langfuse.com/pricing>) cover sandbox traffic comfortably
 LangFuse stack, point `langfuseHost` at the self-hosted URL and supply
 keys minted on that instance.
 
+**Region override.** The default `langfuseHost` is the US Hobby endpoint
+(`https://us.cloud.langfuse.com`). To target the EU region or a
+self-hosted instance without editing `parameters.sandbox.json`, pass
+`LANGFUSE_HOST` as an env var to the deploy script:
+
+```bash
+LANGFUSE_HOST='https://cloud.langfuse.com' \
+LANGFUSE_PUBLIC_KEY='pk-lf-...' \
+LANGFUSE_SECRET_KEY='sk-lf-...' \
+ANTHROPIC_API_KEY='sk-ant-...' \
+PG_ADMIN_PASSWORD='...' \
+    ./scripts/deploy-azure.sh
+```
+
+Match the host to the region where you minted the keys — keys minted on
+`cloud.langfuse.com` (EU) will not authenticate against
+`us.cloud.langfuse.com` and vice versa.
+
 > **Why two stages?** The Container App resource refuses to be created
 > until its first revision reaches a healthy state. Pre-Stage 2, the
 > bicep would default to a generic placeholder image; the real probe
