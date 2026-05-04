@@ -190,6 +190,34 @@ def _persist_exception(
     # the graph state doesn't leak into the persisted record.
     ctx = dict(state.enrichment_context)
 
+    # Project the inbound event into a single LineItem-shaped row when
+    # the recipe didn't itself populate ``resolution_data.line_items``.
+    # The /api/v1/exceptions/{id}/line-items endpoint reads from this
+    # key; without a projection the UI's "Evidence Detail" pane is
+    # always empty even though the event carries the relevant pricing
+    # / sku / quantity metadata.
+    #
+    # Pure projection — the event field shape maps 1:1 to LineItem:
+    #   line_id ← f"{order_id}-{line_item}"
+    #   sku/uom/quantity/erp/po prices ← event fields (with safe
+    #   defaults when the upstream classifier didn't supply them).
+    # Recipes that emit a richer multi-line list (e.g. mass-pricing-
+    # error sweeps) still win — we only fill in when the recipe
+    # output's ``line_items`` is missing or empty.
+    raw_outputs = state.execution_log.outputs if state.execution_log else {}
+    resolution_data = dict(raw_outputs)
+    if not resolution_data.get("line_items"):
+        evt = state.event
+        resolution_data["line_items"] = [{
+            "line_id": f"{evt.order_id}-{evt.line_item}",
+            "sku": evt.sku or evt.order_id,
+            "description": evt.event_type or "Order line",
+            "uom": "EA",
+            "quantity": int(evt.line_count or 1),
+            "erp_price": float(evt.sap_base_price or 0.0),
+            "po_price": float(evt.po_price or 0.0),
+        }]
+
     record = exception_store.create(
         tenant_id=tenant_id,
         order_id=state.event.order_id,
@@ -199,7 +227,7 @@ def _persist_exception(
         shadow_verdict=state.shadow.status.value if state.shadow else None,
         selected_recipe=state.selected_recipe,
         final_status=state.final_status.value if state.final_status else None,
-        resolution_data=state.execution_log.outputs if state.execution_log else {},
+        resolution_data=resolution_data,
         # Capture the source event so a future re-analysis can replay it
         # through the graph without relying on external state reconstruction.
         original_event=state.event.model_dump(mode="json"),
