@@ -290,6 +290,15 @@ Build prompt: `prompts/phase_10_langfuse.md`
 - [x] `docs/AUDITOR_GUIDE.md` — audit trail section updated with LangFuse forwarding
 - [x] `tasks.md` — this phase checklist
 ✅ Outcome: docs cover setup, testing, and production deployment
+
+### 10.7 Azure Container Apps deployment + full-topology span coverage
+- [x] `infra/main.bicep` — `langfuseHost`/`langfusePublicKey`/`langfuseSecretKey` parameters; two new Container App secrets; three env vars wired onto the API container (sink stays no-op when keys are empty)
+- [x] `scripts/deploy-azure.sh` — preserves the LangFuse key pair across re-runs; honours `LANGFUSE_HOST` env override (US Hobby default, EU / self-hosted on demand)
+- [x] `scripts/set-secrets.sh` — paired key rotation; refuses single-key updates
+- [x] `observability/langfuse_sink.py` — span coverage expanded from 4 → all 11 graph nodes (`ingest`, `classify`, `load_skill`, `validate_circuit_breaker`, `select_recipe`, `resolve_dependencies`, `validate_types`, `shadow_audit`, `execute_recipe`, `apply_effects`, `build_analysis`); LLM `generation` observations attached as children of their owning step span (intent → classify, recipe → select_recipe, shadow → shadow_audit) instead of trace-root siblings; classify / select_recipe / shadow_audit metadata records `backend_used = "<provider>:<model_id>"` (or `"deterministic"`) so degraded runs are visible at a glance
+- [x] 71/71 tests in `tests/test_observability.py` (3 new — full-topology span set, YELLOW shadow suppression of execute_recipe, backend_used metadata)
+- [x] `docs/deploy-azure-container-apps.md` + `infra/README.md` — operator runbook for enable / rotate / region override
+✅ Outcome: LangFuse Cloud (Hobby) is wired into pre-prod Azure deploy; every graph node renders in the LangFuse UI with its LLM call nested inline
 ---
 ## PHASE 11 — Duplicate PO Product Spec Gap Closure
 Build prompt: `docs/specs/duplicate-po-product-spec.md`

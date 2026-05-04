@@ -432,8 +432,13 @@ above.
 When `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are set and the `langfuse`
 package is installed, `Tracer.emit()` forwards each `TraceRecord` to LangFuse
 in addition to stdlib logging.  This creates a LangFuse trace per graph execution
-with spans for `classify`, `load_skill`, `shadow_audit`, and `execute_recipe`,
-plus a `terminal_status` score that enables dashboard filtering and success-rate
+with one span per LangGraph node that ran (`ingest`, `classify`, `load_skill`,
+`validate_circuit_breaker`, `select_recipe`, `resolve_dependencies`,
+`validate_types`, `shadow_audit`, `execute_recipe`, `apply_effects`,
+`build_analysis` — see `architecture_v4.md §5.1` for the topology), per-LLM-call
+`generation` observations attached as children of their owning step span (so
+auditors expand `classify` and see the LLM call inline), and a
+`terminal_status` score that enables dashboard filtering and success-rate
 tracking:
 
 | `final_status` | Score `value` | Meaning |
