@@ -715,6 +715,201 @@ ImpactMetrics:
       operator's review checklist; trivially derived from the
       line-items list, MUST agree with it.
 
+# ---------------------------------------------------------------------------
+# DuplicatePOEnvelope (ADR-028 G2 / action item A6) — V1 PR-B.
+# ---------------------------------------------------------------------------
+# Single-round-trip canonical envelope returned by
+# GET /api/v1/exceptions/duplicates/{id}. Composer:
+# api/duplicate_envelope.py::compose_duplicate_po_envelope.
+#
+# This section sits OUTSIDE the *AnalysisData family — the envelope is
+# a separate flat shape composed FROM existing AnalysisData fields
+# (DuplicateDetectionData / OrderComparisonData), not a replacement for
+# them. The tests/test_audit_registry_coverage.py fitness test for
+# *AnalysisData classes does not auto-check this section; the summary
+# tally below DOES count every row here.
+#
+# Source attributions:
+#   * shadow-policy / recipe-output / control / derived — same vocab
+#     as the *AnalysisData family.
+#   * envelope-projection — new tag for fields that PROJECT data
+#     already classified elsewhere (e.g. matched_po projects from
+#     DuplicateDetectionData.original_order). The classification
+#     tier matches the source; envelope-projection is the
+#     traceability marker, not a standalone classification.
+DuplicatePOEnvelope:
+  exception_id:
+    tier: audit-bearing
+    source: control
+    rationale: >-
+      Record identity. Every audit-trail entry, every human-action
+      entry, and every downstream cross-reference cites this id;
+      its presence on the envelope is non-negotiable.
+  tenant_id:
+    tier: audit-bearing
+    source: control
+    rationale: >-
+      Tenant scope. SOX requires the auditor to see WHO the action
+      applied to; tenant_id is the deterministic answer.
+  intent:
+    tier: audit-bearing
+    source: shadow-policy
+    rationale: >-
+      Always "DUPLICATE_PO" on this envelope (Literal). Audit-bearing
+      because the envelope endpoint refuses to serve when intent
+      doesn't match — the value is the gate the route handler asserts
+      against.
+  lifecycle_state:
+    tier: audit-bearing
+    source: control
+    rationale: >-
+      State the operator is acting on (PENDING_REVIEW vs RESOLVED vs
+      BLOCKED, etc.). Authorisation depends on lifecycle position.
+  shadow_verdict:
+    tier: audit-bearing
+    source: shadow-policy
+    rationale: >-
+      Compliance Shadow's GREEN/YELLOW/RED — the verdict the
+      authorisation must align with. Optional only because
+      pre-shadow records have no value yet; post-shadow it MUST be
+      populated.
+  final_status:
+    tier: audit-bearing
+    source: control
+    rationale: >-
+      TerminalStatus of the run (COMPLETE / MANUAL_REVIEW_REQUIRED /
+      BLOCKED / FAIL_TO_HUMAN / AUDIT_CONTEXT_MISSING). Auditors cite
+      this when reconstructing why the record is in its current
+      lifecycle.
+  incoming_po:
+    tier: audit-bearing
+    source: control
+    rationale: >-
+      The PO under review. Reviewer authorises action against this
+      snapshot; absence is a partial-truth.
+    subfields:
+      so_number: audit-bearing      # surrogate (exception_id when SAP SO not yet assigned)
+      po_number: audit-bearing
+      created_date: audit-bearing
+      total_value: audit-bearing
+      line_count: audit-bearing
+      status: audit-bearing
+  matched_po:
+    tier: conditional
+    depends_on: resolved_action in [BLOCK_AND_NOTIFY, MERGE, SUPERSEDE, ALLOW_BOTH, ESCALATE, REQUEST_BUYER_CONFIRMATION]
+    source: control
+    rationale: >-
+      The matched existing PO from the OMS gateway. Audit-bearing
+      whenever the operator is authorising a resolution that
+      compares against an existing PO (every duplicate-PO action
+      does). Optional at the type level so early-halt records
+      (BLOCKED by shadow with no gateway call) don't false-positive
+      AUDIT_CONTEXT_MISSING. Projects from
+      DuplicateDetectionData.original_order — same audit-bearing
+      classifications inherit; this row is the envelope-projection
+      marker.
+    subfields:
+      so_number: audit-bearing
+      po_number: audit-bearing
+      created_date: audit-bearing
+      total_value: audit-bearing
+      line_count: audit-bearing
+      status: audit-bearing
+  signal_breakdown:
+    tier: audit-bearing
+    source: recipe-output
+    rationale: >-
+      Per-signal weighted contribution to composite_score. Auditor
+      sees WHY the score was what it was; the operator authorising
+      BLOCK_AND_NOTIFY cites the signals that drove the score.
+  composite_score:
+    tier: audit-bearing
+    source: recipe-output
+    rationale: >-
+      Single-number summary the analyst signs off on; threshold
+      comparisons (auto_block / review_required / soft_flag) are
+      computed against this.
+  classification:
+    tier: audit-bearing
+    source: recipe-output
+    rationale: >-
+      Decision-tier label (AUTO_BLOCK / REVIEW_REQUIRED / SOFT_FLAG /
+      PASS) — also in always_audit_bearing_field_names.
+  recommended_action:
+    tier: audit-bearing
+    source: recipe-output
+    rationale: >-
+      The proposed disposition the operator approves or overrides —
+      also in always_audit_bearing_field_names.
+  autonomy_level:
+    tier: audit-bearing
+    source: control
+    rationale: >-
+      Names the L1/L2/L3/L4 control tier — explains why the action
+      did or did not auto-execute. §404 cites L-tiers explicitly.
+      Optional only because pre-recipe halts leave it None.
+  agent_reasoning:
+    tier: contextual
+    source: derived
+    rationale: >-
+      Human-readable narrative projected from trace.explanation.
+      Regenerable from policy_hits + lifecycle; absence is fine.
+      The auditable substance is in shadow_verdict + classification +
+      recommended_action.
+  config_layer_trace:
+    tier: audit-bearing
+    source: control
+    rationale: >-
+      ADR-029 per-layer contribution trace — operator + auditor
+      see WHICH of the 5 config layers (platform → tenant → tier →
+      customer → channel) supplied each final weight value. Without
+      this, a reviewer can't reconstruct which tenant configuration
+      drove the score. Optional only because non-orchestration
+      paths (tests bypassing the gateway) may not produce one.
+    subfields:
+      signal: audit-bearing
+      value: audit-bearing
+      source_layer: audit-bearing
+  audit_trail:
+    tier: audit-bearing
+    source: control
+    rationale: >-
+      Chronological policy_audit_log entries filtered to events
+      that reference this exception. event_hash carries SOX chain
+      integrity — auditors can verify without re-querying the log
+      table. Filter convention documented in
+      api/duplicate_envelope.py::_entry_relates_to_exception.
+    subfields:
+      event_type: audit-bearing
+      timestamp: audit-bearing
+      actor: audit-bearing
+      payload: audit-bearing
+      event_hash: audit-bearing
+  human_actions:
+    tier: audit-bearing
+    source: control
+    rationale: >-
+      Synthesised chronological list of HITL actions (APPROVE /
+      OVERRIDE / ESCALATE / COSIGN_*). Reviewer cites prior actions
+      when authorising a follow-up disposition. Distinct from
+      audit_trail (SOX log rows) — human_actions is the
+      domain-language summary the operator reads.
+    subfields:
+      action: audit-bearing
+      actor: audit-bearing
+      timestamp: audit-bearing
+      notes: contextual         # free-text narrative; regenerable
+      reason_tag: audit-bearing # ADR-033 structured reason code
+      payload: contextual       # action-specific extras
+  created_at:
+    tier: audit-bearing
+    source: control
+    rationale: Record-of-action timestamp — SOX trail anchor.
+  updated_at:
+    tier: audit-bearing
+    source: control
+    rationale: State-of-record timestamp.
+
 grandfather_clauses:
   # entity_profile_master_gap (added 2026-05-02): customer_tier ships
   # from the seed Account table today, but vip_status, credit_standing,
@@ -770,9 +965,16 @@ summary:
   # fulfillment_gap_pct, sla_deadline). Three of the contextuals
   # are tracked under the new entity_profile_master_gap +
   # impact_metrics_sla_gap grandfather clauses.
-  total_fields: 124
-  audit_bearing: 92
-  conditional: 5
-  contextual: 27
+  # 2026-05-04: +19 rows for DuplicatePOEnvelope (ADR-028 G2 / A6).
+  # 17 audit-bearing (identity / state / recipe-output /
+  # config-trace / audit_trail / human_actions / timestamps),
+  # 1 conditional (matched_po — required when resolved_action is a
+  # disposition that compares against an existing PO), 1 contextual
+  # (agent_reasoning — derived narrative; regenerable from
+  # policy_hits + classification).
+  total_fields: 143
+  audit_bearing: 109
+  conditional: 6
+  contextual: 28
   backend_gap_fields: 0
   gateway_dependent_fields: 13
