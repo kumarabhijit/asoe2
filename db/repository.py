@@ -22,6 +22,11 @@ DUPLICATE_PO score-weight hierarchy. Layer 1 (platform) lives on disk
 in docs/specs/duplicate-po/config-defaults.json. Edit history flows
 through policy_audit_log via PolicyRepository.create_audit_event so
 the SOX surface remains a single hash-chained log.
+
+A9 (PR-C.2): ``PolicyRepository.list_audit_log`` accepts an optional
+``policy_key_prefix`` so the GET /api/v1/config/tenants/.../audit
+endpoint can scope to ConfigChange entries (prefix
+``duplicate_po.weights.``) without a Python-side filter pass.
 """
 
 from __future__ import annotations
@@ -61,11 +66,6 @@ def _json_loads(s: Optional[str]) -> Any:
 
 
 def _row_to_dict(row, columns: tuple[str, ...]) -> Dict[str, Any]:
-    """Convert a database row to a dict using column names.
-
-    Works with both dict-like rows (psycopg2 RealDictCursor, sqlite3.Row)
-    and plain tuples (positional indexing fallback).
-    """
     if hasattr(row, "keys"):
         return dict(row)
     return {col: row[i] for i, col in enumerate(columns)}
@@ -125,25 +125,16 @@ class ExceptionRepository:
             )
 
         return {
-            "id": record_id,
-            "tenant_id": tenant_id,
-            "order_id": order_id,
-            "event_type": event_type,
-            "intent": intent,
-            "lifecycle_state": lifecycle_state,
-            "shadow_verdict": shadow_verdict,
-            "selected_recipe": selected_recipe,
-            "final_status": final_status,
-            "trace_id": trace_id,
-            "resolution_data": resolution_data or {},
+            "id": record_id, "tenant_id": tenant_id, "order_id": order_id,
+            "event_type": event_type, "intent": intent,
+            "lifecycle_state": lifecycle_state, "shadow_verdict": shadow_verdict,
+            "selected_recipe": selected_recipe, "final_status": final_status,
+            "trace_id": trace_id, "resolution_data": resolution_data or {},
             "original_event": original_event,
             "reanalysis_history": reanalysis_history or [],
             "enrichment_context": enrichment_context or {},
-            "resolved_by": None,
-            "resolved_action": None,
-            "resolution_notes": None,
-            "created_at": now,
-            "updated_at": now,
+            "resolved_by": None, "resolved_action": None, "resolution_notes": None,
+            "created_at": now, "updated_at": now,
         }
 
     def get(self, exception_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
@@ -165,32 +156,24 @@ class ExceptionRepository:
         return self._to_dict(row)
 
     def list(
-        self,
-        tenant_id: str,
-        status: Optional[str] = None,
-        intent: Optional[str] = None,
-        limit: int = 50,
+        self, tenant_id: str, status: Optional[str] = None,
+        intent: Optional[str] = None, limit: int = 50,
         cursor: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], Optional[str], bool]:
         conditions = ["tenant_id = ?"]
         params: list = [tenant_id]
-
         if status:
             conditions.append("lifecycle_state = ?")
             params.append(status)
         if intent:
             conditions.append("intent = ?")
             params.append(intent)
-
-        # Cursor-based pagination: records created before the cursor record
         if cursor:
             conditions.append("""created_at <= (
                 SELECT created_at FROM exceptions WHERE id = ?
             ) AND id != ?""")
             params.extend([cursor, cursor])
-
         where = " AND ".join(conditions)
-        # Fetch one extra to determine has_more
         query = f"""SELECT id, tenant_id, order_id, event_type, intent,
                            lifecycle_state, shadow_verdict, selected_recipe,
                            final_status, trace_id, resolution_data,
@@ -202,42 +185,30 @@ class ExceptionRepository:
                     ORDER BY created_at DESC
                     LIMIT ?"""
         params.append(limit + 1)
-
         with self._adapter.cursor(tenant_id) as cur:
             cur.execute(query, tuple(params))
             rows = cur.fetchall()
-
         records = [self._to_dict(r) for r in rows[:limit]]
         has_more = len(rows) > limit
         next_cursor = records[-1]["id"] if has_more and records else None
         return records, next_cursor, has_more
 
-    def update(
-        self, exception_id: str, tenant_id: str, **fields
-    ) -> Optional[Dict[str, Any]]:
+    def update(self, exception_id: str, tenant_id: str, **fields) -> Optional[Dict[str, Any]]:
         if not fields:
             return self.get(exception_id, tenant_id)
-
-        # Serialize JSON columns before binding. Callers pass native Python
-        # objects for these fields; we persist them as JSON strings.
-        for json_col in (
-            "resolution_data", "original_event",
-            "reanalysis_history", "enrichment_context",
-        ):
+        for json_col in ("resolution_data", "original_event",
+                         "reanalysis_history", "enrichment_context"):
             if json_col in fields and not isinstance(fields[json_col], str):
                 fields[json_col] = _json_dumps(fields[json_col])
-
         fields["updated_at"] = _now()
         set_clause = ", ".join(f"{k} = ?" for k in fields)
         values = list(fields.values())
         values.extend([exception_id, tenant_id])
-
         with self._adapter.cursor(tenant_id) as cur:
             cur.execute(
                 f"UPDATE exceptions SET {set_clause} WHERE id = ? AND tenant_id = ?",
                 tuple(values),
             )
-
         return self.get(exception_id, tenant_id)
 
     def stats(self, tenant_id: str) -> Dict[str, Any]:
@@ -255,8 +226,6 @@ class ExceptionRepository:
                 (tenant_id,),
             )
             row = cur.fetchone()
-
-        # Aggregate by intent
         by_intent: Dict[str, int] = {}
         with self._adapter.cursor(tenant_id) as cur:
             cur.execute(
@@ -267,8 +236,6 @@ class ExceptionRepository:
                 k = r[0] if not hasattr(r, "keys") else r["intent_key"]
                 v = r[1] if not hasattr(r, "keys") else r["cnt"]
                 by_intent[k] = v
-
-        # Aggregate by lifecycle_state
         by_lifecycle_state: Dict[str, int] = {}
         with self._adapter.cursor(tenant_id) as cur:
             cur.execute(
@@ -279,8 +246,6 @@ class ExceptionRepository:
                 k = r[0] if not hasattr(r, "keys") else r["lifecycle_state"]
                 v = r[1] if not hasattr(r, "keys") else r["cnt"]
                 by_lifecycle_state[k] = v
-
-        # Aggregate by shadow_verdict
         by_shadow_verdict: Dict[str, int] = {}
         with self._adapter.cursor(tenant_id) as cur:
             cur.execute(
@@ -291,7 +256,6 @@ class ExceptionRepository:
                 k = r[0] if not hasattr(r, "keys") else r["shadow_verdict"]
                 v = r[1] if not hasattr(r, "keys") else r["cnt"]
                 by_shadow_verdict[k] = v
-
         return {
             "total_exceptions": row[0] or 0,
             "open_exceptions": row[1] or 0,
@@ -316,27 +280,14 @@ class ExceptionRepository:
 
     def _to_dict(self, row) -> Dict[str, Any]:
         r = _row_to_dict(row, self._COLUMNS)
-        for json_col in (
-            "resolution_data", "original_event",
-            "reanalysis_history", "enrichment_context",
-        ):
+        for json_col in ("resolution_data", "original_event",
+                         "reanalysis_history", "enrichment_context"):
             if isinstance(r.get(json_col), str):
                 r[json_col] = _json_loads(r[json_col])
-        # Normalise: always provide a list, never None, for reanalysis_history.
         if r.get("reanalysis_history") is None:
             r["reanalysis_history"] = []
-        # Normalise: always provide a dict, never None, for enrichment_context
-        # (V004 default '{}' guarantees this for new rows; older callers may
-        # have inserted via the in-memory bridge with no value).
         if r.get("enrichment_context") is None:
             r["enrichment_context"] = {}
-        # Postgres returns UUID columns as ``uuid.UUID`` objects and
-        # TIMESTAMPTZ columns as ``datetime`` objects. The downstream
-        # ExceptionSummary / ExceptionDetailResponse pydantic models
-        # declare these as ``str``, so unconverted values trigger
-        # ValidationError(type=string_type) and the API 500s on
-        # GET /api/v1/exceptions. SQLite returns plain strings already,
-        # so the isinstance guards are no-ops there.
         for uuid_col in ("id", "trace_id"):
             v = r.get(uuid_col)
             if v is not None and not isinstance(v, str):
@@ -344,7 +295,6 @@ class ExceptionRepository:
         for ts_col in ("created_at", "updated_at"):
             v = r.get(ts_col)
             if v is not None and not isinstance(v, str):
-                # datetime → ISO 8601; anything else stringifies safely.
                 r[ts_col] = v.isoformat() if hasattr(v, "isoformat") else str(v)
         return r
 
@@ -359,17 +309,11 @@ class TraceRepository:
     def __init__(self, adapter=None):
         self._adapter = adapter or create_adapter()
 
-    def create(
-        self,
-        exception_id: str,
-        trace_id: str,
-        tenant_id: str,
-        trace_record: Dict[str, Any],
-    ) -> Dict[str, Any]:
+    def create(self, exception_id: str, trace_id: str, tenant_id: str,
+               trace_record: Dict[str, Any]) -> Dict[str, Any]:
         record_id = _uuid()
         now = _now()
         trace_json = _json_dumps(trace_record)
-
         with self._adapter.cursor(tenant_id) as cur:
             cur.execute(
                 """INSERT INTO traces
@@ -377,19 +321,13 @@ class TraceRepository:
                    VALUES (?, ?, ?, ?, ?, ?)""",
                 (record_id, exception_id, trace_id, tenant_id, trace_json, now),
             )
-
         return {
-            "id": record_id,
-            "exception_id": exception_id,
-            "trace_id": trace_id,
-            "tenant_id": tenant_id,
-            "trace_record": trace_record,
-            "created_at": now,
+            "id": record_id, "exception_id": exception_id,
+            "trace_id": trace_id, "tenant_id": tenant_id,
+            "trace_record": trace_record, "created_at": now,
         }
 
-    def get_by_exception(
-        self, exception_id: str, tenant_id: str
-    ) -> Optional[Dict[str, Any]]:
+    def get_by_exception(self, exception_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
         with self._adapter.cursor(tenant_id) as cur:
             cur.execute(
                 """SELECT id, exception_id, trace_id, tenant_id,
@@ -438,7 +376,6 @@ class PolicyRepository:
         self._adapter = adapter or create_adapter()
 
     def _last_event_hash(self, cur, tenant_id: str) -> str:
-        """Per-tenant prev_hash lookup. Returns 'GENESIS' for first row."""
         cur.execute(
             "SELECT event_hash FROM policy_audit_log "
             "WHERE tenant_id = ? "
@@ -449,32 +386,21 @@ class PolicyRepository:
         return row[0] if row else "GENESIS"
 
     def _insert_audit_event(
-        self,
-        cur,
-        *,
-        tenant_id: str,
-        policy_key: str,
-        previous_value: Optional[str],
-        new_value: str,
-        changed_by: str,
-        change_reason: Optional[str],
+        self, cur, *, tenant_id: str, policy_key: str,
+        previous_value: Optional[str], new_value: str,
+        changed_by: str, change_reason: Optional[str],
     ) -> str:
-        """Hash-chained INSERT into policy_audit_log. Returns the new row id."""
         audit_id = _uuid()
         now = _now()
         prev_hash = self._last_event_hash(cur, tenant_id)
         event_hash = _audit_event_hash(
             prev_hash,
             {
-                "id": audit_id,
-                "tenant_id": tenant_id,
+                "id": audit_id, "tenant_id": tenant_id,
                 "policy_key": policy_key,
-                "previous_value": previous_value,
-                "new_value": new_value,
-                "changed_by": changed_by,
-                "change_reason": change_reason,
-                "created_at": now,
-                "prev_hash": prev_hash,
+                "previous_value": previous_value, "new_value": new_value,
+                "changed_by": changed_by, "change_reason": change_reason,
+                "created_at": now, "prev_hash": prev_hash,
             },
         )
         cur.execute(
@@ -489,23 +415,15 @@ class PolicyRepository:
         return audit_id
 
     def create_override(
-        self,
-        tenant_id: str,
-        policy_key: str,
-        value: Any,
-        created_by: str,
-        change_reason: Optional[str] = None,
+        self, tenant_id: str, policy_key: str, value: Any,
+        created_by: str, change_reason: Optional[str] = None,
     ) -> Dict[str, Any]:
         record_id = _uuid()
         now = _now()
         value_json = _json_dumps(value)
-
-        # Look up previous value for audit log
         previous = self.get_override(tenant_id, policy_key)
         previous_value = _json_dumps(previous["value"]) if previous else None
-
         with self._adapter.cursor(tenant_id) as cur:
-            # Insert new override
             cur.execute(
                 """INSERT INTO policy_overrides
                    (id, tenant_id, policy_key, value, effective_from,
@@ -514,65 +432,32 @@ class PolicyRepository:
                 (record_id, tenant_id, policy_key, value_json, now,
                  created_by, now),
             )
-
-            # Insert hash-chained audit log entry (SOX + tamper-evidence).
             self._insert_audit_event(
-                cur,
-                tenant_id=tenant_id,
-                policy_key=policy_key,
-                previous_value=previous_value,
-                new_value=value_json,
-                changed_by=created_by,
-                change_reason=change_reason,
+                cur, tenant_id=tenant_id, policy_key=policy_key,
+                previous_value=previous_value, new_value=value_json,
+                changed_by=created_by, change_reason=change_reason,
             )
-
         return {
-            "id": record_id,
-            "tenant_id": tenant_id,
-            "policy_key": policy_key,
-            "value": value,
-            "effective_from": now,
-            "created_by": created_by,
+            "id": record_id, "tenant_id": tenant_id,
+            "policy_key": policy_key, "value": value,
+            "effective_from": now, "created_by": created_by,
         }
 
     def create_audit_event(
-        self,
-        tenant_id: str,
-        policy_key: str,
-        previous_value: Any,
-        new_value: Any,
-        changed_by: str,
-        change_reason: Optional[str] = None,
+        self, tenant_id: str, policy_key: str,
+        previous_value: Any, new_value: Any,
+        changed_by: str, change_reason: Optional[str] = None,
     ) -> str:
-        """Audit-only insert (no policy_override row).
-
-        Used by the exception-store DB backend for events like
-        EXCEPTION_RESOLVED / EXCEPTION_OVERRIDE_INITIATED — these are
-        application-level audit events, not policy threshold tunings.
-        Returns the new audit row id.
-        """
         with self._adapter.cursor(tenant_id) as cur:
             return self._insert_audit_event(
-                cur,
-                tenant_id=tenant_id,
-                policy_key=policy_key,
+                cur, tenant_id=tenant_id, policy_key=policy_key,
                 previous_value=_json_dumps(previous_value)
                     if previous_value is not None else None,
                 new_value=_json_dumps(new_value),
-                changed_by=changed_by,
-                change_reason=change_reason,
+                changed_by=changed_by, change_reason=change_reason,
             )
 
-    def verify_audit_chain(
-        self, tenant_id: str
-    ) -> tuple[bool, Optional[int]]:
-        """Walk the tenant's chain in (created_at, id) order.
-
-        Returns (True, None) on a valid chain, or (False, idx) where idx
-        is the zero-based position of the first event whose stored
-        ``event_hash`` does not match a recompute, or whose ``prev_hash``
-        does not link to the predecessor's ``event_hash``.
-        """
+    def verify_audit_chain(self, tenant_id: str) -> tuple[bool, Optional[int]]:
         with self._adapter.cursor(tenant_id) as cur:
             cur.execute(
                 """SELECT id, tenant_id, policy_key, previous_value,
@@ -594,15 +479,11 @@ class PolicyRepository:
             recomputed = _audit_event_hash(
                 prev_hash,
                 {
-                    "id": audit_id,
-                    "tenant_id": t_id,
+                    "id": audit_id, "tenant_id": t_id,
                     "policy_key": policy_key,
-                    "previous_value": previous_value,
-                    "new_value": new_value,
-                    "changed_by": changed_by,
-                    "change_reason": change_reason,
-                    "created_at": created_at,
-                    "prev_hash": prev_hash,
+                    "previous_value": previous_value, "new_value": new_value,
+                    "changed_by": changed_by, "change_reason": change_reason,
+                    "created_at": created_at, "prev_hash": prev_hash,
                 },
             )
             if recomputed != event_hash:
@@ -610,9 +491,7 @@ class PolicyRepository:
             expected_prev = event_hash
         return True, None
 
-    def get_override(
-        self, tenant_id: str, policy_key: str
-    ) -> Optional[Dict[str, Any]]:
+    def get_override(self, tenant_id: str, policy_key: str) -> Optional[Dict[str, Any]]:
         with self._adapter.cursor(tenant_id) as cur:
             cur.execute(
                 """SELECT id, tenant_id, policy_key, value,
@@ -635,17 +514,35 @@ class PolicyRepository:
         return r
 
     def list_audit_log(
-        self, tenant_id: str, limit: int = 50
+        self,
+        tenant_id: str,
+        limit: int = 50,
+        policy_key_prefix: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        """List audit-log rows, newest first.
+
+        ``policy_key_prefix`` (PR-C.2): when set, restricts the result
+        to rows whose ``policy_key`` LIKE ``{prefix}%``. Used by the
+        config-audit endpoint to scope to ``duplicate_po.weights.*``
+        without a Python-side filter pass.
+        """
+        conditions = ["tenant_id = ?"]
+        params: list = [tenant_id]
+        if policy_key_prefix:
+            conditions.append("policy_key LIKE ?")
+            params.append(f"{policy_key_prefix}%")
+        where = " AND ".join(conditions)
+        params.append(limit)
+
         with self._adapter.cursor(tenant_id) as cur:
             cur.execute(
-                """SELECT id, tenant_id, policy_key, previous_value,
+                f"""SELECT id, tenant_id, policy_key, previous_value,
                           new_value, changed_by, change_reason, created_at,
                           prev_hash, event_hash
                    FROM policy_audit_log
-                   WHERE tenant_id = ?
+                   WHERE {where}
                    ORDER BY created_at DESC LIMIT ?""",
-                (tenant_id, limit),
+                tuple(params),
             )
             rows = cur.fetchall()
         _AUDIT_COLS = (
@@ -660,7 +557,7 @@ class PolicyRepository:
                 try:
                     r["previous_value"] = _json_loads(r["previous_value"])
                 except Exception:
-                    pass  # leave as raw string (matches in-memory store)
+                    pass
             if isinstance(r.get("new_value"), str):
                 try:
                     r["new_value"] = _json_loads(r["new_value"])
@@ -689,8 +586,8 @@ _TENANT_CONFIG_VALID_LAYERS = ("tenant", "tier", "customer", "channel")
 
 
 def _canonical_scope(scope: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """Return scope with None values dropped so the hash is stable across
-    callers that pass {"customer_id": None} vs {} for the tenant layer."""
+    """Drop None values so the hash is stable across callers that
+    pass {"customer_id": None} vs {} for the tenant layer."""
     return {k: v for k, v in (scope or {}).items() if v is not None}
 
 
@@ -716,7 +613,7 @@ class TenantConfigRepository:
     round-trip.
 
     Audit-chain coupling is the route handler's responsibility (see
-    api/routes/config.py in PR-C.2): on every upsert/delete it calls
+    api/routes/config.py): on every upsert/delete it calls
     PolicyRepository.create_audit_event with a ConfigChangeEvent
     payload and the canonical policy_key produced by
     contracts.config_events.policy_key_for_event.
@@ -734,20 +631,10 @@ class TenantConfigRepository:
             )
 
     def upsert(
-        self,
-        tenant_id: str,
-        layer: str,
+        self, tenant_id: str, layer: str,
         scope: Optional[Dict[str, Any]],
-        weights: Dict[str, float],
-        created_by: str,
+        weights: Dict[str, float], created_by: str,
     ) -> Dict[str, Any]:
-        """Insert-or-update an active row for (tenant, layer, scope).
-
-        The unique key (tenant_id, layer, scope_hash) lets us upsert
-        without a transaction-scoped lookup: SELECT first, then
-        INSERT-or-UPDATE. SQLite + Postgres both support this pattern
-        without dialect-specific UPSERT syntax (which differs).
-        """
         self._validate_layer(layer)
         canonical_scope = _canonical_scope(scope)
         sh = _scope_hash(canonical_scope)
@@ -762,8 +649,7 @@ class TenantConfigRepository:
                     """UPDATE tenant_config
                           SET weights = ?, created_by = ?, updated_at = ?
                         WHERE tenant_id = ? AND layer = ? AND scope_hash = ?""",
-                    (weights_json, created_by, now,
-                     tenant_id, layer, sh),
+                    (weights_json, created_by, now, tenant_id, layer, sh),
                 )
                 record_id = existing["id"]
                 created_at = existing["created_at"]
@@ -778,25 +664,15 @@ class TenantConfigRepository:
                     (record_id, tenant_id, layer, sh, scope_json,
                      weights_json, created_by, created_at, now),
                 )
-
         return {
-            "id": record_id,
-            "tenant_id": tenant_id,
-            "layer": layer,
-            "scope_hash": sh,
-            "scope": canonical_scope,
-            "weights": weights,
-            "created_by": created_by,
-            "created_at": created_at,
-            "updated_at": now,
+            "id": record_id, "tenant_id": tenant_id, "layer": layer,
+            "scope_hash": sh, "scope": canonical_scope,
+            "weights": weights, "created_by": created_by,
+            "created_at": created_at, "updated_at": now,
         }
 
-    def get(
-        self,
-        tenant_id: str,
-        layer: str,
-        scope: Optional[Dict[str, Any]],
-    ) -> Optional[Dict[str, Any]]:
+    def get(self, tenant_id: str, layer: str,
+            scope: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         self._validate_layer(layer)
         sh = _scope_hash(scope)
         with self._adapter.cursor(tenant_id) as cur:
@@ -812,9 +688,7 @@ class TenantConfigRepository:
             return None
         return self._to_dict(row)
 
-    def list_by_layer(
-        self, tenant_id: str, layer: str,
-    ) -> List[Dict[str, Any]]:
+    def list_by_layer(self, tenant_id: str, layer: str) -> List[Dict[str, Any]]:
         self._validate_layer(layer)
         with self._adapter.cursor(tenant_id) as cur:
             cur.execute(
@@ -828,18 +702,8 @@ class TenantConfigRepository:
             rows = cur.fetchall()
         return [self._to_dict(r) for r in rows]
 
-    def delete(
-        self,
-        tenant_id: str,
-        layer: str,
-        scope: Optional[Dict[str, Any]],
-    ) -> bool:
-        """Remove the active row for (tenant, layer, scope).
-
-        Returns True when a row was removed, False when no row matched.
-        Audit history is preserved on policy_audit_log; deleting the
-        live row does not erase the trail.
-        """
+    def delete(self, tenant_id: str, layer: str,
+               scope: Optional[Dict[str, Any]]) -> bool:
         self._validate_layer(layer)
         existing = self.get(tenant_id, layer, scope)
         if not existing:
@@ -854,49 +718,27 @@ class TenantConfigRepository:
         return True
 
     def resolve_layered_overrides(
-        self,
-        tenant_id: str,
+        self, tenant_id: str,
         customer_tier: Optional[str] = None,
         customer_id: Optional[str] = None,
         channel: Optional[str] = None,
     ) -> Dict[str, Dict[str, float]]:
-        """Fan-out lookup for the four DB-backed layers.
-
-        Returns a dict keyed by layer name with the partial weight map
-        for each. Empty maps mean "no override at this layer" — the
-        gateway's resolve_weights() will then leave the inherited
-        value in place.
-
-        Layers whose scope is missing required parameters return ``{}``
-        rather than raising — the gateway can call this with whatever
-        scope information the inbound event carries, and missing
-        scope just means "skip that layer".
-        """
         result: Dict[str, Dict[str, float]] = {
-            "tenant": {},
-            "tier": {},
-            "customer": {},
-            "channel": {},
+            "tenant": {}, "tier": {}, "customer": {}, "channel": {},
         }
-
         tenant_row = self.get(tenant_id, "tenant", {})
         if tenant_row:
             result["tenant"] = tenant_row["weights"]
-
         if customer_tier:
-            tier_row = self.get(
-                tenant_id, "tier", {"customer_tier": customer_tier},
-            )
+            tier_row = self.get(tenant_id, "tier",
+                                {"customer_tier": customer_tier})
             if tier_row:
                 result["tier"] = tier_row["weights"]
-
         if customer_id:
-            cust_row = self.get(
-                tenant_id, "customer", {"customer_id": customer_id},
-            )
+            cust_row = self.get(tenant_id, "customer",
+                                {"customer_id": customer_id})
             if cust_row:
                 result["customer"] = cust_row["weights"]
-
         if customer_id and channel:
             chan_row = self.get(
                 tenant_id, "channel",
@@ -904,7 +746,6 @@ class TenantConfigRepository:
             )
             if chan_row:
                 result["channel"] = chan_row["weights"]
-
         return result
 
     _COLUMNS = (
@@ -917,7 +758,6 @@ class TenantConfigRepository:
         for json_col in ("scope", "weights"):
             if isinstance(r.get(json_col), str):
                 r[json_col] = _json_loads(r[json_col]) or {}
-        # Postgres UUID + TIMESTAMPTZ stringification (mirrors ExceptionRepository).
         if r.get("id") is not None and not isinstance(r["id"], str):
             r["id"] = str(r["id"])
         for ts_col in ("created_at", "updated_at"):
