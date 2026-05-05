@@ -195,9 +195,21 @@ backlog tracked here for the review board.
 
 ### Phase C — UI section component + EvidenceBlock projection (follow-up PR)
 
-* `asoe-ui/src/components/sections/EmailOrderEntrySection.tsx`
-* Hook into the analysis composer so the section renders for `EMAIL_ORDER_ENTRY` records.
-* Architectural lock test ensuring the section is registered in the section map.
+* `asoe-ui/src/app/exceptions/EmailOrderEntrySection.tsx` — dumb projector
+  rendered via `OrderAnalysis.email_order_entry_analysis` (data-presence
+  dispatch — no page-level branching, preserves CLAUDE.md Guardrail #1).
+* Mock exception in `asoe-ui/src/lib/api.ts MOCK_EXCEPTIONS` with
+  `intent="EMAIL_ORDER_ENTRY"` so the search has a real target and the
+  section has something to render in demos.
+* Search short-circuit: SCREAMING_SNAKE_CASE single-token queries in the
+  exception list pane auto-promote to an `intent:` operator instead of
+  going through Fuse fuzzy match, fixing the class of "EMAIL_ORDER_ENTRY
+  matches MIN_ORDER_QTY by edit distance" surprise.
+* Architectural lock test ensuring the section renders by data-presence
+  alone (no `if (intent === ...)` dispatch).
+* **Out of scope for Phase C:** any changes to `/inbox`. The IA decision
+  recorded under §6 (below) keeps `/inbox` and `/exceptions` as separate
+  surfaces; productizing the inbox is Phase F.
 
 ### Phase D — MCP tool surface (ADR-035, separate review)
 
@@ -211,6 +223,23 @@ backlog tracked here for the review board.
 * The §7 graduation metrics feed the ADR-032 calibration loop. No separate ADR needed.
 * L4 → L3 auto-demotion enforced in `policy.py` until calibration ships graduation
   signals.
+
+### Phase F — Inbox productisation (deferred, separate ADR pointer)
+
+* **Proposed name:** ADR-036 — Email Intake Surface and Bridge to Exception Queue.
+* Productizes the current `/inbox` page (today a hand-coded mock) to consume
+  the upstream `email-intelligence-agent` output, source category vocabulary
+  from `useHealth`, and bidirectionally deep-link with the Exception Queue:
+  inbox `NEW_ORDER` row that produced an `EMAIL_ORDER_ENTRY` exception →
+  `/exceptions/{id}`; exception detail with `event.metadata.source_email_id`
+  → back to the inbox row.
+* **Why a separate ADR:** the inbox page covers more categories than just
+  PO intake (`SHIPMENT_INQUIRY`, `INVOICE_QUERY`, `COMPLAINT`, `ORDER_CHANGE`,
+  `NEW_ORDER`); it is the operator's browse-inbound surface and is upstream of
+  this ADR's exception-queue scope. Bundling its productisation into ADR-034
+  would conflate intake with resolution.
+* **Reviewer chain (proposed):** AI/LangGraph → Compliance → Tools Admin →
+  Frontend Platform → Compliance veto holder.
 
 ---
 
@@ -227,7 +256,55 @@ backlog tracked here for the review board.
 
 ---
 
-## 6. Notes for the next reviewer
+## 6. Information-Architecture Decision (recorded post-Phase A review)
+
+A follow-up review asked whether `EMAIL_ORDER_ENTRY` should live on the existing
+Exception Queue, deserve its own page, or replace the current `/inbox` page.
+The convened experts (Product/IA, Compliance, Frontend Platform per CLAUDE.md,
+Domain SME, UX Researcher, Backend/Recipe Architect) reached the following:
+
+### Decision
+
+1. **EMAIL_ORDER_ENTRY records that need human review belong in the existing
+   Exception Queue.** ONE_CLICK_APPROVE records auto-resolve to `COMPLETE`
+   and never queue. STANDARD_REVIEW / REQUEST_CLARIFICATION / ESCALATE /
+   FATAL_REJECT records become exception-queue items rendered via the
+   data-presence section pattern (`OrderAnalysis.email_order_entry_analysis`
+   present → `<EmailOrderEntrySection>` mounts).
+2. **No new top-level UI page for EMAIL_ORDER_ENTRY.** A per-intent page
+   would violate `asoe-ui/CLAUDE.md` Guardrail #1 ("adding a new intent
+   must require zero UI code changes") by reintroducing intent-keyed
+   page-level dispatch.
+3. **The `/inbox` page stays.** It serves a distinct mode of work
+   (browse-inbound across `NEW_ORDER`, `COMPLAINT`, `SHIPMENT_INQUIRY`,
+   `INVOICE_QUERY`, `ORDER_CHANGE` — categories that aren't and shouldn't
+   become exceptions). Removing it would lose the upstream firehose
+   surface entirely.
+4. **The `/inbox` page is not a SOX surface.** It is currently a hand-coded
+   mock with no API client, no `useHealth`, no override chooser, no audit
+   chain. Routing a financially-binding approval (an EMAIL_ORDER_ENTRY
+   ONE_CLICK_APPROVE on a real ERP-bound PO) through that surface would
+   fail compliance review. Approval lives on the audit-instrumented
+   Exception Queue; the inbox carries triage and visibility only.
+
+### Bridge between the surfaces (Phase F backlog)
+
+* Inbox `NEW_ORDER` row that produced an `EMAIL_ORDER_ENTRY` exception
+  → "View exception →" deep-link to `/exceptions/{id}`.
+* Exception detail for an `EMAIL_ORDER_ENTRY` record with
+  `event.metadata.source_email_id` → "View source email" link back to
+  the inbox row.
+
+### Why this ADR records (not implements) the bridge
+
+The bridge requires productizing `/inbox` (real `email-intelligence-agent`
+output, real `useHealth` category vocabulary, deep-link plumbing). That is
+a separate cross-cutting effort with its own reviewer chain — Phase F /
+ADR-036.
+
+---
+
+## 7. Notes for the next reviewer
 
 * This ADR explicitly carves **out** the extraction pipeline, MCP integration, and
   calibration loop from Phase A. The recipe is a *thin*, pure scoring/classification
