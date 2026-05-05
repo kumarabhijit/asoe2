@@ -351,53 +351,38 @@ def _apply_sqlite_v007(conn: sqlite3.Connection) -> None:
 def _apply_sqlite_v008(conn: sqlite3.Connection) -> None:
     """V008 — Backfill resolution_data.line_items for legacy exception rows.
 
-    Mirrors V008__backfill_line_items.sql. SQLite stores resolution_data
-    and original_event as TEXT (JSON-stringified); we use json_extract /
-    json_set / json_object / json_array to project a single LineItem
-    row from each record's original_event when line_items is missing.
+    Mirrors V008__backfill_line_items.sql. SQLite stores
+    resolution_data and original_event as TEXT (JSON-stringified); we
+    use json_extract / json_each / json_set / json_object /
+    json_group_array to project LineItem rows from each record's
+    original_event when line_items is missing.
+
+    Two projection modes (mirroring
+    `api/routes/exceptions.py::_project_line_items`):
+
+      1. **Multi-line** — when `original_event.metadata.line_items`
+         is a non-empty array, expand each entry into its own
+         LineItem with order-level fallbacks for omitted fields.
+      2. **Single-line fallback** — emit one LineItem from the
+         event's order-level fields.
 
     Idempotent: re-runs are no-ops thanks to the WHERE-clause check.
 
     V007 trigger compatibility: pre-V007 DUPLICATE_PO rows that lack
     the four audit-bearing keys would trip the trigger and abort the
-    migration. The WHERE clause excludes them; they are pre-existing
-    non-compliant data and out of scope here.
+    migration. The WHERE clause excludes them.
+
+    Implementation note: SQLite doesn't support UPDATE-FROM-CTE the
+    way Postgres does, so this is implemented as a two-pass operation
+    inside Python — read candidate rows, project per-row, write back.
+    Idempotency is preserved via the same WHERE-clause filter the
+    Postgres path uses.
     """
-    # The CASE expression in the WHERE clause filters rows where
-    # line_items is missing or empty. SQLite's json_array_length on a
-    # NULL or non-array yields NULL, which compares as not-equal to 0
-    # — coerce both sides through COALESCE to normalise.
-    conn.execute(
+    # ── Pass 1: enumerate candidate rows ──────────────────────────────
+    cursor = conn.execute(
         """
-        UPDATE exceptions
-        SET resolution_data = json_set(
-            COALESCE(resolution_data, '{}'),
-            '$.line_items',
-            json_array(json_object(
-                'line_id',
-                    COALESCE(json_extract(original_event, '$.order_id'), '')
-                    || '-'
-                    || COALESCE(json_extract(original_event, '$.line_item'), 1),
-                'sku',
-                    COALESCE(
-                        NULLIF(json_extract(original_event, '$.sku'), ''),
-                        json_extract(original_event, '$.order_id'),
-                        ''
-                    ),
-                'description',
-                    COALESCE(
-                        NULLIF(json_extract(original_event, '$.event_type'), ''),
-                        'Order line'
-                    ),
-                'uom', 'EA',
-                'quantity',
-                    COALESCE(json_extract(original_event, '$.line_count'), 1),
-                'erp_price',
-                    COALESCE(json_extract(original_event, '$.sap_base_price'), 0.0),
-                'po_price',
-                    COALESCE(json_extract(original_event, '$.po_price'), 0.0)
-            ))
-        )
+        SELECT id, original_event, resolution_data, intent, final_status
+        FROM exceptions
         WHERE original_event IS NOT NULL
           AND (
               resolution_data IS NULL
@@ -405,8 +390,6 @@ def _apply_sqlite_v008(conn: sqlite3.Connection) -> None:
               OR json_type(resolution_data, '$.line_items') != 'array'
               OR json_array_length(resolution_data, '$.line_items') = 0
           )
-          -- V007 trigger compatibility: skip pre-V007 DUPLICATE_PO
-          -- rows that lack the four audit-bearing keys.
           AND (
               intent != 'DUPLICATE_PO'
               OR final_status IS NULL
@@ -419,6 +402,70 @@ def _apply_sqlite_v008(conn: sqlite3.Connection) -> None:
           )
         """
     )
+    candidates = cursor.fetchall()
+
+    # ── Pass 2: project + write back ──────────────────────────────────
+    import json as _json
+
+    backfilled = 0
+    for row in candidates:
+        rec_id, evt_text, rd_text, _intent, _final = row
+        try:
+            evt = _json.loads(evt_text) if evt_text else {}
+        except (TypeError, _json.JSONDecodeError):
+            continue
+        rd = {}
+        if rd_text:
+            try:
+                rd = _json.loads(rd_text)
+            except (TypeError, _json.JSONDecodeError):
+                rd = {}
+
+        order_id = evt.get("order_id", "") or ""
+        fallback_sku = evt.get("sku") or order_id
+        fallback_desc = evt.get("event_type") or "Order line"
+        fallback_qty = int(evt.get("line_count") or 1)
+        fallback_erp = float(evt.get("sap_base_price") or 0.0)
+        fallback_po = float(evt.get("po_price") or 0.0)
+        event_line_item = int(evt.get("line_item") or 1)
+
+        meta = evt.get("metadata") or {}
+        raw_lines = meta.get("line_items") if isinstance(meta, dict) else None
+
+        items: list[dict] = []
+        if isinstance(raw_lines, list) and raw_lines:
+            for idx, raw in enumerate(raw_lines, start=1):
+                if not isinstance(raw, dict):
+                    continue
+                line_no = raw.get("line_id") or f"{order_id}-{raw.get('line_item', idx)}"
+                items.append({
+                    "line_id": str(line_no),
+                    "sku": str(raw.get("sku") or fallback_sku),
+                    "description": str(raw.get("description") or fallback_desc),
+                    "uom": str(raw.get("uom") or "EA"),
+                    "quantity": int(raw.get("quantity", fallback_qty) or fallback_qty),
+                    "erp_price": float(raw.get("erp_price", fallback_erp) or fallback_erp),
+                    "po_price": float(raw.get("po_price", fallback_po) or fallback_po),
+                    "root_cause": raw.get("root_cause"),
+                })
+        if not items:
+            items = [{
+                "line_id": f"{order_id}-{event_line_item}",
+                "sku": fallback_sku,
+                "description": fallback_desc,
+                "uom": "EA",
+                "quantity": fallback_qty,
+                "erp_price": fallback_erp,
+                "po_price": fallback_po,
+            }]
+
+        rd["line_items"] = items
+        conn.execute(
+            "UPDATE exceptions SET resolution_data = ? WHERE id = ?",
+            (_json.dumps(rd), rec_id),
+        )
+        backfilled += 1
+
     now = datetime.now(timezone.utc).isoformat()
     conn.execute(
         "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
@@ -426,7 +473,8 @@ def _apply_sqlite_v008(conn: sqlite3.Connection) -> None:
     )
     conn.commit()
     logger.info(
-        "SQLite schema V008 applied (backfill resolution_data.line_items)",
+        "SQLite schema V008 applied (backfill resolution_data.line_items, "
+        "%d row%s updated)", backfilled, "" if backfilled == 1 else "s",
     )
 
 

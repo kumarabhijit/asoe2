@@ -5,12 +5,19 @@
   "sap_base_price": 100.0,
   "event_type": "EDI_850_LINE_MISMATCH",
   "retailer_id": "R-50",
-  "line_count": 1,
+  "line_count": 4,
+  "sku": "SKU-CANONICAL-001",
   "metadata": {
     "synthetic": true,
     "source": "smoke-e2e",
     "mismatch_sub_type": "SKU_MISMATCH",
     "expected_value": "SKU-CANONICAL-001",
-    "received_value": "SKU-RETAILER-XYZ"
+    "received_value": "SKU-RETAILER-XYZ",
+    "line_items": [
+      { "line_id": "L1", "sku": "SKU-CANONICAL-001", "description": "Snack Bar 48ct",     "uom": "CS", "quantity": 300, "erp_price": 28.44, "po_price": 25.00, "root_cause": "SKU_MISMATCH" },
+      { "line_id": "L2", "sku": "SKU-CANONICAL-002", "description": "Protein Bar 36ct",   "uom": "CS", "quantity": 150, "erp_price": 24.00, "po_price": 21.50, "root_cause": "PROMO_EXPIRED" },
+      { "line_id": "L3", "sku": "SKU-CANONICAL-003", "description": "Granola Bar 60ct",   "uom": "CS", "quantity":  80, "erp_price": 32.00, "po_price": 32.00, "root_cause": "EDI_FORMAT" },
+      { "line_id": "L4", "sku": "SKU-CANONICAL-004", "description": "Kids Bar 24ct",      "uom": "CS", "quantity": 200, "erp_price": 18.00, "po_price": 15.00, "root_cause": "MASTER_DATA" }
+    ]
   }
 }
