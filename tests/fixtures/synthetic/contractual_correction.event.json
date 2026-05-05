@@ -1,13 +1,19 @@
 {
   "order_id": "SMK-CC-001",
   "line_item": 1,
-  "po_price": 90.0,
-  "sap_base_price": 100.0,
+  "po_price": 13.20,
+  "sap_base_price": 14.88,
   "event_type": "EDI_850_PRICE_MISMATCH",
   "retailer_id": "R-01",
-  "line_count": 1,
+  "line_count": 3,
+  "sku": "SKU-0042",
   "metadata": {
     "synthetic": true,
-    "source": "smoke-e2e"
+    "source": "smoke-e2e",
+    "line_items": [
+      { "line_id": "L1", "sku": "SKU-0042", "description": "12-pk Cola",       "uom": "CS", "quantity": 240, "erp_price": 14.88, "po_price": 13.20 },
+      { "line_id": "L2", "sku": "SKU-0043", "description": "12-pk Diet Cola",  "uom": "CS", "quantity": 120, "erp_price": 14.88, "po_price": 13.20 },
+      { "line_id": "L3", "sku": "SKU-0051", "description": "12-pk Zero Sugar", "uom": "CS", "quantity":  96, "erp_price": 14.88, "po_price": 14.90 }
+    ]
   }
 }

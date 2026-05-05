@@ -180,6 +180,60 @@ def _state_to_resolve_response(
     )
 
 
+def _project_line_items(event) -> list[dict]:
+    """Project the inbound event into the runtime ``line_items`` shape.
+
+    See ``_persist_exception`` for the full rationale. Two modes:
+
+      1. ``event.metadata.line_items`` is a non-empty list → one
+         LineItem per entry, with order-level fallbacks for fields
+         the entry omits.
+      2. Otherwise → a single LineItem derived from the event's
+         order-level fields (the V1 per-line event shape).
+
+    The shape returned matches ``api.schemas.LineItem`` so the
+    /line-items endpoint can hand it back unchanged.
+    """
+    metadata = getattr(event, "metadata", None) or {}
+    raw_lines = metadata.get("line_items") if isinstance(metadata, dict) else None
+    order_id = event.order_id
+    fallback_sku = event.sku or order_id
+    fallback_description = event.event_type or "Order line"
+    fallback_qty = int(event.line_count or 1)
+    fallback_erp = float(event.sap_base_price or 0.0)
+    fallback_po = float(event.po_price or 0.0)
+
+    if isinstance(raw_lines, list) and raw_lines:
+        out: list[dict] = []
+        for idx, raw in enumerate(raw_lines, start=1):
+            if not isinstance(raw, dict):
+                continue
+            line_no = raw.get("line_id") or f"{order_id}-{raw.get('line_item', idx)}"
+            out.append({
+                "line_id": str(line_no),
+                "sku": str(raw.get("sku") or fallback_sku),
+                "description": str(raw.get("description") or fallback_description),
+                "uom": str(raw.get("uom") or "EA"),
+                "quantity": int(raw.get("quantity", fallback_qty) or fallback_qty),
+                "erp_price": float(raw.get("erp_price", fallback_erp) or fallback_erp),
+                "po_price": float(raw.get("po_price", fallback_po) or fallback_po),
+                "root_cause": raw.get("root_cause"),
+            })
+        if out:
+            return out
+
+    # Single-line fallback — preserves the V1 per-line event shape.
+    return [{
+        "line_id": f"{order_id}-{event.line_item}",
+        "sku": fallback_sku,
+        "description": fallback_description,
+        "uom": "EA",
+        "quantity": fallback_qty,
+        "erp_price": fallback_erp,
+        "po_price": fallback_po,
+    }]
+
+
 def _persist_exception(
     tenant_id: str, state: GraphState, trace_id: Optional[str],
 ) -> str:
@@ -190,33 +244,38 @@ def _persist_exception(
     # the graph state doesn't leak into the persisted record.
     ctx = dict(state.enrichment_context)
 
-    # Project the inbound event into a single LineItem-shaped row when
-    # the recipe didn't itself populate ``resolution_data.line_items``.
-    # The /api/v1/exceptions/{id}/line-items endpoint reads from this
-    # key; without a projection the UI's "Evidence Detail" pane is
-    # always empty even though the event carries the relevant pricing
-    # / sku / quantity metadata.
+    # Project the inbound event into a list of LineItem-shaped rows
+    # when the recipe didn't itself populate
+    # ``resolution_data.line_items``. The
+    # /api/v1/exceptions/{id}/line-items endpoint reads from this key;
+    # without a projection the UI's "Evidence Detail" pane is always
+    # empty even though the event carries the relevant pricing / sku /
+    # quantity metadata.
     #
-    # Pure projection — the event field shape maps 1:1 to LineItem:
-    #   line_id ← f"{order_id}-{line_item}"
-    #   sku/uom/quantity/erp/po prices ← event fields (with safe
-    #   defaults when the upstream classifier didn't supply them).
-    # Recipes that emit a richer multi-line list (e.g. mass-pricing-
-    # error sweeps) still win — we only fill in when the recipe
-    # output's ``line_items`` is missing or empty.
+    # Two projection modes:
+    #
+    #   1. **Multi-line** — when ``state.event.metadata.line_items`` is
+    #      a non-empty list, project one LineItem per entry. Each entry
+    #      can override any of the LineItem fields (sku, description,
+    #      uom, quantity, erp_price, po_price, root_cause); fields the
+    #      entry omits fall back to the order-level values
+    #      (event.po_price / event.sap_base_price / event.event_type).
+    #      This is how multi-SKU price discrepancies, multi-line
+    #      back-orders, etc. carry per-line evidence into the
+    #      Evidence Detail pane.
+    #
+    #   2. **Single-line fallback** — when the event has no
+    #      ``metadata.line_items``, project one row from the order-
+    #      level fields. Preserves the V1 per-line event shape; the
+    #      operator sees one entry that mirrors the inbound payload.
+    #
+    # Recipes that emit a richer multi-line list still win — we only
+    # fill in when the recipe output's ``line_items`` is missing or
+    # empty.
     raw_outputs = state.execution_log.outputs if state.execution_log else {}
     resolution_data = dict(raw_outputs)
     if not resolution_data.get("line_items"):
-        evt = state.event
-        resolution_data["line_items"] = [{
-            "line_id": f"{evt.order_id}-{evt.line_item}",
-            "sku": evt.sku or evt.order_id,
-            "description": evt.event_type or "Order line",
-            "uom": "EA",
-            "quantity": int(evt.line_count or 1),
-            "erp_price": float(evt.sap_base_price or 0.0),
-            "po_price": float(evt.po_price or 0.0),
-        }]
+        resolution_data["line_items"] = _project_line_items(state.event)
 
     record = exception_store.create(
         tenant_id=tenant_id,

@@ -397,3 +397,206 @@ def test_v008_recorded_in_schema_migrations(adapter):
         )
         row = cur.fetchone()
     assert row is not None
+
+
+# ---------------------------------------------------------------------------
+# Multi-line projection from event.metadata.line_items
+# ---------------------------------------------------------------------------
+
+
+class TestMultiLineProjection:
+    """When the original_event carries a non-empty
+    metadata.line_items list, V008 should expand it into one
+    LineItem per entry — mirroring the runtime projection in
+    api/routes/exceptions.py::_project_line_items.
+    """
+
+    def test_three_line_event_backfills_three_rows(self, adapter):
+        rec_id = _seed_row(
+            adapter,
+            resolution_data={},
+            original_event={
+                "order_id": "PO-MULTI",
+                "line_item": 1,
+                "po_price": 13.20,
+                "sap_base_price": 14.88,
+                "event_type": "EDI_850_PRICE_MISMATCH",
+                "line_count": 3,
+                "metadata": {
+                    "line_items": [
+                        {"line_id": "L1", "sku": "SKU-A", "description": "Alpha", "uom": "CS", "quantity": 240, "erp_price": 14.88, "po_price": 13.20},
+                        {"line_id": "L2", "sku": "SKU-B", "description": "Beta",  "uom": "CS", "quantity": 120, "erp_price": 14.88, "po_price": 13.20},
+                        {"line_id": "L3", "sku": "SKU-C", "description": "Gamma", "uom": "CS", "quantity":  96, "erp_price": 14.88, "po_price": 14.90},
+                    ],
+                },
+            },
+        )
+        _run_migration(adapter)
+
+        rd = _read_resolution_data(adapter, rec_id)
+        items = rd["line_items"]
+        assert len(items) == 3
+        assert [i["line_id"] for i in items] == ["L1", "L2", "L3"]
+        assert [i["sku"] for i in items] == ["SKU-A", "SKU-B", "SKU-C"]
+        assert items[0]["po_price"] == 13.20
+        assert items[2]["po_price"] == 14.90
+
+    def test_per_line_overrides_root_cause(self, adapter):
+        rec_id = _seed_row(
+            adapter,
+            resolution_data={},
+            original_event={
+                "order_id": "PO-RC",
+                "line_item": 1,
+                "po_price": 0.0,
+                "sap_base_price": 0.0,
+                "event_type": "X",
+                "line_count": 2,
+                "metadata": {
+                    "line_items": [
+                        {"line_id": "L1", "sku": "S1", "root_cause": "PROMO_EXPIRED"},
+                        {"line_id": "L2", "sku": "S2", "root_cause": "CONTRACT_GAP"},
+                    ],
+                },
+            },
+        )
+        _run_migration(adapter)
+
+        rd = _read_resolution_data(adapter, rec_id)
+        assert [i["root_cause"] for i in rd["line_items"]] == \
+            ["PROMO_EXPIRED", "CONTRACT_GAP"]
+
+    def test_omitted_per_line_fields_fall_back_to_event(self, adapter):
+        """A multi-line entry that omits sku / uom / quantity / prices
+        should inherit those values from the order-level event fields."""
+        rec_id = _seed_row(
+            adapter,
+            resolution_data={},
+            original_event={
+                "order_id": "PO-FALLBACK",
+                "line_item": 1,
+                "sku": "SKU-DEFAULT",
+                "po_price": 99.0,
+                "sap_base_price": 100.0,
+                "event_type": "FALLBACK_EVENT",
+                "line_count": 5,
+                "metadata": {
+                    "line_items": [
+                        {"line_id": "L1"},  # everything omitted
+                        {"line_id": "L2", "sku": "SKU-EXPLICIT"},
+                    ],
+                },
+            },
+        )
+        _run_migration(adapter)
+
+        rd = _read_resolution_data(adapter, rec_id)
+        items = rd["line_items"]
+        assert items[0]["sku"] == "SKU-DEFAULT"
+        assert items[0]["po_price"] == 99.0
+        assert items[0]["erp_price"] == 100.0
+        assert items[0]["description"] == "FALLBACK_EVENT"
+        assert items[0]["quantity"] == 5
+        assert items[1]["sku"] == "SKU-EXPLICIT"
+        # Non-overridden fields still inherited
+        assert items[1]["po_price"] == 99.0
+
+    def test_empty_metadata_line_items_falls_back_to_single_line(self, adapter):
+        rec_id = _seed_row(
+            adapter,
+            resolution_data={},
+            original_event={
+                "order_id": "PO-EMPTY-META",
+                "line_item": 1,
+                "po_price": 5.0,
+                "sap_base_price": 5.0,
+                "event_type": "X",
+                "line_count": 1,
+                "metadata": {"line_items": []},
+            },
+        )
+        _run_migration(adapter)
+
+        rd = _read_resolution_data(adapter, rec_id)
+        assert len(rd["line_items"]) == 1
+        assert rd["line_items"][0]["line_id"] == "PO-EMPTY-META-1"
+
+
+# ---------------------------------------------------------------------------
+# Runtime projection helper: _project_line_items
+# ---------------------------------------------------------------------------
+
+
+class TestRuntimeProjection:
+    """Direct unit tests for _project_line_items (the runtime path used
+    by _persist_exception). The migration's projection mirrors this
+    helper, so the two paths must produce identical shapes for the
+    same input event."""
+
+    def _event(self, **overrides):
+        from contracts.models import OrderEvent
+        defaults = dict(
+            order_id="PO-RT", line_item=1, po_price=10.0,
+            sap_base_price=10.0, event_type="EVT", line_count=1,
+        )
+        defaults.update(overrides)
+        return OrderEvent(**defaults)
+
+    def test_single_line_event(self):
+        from api.routes.exceptions import _project_line_items
+        items = _project_line_items(self._event())
+        assert len(items) == 1
+        assert items[0]["line_id"] == "PO-RT-1"
+        assert items[0]["po_price"] == 10.0
+
+    def test_multi_line_metadata_expands(self):
+        from api.routes.exceptions import _project_line_items
+        evt = self._event(
+            line_count=3,
+            metadata={
+                "line_items": [
+                    {"line_id": "A", "sku": "S-A", "po_price": 1.0},
+                    {"line_id": "B", "sku": "S-B", "po_price": 2.0},
+                    {"line_id": "C", "sku": "S-C", "po_price": 3.0},
+                ],
+            },
+        )
+        items = _project_line_items(evt)
+        assert [i["line_id"] for i in items] == ["A", "B", "C"]
+        assert [i["po_price"] for i in items] == [1.0, 2.0, 3.0]
+
+    def test_runtime_and_migration_produce_same_shape(self, adapter):
+        """Round-trip equality: project via runtime helper, then
+        project the same event via the migration, and assert the
+        line_items list is identical."""
+        from contracts.models import OrderEvent
+        from api.routes.exceptions import _project_line_items
+        evt_dict = {
+            "order_id": "PO-EQ",
+            "line_item": 1,
+            "po_price": 7.5,
+            "sap_base_price": 8.0,
+            "event_type": "EVT",
+            "line_count": 2,
+            "metadata": {
+                "line_items": [
+                    {"line_id": "X", "sku": "S-X", "quantity": 11},
+                    {"line_id": "Y", "sku": "S-Y", "quantity": 22},
+                ],
+            },
+        }
+        runtime = _project_line_items(OrderEvent(**evt_dict))
+        # Migration path: seed legacy row, run V008, read back.
+        rec_id = _seed_row(
+            adapter,
+            resolution_data={},
+            original_event=evt_dict,
+        )
+        _run_migration(adapter)
+        rd = _read_resolution_data(adapter, rec_id)
+        migrated = rd["line_items"]
+        # Runtime omits the root_cause key by default; migration emits
+        # explicit None. Normalise both sides for comparison.
+        for it in runtime:
+            it.setdefault("root_cause", None)
+        assert runtime == migrated

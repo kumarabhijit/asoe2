@@ -5,7 +5,7 @@
   "sap_base_price": 10.0,
   "event_type": "BACK_ORDER_OOS",
   "retailer_id": "R-70",
-  "line_count": 1,
+  "line_count": 2,
   "sku": "SKU-BO-1",
   "metadata": {
     "synthetic": true,
@@ -13,6 +13,10 @@
     "ordered_qty": 100,
     "available_qty": 75,
     "unit_price": 10.0,
-    "uom": "CS"
+    "uom": "CS",
+    "line_items": [
+      { "line_id": "L1", "sku": "SKU-BO-1",     "description": "24-pk Water",      "uom": "CS", "quantity": 100, "erp_price": 10.00, "po_price": 10.00, "root_cause": "INVENTORY_GAP" },
+      { "line_id": "L2", "sku": "SKU-BO-1-ALT", "description": "24-pk Sparkling",  "uom": "CS", "quantity":  60, "erp_price": 10.20, "po_price": 10.20, "root_cause": "INVENTORY_GAP" }
+    ]
   }
 }
