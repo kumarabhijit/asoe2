@@ -1,0 +1,62 @@
+# Deployed-API smoke E2E (manual trigger).
+#
+# Wraps scripts/smoke-e2e.sh — the deterministic-pipeline check
+# that drives every fixture under tests/fixtures/synthetic/
+# through POST /api/v1/exceptions/resolve on a live deployment
+# and asserts intent / recipe / shadow_verdict / final_status
+# against the .expected.json sidecars.
+#
+# Why workflow_dispatch only:
+#   * Needs a deployed API URL (Azure Container Apps pre-prod by
+#     default). PR builds don't have one and shouldn't deploy.
+#   * Synthetic-fixture *shape* is already enforced offline by
+#     tests/test_synthetic_fixtures_shape.py inside Tests workflow,
+#     so PRs are still protected from the most common breakage
+#     (fixture drift vs. recipe / intent enums).
+#
+# Run from the Actions UI; pass api_url + user_email if you need
+# to target a non-default environment.
+name: Smoke E2E (deployed)
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: 'Base URL of the deployed asoe2 API (no trailing slash).'
+        required: false
+        default: 'https://asoepreprodapi.orangerock-0b3a1691.centralus.azurecontainerapps.io'
+      user_email:
+        description: 'Seeded user to log in as.'
+        required: false
+        default: 'jane@acme.com'
+      stop_on_fail:
+        description: 'Set to 1 to abort on first failing fixture.'
+        required: false
+        default: '0'
+
+jobs:
+  smoke:
+    name: smoke-e2e against ${{ github.event.inputs.api_url }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install jq + curl
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends jq curl
+
+      - name: Setup Python (for uuid + dict diff helpers in smoke-e2e.sh)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run smoke E2E
+        env:
+          API_URL: ${{ github.event.inputs.api_url }}
+          USER_EMAIL: ${{ github.event.inputs.user_email }}
+          USER_PASSWORD: smoke-e2e
+          STOP_ON_FAIL: ${{ github.event.inputs.stop_on_fail }}
+        run: bash scripts/smoke-e2e.sh

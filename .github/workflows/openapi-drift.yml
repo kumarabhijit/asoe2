@@ -1,0 +1,74 @@
+# OpenAPI contract drift gate.
+#
+# scripts/export_openapi.py docstring (Phase 2 #9) is explicit:
+# "a CI job in each repo regenerates the artifact and fails if the
+# checked-in copy is stale." asoe-ui consumes
+# openapi/asoe2.openapi.json via openapi-typescript, so drift is a
+# cross-repo contract break that surfaces only at UI build time —
+# too late.
+#
+# This job regenerates the schema from the live FastAPI app and
+# diffs it against the committed artifact. A non-empty diff fails
+# the build with a clear instruction to re-run the exporter.
+name: OpenAPI Drift
+
+on:
+  pull_request:
+    paths:
+      - 'api/**'
+      - 'contracts/**'
+      - 'constraints/**'
+      - 'compliance/**'
+      - 'recipes/**'
+      - 'gateways/**'
+      - 'workflows/**'
+      - 'orchestration/**'
+      - 'observability/**'
+      - 'hardening/**'
+      - 'llm/**'
+      - 'db/**'
+      - 'openapi/**'
+      - 'scripts/export_openapi.py'
+      - 'pyproject.toml'
+      - '.github/workflows/openapi-drift.yml'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: openapi-drift-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drift:
+    name: openapi/asoe2.openapi.json is fresh
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Install package + dev extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Apply pydantic 3.14 typing patch
+        run: bash scripts/apply-patches.sh python
+
+      - name: Regenerate OpenAPI schema
+        run: python scripts/export_openapi.py
+
+      - name: Diff against committed artifact
+        run: |
+          if ! git diff --exit-code -- openapi/asoe2.openapi.json; then
+            echo "::error::openapi/asoe2.openapi.json is stale."
+            echo "Run 'python scripts/export_openapi.py' locally,"
+            echo "commit the regenerated file, and push again."
+            exit 1
+          fi
