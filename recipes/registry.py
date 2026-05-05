@@ -303,14 +303,56 @@ REGISTRY = {
             "threshold_review_band_low", "threshold_auto_correct",
         ),
         allowed_intents=("EMAIL_ORDER_ENTRY",),
-        # ADR-034 Phase A: gateway dependencies are *declared* in the ADR
-        # (sender_auth, customer_resolver, duplicate_po_pre_check, credit_check
-        # — required_for_audit=True; document_extractor, pricing_variance,
-        # atp_check, delivery_feasibility — required_for_audit=False) but
-        # not registered here yet. Phase B ships the stubs + registrations
-        # together so resolve_dependencies has something to call. Until then,
-        # the recipe consumes its floor inputs from event.metadata, exactly
-        # like DuplicatePORecipe consumes signal_scores from metadata.
+        # ADR-034 Phase B: the four "non-disable-able floor" checks each
+        # land as a `required_for_audit=True` GatewayDependency on the
+        # `email_intake` gateway. The recipe still consumes its primary
+        # inputs from `event.metadata.non_disableable_floor` (mirrors how
+        # DuplicatePO consumes signal_scores from metadata) — gateway
+        # results populate `state.enrichment_context` as PARALLEL audit
+        # evidence. The adapter prefers the gateway response when present
+        # and falls back to the metadata floor booleans defensively.
+        #
+        # Phase B.x will add the 4 expensive checks (document_extract,
+        # pricing_variance, atp_check, delivery_feasibility) once the
+        # corresponding adapter rows land in the audit-bearing registry.
+        dependencies=(
+            GatewayDependency(
+                gateway_name="email_intake",
+                operation="sender_auth",
+                params_from_state={
+                    "order_id": "event.order_id",
+                    "customer_id": "event.retailer_id",
+                },
+                result_key="sender_auth_context",
+            ),
+            GatewayDependency(
+                gateway_name="email_intake",
+                operation="resolve_customer",
+                params_from_state={
+                    "order_id": "event.order_id",
+                    "customer_id": "event.retailer_id",
+                },
+                result_key="customer_resolution_context",
+            ),
+            GatewayDependency(
+                gateway_name="email_intake",
+                operation="duplicate_po_pre_check",
+                params_from_state={
+                    "order_id": "event.order_id",
+                    "customer_id": "event.retailer_id",
+                },
+                result_key="duplicate_po_pre_check_context",
+            ),
+            GatewayDependency(
+                gateway_name="email_intake",
+                operation="credit_check",
+                params_from_state={
+                    "order_id": "event.order_id",
+                    "customer_id": "event.retailer_id",
+                },
+                result_key="credit_check_context",
+            ),
+        ),
         expected_metadata_keys=(
             "composite_confidence",
             "non_disableable_floor",

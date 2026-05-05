@@ -40,6 +40,8 @@ from api.schemas import (
     DeliveryDelayAnalysisData,
     DuplicateDetectionData,
     EdiMismatchAnalysisData,
+    EmailOrderEntryAnalysisData,
+    EmailOrderEntryFloorStatus,
     InboundOrder,
     MOQAnalysisData,
     OrderComparisonData,
@@ -68,6 +70,10 @@ from contracts.policy import (
     DUPLICATE_PO_THRESHOLD_REVIEW_REQUIRED,
     DUPLICATE_PO_THRESHOLD_SOFT_FLAG,
     EDI_MISMATCH_AUTONOMY_LEVELS,
+    EMAIL_ORDER_AUTO_APPROVE_CONFIDENCE,
+    EMAIL_ORDER_AUTO_CORRECT_CONFIDENCE,
+    EMAIL_ORDER_ENTRY_AUTONOMY_LEVELS,
+    EMAIL_ORDER_REVIEW_BAND_LOW,
     MOQ_SEVERE_SHORTFALL_PCT,
     MOQ_UPLIFT_REVIEW_PCT,
     OVER_MAX_SEVERE_EXCEEDANCE_PCT,
@@ -80,6 +86,10 @@ from recipes.BackOrderResolutionRecipe import resolve_back_order
 from recipes.DeliveryDelayResolutionRecipe import resolve_delivery_delay
 from recipes.DuplicatePORecipe import detect_duplicate_po
 from recipes.EdiMismatchRecipe import detect_edi_mismatch
+from recipes.EmailOrderEntryRecipe import (
+    FLOOR_KEYS as _EMAIL_ORDER_FLOOR_KEYS,
+    classify_email_order_entry,
+)
 from recipes.MOQRoundUpRecipe import round_up_moq
 from recipes.OverMaxTrimRecipe import trim_over_max
 from recipes.PalletAlignmentRecipe import align_pallets
@@ -1222,6 +1232,166 @@ def adapt_back_order(record: ExceptionRecord) -> Optional[BackOrderAnalysisData]
         return None
 
 
+# --------------------------------------------------------------------------
+# EmailOrderEntryRecipe → email_order_entry_analysis (ADR-034 Phase B)
+# --------------------------------------------------------------------------
+
+
+def _floor_status_from_record(
+    record: ExceptionRecord,
+) -> EmailOrderEntryFloorStatus:
+    """Project the four "non-disable-able floor" booleans into the
+    typed Pydantic model.
+
+    Source priority (Pillar 1):
+      1. `record.enrichment_context.{<gateway_response_key>}.<flag>` —
+         the email_intake gateway's authoritative response.
+      2. `record.original_event.metadata.non_disableable_floor.<flag>`
+         — defensive fallback when the gateway response is empty (e.g.
+         direct-recipe-call paths in unit tests, or a soft gateway
+         failure handled upstream).
+      3. False — conservative default if neither source is present.
+
+    Each flag has a corresponding gateway operation; the mapping is
+    declared on the recipe spec in `recipes/registry.py`.
+    """
+    enrichment = record.enrichment_context or {}
+    metadata = (record.original_event or {}).get("metadata") or {}
+    fallback = metadata.get("non_disableable_floor") or {}
+    if not isinstance(fallback, dict):
+        fallback = {}
+
+    def _resolve(gateway_key: str, flag_key: str, fallback_key: str) -> bool:
+        gw = enrichment.get(gateway_key)
+        if isinstance(gw, dict) and flag_key in gw:
+            return bool(gw.get(flag_key))
+        return bool(fallback.get(fallback_key, False))
+
+    return EmailOrderEntryFloorStatus(
+        sender_authorized=_resolve(
+            "sender_auth_context", "sender_authorized", "sender_authorized",
+        ),
+        customer_resolved=_resolve(
+            "customer_resolution_context", "customer_resolved", "customer_resolved",
+        ),
+        duplicate_po_clear=_resolve(
+            "duplicate_po_pre_check_context", "duplicate_po_clear", "duplicate_po_clear",
+        ),
+        credit_clear=_resolve(
+            "credit_check_context", "credit_clear", "credit_clear",
+        ),
+    )
+
+
+def _eoe_from_outputs(
+    outputs: Dict[str, Any], floor_status: EmailOrderEntryFloorStatus,
+) -> Optional[EmailOrderEntryAnalysisData]:
+    classification = outputs.get("classification")
+    autonomy_level = outputs.get("autonomy_level")
+    if classification is None or autonomy_level is None:
+        return None
+    failures = outputs.get("validation_failures") or []
+    if not isinstance(failures, list):
+        failures = []
+    breaches = outputs.get("floor_breaches") or []
+    if not isinstance(breaches, list):
+        breaches = []
+    try:
+        return EmailOrderEntryAnalysisData(
+            composite_confidence=float(outputs.get("composite_confidence") or 0.0),
+            classification=classification,
+            recommended_action=str(outputs.get("recommended_action", "")),
+            autonomy_level=autonomy_level,
+            validation_failures=[str(f) for f in failures],
+            floor_breaches=[str(b) for b in breaches],
+            reject_reason_code=outputs.get("reject_reason_code"),
+            floor_status=floor_status,
+            notification_template=outputs.get("notification_template"),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def adapt_email_order_entry(
+    record: ExceptionRecord,
+) -> Optional[EmailOrderEntryAnalysisData]:
+    """Project an EmailOrderEntryRecipe resolution into
+    EmailOrderEntryAnalysisData (ADR-034 Phase B).
+
+    Three-path structure mirroring `adapt_edi_mismatch`:
+      1. Recipe output present (GREEN path): project directly.
+      2. Shadow-gated (YELLOW/RED): synthesise the recipe call from
+         event metadata so the operator still sees the agent's
+         analysis on the audit-bearing surface.
+      3. Routing/structural error: recipe returns None / FAILED →
+         adapter returns None and the composer routes to
+         AUDIT_CONTEXT_MISSING per Pillar 2.
+
+    Floor evidence (the four non-disable-able booleans) is sourced
+    from `record.enrichment_context.{sender_auth_context,
+    customer_resolution_context, duplicate_po_pre_check_context,
+    credit_check_context}` — the email_intake gateway responses
+    declared on the recipe spec — and falls back to
+    `event.metadata.non_disableable_floor` defensively.
+    """
+    floor_status = _floor_status_from_record(record)
+    outputs = record.resolution_data or {}
+    event = record.original_event or {}
+    status = outputs.get("status")
+
+    if status and status != "FAILED":
+        projection = _eoe_from_outputs(outputs, floor_status)
+        if projection is not None:
+            return projection
+
+    # Synthetic call on the shadow-gated path. We hand the recipe the
+    # exact same inputs validate_types.py would have if shadow had
+    # returned GREEN — sourced from event.metadata so we don't need
+    # the recipe to have actually run.
+    metadata = event.get("metadata") or {}
+    floor_meta = metadata.get("non_disableable_floor") or {}
+    if not isinstance(floor_meta, dict):
+        floor_meta = {}
+    # Prefer gateway-resolved floor booleans on the synthetic path too —
+    # the recipe consumes whatever the orchestration layer would have
+    # passed it, which prefers gateway over metadata.
+    synthetic_floor: Dict[str, bool] = {}
+    enrichment = record.enrichment_context or {}
+    gw_keys = (
+        ("sender_auth_context", "sender_authorized", "sender_authorized"),
+        ("customer_resolution_context", "customer_resolved", "customer_resolved"),
+        ("duplicate_po_pre_check_context", "duplicate_po_clear", "duplicate_po_clear"),
+        ("credit_check_context", "credit_clear", "credit_clear"),
+    )
+    for gw_key, flag, recipe_key in gw_keys:
+        gw = enrichment.get(gw_key)
+        if isinstance(gw, dict) and flag in gw:
+            synthetic_floor[recipe_key] = bool(gw.get(flag))
+        elif recipe_key in floor_meta:
+            synthetic_floor[recipe_key] = bool(floor_meta.get(recipe_key, False))
+    failures = metadata.get("validation_failures") or []
+    if not isinstance(failures, list):
+        failures = []
+    try:
+        synthetic = classify_email_order_entry(
+            order_id=str(event.get("order_id", "")),
+            customer_id=str(event.get("retailer_id") or ""),
+            composite_confidence=float(metadata.get("composite_confidence") or 0.0),
+            validation_failures=[str(f) for f in failures],
+            non_disableable_floor=synthetic_floor,
+            autonomy_levels=EMAIL_ORDER_ENTRY_AUTONOMY_LEVELS,
+            threshold_auto_approve=EMAIL_ORDER_AUTO_APPROVE_CONFIDENCE,
+            threshold_review_band_low=EMAIL_ORDER_REVIEW_BAND_LOW,
+            threshold_auto_correct=EMAIL_ORDER_AUTO_CORRECT_CONFIDENCE,
+            reject_reason_code=metadata.get("reject_reason_code"),
+        )
+    except (TypeError, ValueError):
+        return None
+    if synthetic.get("status") == "FAILED":
+        return None
+    return _eoe_from_outputs(synthetic, floor_status)
+
+
 # Recipe-name → (target field on AnalysisResponse, adapter function).
 #
 # The endpoint looks up by `record.selected_recipe`. Absent recipe name
@@ -1242,6 +1412,9 @@ ANALYSIS_ADAPTERS: Dict[
     "DuplicatePORecipe.py": ("duplicate_detection", adapt_duplicate),
     "BackOrderResolutionRecipe.py": ("backorder_analysis", adapt_back_order),
     "PriceAdjustmentRecipe.py": ("price_analysis", adapt_price),
+    "EmailOrderEntryRecipe.py": (
+        "email_order_entry_analysis", adapt_email_order_entry,
+    ),
 }
 
 
@@ -1276,6 +1449,7 @@ INTENT_TO_RECIPE_NAME: Dict[str, str] = {
     "DUPLICATE_PO": "DuplicatePORecipe.py",
     "BACK_ORDER": "BackOrderResolutionRecipe.py",
     "CONTRACTUAL_CORRECTION": "PriceAdjustmentRecipe.py",
+    "EMAIL_ORDER_ENTRY": "EmailOrderEntryRecipe.py",
 }
 
 

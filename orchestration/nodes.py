@@ -662,13 +662,30 @@ def validate_types(state: GraphState) -> GraphState:
             },
         )
     elif state.selected_recipe == "EmailOrderEntryRecipe.py":
-        # ADR-034 Phase A — gateway dependencies are deferred to Phase B.
-        # Floor inputs come straight from event.metadata, mirroring how
-        # DuplicatePORecipe pulls signal_scores from metadata.
+        # ADR-034 Phase B — the email_intake gateway resolves the four
+        # non-disable-able floor checks (sender_auth, resolve_customer,
+        # duplicate_po_pre_check, credit_check) into enrichment_context
+        # BEFORE shadow_audit (ADR-025). Prefer the gateway response;
+        # fall back to event.metadata.non_disableable_floor when a
+        # gateway response is empty (e.g. a soft gateway failure that
+        # left an empty dict per resolve_dependencies' soft-fail path).
         meta = state.event.metadata
-        floor = meta.get("non_disableable_floor") or {}
-        if not isinstance(floor, dict):
-            floor = {}
+        floor_meta = meta.get("non_disableable_floor") or {}
+        if not isinstance(floor_meta, dict):
+            floor_meta = {}
+        enrichment = state.enrichment_context
+        gateway_floor: dict[str, bool] = {}
+        for gw_key, flag, recipe_key in (
+            ("sender_auth_context", "sender_authorized", "sender_authorized"),
+            ("customer_resolution_context", "customer_resolved", "customer_resolved"),
+            ("duplicate_po_pre_check_context", "duplicate_po_clear", "duplicate_po_clear"),
+            ("credit_check_context", "credit_clear", "credit_clear"),
+        ):
+            gw = enrichment.get(gw_key)
+            if isinstance(gw, dict) and flag in gw:
+                gateway_floor[recipe_key] = bool(gw.get(flag))
+            elif recipe_key in floor_meta:
+                gateway_floor[recipe_key] = bool(floor_meta.get(recipe_key, False))
         failures = meta.get("validation_failures") or []
         if not isinstance(failures, list):
             failures = []
@@ -679,7 +696,7 @@ def validate_types(state: GraphState) -> GraphState:
                 "customer_id": state.event.retailer_id or "",
                 "composite_confidence": float(meta.get("composite_confidence") or 0.0),
                 "validation_failures": failures,
-                "non_disableable_floor": floor,
+                "non_disableable_floor": gateway_floor,
                 "autonomy_levels": EMAIL_ORDER_ENTRY_AUTONOMY_LEVELS,
                 "threshold_auto_approve": EMAIL_ORDER_AUTO_APPROVE_CONFIDENCE,
                 "threshold_review_band_low": EMAIL_ORDER_REVIEW_BAND_LOW,

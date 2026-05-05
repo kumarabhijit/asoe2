@@ -287,6 +287,63 @@ def _register_oms_stub():
             ),
         },
     )
+    # ADR-034 Phase B: email_intake gateway carries the four
+    # non-disable-able floor checks for EmailOrderEntryRecipe.
+    # All four operations are required_for_audit=True; their results
+    # populate enrichment_context.{sender_auth_context,
+    # customer_resolution_context, duplicate_po_pre_check_context,
+    # credit_check_context} which `adapt_email_order_entry` projects
+    # into `EmailOrderEntryAnalysisData.floor_status`.
+    email_intake_stub = StubGateway(
+        "email_intake",
+        responses={
+            "sender_auth": GatewayResponse(
+                gateway_name="email_intake",
+                operation="sender_auth",
+                status="SUCCESS",
+                data={
+                    "sender_authorized": True,
+                    "auth_method": "domain_match",
+                    "auth_evidence": {
+                        "from_domain": "stub-customer.example",
+                        "matched_against": "customer_master.allowed_domains",
+                    },
+                },
+            ),
+            "resolve_customer": GatewayResponse(
+                gateway_name="email_intake",
+                operation="resolve_customer",
+                status="SUCCESS",
+                data={
+                    "customer_resolved": True,
+                    "match_method": "domain",
+                    "match_confidence": 0.97,
+                    "customer_name": "Stub Customer Inc",
+                },
+            ),
+            "duplicate_po_pre_check": GatewayResponse(
+                gateway_name="email_intake",
+                operation="duplicate_po_pre_check",
+                status="SUCCESS",
+                data={
+                    "duplicate_po_clear": True,
+                    "matched_po_id": None,
+                    "match_score": 0.0,
+                },
+            ),
+            "credit_check": GatewayResponse(
+                gateway_name="email_intake",
+                operation="credit_check",
+                status="SUCCESS",
+                data={
+                    "credit_clear": True,
+                    "credit_limit": 100_000.0,
+                    "current_exposure": 25_000.0,
+                    "headroom": 75_000.0,
+                },
+            ),
+        },
+    )
     register_gateway(oms_stub)
     register_gateway(notification_stub)
     register_gateway(sap_doc_stub)
@@ -295,6 +352,7 @@ def _register_oms_stub():
     register_gateway(sap_block_stub)
     register_gateway(sap_customer_master_stub)
     register_gateway(sla_contract_stub)
+    register_gateway(email_intake_stub)
     # ADR-029: tenant_config is registered as the real file-backed
     # gateway (not a stub) — it's pure in-process I/O against
     # gateways/configs/duplicate_po/defaults.json, so graph tests

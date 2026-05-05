@@ -215,12 +215,33 @@ class TestEmailOrderEntrySpec:
         with pytest.raises((AttributeError, TypeError)):
             self.spec.name = "tampered"  # type: ignore[misc]
 
-    def test_phase_a_has_no_gateway_dependencies(self):
-        # ADR-034 Phase A: gateway dependencies are deferred to Phase B
-        # (stubs land alongside the gateway registrations).
-        assert self.spec.dependencies == ()
+    def test_gateway_dependencies_declared(self):
+        # ADR-034 Phase B: four `email_intake` operations land as
+        # required_for_audit=True dependencies — sender_auth,
+        # resolve_customer, duplicate_po_pre_check, credit_check.
+        # Each populates a distinct enrichment_context key consumed by
+        # adapt_email_order_entry.
+        assert len(self.spec.dependencies) == 4
+        gateways = {d.gateway_name for d in self.spec.dependencies}
+        assert gateways == {"email_intake"}
+        ops = {d.operation for d in self.spec.dependencies}
+        assert ops == {
+            "sender_auth", "resolve_customer",
+            "duplicate_po_pre_check", "credit_check",
+        }
+        for dep in self.spec.dependencies:
+            assert dep.required_for_audit is True
+        result_keys = {d.result_key for d in self.spec.dependencies}
+        assert result_keys == {
+            "sender_auth_context", "customer_resolution_context",
+            "duplicate_po_pre_check_context", "credit_check_context",
+        }
 
-    def test_phase_a_has_no_effects(self):
+    def test_no_effects(self):
+        # No gateway side effects in Phase B — REQUEST_CLARIFICATION /
+        # ESCALATE / REJECT actions don't trigger automated buyer
+        # notifications today (deferred to a downstream notification
+        # surface; not in scope for this skill's recipe).
         assert self.spec.effects == ()
 
     def test_expected_metadata_keys_declared(self):

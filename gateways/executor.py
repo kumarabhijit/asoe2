@@ -18,9 +18,20 @@ class GatewayExecutor:
 
     A shared thread pool is reused across calls to avoid OS-level
     thread create/destroy overhead per gateway invocation.
+
+    Sizing note: ``orchestration.nodes.resolve_dependencies`` fans out
+    GatewayDependency calls by submitting to this same ``_pool`` AND
+    each ``run()`` here also submits to ``_pool`` to enforce the
+    per-call timeout. With N dependencies the worst case is N outer
+    + N inner tasks competing for the pool — classic recursive-submit
+    deadlock when ``max_workers <= N``. The pool is sized at 16 so
+    recipes with up to ~7 declared dependencies stay safely above the
+    deadlock floor (current max is EmailOrderEntryRecipe at 4). If a
+    future recipe needs more, the right fix is to give the outer
+    fan-out its own pool — not to keep bumping this constant.
     """
 
-    _pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+    _pool = concurrent.futures.ThreadPoolExecutor(max_workers=16)
 
     def run(self, request: GatewayRequest) -> GatewayResponse:
         start = time.monotonic()
