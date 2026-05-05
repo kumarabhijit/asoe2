@@ -348,6 +348,88 @@ def _apply_sqlite_v007(conn: sqlite3.Connection) -> None:
     )
 
 
+def _apply_sqlite_v008(conn: sqlite3.Connection) -> None:
+    """V008 — Backfill resolution_data.line_items for legacy exception rows.
+
+    Mirrors V008__backfill_line_items.sql. SQLite stores resolution_data
+    and original_event as TEXT (JSON-stringified); we use json_extract /
+    json_set / json_object / json_array to project a single LineItem
+    row from each record's original_event when line_items is missing.
+
+    Idempotent: re-runs are no-ops thanks to the WHERE-clause check.
+
+    V007 trigger compatibility: pre-V007 DUPLICATE_PO rows that lack
+    the four audit-bearing keys would trip the trigger and abort the
+    migration. The WHERE clause excludes them; they are pre-existing
+    non-compliant data and out of scope here.
+    """
+    # The CASE expression in the WHERE clause filters rows where
+    # line_items is missing or empty. SQLite's json_array_length on a
+    # NULL or non-array yields NULL, which compares as not-equal to 0
+    # — coerce both sides through COALESCE to normalise.
+    conn.execute(
+        """
+        UPDATE exceptions
+        SET resolution_data = json_set(
+            COALESCE(resolution_data, '{}'),
+            '$.line_items',
+            json_array(json_object(
+                'line_id',
+                    COALESCE(json_extract(original_event, '$.order_id'), '')
+                    || '-'
+                    || COALESCE(json_extract(original_event, '$.line_item'), 1),
+                'sku',
+                    COALESCE(
+                        NULLIF(json_extract(original_event, '$.sku'), ''),
+                        json_extract(original_event, '$.order_id'),
+                        ''
+                    ),
+                'description',
+                    COALESCE(
+                        NULLIF(json_extract(original_event, '$.event_type'), ''),
+                        'Order line'
+                    ),
+                'uom', 'EA',
+                'quantity',
+                    COALESCE(json_extract(original_event, '$.line_count'), 1),
+                'erp_price',
+                    COALESCE(json_extract(original_event, '$.sap_base_price'), 0.0),
+                'po_price',
+                    COALESCE(json_extract(original_event, '$.po_price'), 0.0)
+            ))
+        )
+        WHERE original_event IS NOT NULL
+          AND (
+              resolution_data IS NULL
+              OR json_extract(resolution_data, '$.line_items') IS NULL
+              OR json_type(resolution_data, '$.line_items') != 'array'
+              OR json_array_length(resolution_data, '$.line_items') = 0
+          )
+          -- V007 trigger compatibility: skip pre-V007 DUPLICATE_PO
+          -- rows that lack the four audit-bearing keys.
+          AND (
+              intent != 'DUPLICATE_PO'
+              OR final_status IS NULL
+              OR (
+                  json_extract(resolution_data, '$.signal_breakdown') IS NOT NULL
+                  AND json_extract(resolution_data, '$.composite_score') IS NOT NULL
+                  AND json_extract(resolution_data, '$.classification') IS NOT NULL
+                  AND json_extract(resolution_data, '$.recommended_action') IS NOT NULL
+              )
+          )
+        """
+    )
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+        ("V008", now),
+    )
+    conn.commit()
+    logger.info(
+        "SQLite schema V008 applied (backfill resolution_data.line_items)",
+    )
+
+
 def apply_sqlite(conn: sqlite3.Connection) -> None:
     """Apply the SQLite-compatible schema (V001 + subsequent migrations)."""
     conn.executescript(_SQLITE_SCHEMA)
@@ -371,6 +453,7 @@ def apply_sqlite(conn: sqlite3.Connection) -> None:
     conn.commit()
     _apply_sqlite_v006(conn)
     _apply_sqlite_v007(conn)
+    _apply_sqlite_v008(conn)
 
 
 def apply_postgres(database_url: str) -> None:
@@ -428,6 +511,7 @@ def apply_postgres(database_url: str) -> None:
             ("V005", "V005__drop_intent_check.sql", "PostgreSQL schema V005 applied (dropped intent CHECK)"),
             ("V006", "V006__tenant_config.sql", "PostgreSQL schema V006 applied (tenant_config table)"),
             ("V007", "V007__duplicate_po_metadata_contract.sql", "PostgreSQL schema V007 applied (DUPLICATE_PO metadata-contract trigger)"),
+            ("V008", "V008__backfill_line_items.sql", "PostgreSQL schema V008 applied (backfilled resolution_data.line_items for legacy rows)"),
         ):
             cur.execute(
                 "SELECT version FROM schema_migrations WHERE version = %s",
