@@ -18,8 +18,6 @@ build/
 venv/
 .env
 .env.*
-tests/sandbox/sandbox.db
-tests/sandbox/db/*.db
 *.log
 .DS_Store
 k8s/
@@ -27,7 +25,30 @@ infra/
 docs/
 .github/
 .claude/
-tests/
+
+# Test tree handling.
+#
+# Dockerfile.api / Dockerfile.core never COPY anything under tests/,
+# so excluding it shrinks their build context. Dockerfile.ui and
+# Dockerfile.inference, however, intentionally COPY tests/sandbox/
+# as application code:
+#   * Dockerfile.ui     — Streamlit sandbox UI lives at
+#                          tests/sandbox/ui/app.py.
+#   * Dockerfile.inference — imports from tests/sandbox/llm/.
+#
+# A blanket `tests/` exclusion (the old rule) made those two
+# Dockerfiles fail at COPY time with
+# "/tests/sandbox": not found, so we instead exclude only the unit
+# / sandbox test code and re-include the sandbox application
+# subdirectories. Order matters: later rules win, so the runtime
+# DB exclusions are placed last.
+tests/**
+!tests/__init__.py
+!tests/sandbox
+!tests/sandbox/**
+tests/sandbox/sandbox.db
+tests/sandbox/db/*.db
+
 # Top-level markdown docs (skills/*_SKILL.md, prompts/*.md, and
 # compliance/*.md are kept — they live inside dirs that are explicitly
 # COPYed and are read at runtime).
