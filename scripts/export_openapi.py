@@ -15,9 +15,22 @@ Output:
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
-from api.app import create_app
+# Pin ASOE_ENV=sandbox *before* importing api.app. The sandbox-only
+# routes (/api/v1/_sandbox/*) and their request models
+# (SeedFinancialImpactRequest, TenantResetRequest, …) only register
+# in sandbox mode — but they are part of the contract asoe-ui's
+# Playwright suite and scripts/smoke-e2e.sh consume, so the exported
+# schema must include them. Without this pin a contributor running
+# the exporter on a host without ASOE_ENV set would silently produce
+# a smaller artifact (production-only surface) and the drift gate
+# would flap. Set it explicitly here, not at the call site, so the
+# artifact is reproducible regardless of who runs the script.
+os.environ.setdefault("ASOE_ENV", "sandbox")
+
+from api.app import create_app  # noqa: E402  — must follow ASOE_ENV pin
 
 
 def export() -> None:
