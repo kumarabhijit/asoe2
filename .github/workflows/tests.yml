@@ -26,6 +26,16 @@
 # installed: they are sandbox-runtime deps for constrained
 # generation, not test deps. The dev extra in pyproject.toml is
 # sufficient for the entire test tree.
+#
+# Important: do NOT export ASOE_ENV at the workflow `env:` level.
+# api/deps.py resolves ACCESS_TOKEN_EXPIRE_SECONDS /
+# REFRESH_TOKEN_EXPIRE_SECONDS at *module import* (production
+# defaults: 60 min / 7 days; sandbox: 24 h / 30 days), and several
+# tests (notably tests/test_security.py::TestTokenExpiry) assert
+# the production-default 7-day refresh TTL. tests/conftest.py
+# deliberately sets ASOE_ENV=sandbox per-test via monkeypatch
+# *after* import, so runtime gets sandbox behaviour while the
+# import-time constants stay at production defaults.
 name: Tests
 
 on:
@@ -76,9 +86,4 @@ jobs:
         run: bash scripts/apply-patches.sh python
 
       - name: Run pytest
-        env:
-          # conftest.py auto-pins ASOE_ENV=sandbox unless already
-          # set. Make it explicit here so the value is visible in
-          # the CI log when something flakes.
-          ASOE_ENV: sandbox
         run: pytest -q tests/
