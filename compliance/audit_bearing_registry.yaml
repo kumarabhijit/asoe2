@@ -110,6 +110,70 @@ PriceHoldAnalysisData:
     source: derived
     rationale: Human-readable; regenerable from variance + thresholds.
 
+EmailSourceData:
+  # ADR-034 Phase G — email source-of-truth substrate the operator
+  # consumes when authorising an email-channel order. Sourced from
+  # the email_intake/fetch_message gateway response (gateway-backed,
+  # required_for_audit=True) via enrichment_context.email_source_context.
+  # Pillar 1: present on every email-channel record regardless of
+  # shadow verdict (gateway READS run before shadow_audit per ADR-025).
+  from_address:
+    tier: audit-bearing
+    source: control
+    gateway_dependency: true
+    rationale: >-
+      Sender of the inbound email. Substrate of the sender_authorized
+      floor check; the operator must see the address the floor check
+      was applied to.
+  received_at:
+    tier: audit-bearing
+    source: control
+    gateway_dependency: true
+    rationale: >-
+      ISO-8601 receipt timestamp. Substrate for SLA-deadline
+      derivation downstream and for the audit trail's chronology.
+  subject:
+    tier: audit-bearing
+    source: control
+    gateway_dependency: true
+    rationale: >-
+      Email subject line. Reviewer cannot triage whether the
+      extracted PO matches the buyer's stated intent without seeing
+      the subject the agent acted on.
+  body_hash:
+    tier: audit-bearing
+    source: control
+    gateway_dependency: true
+    rationale: >-
+      SHA-256 of the canonicalised email body. Lets the audit trail
+      detect post-hoc tampering of the inbound payload without
+      storing PII-shaped body content in the registry.
+  attachment_manifest:
+    tier: audit-bearing
+    source: control
+    gateway_dependency: true
+    rationale: >-
+      List of (name, mime_type, bytes) for every attachment the
+      extraction pipeline saw. Reviewer authorising a multi-attachment
+      PO needs the manifest to confirm scope.
+  body_excerpt:
+    tier: contextual
+    source: derived
+    rationale: >-
+      Optional human-readable excerpt of the email body — typically
+      the first 240 chars after canonicalisation. Decorative when
+      absent (redaction policy may strip PII or the body may be
+      unavailable); the audit trail reads from `body_hash`.
+  source_email_id:
+    tier: contextual
+    source: control
+    rationale: >-
+      Optional Inbox correlation id (ADR-034 Phase G — bidirectional
+      deep-link between /inbox NEW_ORDER rows and /exceptions/{id}).
+      Decorative: when absent, the inline EmailSourceSection on the
+      detail page is the primary surface; when present, the detail
+      page surfaces a "View source email" back-link.
+
 EmailOrderEntryAnalysisData:
   # ADR-034 Phase B — email-channel order intake. Floor evidence
   # (sender_authorized / customer_resolved / duplicate_po_clear /
@@ -1067,9 +1131,16 @@ summary:
   # legitimately-empty lists treated as absent by the composer's
   # `_populated` rule, audit story carried by floor_status +
   # classification; notification_template — downstream email plumbing).
-  total_fields: 152
-  audit_bearing: 114
+  # 2026-05-06: +7 rows for EmailSourceData (ADR-034 Phase G —
+  # PO-driven IA correction; email source-of-truth substrate on the
+  # Exception Queue detail page). 5 audit-bearing (from_address,
+  # received_at, subject, body_hash, attachment_manifest), 2 contextual
+  # (body_excerpt — decorative; audit trail reads body_hash;
+  # source_email_id — Inbox correlation id for the bidirectional
+  # deep-link).
+  total_fields: 159
+  audit_bearing: 119
   conditional: 7
-  contextual: 31
+  contextual: 33
   backend_gap_fields: 0
   gateway_dependent_fields: 13

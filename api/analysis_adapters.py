@@ -40,8 +40,10 @@ from api.schemas import (
     DeliveryDelayAnalysisData,
     DuplicateDetectionData,
     EdiMismatchAnalysisData,
+    EmailAttachmentManifestEntry,
     EmailOrderEntryAnalysisData,
     EmailOrderEntryFloorStatus,
+    EmailSourceData,
     InboundOrder,
     MOQAnalysisData,
     OrderComparisonData,
@@ -1392,6 +1394,58 @@ def adapt_email_order_entry(
     return _eoe_from_outputs(synthetic, floor_status)
 
 
+def adapt_email_source(
+    record: ExceptionRecord,
+) -> Optional[EmailSourceData]:
+    """Project the email source-of-truth substrate (ADR-034 Phase G).
+
+    SECONDARY adapter on `EmailOrderEntryRecipe.py` (same attestation
+    target as the primary `email_order_entry_analysis` — both are
+    surfaced on the Exception Queue detail page for an email-channel
+    order). Sources from
+    `record.enrichment_context["email_source_context"]` — the
+    `email_intake/fetch_message` gateway response.
+
+    Returns None when the gateway response is absent (e.g. an
+    EDI-channel record where this adapter's primary doesn't run, or
+    a soft gateway failure). The composer treats secondary `None`
+    as structural omission (the section simply doesn't mount).
+    """
+    enrichment = record.enrichment_context or {}
+    src = enrichment.get("email_source_context")
+    if not isinstance(src, dict) or not src:
+        return None
+
+    raw_attachments = src.get("attachment_manifest") or []
+    if not isinstance(raw_attachments, list):
+        raw_attachments = []
+    manifest: list[EmailAttachmentManifestEntry] = []
+    for raw in raw_attachments:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            manifest.append(EmailAttachmentManifestEntry(
+                name=str(raw.get("name") or ""),
+                mime_type=str(raw.get("mime_type") or ""),
+                bytes=int(raw.get("bytes") or 0),
+            ))
+        except (TypeError, ValueError):
+            continue
+
+    try:
+        return EmailSourceData(
+            from_address=str(src.get("from_address") or ""),
+            received_at=str(src.get("received_at") or ""),
+            subject=str(src.get("subject") or ""),
+            body_hash=str(src.get("body_hash") or ""),
+            attachment_manifest=manifest,
+            body_excerpt=src.get("body_excerpt"),
+            source_email_id=src.get("source_email_id"),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
 # Recipe-name → (target field on AnalysisResponse, adapter function).
 #
 # The endpoint looks up by `record.selected_recipe`. Absent recipe name
@@ -1430,6 +1484,13 @@ SECONDARY_ANALYSIS_ADAPTERS: Dict[
 ] = {
     "DuplicatePORecipe.py": (
         ("order_comparison", adapt_order_comparison),
+    ),
+    # ADR-034 Phase G — the email source-of-truth substrate shares the
+    # primary's attestation target (the operator authorising an email-
+    # channel order needs both the agent's recommendation AND the
+    # source-of-truth for the order they're acting on).
+    "EmailOrderEntryRecipe.py": (
+        ("email_source", adapt_email_source),
     ),
 }
 

@@ -216,18 +216,19 @@ class TestEmailOrderEntrySpec:
             self.spec.name = "tampered"  # type: ignore[misc]
 
     def test_gateway_dependencies_declared(self):
-        # ADR-034 Phase B: four `email_intake` operations land as
-        # required_for_audit=True dependencies — sender_auth,
-        # resolve_customer, duplicate_po_pre_check, credit_check.
-        # Each populates a distinct enrichment_context key consumed by
-        # adapt_email_order_entry.
-        assert len(self.spec.dependencies) == 4
+        # ADR-034 Phase B + Phase G: five `email_intake` operations
+        # land as required_for_audit=True dependencies — the four
+        # non-disable-able floor checks plus fetch_message (Phase G —
+        # email source-of-truth substrate for the EmailSourceSection
+        # secondary-adapter projection).
+        assert len(self.spec.dependencies) == 5
         gateways = {d.gateway_name for d in self.spec.dependencies}
         assert gateways == {"email_intake"}
         ops = {d.operation for d in self.spec.dependencies}
         assert ops == {
             "sender_auth", "resolve_customer",
             "duplicate_po_pre_check", "credit_check",
+            "fetch_message",
         }
         for dep in self.spec.dependencies:
             assert dep.required_for_audit is True
@@ -235,6 +236,7 @@ class TestEmailOrderEntrySpec:
         assert result_keys == {
             "sender_auth_context", "customer_resolution_context",
             "duplicate_po_pre_check_context", "credit_check_context",
+            "email_source_context",
         }
 
     def test_no_effects(self):

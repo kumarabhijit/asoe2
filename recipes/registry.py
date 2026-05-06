@@ -352,6 +352,20 @@ REGISTRY = {
                 },
                 result_key="credit_check_context",
             ),
+            # ADR-034 Phase G — source-of-truth substrate for the
+            # Exception Queue detail page's EmailSourceSection.
+            # Audit-bearing: the operator authorising the order needs
+            # to see the inbound email's metadata (sender, received-at,
+            # subject) and a tamper-detect hash of the body.
+            GatewayDependency(
+                gateway_name="email_intake",
+                operation="fetch_message",
+                params_from_state={
+                    "order_id": "event.order_id",
+                    "customer_id": "event.retailer_id",
+                },
+                result_key="email_source_context",
+            ),
         ),
         expected_metadata_keys=(
             "composite_confidence",

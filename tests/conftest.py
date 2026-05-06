@@ -342,6 +342,34 @@ def _register_oms_stub():
                     "headroom": 75_000.0,
                 },
             ),
+            # ADR-034 Phase G — fetch_message supplies the email
+            # source-of-truth substrate the EmailSourceSection renders.
+            "fetch_message": GatewayResponse(
+                gateway_name="email_intake",
+                operation="fetch_message",
+                status="SUCCESS",
+                data={
+                    "from_address": "buyer@stub-customer.example",
+                    "received_at": "2026-04-30T10:12:00Z",
+                    "subject": "PO submission — stub fixture",
+                    "body_hash": (
+                        "0000000000000000000000000000000000000000"
+                        "000000000000000000000000"
+                    ),
+                    "attachment_manifest": [
+                        {
+                            "name": "purchase_order.pdf",
+                            "mime_type": "application/pdf",
+                            "bytes": 12_345,
+                        },
+                    ],
+                    "body_excerpt": (
+                        "Please process the attached PO. "
+                        "Ship to the Atlanta DC."
+                    ),
+                    "source_email_id": "stub-msg-001",
+                },
+            ),
         },
     )
     register_gateway(oms_stub)

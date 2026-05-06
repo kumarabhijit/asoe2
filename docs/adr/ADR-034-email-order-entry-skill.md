@@ -224,6 +224,48 @@ backlog tracked here for the review board.
 * L4 → L3 auto-demotion enforced in `policy.py` until calibration ships graduation
   signals.
 
+### Phase G — Unified Detail Surface (PO-driven IA correction, ships now)
+
+Per §6 (corrected), this phase delivers the surface-level merge: the CSA
+sees one detail page for the "email → ERP resolution" task regardless
+of which list view brought them there. Three commits:
+
+* **G.1 (asoe2 backend):**
+  - `api/schemas.py` += `EmailSourceData` (from_address, received_at,
+    subject, body_hash, attachment_manifest, body_excerpt) + new
+    `OrderAnalysis.email_source` field.
+  - `recipes/registry.py`: extend the `EmailOrderEntryRecipe` spec's
+    `email_intake` gateway with a `fetch_message` operation
+    (`required_for_audit=True`); result_key=`email_source_context`.
+  - `api/analysis_adapters.py` += `adapt_email_source` registered as a
+    SECONDARY adapter on `EmailOrderEntryRecipe.py` (same attestation
+    target as the primary `email_order_entry_analysis` per the
+    SECONDARY pattern used for `DuplicatePORecipe.py → order_comparison`).
+  - `compliance/audit_bearing_registry.yaml`: 6 new rows for
+    `EmailSourceData` (5 audit-bearing, 1 contextual). Tally bumped.
+  - `tests/conftest.py` + `api/sandbox_gateways.py`: stub
+    `fetch_message` response.
+  - Tests: adapter unit + e2e graph.
+
+* **G.2 (asoe-ui section):**
+  - `src/types/exceptions.ts` += `EmailSourceData` mirror + field on
+    `OrderAnalysis`.
+  - `src/app/exceptions/EmailSourceSection.tsx`: dumb projector mounted
+    above `EmailOrderEntrySection` via data-presence dispatch.
+  - `src/lib/api.ts MOCK_EXCEPTIONS["exc-026"]`: extend with
+    `email_source` payload so the section renders in demos.
+  - Component test + architectural lock test.
+
+* **G.3 (asoe-ui inbox bridge):**
+  - `/inbox` NEW_ORDER rows whose `exception_id` is set deep-link to
+    `/exceptions/{exception_id}` on click.
+  - Exception Queue detail surfaces a "View source email" back-link
+    when `event.metadata.source_email_id` is present, navigating to
+    `/inbox?msg={id}`.
+  - Inbox-side click handler is the only `/inbox` change in scope —
+    the page's static-mock substrate stays intact (productisation is
+    still Phase F / proposed ADR-036).
+
 ### Phase F — Inbox productisation (deferred, separate ADR pointer)
 
 * **Proposed name:** ADR-036 — Email Intake Surface and Bridge to Exception Queue.
@@ -256,51 +298,85 @@ backlog tracked here for the review board.
 
 ---
 
-## 6. Information-Architecture Decision (recorded post-Phase A review)
+## 6. Information-Architecture Decision (corrected post-PO review — Phase G)
 
-A follow-up review asked whether `EMAIL_ORDER_ENTRY` should live on the existing
-Exception Queue, deserve its own page, or replace the current `/inbox` page.
-The convened experts (Product/IA, Compliance, Frontend Platform per CLAUDE.md,
-Domain SME, UX Researcher, Backend/Recipe Architect) reached the following:
+A follow-up review with the Product Owner (2026-05-05) **superseded the
+original §6 decision**. The PO's binding premise: the CSA's lived workflow
+is *one* task ("process this customer email through to ERP resolution")
+that the legacy ERP split across two human roles (junior reads + enters,
+senior resolves). ASOE collapses both roles into one human + agent, so the
+page count must follow the **task count**, not the legacy role count.
 
-### Decision
+Forcing the CSA to context-switch between a browse-inbound `/inbox` and
+a work-the-queue `/exceptions` for the same task — when the system
+already has both the email content and the resolution actions — is a
+workflow tax paid for an architectural taxonomy the user does not share.
 
-1. **EMAIL_ORDER_ENTRY records that need human review belong in the existing
-   Exception Queue.** ONE_CLICK_APPROVE records auto-resolve to `COMPLETE`
-   and never queue. STANDARD_REVIEW / REQUEST_CLARIFICATION / ESCALATE /
-   FATAL_REJECT records become exception-queue items rendered via the
-   data-presence section pattern (`OrderAnalysis.email_order_entry_analysis`
-   present → `<EmailOrderEntrySection>` mounts).
-2. **No new top-level UI page for EMAIL_ORDER_ENTRY.** A per-intent page
-   would violate `asoe-ui/CLAUDE.md` Guardrail #1 ("adding a new intent
-   must require zero UI code changes") by reintroducing intent-keyed
-   page-level dispatch.
-3. **The `/inbox` page stays.** It serves a distinct mode of work
-   (browse-inbound across `NEW_ORDER`, `COMPLAINT`, `SHIPMENT_INQUIRY`,
-   `INVOICE_QUERY`, `ORDER_CHANGE` — categories that aren't and shouldn't
-   become exceptions). Removing it would lose the upstream firehose
-   surface entirely.
-4. **The `/inbox` page is not a SOX surface.** It is currently a hand-coded
-   mock with no API client, no `useHealth`, no override chooser, no audit
-   chain. Routing a financially-binding approval (an EMAIL_ORDER_ENTRY
-   ONE_CLICK_APPROVE on a real ERP-bound PO) through that surface would
-   fail compliance review. Approval lives on the audit-instrumented
-   Exception Queue; the inbox carries triage and visibility only.
+### What stays from the original §6
 
-### Bridge between the surfaces (Phase F backlog)
+* **EMAIL_ORDER_ENTRY records that need human review still belong on
+  the audited Exception Queue surface** — the SOX requirement is that
+  the operator authorising a financially-binding decision sees the
+  full audit-bearing evidence payload. That requirement constrains the
+  *detail surface*, not the page count.
+* **No per-intent page-level dispatch** (CLAUDE.md Guardrail #1). The
+  email-source view mounts via the existing data-presence pattern on
+  a new `OrderAnalysis.email_source` field; no `if (intent === ...)`.
+* **`/inbox` is not deleted.** It still hosts the inbound firehose for
+  non-exception categories (`SHIPMENT_INQUIRY`, `INVOICE_QUERY`,
+  `COMPLAINT`, `ORDER_CHANGE`). Removing it would lose the
+  browse-inbound mode entirely.
 
-* Inbox `NEW_ORDER` row that produced an `EMAIL_ORDER_ENTRY` exception
-  → "View exception →" deep-link to `/exceptions/{id}`.
-* Exception detail for an `EMAIL_ORDER_ENTRY` record with
-  `event.metadata.source_email_id` → "View source email" link back to
-  the inbox row.
+### What changes
 
-### Why this ADR records (not implements) the bridge
+The detail surface becomes **identical regardless of which list view
+got the operator there**. Concretely:
 
-The bridge requires productizing `/inbox` (real `email-intelligence-agent`
-output, real `useHealth` category vocabulary, deep-link plumbing). That is
-a separate cross-cutting effort with its own reviewer chain — Phase F /
-ADR-036.
+1. A new `<EmailSourceSection>` mounts on the Exception Queue detail
+   page above `<EmailOrderEntrySection>`, rendered by data-presence on
+   `OrderAnalysis.email_source`. It shows the inbound email's metadata
+   (sender, received-at, subject, body hash) and an attachment manifest
+   so the operator authorising the order has the source-of-truth
+   substrate inline.
+2. `/inbox` rows that produced an Exception Queue record deep-link to
+   `/exceptions/{id}`. The operator clicks once and lands on the
+   unified detail surface — no tab switch, no copy-paste, no re-typing.
+3. The Exception Queue detail surfaces a "View source email" back-link
+   to `/inbox?msg={source_email_id}` so the navigation is bidirectional.
+
+### Compliance posture
+
+The detail surface gains audit-bearing rows for the email source
+(from_address, received_at, subject, body_hash, attachment_manifest).
+The `email_intake` gateway gains a `fetch_message` operation
+(`required_for_audit=True`) that supplies them. The operator
+authorising the action now sees the same source-of-truth substrate the
+junior CSA used to manually transcribe.
+
+### Why not Option B (single unified surface)
+
+Option B (delete `/inbox`, route every inbound communication into the
+Exception Queue) is the right north star but requires:
+* a per-classification audit policy (SHIPMENT_INQUIRY does not need
+  `floor_status`; INVOICE_QUERY does not need a financial-impact
+  cosign gate),
+* an `email-intelligence-agent` integration ADR (today the inbox is a
+  hand-coded mock; the upstream classifier is platform-track work),
+* a compliance workshop on which inbound categories become SOX-audited.
+
+These are all ratifiable but each is its own ADR. Bundling them into
+ADR-034 would re-create the v3 failure mode (writing aspirations into
+the spec). Option A unblocks the PO's complaint with one new section
+and bidirectional deep-links; Option B becomes a clean follow-up
+(proposed ADR-037) once the upstream classifier ships.
+
+### Phase G — Unified Detail Surface (PO-driven IA correction)
+
+This phase is added to §4. The deferred Phase F (inbox productisation
+under proposed ADR-036) remains valid: it covers `/inbox`'s upstream
+plumbing and the per-classification surface for the non-exception
+categories. Phase G is the surface-level merge that solves the CSA's
+workflow tax without waiting on F.
 
 ---
 

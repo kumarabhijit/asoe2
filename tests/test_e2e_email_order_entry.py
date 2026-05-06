@@ -239,6 +239,44 @@ class TestAnalysisEnrichment:
         # reject_reason_code is conditional — None when classification != FATAL_REJECT.
         assert section["reject_reason_code"] is None
 
+    def test_email_source_secondary_present_on_analysis(
+        self, client, analyst_token,
+    ):
+        # ADR-034 Phase G — the email source-of-truth substrate is a
+        # SECONDARY adapter on EmailOrderEntryRecipe. The Exception
+        # Queue detail page mounts <EmailSourceSection> above
+        # <EmailOrderEntrySection> via data-presence dispatch on
+        # `OrderAnalysis.email_source`. Verify the field is populated.
+        r = client.post(
+            "/api/v1/exceptions/resolve",
+            json=_email_event(
+                confidence=0.88,
+                failures=["ambiguous_ship_to"],
+                order_suffix="SOURCE",
+            ),
+            headers=_auth(analyst_token),
+        )
+        assert r.status_code == 200
+        exc_id = r.json()["exception_id"]
+        rr = client.get(
+            f"/api/v1/exceptions/{exc_id}/analysis",
+            headers=_auth(analyst_token),
+        )
+        assert rr.status_code == 200
+        analysis = rr.json()
+        source = analysis.get("email_source")
+        assert source is not None, (
+            f"email_source secondary missing; payload keys: {list(analysis)}"
+        )
+        # Stub gateway response in tests/conftest.py supplies these fields.
+        assert source["from_address"] == "buyer@stub-customer.example"
+        assert source["received_at"] == "2026-04-30T10:12:00Z"
+        assert source["subject"]
+        assert len(source["body_hash"]) == 64  # SHA-256 hex
+        assert isinstance(source["attachment_manifest"], list)
+        # body_excerpt is contextual and optional — present in the stub.
+        assert source["body_excerpt"] is not None
+
     def test_email_order_entry_analysis_carries_floor_breach(
         self, client, analyst_token,
     ):
