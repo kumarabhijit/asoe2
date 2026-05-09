@@ -1017,9 +1017,23 @@ See `architecture_v3.md` §4 for the full Azure infrastructure stack.
 ## Directory structure
 
 ```
-contracts/          Typed Pydantic models — OrderEvent, GraphState, ExecutionLog, …
+contracts/          Typed Pydantic models — OrderEvent, GraphState, ExecutionLog, OrderCase, …
   policy.py         Centralised business thresholds (discount limits, circuit breaker bounds, autonomy levels, etc.)
-skills/             SKILL.md files (loaded verbatim, never rewritten)
+skills/             Legacy skill loader (the bundles themselves live under knowledge/skills/<name>/ — see below)
+  loader.py         Bundle-first resolution with one-release legacy fallback (ADR-038 Phase H.1)
+knowledge/          L0 Knowledge layer (ADR-038)
+  skills/<name>/    Per-skill bundle: SKILL.md, metadata.yaml, examples/, assets/, specs/
+  policy/           Per-customer-tier SLA policy (sla_per_customer_tier.yaml)
+  compaction/       Per-event-type compaction templates (deterministic, not LLM-driven)
+agents/             Case Agent + L2 primitives (ADR-038 Phase H.4 / H.5 / H.7 — primitives shipped, dispatcher pending)
+  case_agent.py     Bounded while-loop with constrained AgentLLMResponse and AgentRunOutcome terminals
+  case_tools.py     ToolCall / ToolResult Pydantic envelopes; ToolRegistry of 9 wired tools
+  working_memory.py Cache-discipline-aware frame builder honouring ADR-038 §5.3
+  budget.py         Per-tier CaseBudget with named is_exhausted() reasons
+  primitives/       L2 primitives — extract_attachment.py with tenant-isolated cache (§5.8)
+  compaction.py     Deterministic compaction (CompactionTrigger.evaluate + replay-divergence == 0)
+  sla.py            SLA policy loader + stamp_sla_deadline()
+  backfill.py       Orphan-OrderCase backfill (Pass 1 + optional Pass 2 merge)
 compliance/         Compliance Shadow — audit() + enforce()
 constraints/        Constrained-generation schemas, backends, router
   specs.py          AllowedIntent / AllowedShadowStatus / AllowedRecipeName / AllowedResolutionAction Literals
@@ -1050,7 +1064,8 @@ api/                FastAPI API layer (architecture_v3.md §8, §11)
   middleware.py     X-Trace-ID propagation middleware
   errors.py         Standard error envelope
   schemas.py        Request/Response Pydantic models
-  store.py          Exception store (in-memory or database-backed via DATABASE_URL)
+  store.py          Exception store + CaseStore (lookup-or-create with SO → PO → EDI → email priority; ADR-038 Phase H.2)
+  case_resolver.py  Lazy case materialisation (ADR-038 Phase H.3) — derive_source_and_channel + materialise_for_event
   analysis_composer.py  Per-recipe enrichment projection wrapped with audit_bearing_registry coverage check
   analysis_adapters.py  Recipe → *AnalysisData adapters (price_hold, edi_mismatch, …)
   profile_composer.py   Order-level enrichment composer (Phase 26 / 2026-05-03): entity_profile (Account master-data lookup), impact_metrics (line-item math), root_cause + recommendation (resolution_data → trace fallback). Returns None when backing data is absent so the UI structurally omits the surface.
@@ -1058,8 +1073,10 @@ api/                FastAPI API layer (architecture_v3.md §8, §11)
 db/                 Database layer (architecture_v3.md §9)
   connection.py     SQLiteAdapter / PostgresAdapter + _QmarkCursorWrapper (?→%s), create_adapter() factory
   repository.py     ExceptionRepository, TraceRepository, PolicyRepository
-  migrations/       V001__initial_schema.sql (5 tables, RLS, SOX trigger, pgvector); V002__reanalyze_columns.sql (original_event + reanalysis_history); V003__audit_hash_chain.sql (prev_hash/event_hash + append-only triggers); V004__enrichment_context.sql (Pillar 1 audit-evidence column)
-docs/               AUDITOR_GUIDE.md, ADR-021, ADR-022, ADR-023, ADR-024, ADR-025
+  migrations/       V001__initial_schema.sql (5 tables, RLS, SOX trigger, pgvector); V002__reanalyze_columns.sql (original_event + reanalysis_history); V003__audit_hash_chain.sql (prev_hash/event_hash + append-only triggers); V004__enrichment_context.sql (Pillar 1 audit-evidence column); V009__order_case.sql (OrderCase parent entity); V010__case_correlation_keys.sql (lookup-or-create correlation table); V011__backfill_orphan_cases.sql (Phase H.7 orphan-case backfill)
+docs/               AUDITOR_GUIDE.md, ADR-021..039 (case-centric pair: ADR-038 / ADR-039 — Proposed)
+  adr/              Architecture decision records (numbered chronologically)
+  plans/            Operational rollout plans (case-centric-rollout.md tracks ADR-038 phase H.1 → H.7 status)
   specs/            Product-owner reference specs (not runtime code)
 tests/              pytest test suite (1021 tests)
   test_*.py         Core tests: contracts, constraints, recipes, orchestration, shadow, API, DB, WebSocket, workflows, guardrails (772 tests)
@@ -1113,6 +1130,9 @@ k8s/                Kubernetes manifests for AKS production deployment
 | `docs/adr/ADR-021-core-deployment-model.md` | Library vs. service deployment decision, staged evolution triggers |
 | `docs/adr/ADR-022-database-access-pattern.md` | Raw SQL vs. ORM decision, migration triggers, expert perspectives |
 | `docs/adr/ADR-023-disposition-and-hash-chained-audit.md` | Unified `/disposition` primitive + hash-chained append-only audit log (Phases 1–4 of the Override Action overhaul) |
+| `docs/adr/ADR-038-case-centric-order-intake.md` | **Proposed.** Five-layer agentic architecture (L0 Knowledge / L1 Deterministic / L2 Bounded LLM / L3 Case Agent / L4 Harness). Manual / Automated Order vocabulary, OrderCase parent entity, T1/T2/T3 case materialisation, ~18-tool agent surface, deterministic compaction, per-tier cost & latency budgets. Phase H.1 → H.7 primitives shipped on main; integration + Compliance ratification pending |
+| `docs/adr/ADR-039-llm-compliance-shadow-second-opinion.md` | **Proposed.** Constrained-output L2 LLM Shadow alongside the existing deterministic Shadow. Asymmetric combination rule (LLM may DOWNGRADE GREEN → YELLOW but never UPGRADE). Phased rollout X.1 (observe-only) → X.4 (extended cross-check). 0% shipped beyond document |
+| `docs/plans/case-centric-rollout.md` | Per-phase status board for ADR-038 H.1 → H.7 with operational sequencing, owner mapping, acceptance criteria, and §3.4 in-flight branch adaptation closeout |
 | `prompts/po-spec-to-asoe.md` | Step-by-step prompt for converting a Product Owner specification into ASOE Skill–Shadow–Recipe components |
 | `prompts/triple_check_review_board.md` | Reusable review prompt — three-persona architecture, security, and test coverage assessment |
 | `prompts/phase_10_langfuse.md` | LangFuse integration prompt — sink design, trace mapping, self-hosted setup, SDK compatibility, test plan |
