@@ -2136,9 +2136,14 @@ together). Verdicts produced today are not yet attached to any
       ADR-034 / ADR-038 documents kept the historical path
       (those describe decisions at a point in time). 180/180
       affected tests + full pytest regression green.
-- [ ] **`architecture_v5.md` draft** — the rollout plan
-      promises v5 once ADR-038/039 are *Accepted* and Phase
-      H.1 has shipped. Code is ahead but ratification gates
-      above are still pending; drafting v5 before ratification
-      would cement Proposed-status decisions. Defer until the
-      compliance workshops complete.
+- [x] **`architecture_v5.md` draft** shipped as **Proposed**.
+      Documents the five-layer architecture (L0 Knowledge → L4
+      Harness), `OrderCase` parent entity, V012 / V013 case-
+      events / case-locks tables, the L2 LLM Shadow primitive +
+      X.2+ combiner truth table (flag-gated), ADR-040 case-level
+      cosign (flag-gated), `manual-order-intake` channel-neutral
+      naming, and the asoe-ui `/cases` primary surface. v5
+      remains Proposed until Compliance ratifies ADR-038 §6 +
+      §8.5, ADR-039 §4.1 + §6, and ADR-040 §2 + §2.2. Once
+      ratified the X.2 / X.3 / X.4 / case-cosign-on flips are
+      ConfigMap edits with no code redeploy.
