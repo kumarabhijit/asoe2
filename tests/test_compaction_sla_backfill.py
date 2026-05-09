@@ -230,7 +230,7 @@ class TestPerEventTypeTemplates:
             {"event_type": "agent_step", "timestamp": "T1",
              "outcome": "RESOLVED", "tool_name": "declare_done"},
             {"event_type": "shadow_decision", "timestamp": "T2",
-             "shadow_verdict": "GREEN", "intent": "EMAIL_ORDER_ENTRY"},
+             "shadow_verdict": "GREEN", "intent": "MANUAL_ORDER_INTAKE"},
             {"event_type": "case_open", "timestamp": "T3",
              "source": "manual_order", "source_channel": "email",
              "tier": 2, "sla_deadline": "2026-05-10T00:00:00Z"},

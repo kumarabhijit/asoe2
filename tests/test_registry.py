@@ -202,7 +202,7 @@ class TestEmailOrderEntrySpec:
             assert param in self.spec.required_params
 
     def test_allowed_intent_is_email_order_entry(self):
-        assert "EMAIL_ORDER_ENTRY" in self.spec.allowed_intents
+        assert "MANUAL_ORDER_INTAKE" in self.spec.allowed_intents
 
     def test_other_intents_not_in_allowed_intents(self):
         for other in ("DUPLICATE_PO", "CREDIT_BLOCK", "CONTRACTUAL_CORRECTION"):

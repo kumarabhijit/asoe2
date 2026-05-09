@@ -237,7 +237,7 @@ EMAIL_ORDER_ENTRY_AUTONOMY_LEVELS: dict[str, str] = {
     "ESCALATE":              "L1",
     "REJECT":                "L1",
 }
-"""Maps EMAIL_ORDER_ENTRY recommended_action → autonomy level. AUTO_CORRECT
+"""Maps MANUAL_ORDER_INTAKE recommended_action → autonomy level. AUTO_CORRECT
 is intentionally *not* L4 — pending ADR-032 calibration graduation, all
 auto-actions remain at most L3 (act & inform)."""
 

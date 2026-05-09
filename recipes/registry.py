@@ -302,7 +302,7 @@ REGISTRY = {
             "autonomy_levels", "threshold_auto_approve",
             "threshold_review_band_low", "threshold_auto_correct",
         ),
-        allowed_intents=("EMAIL_ORDER_ENTRY",),
+        allowed_intents=("MANUAL_ORDER_INTAKE",),
         # ADR-034 Phase B: the four "non-disable-able floor" checks each
         # land as a `required_for_audit=True` GatewayDependency on the
         # `email_intake` gateway. The recipe still consumes its primary

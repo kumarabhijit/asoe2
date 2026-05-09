@@ -1,4 +1,4 @@
-"""End-to-end tests for the EMAIL_ORDER_ENTRY use case (ADR-034 Phase B).
+"""End-to-end tests for the MANUAL_ORDER_INTAKE use case (ADR-034 Phase B).
 
 Exercises the full graph: ingest → classify (deterministic fallback)
 → load_skill (email-order-entry) → select_recipe → resolve_dependencies
@@ -6,7 +6,7 @@ Exercises the full graph: ingest → classify (deterministic fallback)
 execute_recipe → apply_effects → build_analysis.
 
 Covers:
-  1. Health endpoint serves EMAIL_ORDER_ENTRY + EmailOrderEntryRecipe.py.
+  1. Health endpoint serves MANUAL_ORDER_INTAKE + EmailOrderEntryRecipe.py.
   2. Confidence-band routing produces the expected terminal states.
   3. Floor-breach inputs produce FATAL_REJECT.
   4. Audit-bearing analysis surfaces on `email_order_entry_analysis`
@@ -90,7 +90,7 @@ class TestHealthEmailOrderEntry:
     def test_intent_in_allowed_intents(self, client):
         r = client.get("/api/v1/health")
         assert r.status_code == 200
-        assert "EMAIL_ORDER_ENTRY" in r.json()["allowed_intents"]
+        assert "MANUAL_ORDER_INTAKE" in r.json()["allowed_intents"]
 
     def test_recipe_in_allowed_recipes(self, client):
         r = client.get("/api/v1/health")
@@ -113,7 +113,7 @@ class TestResolveEmailOrderEntry:
         )
         assert r.status_code == 200
         data = r.json()
-        assert data["intent"] == "EMAIL_ORDER_ENTRY"
+        assert data["intent"] == "MANUAL_ORDER_INTAKE"
         # ONE_CLICK_APPROVE → autonomy L3 → no human approval needed.
         # With GREEN shadow the run reaches COMPLETE. Allow either
         # COMPLETE or RESOLVED-equivalent terminal states.
@@ -131,7 +131,7 @@ class TestResolveEmailOrderEntry:
         )
         assert r.status_code == 200
         data = r.json()
-        assert data["intent"] == "EMAIL_ORDER_ENTRY"
+        assert data["intent"] == "MANUAL_ORDER_INTAKE"
         # ambiguous_ship_to → REQUEST_CLARIFICATION (autonomy L2 → review)
         assert data["final_status"] == "MANUAL_REVIEW_REQUIRED"
 
@@ -175,7 +175,7 @@ class TestResolveEmailOrderEntry:
         )
         assert r.status_code == 200
         data = r.json()
-        assert data["intent"] == "EMAIL_ORDER_ENTRY"
+        assert data["intent"] == "MANUAL_ORDER_INTAKE"
         # Gateway says all-green → recipe classifies on confidence alone:
         # 0.99 + no failures → ONE_CLICK_APPROVE → COMPLETE.
         assert data["final_status"] == "COMPLETE"
@@ -194,7 +194,7 @@ class TestResolveEmailOrderEntry:
         # Autonomy L1 keeps it in MANUAL_REVIEW_REQUIRED — same precedence
         # rule as the floor-breach case.
         data = r.json()
-        assert data["intent"] == "EMAIL_ORDER_ENTRY"
+        assert data["intent"] == "MANUAL_ORDER_INTAKE"
 
 
 # ---------------------------------------------------------------------------

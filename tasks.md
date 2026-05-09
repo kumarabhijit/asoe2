@@ -2030,9 +2030,21 @@ together). Verdicts produced today are not yet attached to any
       ship `anchor_examples: []` per §5.5 ("earned, not
       authored"). The first earnings cycle starts when Phase
       H.5 routes real traffic through the agent.
-- [ ] **`MANUAL_ORDER_INTAKE` rename of `EMAIL_ORDER_ENTRY`** —
-      optional channel-neutral cleanup (§3.2 binding); deferred
-      until Phase H.5 wire-up.
+- [x] **`MANUAL_ORDER_INTAKE` rename of `EMAIL_ORDER_ENTRY`** —
+      §3.2 channel-neutral cleanup. The Intent enum value renamed
+      across the backend (~16 files) and the asoe-ui surface
+      (~9 files). The recipe filename / class
+      (`EmailOrderEntryRecipe`), event_type
+      (`EMAIL_ORDER_ENTRY_REQUEST`), and `*AnalysisData` classes
+      all stay — those describe email-channel-specific behaviour,
+      whereas `MANUAL_ORDER_INTAKE` is the abstract semantic
+      category (covers email + phone + fax). Skill-bundle
+      directory `knowledge/skills/email-order-entry/` retained
+      for now (rename is a separate ~10-file follow-up); the
+      bundle's metadata.yaml `intents` list was updated in
+      this pass. UI generated types regenerated via
+      `npm run generate-types`. Full backend regression + UI
+      vitest + typecheck green.
 - [ ] **`architecture_v5.md` draft** — the rollout plan
       promises v5 once ADR-038/039 are *Accepted* and Phase
       H.1 has shipped. Code is ahead but ratification gates

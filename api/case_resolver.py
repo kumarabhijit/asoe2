@@ -35,7 +35,7 @@ from contracts.models import OrderCase, OrderEvent, TerminalStatus
 
 _MANUAL_EVENT_TYPES = frozenset({
     "EMAIL_ORDER_ENTRY_REQUEST",
-    "EMAIL_ORDER_ENTRY",
+    "MANUAL_ORDER_INTAKE",
     "EMAIL_ORDER",
     "MANUAL_ORDER_INTAKE",  # forward-compat alias from ADR-038 §10.4
 })

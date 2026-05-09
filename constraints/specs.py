@@ -15,7 +15,7 @@ AllowedIntent = Literal[
     "MIN_ORDER_QTY",
     "PALLET_CONFIG",
     "DELIVERY_DELAY",
-    "EMAIL_ORDER_ENTRY",
+    "MANUAL_ORDER_INTAKE",
 ]
 
 AllowedShadowStatus = Literal["GREEN", "YELLOW", "RED"]
