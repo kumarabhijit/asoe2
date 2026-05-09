@@ -11,27 +11,99 @@ NAME_RE = re.compile(r"^name:\s*(.+)$", re.MULTILINE)
 DESC_RE = re.compile(r"^description:\s*(.+)$", re.MULTILINE)
 RECIPES_RE = re.compile(r"^\s*recipes:\s*\[(.*?)\]", re.MULTILINE)
 
+# ADR-038 §5.1 — knowledge bundle root. The bundle directory layout is
+# knowledge/skills/<bundle-name>/SKILL.md (+ metadata.yaml + examples/
+# + assets/ + specs/). The loader prefers this path; legacy
+# skills/<name>_SKILL.md is kept as a fallback for one release per
+# ADR-038 Phase H.1 backward-compat policy.
+BUNDLE_ROOT = Path("knowledge/skills")
+
+
+def _bundle_name_from_legacy_filename(name: str) -> str:
+    """Map a legacy skill filename to its bundle directory name.
+
+    ``"duplicate-po_SKILL.md"`` → ``"duplicate-po"``.
+    ``"duplicate-po"``           → ``"duplicate-po"`` (already a bundle name).
+
+    Returns the original string when the suffix isn't present so callers
+    that pass a bundle name directly still resolve correctly.
+    """
+    if name.endswith("_SKILL.md"):
+        return name[: -len("_SKILL.md")]
+    if name.endswith(".md"):
+        return name[: -len(".md")]
+    return name
+
 
 class SkillLoader:
+    """Loader for skill documents.
+
+    Phase H.1 of ADR-038 introduces the bundle layout. ``load_by_name`` and
+    ``discover`` prefer ``BUNDLE_ROOT/<bundle>/SKILL.md`` and fall back to
+    the legacy ``<root>/<filename>`` path. This keeps existing call sites
+    (``skills/loader.py::select_for_event`` consumers, tests passing
+    ``"skills"`` as the constructor arg) working without modification —
+    they pick up the migrated bundles transparently.
+    """
+
     # Class-level cache keyed by resolved path — skills are static .md files
     # that don't change during process lifetime.  Shared across instances.
     _cache: dict[str, SkillDocument] = {}
 
     def __init__(self, root: str | Path = "skills") -> None:
+        # Legacy root retained for backward-compat; new code may pass
+        # ``BUNDLE_ROOT`` directly. Either way, ``_resolve`` checks the
+        # bundle path first.
         self.root = Path(root)
+        self.bundle_root = BUNDLE_ROOT
+
+    def _resolve(self, name: str) -> Path:
+        """Return the canonical path for the named skill, preferring the
+        bundle path over the legacy flat-file path.
+
+        Raises ``FileNotFoundError`` only when neither exists.
+        """
+        bundle_name = _bundle_name_from_legacy_filename(name)
+        bundle_path = self.bundle_root / bundle_name / "SKILL.md"
+        if bundle_path.exists():
+            return bundle_path
+        legacy_path = self.root / name
+        if legacy_path.exists():
+            return legacy_path
+        # Surface the bundle path in the error so the operator knows the
+        # canonical location even when nothing is present.
+        raise FileNotFoundError(
+            f"Skill not found: tried bundle path {bundle_path!s} and legacy "
+            f"path {legacy_path!s}"
+        )
 
     def load_by_name(self, name: str) -> SkillDocument:
-        key = str(self.root / name)
+        path = self._resolve(name)
+        key = str(path)
         if key not in self._cache:
-            text = (self.root / name).read_text(encoding="utf-8")
+            text = path.read_text(encoding="utf-8")
             self._cache[key] = self._parse(text)
         return self._cache[key]
 
     def discover(self) -> List[SkillDocument]:
-        docs = []
-        for path in sorted(self.root.glob("*.md")):
-            docs.append(self._parse(path.read_text(encoding="utf-8")))
-        return docs
+        """Discover all skills available to the loader.
+
+        Prefers bundles under ``BUNDLE_ROOT``; falls back to legacy
+        ``<root>/*.md`` only when no bundles are present at all (e.g.
+        an isolated test fixture or a pre-migration repo). Bundle order
+        is alphabetical by directory name; legacy order is alphabetical
+        by filename.
+        """
+        bundle_paths = sorted(
+            p / "SKILL.md"
+            for p in self.bundle_root.iterdir()
+            if p.is_dir() and (p / "SKILL.md").exists()
+        ) if self.bundle_root.exists() else []
+        if bundle_paths:
+            return [self._parse(p.read_text(encoding="utf-8")) for p in bundle_paths]
+        # Legacy fallback — only used when no bundles exist.
+        legacy_paths = sorted(self.root.glob("*.md"))
+        return [self._parse(p.read_text(encoding="utf-8")) for p in legacy_paths]
 
     def select_for_event(
         self,
