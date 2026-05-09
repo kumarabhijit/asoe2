@@ -208,4 +208,212 @@ Concretely: the Case Agent cannot invent a "submit_to_erp" path that bypasses Sh
 
 ---
 
-*Sections §5–§12 follow in subsequent commits.*
+## 5. L0 Knowledge Layer — Skill Bundles, Examples, Assets, Specs
+
+L0 is the architectural shift this ADR is most invested in. The codebase already *has* a knowledge tier; it's just scattered (prose-only `SKILL.md`, `policy.py` constants, `audit_bearing_registry.yaml`, `constraints/specs.py` literals). This section formalises the tier with one canonical home (`knowledge/`), one bundle structure per skill, and one set of loading rules that interact correctly with prompt caching.
+
+### 5.1 The bundle directory (canonical home)
+
+```
+knowledge/
+  skills/
+    email-order-entry/
+      SKILL.md                        # reasoning guide (prose; existing role, new home)
+      metadata.yaml                   # bundle manifest (NEW)
+      examples/                       # few-shot exemplars (NEW)
+        clean_one_click.example.json
+        ambiguous_ship_to.example.json
+        missing_delivery_date.example.json
+        sender_unauthorized.example.json
+      assets/                         # server-rendered templates + reference docs (NEW)
+        clarification_ship_to.template.md
+        clarification_delivery_date.template.md
+        reject_sender_unauthorized.template.md
+        customer_tier_response_matrix.reference.md
+      specs/                          # raw requirement specs (NEW; runtime:false)
+        order_entry_spec.md           # the original PO spec preserved verbatim
+      tests/                          # examples-as-CI-tests
+        examples_match_recipe.test.py
+    duplicate-po/
+      SKILL.md
+      metadata.yaml
+      examples/
+      assets/
+      specs/
+        duplicate-po-product-spec.md  # migrated from docs/specs/
+        calibration-methodology.md    # migrated from docs/specs/duplicate-po/
+      tests/
+    [...one bundle per skill]
+  policy/                             # OPTIONAL future home for policy.py constants (deferred — see §9)
+  audit_bearing_registry.yaml         # symlinked or moved from compliance/ (deferred)
+```
+
+**Why `knowledge/` and not `skills/`:** the existing `skills/` directory in the repo root is **code** (`skills/loader.py`, `skills/intent_classifier.py`). Putting bundles under the same name would conflate L0 (data) with L4 (loader code). `knowledge/skills/` keeps the L0 root distinct, and following the PO's confirmed direction extends naturally to `knowledge/policy/`, `knowledge/audit_registry/`, etc., as those tiers migrate.
+
+### 5.2 `metadata.yaml` schema (the manifest)
+
+```yaml
+schema_version: 1
+skill_name: email-order-entry
+bundle_version: 2.0.0                 # SemVer; major bump for any reasoning-guide change
+recipes: [EmailOrderEntryRecipe.py]   # L1 primitive(s) this skill calls
+intents: [EMAIL_ORDER_ENTRY]          # L0 vocabulary (constraints/specs.py AllowedIntent)
+event_types:                          # routing keys (skills/loader.py uses these)
+  - EMAIL_ORDER_ENTRY_REQUEST
+  - EMAIL_ORDER                       # legacy alias
+
+# Anchor examples — loaded into the cached prefix on every call to this skill.
+# Keep small (1-2). Change rarely (CODEOWNERS-gated). These pay for themselves
+# on cache hits across the case lifetime.
+anchor_examples:
+  - file: examples/clean_one_click.example.json
+    purpose: "Representative ONE_CLICK_APPROVE for the agent's prior."
+
+# On-demand examples — agent loads via load_example(skill, name) tool.
+# Manifest entries below are loaded as one-line summaries (NOT bodies).
+on_demand_examples:
+  - file: examples/ambiguous_ship_to.example.json
+    summary: "STANDARD_REVIEW with REQUEST_CLARIFICATION on ship-to ambiguity"
+    classification: STANDARD_REVIEW
+  - file: examples/missing_delivery_date.example.json
+    summary: "STANDARD_REVIEW with REQUEST_CLARIFICATION on missing date"
+    classification: STANDARD_REVIEW
+  - file: examples/sender_unauthorized.example.json
+    summary: "FATAL_REJECT with reject_reason_code=sender_unauthorized"
+    classification: FATAL_REJECT
+
+# Server-rendered templates the agent invokes via draft_using_template(skill, template_name, fields).
+# Body never enters the agent's context (Boris: templates are syscalls, not data).
+assets:
+  - file: assets/clarification_ship_to.template.md
+    role: buyer_email_draft
+    triggered_by: "recommended_action == REQUEST_CLARIFICATION AND validation_failures contains 'ambiguous_ship_to'"
+  - file: assets/reject_sender_unauthorized.template.md
+    role: buyer_email_draft
+    triggered_by: "classification == FATAL_REJECT AND reject_reason_code == 'sender_unauthorized'"
+
+# Specs — preserved for human review; NEVER loaded into the agent's runtime context.
+runtime_includes:                     # explicit allowlist for the loader
+  - SKILL.md
+  - metadata.yaml
+  - examples/*.example.json           # bodies loaded via load_example tool only
+  # specs/ deliberately absent — humans navigate to them; agent never sees them.
+
+# Cost guardrails (enforced by L4 harness during bundle load).
+token_budget:
+  cached_prefix_max_tokens: 3000      # SKILL.md + metadata.yaml + anchor_examples bodies
+  on_demand_load_max_tokens: 4000     # per single load_example call
+```
+
+**The `runtime_includes` allowlist is load-bearing for safety.** The L4 bundle loader hard-fails if a request reads a path not in the allowlist. Specs accidentally included would leak proprietary requirement language into the agent's prompt; the allowlist prevents this by design, not by convention.
+
+### 5.3 Loading semantics (the Karpathy cache-discipline rules)
+
+**Stable cached prefix (per skill, ~3k tokens, paid once per cache TTL):**
+1. L4 harness system instructions (small, stable)
+2. The active skill's `SKILL.md` (selected per event-type, stable for the case lifetime)
+3. The active skill's `anchor_examples` bodies (1–2 examples, stable, change rarely)
+4. The on-demand example **manifest** (one-line summaries only, no bodies)
+
+**Per-turn (not cached):**
+5. Case working memory — compacted summary + last N actions
+6. Current event payload
+7. Tool-call history this turn
+
+**On-demand (loaded by the agent via tool calls; one-time pay per load):**
+8. `load_example(skill, name)` — pulls one example body into context for this turn
+9. `draft_using_template(skill, template_name, fields)` — renders server-side; the body never enters context, only the rendered draft does
+
+This ordering is **not aesthetic**. Item-1 must be first, item-3 must precede item-4, etc., because every position-shift past the cache boundary invalidates the cached prefix. The L4 harness enforces the order in `agents/working_memory.py`; CI fails if the order regresses.
+
+### 5.4 The five Karpathy cost-discipline rules (binding)
+
+These five rules govern bundle authoring and loading. The `metadata.yaml` schema and L4 loader together enforce them:
+
+1. **Anchor set is small and stable.** Per skill: 1–2 examples maximum, chosen for representativeness, changed rarely (once per quarter, not weekly). They ride in the cached prefix. CI fails if a bundle ships >2 anchors.
+2. **On-demand examples are loaded via tool call.** Manifest entries carry one-line summaries so the agent doesn't have to load to discover. `load_example` is a budget event the harness logs.
+3. **Specs are `runtime: false`** — surfaced through the `runtime_includes` allowlist. The loader hard-fails if a request escapes the allowlist. Defence in depth.
+4. **Per-skill token-cost budget.** `metadata.yaml::token_budget.cached_prefix_max_tokens = 3000`. Bundle-load CI test asserts the budget. Adding a 5k-token SKILL.md fails the build.
+5. **Cache-hit-rate monitoring.** Prometheus metric per skill on prefix-cache hit rate. If it drops below 70% for a skill, that's a regression — investigate. Probable cause: someone edited an anchor example in a hot loop. SLI alarm + PagerDuty when sustained.
+
+### 5.5 Honest answer to the cost / accuracy concern (the question raised in our review)
+
+**Will Karpathy discipline alone solve cost-bloat and accuracy-from-context-bloat? Mostly yes, with caveats:**
+
+* **Cost discipline is necessary but not sufficient** without empirical validation. Examples can degrade reasoning if they're not representative (the LLM-anchoring-bias risk). The discipline must be paired with **per-example A/B testing** in CI: for each example, run a hold-out test set with and without that example loaded; measure classification F1 on the hold-out. Drop examples whose lift is < 1%. This is non-negotiable bundle-authorship discipline; without it, examples accrete and the cost-vs-lift curve goes inverted within months.
+* **Cost outcome with discipline:** cold-start cases pay ~+$0.01–0.02 per case (extraction + first-event reasoning gains anchor-example tokens). Long-running cases pay *less* than today because cached anchor reduces re-reading. Net at scale: roughly flat cost per case, materially higher accuracy on edge cases (ambiguous ship-to, customer-specific SKU mappings, unusual reject reasons).
+* **Accuracy outcome with discipline:** noticeable lift on edge cases; unchanged on clean common cases. The few-shot mechanism doesn't help when there's no ambiguity to resolve; it helps when the model has to recognise a pattern from prior examples. For our domain, the lift surface is the long tail.
+* **Without discipline:** cost balloons (loaded examples grow without measurement), cache-hit rate collapses (eager-loading invalidates prefixes), accuracy possibly *degrades* on the common case (anchoring bias to examples that don't represent it). This is the failure mode we explicitly avoid.
+
+**Recommendation (binding for the bundle authorship process):**
+1. Ship bundle structure with **empty `examples/` and `assets/`**.
+2. Add an example **only when** there's a measured edge case — typically when an audit reveals a wrong-band classification on a real record.
+3. The example becomes the regression test for that case.
+4. CI enforces the lift threshold: examples whose A/B lift is < 1% fail the build.
+
+This is more conservative than "build a rich library upfront" and is closer to the bias-toward-evidence Boris emphasises. Examples are *earned* by real failures, not authored speculatively.
+
+### 5.6 Server-side asset rendering (Compliance ratification)
+
+Customer-facing email templates are **rendered server-side**. The agent provides field values via `draft_using_template(skill, template_name, fields)`; the template body is filled by the L4 harness and returned as a typed `BuyerEmailDraft` object. The draft *never* sends without human approval (see §6.4 on the case-agent tool surface).
+
+**Why server-side rendering:**
+
+| Risk | If LLM composes the email freely | If template is server-side |
+|---|---|---|
+| **Brand voice** | LLM picks tone, vocabulary, style — drift over time | Template encodes brand voice; only field values vary |
+| **Prompt injection** | A malicious customer email could prompt the LLM to compose abusive content; the agent's reply gets sent | Template body never enters the LLM's prompt, so it can't be hijacked |
+| **Compliance review** | Every generated email needs review; auditor cannot batch-approve patterns | Template approved once; field-substitution is a small, reviewable surface |
+| **Replayability** | Different LLM output each time | Same template + same fields → same draft, deterministic |
+
+Compliance has explicit veto on customer-facing template content. CODEOWNERS rule on `assets/*.template.md` requires Compliance + brand sign-off.
+
+### 5.7 Examples-as-CI-tests (the operational discipline)
+
+Every example in `examples/` is a **living regression test**:
+
+```python
+# tests/<skill>/examples_match_recipe.test.py
+def test_clean_one_click_example_classifies_correctly():
+    example = load_example("knowledge/skills/email-order-entry/examples/clean_one_click.example.json")
+    # Render through the deterministic recipe under test (NO agent involvement)
+    output = classify_email_order_entry(**example["recipe_inputs"])
+    assert output["classification"] == example["expected_classification"]
+    assert output["recommended_action"] == example["expected_recommended_action"]
+```
+
+Adding an example that doesn't match what the recipe actually produces fails the build. Editing the recipe in a way that diverges from the examples fails the build. The two move in lock-step; bundle-version + recipe-version both bump.
+
+This is the operational property that turns examples from "documentation that rots" into "regression tests that catch drift."
+
+### 5.8 Tenant isolation for extraction caches (PO answer to Q5)
+
+The L2 attachment-extractor caches by template-fingerprint. The cache **scopes to tenant** even if templates are byte-identical across tenants. Rationale:
+
+* Multi-tenant data isolation is a non-negotiable SOX requirement — tenants must not be able to read each other's extracted data, even via cache side-channels.
+* Template overlap across tenants is a coincidence, not a sharing opportunity. Treating it otherwise risks a class of bugs where Tenant A's extracted-customer-PO-number leaks into Tenant B's same-template-shape document.
+* Cache-key includes `tenant_id`. Storage is partitioned per tenant.
+
+The cost cost of this discipline is real (lower cache hit rate cross-tenant) but the safety property is non-negotiable.
+
+### 5.9 Bundle versioning and audit-log inclusion
+
+* Every L0 bundle has a SemVer (`bundle_version` in metadata.yaml).
+* Major version bumps require Compliance workshop (any reasoning-guide change).
+* Minor version bumps require CODEOWNERS approval (new examples, new assets).
+* Patch version bumps for typos / clarifications.
+* **Every audit-log record carries `skill_bundle_version`** alongside the existing `skill_name`. Replay against a historical version reproduces the decision against the *prior* skill content.
+* Compliance audit query "what did the system do for this customer last quarter" can replay against the L0 bundle that was active at that time.
+
+### 5.10 What this section does **not** decide
+
+Two L0-adjacent migrations are flagged as **deferred** (see §9 for migration phases):
+
+* **`policy.py` → `policy/<intent>.yaml` migration.** Useful eventually; not in scope for this ADR. The constants stay in `policy.py` for now; a follow-up ADR can stage the YAML migration when it earns its keep.
+* **`compliance/audit_bearing_registry.yaml` → `knowledge/audit_bearing_registry.yaml` move.** Cosmetic. The file already lives where Compliance owns it (`compliance/`). Moving it under `knowledge/` is unnecessary churn unless we discover a concrete reason to consolidate.
+
+Both are explicitly in-scope for **future** L0 work but **out of scope** for this ADR's first migration.
+
+---
+
+*Sections §6–§12 follow in subsequent commits.*
