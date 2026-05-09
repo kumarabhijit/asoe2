@@ -1822,12 +1822,25 @@ gates still pending (see "Pending" subsection at the bottom).
       circuit, tool-trace persistence, L2 Shadow invocation +
       RED short-circuit, and the routing predicate's safe-default
       semantics.
-- [ ] **Pending: deterministic graph hot-path replacement.** The
-      harness is in place and the routing predicate is wired but
-      `should_route_to_case_agent` returns `False` unconditionally
-      until Compliance ratifies (ADR-038 §H.5 + ADR-039 §6.1
-      workshop gates). The flag flip is a config-only change in
-      the live deployment.
+- [x] Routing dispatch wired (Compliance ratified post-merge).
+      `api/routes/exceptions.py::_resolve_state` is the single
+      dispatch point: `should_route_to_case_agent(event,
+      enabled=_case_agent_enabled())` selects between the
+      deterministic graph and `_resolve_via_case_agent`. The
+      agent path runs L1 deterministic Shadow first
+      (CLAUDE.md §4 — never bypassed), opens / attaches the
+      case via `case_resolver`, hands off to
+      `agents.harness.run_agent_step`, and maps the agent's
+      outcome onto `state.final_status`. Default off via
+      `ASOE_CASE_AGENT_ENABLED`; flip to `1` (or `true` / `yes`)
+      to enable. **Live default stays off until the Azure
+      AgentLLMProvider lands in Step 7** — the StubAgentLLMProvider
+      is a placeholder.
+- [x] `tests/test_resolve_dispatch.py` — 15 tests covering env-
+      var matrix, predicate restriction (only EMAIL_ORDER_ENTRY_REQUEST
+      routes), L1 Shadow on the agent path, tier graduation as
+      the discriminator (harness graduates T2 → T3; graph leaves
+      at T2).
 - [ ] **Pending: SQL-backed concurrency lock + replay log.** The
       in-memory `CaseLockManager` and `ToolCallReplayLog`
       faithfully model the eventual SQL behaviour
