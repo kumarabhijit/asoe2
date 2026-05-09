@@ -776,4 +776,175 @@ Existing UI tests + e2e assertions on flat exceptions continue to pass — the a
 
 ---
 
-*Sections §8–§12 follow in subsequent commits.*
+## 8. Cost & Latency Budgets, Governance
+
+### 8.1 Per-tier budget table (binding for the L4 harness enforcer)
+
+| Tier | Token budget (input/output per inference) | LLM-call budget per event | Wall-clock per event | $ per event (Sonnet pricing) | What happens at exhaustion |
+|---|---|---|---|---|---|
+| **T1** | 4k / 1k (intent classifier only; existing) | 1 (intent classify) | <500ms | <$0.001 | Existing graph behaviour; no agent loop |
+| **T2** | 16k / 4k input/output growing per turn; up to 6 agent iterations | 3–6 LLM calls (1 classify + 2–5 agent iterations) | <8s | <$0.05 | Harness escalates: case → `OPEN_AWAITING_HUMAN`, reason `budget_exhausted` |
+| **T3** | 8k / 2k (post-compaction; smaller because compacted summary replaces verbatim history) + retrieval as needed | 4–8 LLM calls per event | <12s | <$0.08 (compaction cost amortised) | Same escalation path as T2 |
+
+The L4 harness enforces these per tier. The agent operates as if budget is infinite; the harness preempts and escalates when exhaustion is imminent.
+
+### 8.2 Cost decomposition for a representative T2 case
+
+Representative case: Manual Order email arrives, classifier runs, agent invokes `extract_attachment` (multimodal, cache miss), runs three validation tools, decides STANDARD_REVIEW with REQUEST_CLARIFICATION, drafts a clarification email.
+
+| Component | Cost | Notes |
+|---|---|---|
+| Intent classify (existing) | $0.003 | 4k/200 tokens, Haiku-class |
+| Case open + correlation lookup | $0.0001 | 1 DB roundtrip |
+| Agent turn 1: read context, plan extraction | $0.015 | 11k input (cached prefix ≈ 3k after first call) / 800 output, Sonnet |
+| `extract_attachment` (multimodal, cache miss) | $0.020 | Vision call on a 3-page PDF |
+| Agent turn 2: read extraction, plan validations | $0.012 | Mostly cached prefix; 4k incremental input |
+| `check_credit` + `check_atp` + `check_duplicate_po` | $0.001 | Three deterministic recipes |
+| Agent turn 3: classify, draft clarification | $0.012 | |
+| `draft_buyer_email` (server-render, no LLM body composition) | $0.000 | |
+| Persist case events, update SLA clock | $0.0001 | DB writes |
+| **Total per T2 first-event run** | **≈ $0.063** | |
+
+The $0.063 is above the $0.05 target — the multimodal extraction is the pressure point. **Mitigations** (in order of effort vs gain):
+
+1. **Template-fingerprint cache** for repeat customers' templates (Marcus Reed sends 30 POs/quarter on the same layout) — cuts attachment cost to $0 on cache hits. Expected hit rate after 90 days: 70%+. Effective per-T2 cost: ~$0.045. ✅ within target.
+2. **Use Haiku-class (or local) for the agent loop** instead of Sonnet for routine cases; reserve Sonnet for cases the small model declines on. ~3× cost reduction on agent inferences. Stretch target: $0.025.
+3. **Compose validation tools into one composite check** when the agent calls all three together. Saves agent-loop iterations. Marginal.
+
+The point: **the budget is achievable without compromising the architecture; the dominant cost is multimodal extraction, and cache discipline is the lever.**
+
+### 8.3 Latency decomposition for the same case
+
+| Component | Latency | Notes |
+|---|---|---|
+| Intent classify | 200ms | Haiku-class |
+| Case open + lookup | 20ms | |
+| Agent turn 1 + extract | 2.8s | LLM 1.0s + multimodal 1.5s + IO 0.3s |
+| Agent turn 2 + 3 validation calls | 1.4s | LLM 0.8s + 3 deterministic ~0.2s + IO |
+| Agent turn 3 + draft | 0.9s | |
+| Persist + SLA update | 50ms | |
+| **Total** | **≈ 5.4s** | within 8s target |
+
+Tail-latency mitigation: the harness has a 8s wall-clock cap per event; on breach, it returns the agent's most-recent decision-or-pending-state to the user and continues processing in the background. The case lifecycle marker `OPEN_AGENT_PROCESSING` flips to `OPEN_AWAITING_BUYER` / etc. asynchronously.
+
+### 8.4 SLI / SLO discipline (operational governance)
+
+| Indicator | Target | Action on breach |
+|---|---|---|
+| **T2 case agent run cost (p95)** | <$0.05 | If >$0.10 sustained, throttle agent iterations; investigate cost outliers |
+| **T2 case agent run latency (p95)** | <8s | If >12s sustained, investigate; consider tool-call parallelism |
+| **L0 skill cached-prefix hit rate (per skill)** | ≥70% | If <70% sustained, investigate prefix invalidation; likely an anchor-example edit in a hot loop |
+| **Agent loop budget exhaustion rate** | <2% of T2 events | If >5%, the budget or the workflow is wrong; review cases that exhausted |
+| **Compaction-replay divergence** | 0% | Any divergence is a code-correctness bug; halt rollout and fix |
+| **Case-open rate (T2 / T3 from T1)** | Stable | If T2 case rate climbs without traffic increase, classification-quality regression; investigate |
+
+### 8.5 Governance — who owns what at L0
+
+| Artefact | CODEOWNERS gate | Rationale |
+|---|---|---|
+| `knowledge/skills/<name>/SKILL.md` | Compliance + domain SME + Engineering | Reasoning guide IS policy that drives audited decisions |
+| `knowledge/skills/<name>/examples/*` | Compliance (review) + Engineering (author) | Examples shape agent behaviour; Compliance reviews the patterns. Per-example A/B test required. |
+| `knowledge/skills/<name>/assets/*.template.md` | **Compliance + Brand** + Engineering | Customer-facing prose; brand-voice + legal review required |
+| `knowledge/skills/<name>/specs/*.md` | Engineering + domain SME | Reference docs; not runtime |
+| `knowledge/skills/<name>/metadata.yaml` | Engineering + Compliance | Routing + token-budget governance |
+| `knowledge/compaction/*.template.md` | **Compliance + Engineering** | Compaction templates affect what the agent sees post-compaction; Compliance has veto |
+| `compliance/audit_bearing_registry.yaml` | Compliance (existing) | Unchanged from current governance |
+
+The pattern is consistent: anything that affects what the agent says, what it remembers post-compaction, or what it sends to a customer requires Compliance + a domain expert.
+
+---
+
+## 9. Migration Phases (H.1 → H.7) and Code-Level Scope
+
+This is the operational rollout plan. **None of the phases requires a big-bang rewrite.** Each phase is independently shippable; existing T1 traffic continues uninterrupted throughout.
+
+### Phase H.1 — Knowledge layer foundation (~1 week)
+
+**Goal:** establish `knowledge/` directory and bundle structure without breaking existing skill loading.
+
+* Create `knowledge/skills/<name>/` for each existing SKILL.md. Move SKILL.md files unchanged.
+* Add `metadata.yaml` to each bundle with empty `examples`, empty `assets`, empty `specs`, no `anchor_examples` (initial state — pure repackaging).
+* Update `skills/loader.py` to read from `knowledge/skills/<name>/SKILL.md`. Keep backward-compatible fallback to `skills/<name>_SKILL.md` for one release.
+* Add CI check: every entry in `metadata.yaml::anchor_examples` exists; `runtime_includes` allowlist is honoured by the loader.
+* **Existing graph + tests run unchanged.** No agent code yet; no behavioural change.
+
+### Phase H.2 — `OrderCase` primitive + correlation table (~1 week)
+
+**Goal:** persistence primitive in place; T1 path unaffected.
+
+* `contracts/models.py` += `OrderCase` Pydantic model.
+* `db/migrations/V009__order_case.sql` + `V010__case_correlation_keys.sql`.
+* `api/store.py` + `db/repository.py` += `OrderCase` CRUD.
+* `ExceptionRecord.parent_case_id` added as nullable column.
+* No behavioural change yet — every record still has `parent_case_id = NULL`.
+* Tests: CRUD, correlation lookup-or-create, multi-PO email correctly opens N cases.
+
+### Phase H.3 — Tier-2 case materialisation on existing flows (~2 weeks)
+
+**Goal:** existing exceptions start opening cases on the non-clean path. **No agent yet.**
+
+* Update `orchestration/nodes.py::build_analysis` to call `case_resolver.lookup_or_create(event)` when `final_status != COMPLETE`. Set `parent_case_id` on the record.
+* `OrderCase.tier = 2` for all new cases; SLA clock starts; lifecycle status follows the existing exception lifecycle.
+* Tests: every existing e2e test verifies `parent_case_id` is set on non-clean records and a case row exists.
+* Backfill job (`db/migrations/V011__backfill_orphan_cases.sql`) — optional, can defer.
+* **Behavioural change:** the UI gains a `case_id` field on every non-clean record. Existing detail pages can be reshaped to show case context (Phase H.6 below).
+
+### Phase H.4 — L2 attachment-extractor primitive (~2 weeks)
+
+**Goal:** the multimodal extraction tool the Case Agent will need.
+
+* `agents/primitives/extract_attachment.py` — the tool wrapper.
+* Internal pipeline: template fingerprint → cache lookup (per tenant) → format dispatch (native PDF / OCR / Excel / multimodal image) → structured output.
+* Cache-key includes `tenant_id` (PO Q5 binding).
+* CI fixtures: 5 representative document shapes per format; structured-output assertions.
+* **No agent yet — this is just an L2 primitive that other code can call.**
+
+### Phase H.5 — Case Agent (L3) + Harness extensions (L4) (~3-4 weeks)
+
+**Goal:** the agent runs on T2 cases.
+
+* `agents/case_agent.py` — the loop.
+* `agents/case_tools.py` — the 18-tool surface.
+* `agents/working_memory.py` — context builder honouring §5.3 cache-discipline order.
+* `agents/budget.py` — per-tier budget enforcement.
+* `agents/compaction.py` — deterministic compaction (used in T3, but plumbed in this phase).
+* L4 harness extensions: case-aware concurrency lock; tool-call interception for replay log; tier graduation on first non-clean event for Automated.
+* **Initially route only NEW Manual Order events** (currently zero in production until ADR-034 ships) through the agent. Existing exception flows continue on the deterministic graph; `parent_case_id` is set but the agent doesn't run.
+* Tests: agent loop with mocked LLM; full e2e with stub LLM responses producing each terminal state.
+
+### Phase H.6 — UI: case detail surface (~2 weeks)
+
+**Goal:** the CSR's lived workflow surfaces correctly.
+
+* Reshape the existing `ExceptionDetailPanel` into `CaseDetailPanel` with case header (source, source_channel, SLA, lifecycle status) + child records stacked below as section components.
+* Existing `*Section.tsx` components (EmailSourceSection, EmailOrderEntrySection, MOQSection, …) mount on the case detail page via the existing data-presence pattern.
+* List view: replace `/inbox` + `/exceptions` as separate primaries with a single `/cases` queue. SLA-driven sort. Filter chips per tier / source / customer.
+* Both `/inbox` and `/exceptions` retain as **filtered views** of `/cases` for ADR-034 §6 compatibility, but the primary CSR surface is `/cases`.
+* Migration of existing UI tests + lock tests.
+
+### Phase H.7 — T3 compaction enable + SLA tracking + backfill (~2 weeks)
+
+**Goal:** long-running cases are bounded; SLA tracking is real; legacy data is uniform.
+
+* Compaction trigger fires; templates active; CI tests verify replay-divergence == 0.
+* SLA clock policy table at `knowledge/policy/sla_per_customer_tier.yaml`; the harness reads at case open and stamps `sla_deadline`.
+* Backfill job materialises orphan cases for legacy `ExceptionRecord` rows (one case per record initially; optional merge pass).
+* Migration of existing four-eyes / cosign / override flows to operate on the case lifecycle (not the exception lifecycle in isolation).
+
+### 9.1 Total scope and timeline (estimate)
+
+* **~10–12 weeks of focused engineering** across Phases H.1 → H.7.
+* Independently shippable; T1 traffic uninterrupted throughout.
+* Risk concentration: **Phase H.5 is the load-bearing phase** (Case Agent + 18-tool surface + harness extensions). Spike H.5 first against a single skill (`email-order-entry`) before generalising.
+
+### 9.2 Sequencing notes (architectural honesty)
+
+* H.1, H.2 are pure plumbing — low risk, ship fast.
+* H.3 introduces the case as a real entity but no agent — gives the UI team a concrete object to design against in parallel with H.5.
+* H.4 (extraction) and H.5 (agent) can run in parallel; the agent depends on the extractor at runtime but H.5 can stub it during development.
+* H.6 (UI) depends on H.3 (case persistence); can start design work earlier.
+* H.7 closes the loop with compaction + SLA + backfill.
+
+---
+
+*Sections §10–§12 follow in subsequent commits.*
