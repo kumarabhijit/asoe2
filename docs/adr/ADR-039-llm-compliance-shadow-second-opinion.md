@@ -186,4 +186,150 @@ What the L2 Shadow **does NOT see:**
 
 ---
 
-*Sections §4–§8 follow in subsequent commits.*
+## 4. The Asymmetric Combination Rule (the load-bearing decision)
+
+This is the single most important rule in the ADR. Compliance veto rests on it.
+
+### 4.1 The combination truth table (binding)
+
+For every event where the L2 LLM Shadow is invoked (gating in §6.2 below), L4's combiner produces the final verdict from the deterministic L1 verdict and the L2 LLM verdict per this table:
+
+| L1 deterministic | L2 LLM | Final verdict | Lifecycle outcome | Rationale |
+|---|---|---|---|---|
+| **GREEN** | **AGREE** | **GREEN** | Proceed → recipe executes | Both gates clear; baseline auto-handle path |
+| **GREEN** | **DISAGREE_DOWNGRADE** | **YELLOW** | `MANUAL_REVIEW_REQUIRED` | LLM caught a context the rules missed; human reviews. **The reason text from the LLM is surfaced verbatim in the audit log so the reviewer sees WHY it escalated.** |
+| **GREEN** | **ABSTAIN** | **GREEN** | Proceed → recipe executes | LLM declined to opine; deterministic gate is sufficient. Logged as ABSTAIN for SLI tracking. |
+| **YELLOW** | **AGREE** | **YELLOW** | `MANUAL_REVIEW_REQUIRED` | Both want review; review |
+| **YELLOW** | **DISAGREE_DOWNGRADE** | **YELLOW** | `MANUAL_REVIEW_REQUIRED` | Already at YELLOW; LLM cannot DOWNGRADE further (DISAGREE_DOWNGRADE has no path further down to RED) |
+| **YELLOW** | **ABSTAIN** | **YELLOW** | `MANUAL_REVIEW_REQUIRED` | Deterministic verdict stands |
+| **RED** | *(L2 NEVER INVOKED)* | **RED** | `BLOCKED` | Deterministic-RED short-circuits. L2 LLM Shadow is **not even called** when L1 returns RED — saves cost and prevents any LLM observation of RED-flagged content. |
+
+### 4.2 Why asymmetric (architectural reasoning)
+
+**The structural property:** the L1 deterministic verdict is the **floor**. The L2 LLM verdict can only **raise** caution (push toward MANUAL_REVIEW_REQUIRED), never **reduce** it.
+
+This is enforced in three places, defence-in-depth:
+
+1. **In the schema (§3.2):** the `ShadowLLMVerdict.action` Literal omits any `DISAGREE_UPGRADE` variant. Constrained-output bounds the LLM to actions that don't violate the rule.
+2. **In the combiner (§4.1):** the truth table never produces a final verdict more permissive than the deterministic verdict.
+3. **In the gating (§6.2):** L2 is not even invoked when L1 returns RED. The LLM cannot "see" content the deterministic gate has already blocked, and cannot under any circumstances downgrade RED → YELLOW.
+
+**Compliance keeps its veto:**
+
+* RED stays RED. Any deterministic-RED record blocks the same way it does today; ADR-039 changes nothing for that path.
+* GREEN can become YELLOW if the LLM catches something. This is a *more conservative* outcome than today, never a *less conservative* one. Errors of caution, not commission.
+* GREEN cannot become RED via the LLM. RED requires deterministic policy violation; we don't let the LLM flip to RED on its own. (If we did, replayability would be at risk because LLM is less reproducible than rules.)
+
+**Replayability is preserved:**
+
+* Same deterministic verdict + same LLM input + same model + same temperature (0) + same cached prompt → same final verdict on replay.
+* If a future audit query challenges the decision, the auditor can: (a) verify deterministic Shadow's output independently against the inputs, (b) replay the LLM call against the same model + prompt + inputs and observe ~the same output. Both reproductions are recorded in the audit log.
+* The LLM call's verbatim input + output is persisted alongside the decision (see §7.2 audit-trail extensions).
+
+### 4.3 What the rule does not cover (explicit gaps)
+
+* **L2 LLM unavailable / timeout / rate-limited.** The harness falls through to deterministic-only verdict; logs a `shadow_llm_unavailable` event; the SLI tracks the rate. The case is NEVER blocked waiting on L2 Shadow availability — operational reliability outweighs the marginal safety net. See §5.4.
+* **L2 LLM returns malformed output** (constrained-generation failure). Fall through to deterministic-only; log `shadow_llm_validation_error`; SLI tracks. Same rationale.
+* **L2 LLM answer arrives late** (after the case has already been routed by deterministic verdict). The late answer is logged for SLI but does NOT retroactively change the verdict. The L4 harness has a strict wall-clock budget (§5.3).
+
+### 4.4 The asymmetric property under multiple invocations
+
+If the same record is reanalyzed (CSR triggers a re-run), each invocation's L1 + L2 verdicts are logged independently. The reanalysis history (existing `ReanalysisHistoryEntry` from ADR-027 / `reanalysis_history`) carries both verdicts per attempt. This means:
+
+* An L1-GREEN / L2-AGREE on attempt 1 followed by L1-GREEN / L2-DOWNGRADE on attempt 2 is a legitimate audit narrative ("the agent reconsidered with newer context and the LLM caught something").
+* The L4 harness logs each attempt verbatim; nothing is silently overwritten.
+
+### 4.5 Escalation reason flow (UI-visible)
+
+When the LLM downgrades GREEN → YELLOW, the operator reviewing the case must see *why*. The L4 harness:
+
+1. Captures the LLM's `reason` field (one-sentence rationale, constrained-output) into the `ComplianceDecision.reasons` list.
+2. Captures the LLM's `policy_concerns` (named concerns from the closed L0 vocabulary) into `ComplianceDecision.policy_hits`, prefixed with `LLM_SHADOW:` so they're distinguishable from L1 deterministic policy hits.
+3. Surfaces both on the existing exception detail panel under "Compliance evaluation" — no UI change needed beyond a visual badge indicating the source (rule-based vs LLM-based).
+
+The reviewer never sees the LLM's free-form reasoning unconstrained — they see the structured `reason` + named `policy_concerns`. Boris's "tools are the API contract" rule applied to UI rendering: the LLM speaks in vocabulary the audit log can validate.
+
+---
+
+## 5. Cost and Cache Discipline
+
+### 5.1 What we are protecting against
+
+Naive deployment of L2 LLM Shadow: invoke on every event. At ~$0.005 per inference (Haiku-class) × 100k events/quarter = $500/quarter. Tractable but adds 50ms-200ms latency per event, fragments the prompt cache, and provides marginal safety value on the >99% of events where deterministic Shadow's verdict is already correct.
+
+The right framing: **L2 LLM Shadow is a high-leverage tool deployed selectively, not a default-on cost.**
+
+### 5.2 The two gating triggers (when L2 Shadow is invoked)
+
+L4's `shadow_audit` invokes the L2 LLM Shadow when **either** trigger fires:
+
+**Trigger 1 — Financial-impact threshold.** When the proposed action's financial impact (`financial_impact_usd` per ADR-029 / `policy.py::HIGH_VALUE_OVERRIDE_THRESHOLD_USD`) is at or above a threshold, invoke L2 Shadow regardless of deterministic verdict. **Initial threshold: $500** (well below the four-eyes cosign threshold of $10,000, so we get LLM second-opinion coverage on a much wider band than just cosign-eligible cases).
+
+**Trigger 2 — Deterministic YELLOW.** When deterministic Shadow returns YELLOW, invoke L2 Shadow regardless of financial impact. Rationale: YELLOW is already "the rules are unsure" — the LLM either confirms (audit-bearing reason captured) or DISAGREE_DOWNGRADE (still YELLOW; explicit reason captured). The marginal value is in *enriching the YELLOW reason*, not in changing the verdict.
+
+**Composition:** the triggers are OR-combined. An event with `financial_impact_usd = $50k` AND deterministic-YELLOW invokes L2 Shadow once; the result applies to both trigger paths.
+
+**What's NOT a trigger** (explicit non-invocation):
+
+* Deterministic-RED — short-circuited per §4.1.
+* Low-impact GREEN (`financial_impact_usd < $500` AND deterministic-GREEN) — the >99% case; deterministic gate is enough.
+* Reanalysis where the prior attempt's L2 verdict is cached and inputs haven't changed (§5.5 below).
+
+### 5.3 Wall-clock budget
+
+The L2 Shadow inference has a strict **2-second wall-clock cap**. On breach, the harness:
+
+1. Falls through to deterministic-only verdict.
+2. Logs `shadow_llm_timeout` event with the elapsed time.
+3. Counts the event toward the SLI alert budget (§7.3).
+4. **Does not block the case lifecycle** — the case proceeds with deterministic verdict.
+
+2 seconds is roughly the p99 of a Haiku-class inference on the ~3k-token input the L2 Shadow receives. Local Ollama models on commodity hardware are usually faster but inconsistent under load — the timeout protects against tail latency.
+
+### 5.4 Failure handling (the L2 LLM is unavailable)
+
+Failure modes the harness handles silently (without changing case lifecycle):
+
+| Failure | Harness action | SLI impact |
+|---|---|---|
+| L2 model returns 5xx / connection error | Fall through to deterministic-only; log `shadow_llm_unavailable` | Counts toward `shadow_llm_unavailability_rate` SLI |
+| L2 returns malformed output (constrained-generation rejected) | Fall through; log `shadow_llm_validation_error` | Counts toward `shadow_llm_validation_error_rate` SLI |
+| L2 returns 4xx (quota / auth) | Fall through; log `shadow_llm_quota` | High-priority alert; quota config issue |
+| L2 timeout (>2s) | Fall through; log `shadow_llm_timeout` | Counts toward `shadow_llm_timeout_rate` SLI |
+
+**Operational invariant:** an L2 outage degrades the system to today's behaviour (deterministic-only Shadow), never below it. This is the lowest-risk failure-mode design.
+
+### 5.5 Cache strategy
+
+The L2 Shadow's input is `(intent, recipe_name, recipe_params_hash, proposed_action, deterministic_verdict, customer_profile_hash)`. Many shadow calls repeat — the same customer's same SKU triggers similar evaluations.
+
+**Cache key:** SHA-256 of the JSON-canonical concatenation of the input fields above + the L0 shadow-LLM bundle version + the model id.
+
+**Cache value:** the typed `ShadowLLMVerdict` plus a timestamp.
+
+**TTL:** 24 hours. Long enough to soak up repeat traffic from the same customer's daily order patterns; short enough that L0 bundle updates and customer-profile changes propagate within a day.
+
+**Tenant isolation:** cache key includes `tenant_id` per ADR-038 §5.8. A Tenant-A cache hit cannot serve a Tenant-B request even if the rest of the inputs are byte-identical.
+
+**Effect on cost:** at 70% cache hit rate (sustained after 30 days of warm-up), per-trigger cost drops to ~$0.0015 effective. Combined with the gating in §5.2 (L2 Shadow runs on roughly 5% of events under conservative assumptions), the per-event amortised cost is roughly **$0.0001**.
+
+### 5.6 Cost budget summary (binding)
+
+| Tier (per ADR-038) | L2 Shadow invocation rate | Per-event amortised cost | Per-month cost @ 100k events |
+|---|---|---|---|
+| **T1 (clean automated)** | 0% (deterministic-GREEN low-impact; never triggered) | $0 | $0 |
+| **T2 (stateful case, mid-impact)** | ~5% (financial-impact OR YELLOW path) | ~$0.0001 | ~$10 |
+| **T3 (long-running)** | ~10% (more mid-impact decisions per case) | ~$0.0002 | ~$20 |
+
+**Total monthly L2 Shadow cost at 100k events: ~$30.** Even at 10× that traffic the cost stays under the noise threshold of the existing classifier-LLM bill. The asymmetric value proposition is favourable.
+
+### 5.7 What this discipline does NOT do
+
+* **Doesn't cache across tenants** (already covered in §5.5; bears repeating because it's a frequent bug pattern).
+* **Doesn't cache across L0 bundle versions** — when Compliance updates the shadow-LLM system prompt, the cache key changes, all entries invalidate. This is by design: a policy change must propagate immediately.
+* **Doesn't cache across customer-profile changes** — the customer profile hash is in the cache key. A customer-tier change invalidates relevant cache entries.
+* **Doesn't suppress observability** — even on cache hits the L4 harness logs the cache-hit event with the cached verdict for SLI tracking. We need to see when caching is/isn't earning its keep.
+
+---
+
+*Sections §6–§8 follow in subsequent commits.*
