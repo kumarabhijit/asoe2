@@ -26,12 +26,15 @@ BUNDLE_ROOT = Path("knowledge/skills")
 # The 9 skill bundles ADR-038 Phase H.1 migrated from flat SKILL.md
 # files. Email-order-entry is intentionally absent — that bundle ships
 # with the in-flight ADR-034 branch (see docs/plans/case-centric-rollout.md
-# §3 Option C).
+# §3 Option C). The §3.4 coherence-fix commit added `email-order-entry`
+# to the set so the H.1 invariant "every skill is a bundle" holds across
+# the combined branch.
 EXPECTED_BUNDLES: list[str] = [
     "back-order-resolution",
     "delivery-delay",
     "duplicate-po",
     "edi-mismatch",
+    "email-order-entry",
     "moq-round-up",
     "over-max-trim",
     "pallet-alignment",
