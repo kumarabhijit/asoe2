@@ -1799,16 +1799,40 @@ gates still pending (see "Pending" subsection at the bottom).
       (RESOLVED / ESCALATED / AWAITING_BUYER / AWAITING_ERP /
       BUDGET_EXHAUSTED / ERROR), bounded while-loop.
 - [x] `tests/test_case_agent.py` — 26 tests.
-- [ ] **Pending: agent is dormant.** `run_case_agent` is not
-      called from `api/`, `orchestration/`, or `workflows/`.
-      Per §H.5 the routing decision (`EMAIL_ORDER_ENTRY_REQUEST`
-      → case agent vs deterministic graph) is part of this phase
-      but has not been implemented yet.
-- [ ] **Pending: L4 harness extensions** —
-      case-aware concurrency lock, tool-call interception for
-      replay log, tier graduation on first non-clean event for
-      Automated. Not visible in the codebase
-      (`harness*.py` does not exist).
+- [x] `agents/harness.py` — L4 wrapper composing every cross-
+      cutting concern the inner agent loop deliberately doesn't
+      own: per-case concurrency lock (`CaseLockManager.try_acquire`
+      returns `None` when held; matches the future SQL
+      `SELECT FOR UPDATE NOWAIT`), forward-only tier graduation
+      (T1 → T2 → T3, never demote), tool-call interception
+      (`ToolCallReplayLog`; agent does not write — harness does),
+      compaction trigger evaluation via
+      `agents.compaction.apply_compaction_if_needed` after every
+      step, ADR-039 X.1 observe-only L2 LLM Shadow invocation
+      stamping the verdict alongside the L1 deterministic decision.
+- [x] `agents/harness.py::should_route_to_case_agent` — routing
+      predicate. Returns `False` unless explicitly enabled by
+      config (default off until Compliance ratifies); when enabled
+      routes only `EMAIL_ORDER_ENTRY_REQUEST` (the single Manual-
+      Order event type for the Phase H.5 cutover).
+- [x] `tests/test_harness.py` — 18 tests covering concurrency
+      lock isolation (per-case + per-tenant), tier graduation
+      (forward-only; clean event = no-op), replay log isolation
+      per case, end-to-end happy path, lock contention short-
+      circuit, tool-trace persistence, L2 Shadow invocation +
+      RED short-circuit, and the routing predicate's safe-default
+      semantics.
+- [ ] **Pending: deterministic graph hot-path replacement.** The
+      harness is in place and the routing predicate is wired but
+      `should_route_to_case_agent` returns `False` unconditionally
+      until Compliance ratifies (ADR-038 §H.5 + ADR-039 §6.1
+      workshop gates). The flag flip is a config-only change in
+      the live deployment.
+- [ ] **Pending: SQL-backed concurrency lock + replay log.** The
+      in-memory `CaseLockManager` and `ToolCallReplayLog`
+      faithfully model the eventual SQL behaviour
+      (`SELECT FOR UPDATE NOWAIT` + a `case_events` table) but
+      the persistence migration ships separately.
 
 ### 27.6 Phase H.6 — UI: `/cases` surface (asoe-ui)
 - [x] **Companion repo** — see `asoe-ui/tasks.md` Phase 27.6
