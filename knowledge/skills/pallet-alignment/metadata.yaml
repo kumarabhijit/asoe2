@@ -1,0 +1,56 @@
+# Knowledge bundle manifest for skill `pallet-alignment`.
+#
+# Phase H.1 of ADR-038 establishes this manifest as the L0 (Knowledge)
+# layer's per-skill descriptor. Initial fields are populated from the
+# existing SKILL.md frontmatter; future phases extend with `examples`,
+# `anchor_examples`, `assets`, and tightened `runtime_includes`.
+
+schema_version: 1
+skill_name: pallet-alignment
+bundle_version: 1.0.0
+description: |
+  Detects broken-layer (SD-PLT-001) and partial-pallet (SD-PLT-002) violations and proposes a round-down plan aligned to full layers / full pallets. Triggered on PALLET_CONFIG_VIOLATION events.
+
+# Recipe(s) this skill calls. Mirrors recipes/registry.py.
+recipes:
+  - PalletAlignmentRecipe.py
+
+# Intent enum value(s) this skill produces. Must be a subset of
+# constraints/specs.py::AllowedIntent.
+intents:
+  - PALLET_CONFIG
+
+# Event type strings (OrderEvent.event_type) routed to this skill by
+# skills/loader.py::select_for_event. Phase H.1 retains the existing
+# EDI_850_* legacy aliases per ADR-038 §3.2; channel-neutral cleanup
+# is organic.
+event_types:
+  - PALLET_CONFIG_VIOLATION
+
+# Anchor examples — loaded into the cached prefix on every call. Per
+# ADR-038 §5.4 rule 1, keep ≤ 2 and change rarely. Phase H.1 ships
+# empty per ADR-038 §5.5 (examples are EARNED by real failures, not
+# authored speculatively).
+anchor_examples: []
+
+# On-demand examples — agent loads via load_example tool. Manifest
+# entries below are loaded as one-line summaries (NOT bodies) into
+# the cached prefix.
+on_demand_examples: []
+
+# Server-rendered templates (ADR-038 §5.6). The agent provides field
+# values; the harness fills the template body. Body never enters the
+# agent's context.
+assets: []
+
+# Allowlist of runtime-included paths (ADR-038 §5.2). The L4 bundle
+# loader hard-fails if a request reads a path not in this list. Specs
+# under specs/ are deliberately excluded — humans navigate to them;
+# the agent never sees them.
+runtime_includes:
+  - SKILL.md
+
+# Cost guardrails enforced by the L4 harness during bundle load.
+token_budget:
+  cached_prefix_max_tokens: 3000
+  on_demand_load_max_tokens: 4000
