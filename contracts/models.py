@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
@@ -115,6 +116,124 @@ class OrderEvent(BaseModel):
     current_exposure: Optional[float] = None
     line_count: int = 1
     metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# OrderCase — ADR-038 Phase H.2 parent entity
+# ---------------------------------------------------------------------------
+#
+# An OrderCase is the parent record for all events / actions on a single
+# business order. Created lazily for Automated Orders (on first non-clean
+# event) and eagerly for Manual Orders (on email arrival). Holds the SLA
+# clock, the case-source classification, and correlation keys that let
+# incoming events resolve to an existing case via lookup-or-create.
+
+CaseSource = Literal["manual_order", "automated_order"]
+"""ADR-038 §3.1 — Manual = email/phone/fax (CSR reads prose to extract);
+Automated = EDI X12 / portal / API feed / FTP / VMI (no prose to extract)."""
+
+CaseStatus = Literal[
+    "OPEN_AGENT_PROCESSING",  # agent is currently working
+    "OPEN_AWAITING_HUMAN",    # MANUAL_REVIEW_REQUIRED on a child
+    "OPEN_AWAITING_BUYER",    # REQUEST_CLARIFICATION sent
+    "OPEN_AWAITING_ERP",      # submitted; waiting on ERP confirmation
+    "RESOLVED",               # all children terminal-closed
+    "FAILED",                 # case-level FAIL_TO_HUMAN
+    "BLOCKED",                # case-level RED verdict
+]
+"""ADR-038 §6.1 — case lifecycle. Distinct from `LIFECYCLE_STATES`
+which describes the per-exception lifecycle. The case-level lifecycle
+tracks "what's blocking forward progress on this business order"."""
+
+CaseTier = Literal[1, 2, 3]
+"""ADR-038 §7.1 — graduated materialisation policy. T1 = stateless,
+T2 = stateful, T3 = stateful + compacted. Forward-only transitions
+(never demote)."""
+
+
+class OrderCase(BaseModel):
+    """ADR-038 Phase H.2 parent entity.
+
+    Created via `case_store.lookup_or_create()` keyed on whichever
+    correlation identifiers the inbound event carries. SLA clock starts
+    at `opened_at`; tier is set per the materialisation policy in
+    ADR-038 §7.1. `bundle_version_at_open` stamps the L0 skill bundle
+    version active when the case opened so audit can replay against
+    the historical knowledge surface.
+
+    `working_memory_summary` is populated by the Phase H.7 compaction
+    protocol; it's None until first compaction fires.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    case_id: str = Field(default_factory=lambda: str(uuid4()))
+    tenant_id: str
+    customer_id: Optional[str] = None
+
+    source: CaseSource
+    source_channel: str
+    """Finer-grained channel within `source`. ADR-038 §3.3 allowed
+    values: 'email' | 'phone' | 'fax' for manual_order; 'edi_x12_850'
+    | 'edi_x12_855' | 'portal' | 'api_feed' | 'ftp_csv' | 'ftp_xml'
+    | 'vmi_replenishment' for automated_order. The string is open
+    so new channels don't require a contract bump; routing decisions
+    don't branch on it (recipes handle issues, not channels)."""
+
+    customer_po_number: Optional[str] = None
+    sales_order_id: Optional[str] = None
+    edi_transaction_id: Optional[str] = None
+    source_email_id: Optional[str] = None
+
+    opened_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+    )
+    closed_at: Optional[str] = None
+    status: CaseStatus = "OPEN_AGENT_PROCESSING"
+    sla_deadline: Optional[str] = None
+
+    tier: CaseTier = 2
+    """Default T2 (stateful). Tier-1 stateless events do not
+    materialise an OrderCase at all per ADR-038 §7.1; this field is
+    only present on records that exist as cases."""
+
+    working_memory_summary: Optional[str] = None
+    last_compaction_at: Optional[str] = None
+    bundle_version_at_open: Optional[str] = None
+
+
+CaseCorrelationKeyType = Literal[
+    "customer_po_number",
+    "sales_order_id",
+    "edi_transaction_id",
+    "source_email_id",
+]
+"""ADR-038 §6.2 — the four key types that resolve an event to a case.
+Resolution priority is sales_order_id → customer_po → edi_transaction_id
+→ source_email_id; first match wins."""
+
+
+class CaseCorrelationKey(BaseModel):
+    """One row in the `case_correlation_keys` table (V010).
+
+    ADR-038 §6.2 — `(tenant_id, key_type, key_value)` is the primary
+    key; multiple keys can resolve to the same `case_id` (e.g., the
+    same case has both a customer PO number and an SO id and a
+    source email). The first event to arrive registers whatever
+    keys it carries; subsequent events enrich the set as new
+    identifiers appear (the ERP creates the SO and that key joins
+    the existing case).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tenant_id: str
+    key_type: CaseCorrelationKeyType
+    key_value: str
+    case_id: str
+    registered_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+    )
 
 
 class PricingDiscrepancy(BaseModel):
