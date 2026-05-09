@@ -49,9 +49,15 @@ class TestLoadByName:
         assert "CreditHoldReleaseRecipe.py" in doc.recipes
 
     def test_text_length_matches_file(self):
-        """Text must not be truncated."""
+        """Text must not be truncated. ADR-038 Phase H.1: SKILL.md
+        files now live under knowledge/skills/<bundle>/SKILL.md. The
+        loader's bundle-first resolution returns content from the new
+        path; this test reads from the canonical bundle location
+        directly to compare."""
         import pathlib
-        raw = pathlib.Path(SKILLS_ROOT, "pricing-reconciliation_SKILL.md").read_text(encoding="utf-8")
+        raw = pathlib.Path(
+            "knowledge/skills/pricing-reconciliation/SKILL.md",
+        ).read_text(encoding="utf-8")
         doc = SkillLoader(SKILLS_ROOT).load_by_name("pricing-reconciliation_SKILL.md")
         assert doc.text == raw
 

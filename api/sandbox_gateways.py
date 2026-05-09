@@ -202,6 +202,84 @@ def register_sandbox_gateways() -> None:
         },
     ))
 
+    # ADR-034 Phase B — `email_intake` carries the four non-disable-able
+    # floor checks for EmailOrderEntryRecipe. Mirrors
+    # tests/conftest.py::email_intake_stub so the live sandbox server
+    # behaves identically to the pytest pipeline. Real upstream connectors
+    # (Microsoft Graph / customer-master / OMS / credit service) ship as a
+    # platform-track follow-up under proposed ADR-035.
+    register_gateway(StubGateway(
+        "email_intake",
+        responses={
+            "sender_auth": GatewayResponse(
+                gateway_name="email_intake", operation="sender_auth",
+                status="SUCCESS",
+                data={
+                    "sender_authorized": True,
+                    "auth_method": "domain_match",
+                    "auth_evidence": {
+                        "from_domain": "stub-customer.example",
+                        "matched_against": "customer_master.allowed_domains",
+                    },
+                },
+            ),
+            "resolve_customer": GatewayResponse(
+                gateway_name="email_intake", operation="resolve_customer",
+                status="SUCCESS",
+                data={
+                    "customer_resolved": True,
+                    "match_method": "domain",
+                    "match_confidence": 0.97,
+                    "customer_name": "Stub Customer Inc",
+                },
+            ),
+            "duplicate_po_pre_check": GatewayResponse(
+                gateway_name="email_intake", operation="duplicate_po_pre_check",
+                status="SUCCESS",
+                data={
+                    "duplicate_po_clear": True,
+                    "matched_po_id": None,
+                    "match_score": 0.0,
+                },
+            ),
+            "credit_check": GatewayResponse(
+                gateway_name="email_intake", operation="credit_check",
+                status="SUCCESS",
+                data={
+                    "credit_clear": True,
+                    "credit_limit": 100_000.0,
+                    "current_exposure": 25_000.0,
+                    "headroom": 75_000.0,
+                },
+            ),
+            "fetch_message": GatewayResponse(
+                gateway_name="email_intake", operation="fetch_message",
+                status="SUCCESS",
+                data={
+                    "from_address": "buyer@stub-customer.example",
+                    "received_at": "2026-04-30T10:12:00Z",
+                    "subject": "PO submission — stub fixture",
+                    "body_hash": (
+                        "0000000000000000000000000000000000000000"
+                        "000000000000000000000000"
+                    ),
+                    "attachment_manifest": [
+                        {
+                            "name": "purchase_order.pdf",
+                            "mime_type": "application/pdf",
+                            "bytes": 12_345,
+                        },
+                    ],
+                    "body_excerpt": (
+                        "Please process the attached PO. "
+                        "Ship to the Atlanta DC."
+                    ),
+                    "source_email_id": "stub-msg-001",
+                },
+            ),
+        },
+    ))
+
     # ADR-029 / ADR-030: tenant_config is the file-backed PLATFORM resolver
     # for layer 1 + the DB-backed resolver for layers 2-5 (PR-C.2). It's
     # not a stub — the platform JSON ships with the application and the

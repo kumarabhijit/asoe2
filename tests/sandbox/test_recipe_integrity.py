@@ -54,6 +54,7 @@ class TestRecipeModuleIntegrity:
         "MOQRoundUpRecipe",
         "PalletAlignmentRecipe",
         "DeliveryDelayResolutionRecipe",
+        "EmailOrderEntryRecipe",
     ]
 
     def test_recipe_directory_exists(self):
@@ -177,7 +178,7 @@ class TestConstrainedOutputs:
             "MASS_PRICING_ERROR", "DUPLICATE_PO",
             "PRICE_HOLD_RELEASE", "EDI_MISMATCH",
             "BACK_ORDER", "OVER_MAX", "MIN_ORDER_QTY",
-            "PALLET_CONFIG", "DELIVERY_DELAY", "UNKNOWN",
+            "PALLET_CONFIG", "DELIVERY_DELAY", "EMAIL_ORDER_ENTRY", "UNKNOWN",
         }
         assert allowed == expected
 

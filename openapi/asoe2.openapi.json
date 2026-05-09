@@ -229,6 +229,26 @@
               }
             ]
           },
+          "email_order_entry_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EmailOrderEntryAnalysisData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "email_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EmailSourceData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "entity_profile": {
             "anyOf": [
               {
@@ -1288,6 +1308,213 @@
           "autonomy_level"
         ],
         "title": "EdiMismatchAnalysisData",
+        "type": "object"
+      },
+      "EmailAttachmentManifestEntry": {
+        "additionalProperties": false,
+        "description": "One row in `EmailSourceData.attachment_manifest`.\n\n`name` and `mime_type` are sufficient for the operator to\ntriage what arrived; `bytes` lets the UI render a size hint\nand lets the audit trail check tampering against the inbound\npayload. `body_hash` for the email body lives on\n`EmailSourceData`; per-attachment hashes are out of scope until\na real attachment-store gateway lands (Phase F / ADR-036).",
+        "properties": {
+          "bytes": {
+            "default": 0,
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "mime_type": {
+            "title": "Mime Type",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "mime_type"
+        ],
+        "title": "EmailAttachmentManifestEntry",
+        "type": "object"
+      },
+      "EmailOrderEntryAnalysisData": {
+        "additionalProperties": false,
+        "description": "EmailOrderEntryRecipe \u2192 UI `email_order_entry_analysis`\n(ADR-034 Phase B).\n\nMirrors `asoe-ui/src/types/exceptions.ts::EmailOrderEntryAnalysisData`.\n`classification` is the recipe's confidence-band output;\n`recommended_action` is constrained by `AllowedResolutionAction`\non the wire (intentionally `str` here so the UI section can render\nnew actions added downstream without a contract bump \u2014 same pattern\nas EdiMismatchAnalysisData).\n\n`reject_reason_code` is conditional on classification == FATAL_REJECT;\nNone on every other classification (Pillar 3 conditional field \u2014\nrendered as \"Context Not Required for Resolution\" by EvidenceBlock\nwhen the predicate doesn't hold).",
+        "properties": {
+          "autonomy_level": {
+            "enum": [
+              "L1",
+              "L2",
+              "L3",
+              "L4"
+            ],
+            "title": "Autonomy Level",
+            "type": "string"
+          },
+          "classification": {
+            "enum": [
+              "ONE_CLICK_APPROVE",
+              "STANDARD_REVIEW",
+              "LOW_CONFIDENCE",
+              "FATAL_REJECT"
+            ],
+            "title": "Classification",
+            "type": "string"
+          },
+          "composite_confidence": {
+            "title": "Composite Confidence",
+            "type": "number"
+          },
+          "floor_breaches": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Floor Breaches",
+            "type": "array"
+          },
+          "floor_status": {
+            "$ref": "#/components/schemas/EmailOrderEntryFloorStatus"
+          },
+          "notification_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notification Template"
+          },
+          "recommended_action": {
+            "title": "Recommended Action",
+            "type": "string"
+          },
+          "reject_reason_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "sender_unauthorized",
+                  "customer_unresolved",
+                  "duplicate_po_confirmed",
+                  "credit_block",
+                  "corrupt_input",
+                  "policy_floor_breach"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reject Reason Code"
+          },
+          "validation_failures": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Validation Failures",
+            "type": "array"
+          }
+        },
+        "required": [
+          "composite_confidence",
+          "classification",
+          "recommended_action",
+          "autonomy_level",
+          "floor_status"
+        ],
+        "title": "EmailOrderEntryAnalysisData",
+        "type": "object"
+      },
+      "EmailOrderEntryFloorStatus": {
+        "additionalProperties": false,
+        "description": "The four \"non-disable-able floor\" checks (ADR-034 \u00a74).\n\nEach boolean is the GREEN/RED gate evidence the operator reviews\nwhen authorising an email-channel order. Adapter populates these\nfrom `record.enrichment_context.{sender_auth_context,\ncustomer_resolution_context, duplicate_po_pre_check_context,\ncredit_check_context}` \u2014 the four `email_intake` gateway\noperations declared on the recipe spec \u2014 and falls back to\n`event.metadata.non_disableable_floor` defensively when a\ngateway response is empty.\n\nCompliance Pillar 1: even on a RED-shadowed record these fields\nmust be populated (gateway READS run before shadow_audit per\nADR-025).",
+        "properties": {
+          "credit_clear": {
+            "title": "Credit Clear",
+            "type": "boolean"
+          },
+          "customer_resolved": {
+            "title": "Customer Resolved",
+            "type": "boolean"
+          },
+          "duplicate_po_clear": {
+            "title": "Duplicate Po Clear",
+            "type": "boolean"
+          },
+          "sender_authorized": {
+            "title": "Sender Authorized",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sender_authorized",
+          "customer_resolved",
+          "duplicate_po_clear",
+          "credit_clear"
+        ],
+        "title": "EmailOrderEntryFloorStatus",
+        "type": "object"
+      },
+      "EmailSourceData": {
+        "additionalProperties": false,
+        "description": "EmailOrderEntryRecipe \u2192 UI `email_source` (ADR-034 Phase G).\n\nEmail-channel order intake source-of-truth substrate, projected\nby `adapt_email_source` from\n`record.enrichment_context[\"email_source_context\"]` (the\n`email_intake/fetch_message` gateway response).\n\nMirrors `asoe-ui/src/types/exceptions.ts::EmailSourceData`. Mounts on\nthe Exception Queue detail page above `EmailOrderEntrySection`\nvia data-presence dispatch (no per-intent page-level branching \u2014\nCLAUDE.md Guardrail #1).\n\nCompliance posture (Verdict 2026-04-22):\n  * `from_address`, `received_at`, `subject`, `body_hash`,\n    `attachment_manifest` are audit-bearing \u2014 the operator\n    authorising the order needs to see the source-of-truth\n    substrate the recipe acted on.\n  * `body_excerpt` is contextual \u2014 the full body is referenced by\n    `body_hash` for tamper-detection and may be redacted from the\n    excerpt for PII; absence is a structural omission, not an\n    audit gap.",
+        "properties": {
+          "attachment_manifest": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/EmailAttachmentManifestEntry"
+            },
+            "title": "Attachment Manifest",
+            "type": "array"
+          },
+          "body_excerpt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body Excerpt"
+          },
+          "body_hash": {
+            "title": "Body Hash",
+            "type": "string"
+          },
+          "from_address": {
+            "title": "From Address",
+            "type": "string"
+          },
+          "received_at": {
+            "title": "Received At",
+            "type": "string"
+          },
+          "source_email_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Email Id"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from_address",
+          "received_at",
+          "subject",
+          "body_hash"
+        ],
+        "title": "EmailSourceData",
         "type": "object"
       },
       "EntityProfile": {

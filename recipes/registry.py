@@ -9,6 +9,7 @@ from recipes.CreditHoldReleaseRecipe import release_credit_hold
 from recipes.DeliveryDelayResolutionRecipe import resolve_delivery_delay
 from recipes.DuplicatePORecipe import detect_duplicate_po
 from recipes.EdiMismatchRecipe import detect_edi_mismatch
+from recipes.EmailOrderEntryRecipe import classify_email_order_entry
 from recipes.MOQRoundUpRecipe import round_up_moq
 from recipes.OverMaxTrimRecipe import trim_over_max
 from recipes.PalletAlignmentRecipe import align_pallets
@@ -291,6 +292,86 @@ REGISTRY = {
         ),
         allowed_intents=("PALLET_CONFIG",),
         expected_metadata_keys=("pallet_lines",),
+    ),
+    "EmailOrderEntryRecipe.py": RecipeSpec(
+        name="EmailOrderEntryRecipe.py",
+        func=classify_email_order_entry,
+        required_params=(
+            "order_id", "customer_id", "composite_confidence",
+            "validation_failures", "non_disableable_floor",
+            "autonomy_levels", "threshold_auto_approve",
+            "threshold_review_band_low", "threshold_auto_correct",
+        ),
+        allowed_intents=("EMAIL_ORDER_ENTRY",),
+        # ADR-034 Phase B: the four "non-disable-able floor" checks each
+        # land as a `required_for_audit=True` GatewayDependency on the
+        # `email_intake` gateway. The recipe still consumes its primary
+        # inputs from `event.metadata.non_disableable_floor` (mirrors how
+        # DuplicatePO consumes signal_scores from metadata) — gateway
+        # results populate `state.enrichment_context` as PARALLEL audit
+        # evidence. The adapter prefers the gateway response when present
+        # and falls back to the metadata floor booleans defensively.
+        #
+        # Phase B.x will add the 4 expensive checks (document_extract,
+        # pricing_variance, atp_check, delivery_feasibility) once the
+        # corresponding adapter rows land in the audit-bearing registry.
+        dependencies=(
+            GatewayDependency(
+                gateway_name="email_intake",
+                operation="sender_auth",
+                params_from_state={
+                    "order_id": "event.order_id",
+                    "customer_id": "event.retailer_id",
+                },
+                result_key="sender_auth_context",
+            ),
+            GatewayDependency(
+                gateway_name="email_intake",
+                operation="resolve_customer",
+                params_from_state={
+                    "order_id": "event.order_id",
+                    "customer_id": "event.retailer_id",
+                },
+                result_key="customer_resolution_context",
+            ),
+            GatewayDependency(
+                gateway_name="email_intake",
+                operation="duplicate_po_pre_check",
+                params_from_state={
+                    "order_id": "event.order_id",
+                    "customer_id": "event.retailer_id",
+                },
+                result_key="duplicate_po_pre_check_context",
+            ),
+            GatewayDependency(
+                gateway_name="email_intake",
+                operation="credit_check",
+                params_from_state={
+                    "order_id": "event.order_id",
+                    "customer_id": "event.retailer_id",
+                },
+                result_key="credit_check_context",
+            ),
+            # ADR-034 Phase G — source-of-truth substrate for the
+            # Exception Queue detail page's EmailSourceSection.
+            # Audit-bearing: the operator authorising the order needs
+            # to see the inbound email's metadata (sender, received-at,
+            # subject) and a tamper-detect hash of the body.
+            GatewayDependency(
+                gateway_name="email_intake",
+                operation="fetch_message",
+                params_from_state={
+                    "order_id": "event.order_id",
+                    "customer_id": "event.retailer_id",
+                },
+                result_key="email_source_context",
+            ),
+        ),
+        expected_metadata_keys=(
+            "composite_confidence",
+            "non_disableable_floor",
+            "validation_failures",
+        ),
     ),
     "DeliveryDelayResolutionRecipe.py": RecipeSpec(
         name="DeliveryDelayResolutionRecipe.py",

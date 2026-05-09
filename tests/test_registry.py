@@ -48,6 +48,9 @@ class TestRegistryCompleteness:
     def test_registry_contains_delivery_delay_recipe(self):
         assert "DeliveryDelayResolutionRecipe.py" in REGISTRY
 
+    def test_email_order_entry_recipe_registered(self):
+        assert "EmailOrderEntryRecipe.py" in REGISTRY
+
     def test_registry_size_matches_allowed_recipe_name_literal(self):
         """Registry size stays aligned with AllowedRecipeName. Dynamic
         derivation makes this resilient to future vocabulary expansions
@@ -175,6 +178,78 @@ class TestDuplicatePOSpec:
         effect = self.spec.effects[0]
         assert "template" in effect.params_from_output
         assert effect.params_from_output["template"] == "notification_template"
+
+
+# ---------------------------------------------------------------------------
+# EmailOrderEntryRecipe spec (ADR-034)
+# ---------------------------------------------------------------------------
+
+
+class TestEmailOrderEntrySpec:
+    def setup_method(self):
+        self.spec = get_recipe("EmailOrderEntryRecipe.py")
+
+    def test_name_is_correct(self):
+        assert self.spec.name == "EmailOrderEntryRecipe.py"
+
+    def test_required_params_present(self):
+        for param in (
+            "order_id", "customer_id", "composite_confidence",
+            "validation_failures", "non_disableable_floor",
+            "autonomy_levels", "threshold_auto_approve",
+            "threshold_review_band_low", "threshold_auto_correct",
+        ):
+            assert param in self.spec.required_params
+
+    def test_allowed_intent_is_email_order_entry(self):
+        assert "EMAIL_ORDER_ENTRY" in self.spec.allowed_intents
+
+    def test_other_intents_not_in_allowed_intents(self):
+        for other in ("DUPLICATE_PO", "CREDIT_BLOCK", "CONTRACTUAL_CORRECTION"):
+            assert other not in self.spec.allowed_intents
+
+    def test_func_is_callable(self):
+        assert callable(self.spec.func)
+
+    def test_spec_is_frozen(self):
+        with pytest.raises((AttributeError, TypeError)):
+            self.spec.name = "tampered"  # type: ignore[misc]
+
+    def test_gateway_dependencies_declared(self):
+        # ADR-034 Phase B + Phase G: five `email_intake` operations
+        # land as required_for_audit=True dependencies — the four
+        # non-disable-able floor checks plus fetch_message (Phase G —
+        # email source-of-truth substrate for the EmailSourceSection
+        # secondary-adapter projection).
+        assert len(self.spec.dependencies) == 5
+        gateways = {d.gateway_name for d in self.spec.dependencies}
+        assert gateways == {"email_intake"}
+        ops = {d.operation for d in self.spec.dependencies}
+        assert ops == {
+            "sender_auth", "resolve_customer",
+            "duplicate_po_pre_check", "credit_check",
+            "fetch_message",
+        }
+        for dep in self.spec.dependencies:
+            assert dep.required_for_audit is True
+        result_keys = {d.result_key for d in self.spec.dependencies}
+        assert result_keys == {
+            "sender_auth_context", "customer_resolution_context",
+            "duplicate_po_pre_check_context", "credit_check_context",
+            "email_source_context",
+        }
+
+    def test_no_effects(self):
+        # No gateway side effects in Phase B — REQUEST_CLARIFICATION /
+        # ESCALATE / REJECT actions don't trigger automated buyer
+        # notifications today (deferred to a downstream notification
+        # surface; not in scope for this skill's recipe).
+        assert self.spec.effects == ()
+
+    def test_expected_metadata_keys_declared(self):
+        assert "composite_confidence" in self.spec.expected_metadata_keys
+        assert "non_disableable_floor" in self.spec.expected_metadata_keys
+        assert "validation_failures" in self.spec.expected_metadata_keys
 
 
 # ---------------------------------------------------------------------------

@@ -110,6 +110,145 @@ PriceHoldAnalysisData:
     source: derived
     rationale: Human-readable; regenerable from variance + thresholds.
 
+EmailSourceData:
+  # ADR-034 Phase G — email source-of-truth substrate the operator
+  # consumes when authorising an email-channel order. Sourced from
+  # the email_intake/fetch_message gateway response (gateway-backed,
+  # required_for_audit=True) via enrichment_context.email_source_context.
+  # Pillar 1: present on every email-channel record regardless of
+  # shadow verdict (gateway READS run before shadow_audit per ADR-025).
+  from_address:
+    tier: audit-bearing
+    source: control
+    gateway_dependency: true
+    rationale: >-
+      Sender of the inbound email. Substrate of the sender_authorized
+      floor check; the operator must see the address the floor check
+      was applied to.
+  received_at:
+    tier: audit-bearing
+    source: control
+    gateway_dependency: true
+    rationale: >-
+      ISO-8601 receipt timestamp. Substrate for SLA-deadline
+      derivation downstream and for the audit trail's chronology.
+  subject:
+    tier: audit-bearing
+    source: control
+    gateway_dependency: true
+    rationale: >-
+      Email subject line. Reviewer cannot triage whether the
+      extracted PO matches the buyer's stated intent without seeing
+      the subject the agent acted on.
+  body_hash:
+    tier: audit-bearing
+    source: control
+    gateway_dependency: true
+    rationale: >-
+      SHA-256 of the canonicalised email body. Lets the audit trail
+      detect post-hoc tampering of the inbound payload without
+      storing PII-shaped body content in the registry.
+  attachment_manifest:
+    tier: audit-bearing
+    source: control
+    gateway_dependency: true
+    rationale: >-
+      List of (name, mime_type, bytes) for every attachment the
+      extraction pipeline saw. Reviewer authorising a multi-attachment
+      PO needs the manifest to confirm scope.
+  body_excerpt:
+    tier: contextual
+    source: derived
+    rationale: >-
+      Optional human-readable excerpt of the email body — typically
+      the first 240 chars after canonicalisation. Decorative when
+      absent (redaction policy may strip PII or the body may be
+      unavailable); the audit trail reads from `body_hash`.
+  source_email_id:
+    tier: contextual
+    source: control
+    rationale: >-
+      Optional Inbox correlation id (ADR-034 Phase G — bidirectional
+      deep-link between /inbox NEW_ORDER rows and /exceptions/{id}).
+      Decorative: when absent, the inline EmailSourceSection on the
+      detail page is the primary surface; when present, the detail
+      page surfaces a "View source email" back-link.
+
+EmailOrderEntryAnalysisData:
+  # ADR-034 Phase B — email-channel order intake. Floor evidence
+  # (sender_authorized / customer_resolved / duplicate_po_clear /
+  # credit_clear) is sourced from the email_intake gateway's four
+  # required_for_audit=True operations and projected into
+  # `floor_status` by adapt_email_order_entry. Gateway-backed status:
+  # stub-only in V1 (real upstream connectors are a separate
+  # platform track); see grandfather_clauses below.
+  composite_confidence:
+    tier: audit-bearing
+    source: shadow-policy
+    policy_hits: [EMAIL_ORDER_AUTO_APPROVE_BAND, EMAIL_ORDER_REVIEW_BAND, EMAIL_ORDER_LOW_CONFIDENCE_BAND]
+    rationale: >-
+      Composite extraction + resolution score that drives the
+      classification band. Reviewer cannot authorise the action without
+      seeing the score the agent acted on.
+  classification:
+    tier: audit-bearing
+    source: recipe-output
+    rationale: >-
+      Confidence-band classification (ONE_CLICK_APPROVE / STANDARD_REVIEW /
+      LOW_CONFIDENCE / FATAL_REJECT). Drives the autonomy ladder and
+      SoD routing.
+  recommended_action:
+    tier: audit-bearing
+    source: recipe-output
+    rationale: Authorization vocabulary; member of AllowedResolutionAction.
+  autonomy_level:
+    tier: audit-bearing
+    source: control
+    rationale: Names the L1/L2/L3 control tier — §404 cites these explicitly.
+  validation_failures:
+    tier: contextual
+    source: recipe-input
+    rationale: >-
+      Typed failure codes from the validation suite. Decorative
+      when absent (clean orders pass with an empty list — which the
+      composer's `_populated` rule treats as absent). When the list
+      is populated the codes drive the decision tree (clarification-
+      class vs auto-correctable vs escalate); the *resulting decision*
+      surfaces audit-bearing on classification + recommended_action.
+  floor_breaches:
+    tier: contextual
+    source: recipe-output
+    derivation: >-
+      Names of the non-disable-able floor checks that breached;
+      empty when all four passed. The audit-bearing surface for
+      "did any floor check fail" is `floor_status` (always-populated
+      4-boolean Pydantic model). `floor_breaches` is the contextual
+      detail surfaced when the breach list is non-empty.
+  floor_status:
+    tier: audit-bearing
+    source: control
+    gateway_dependency: true
+    rationale: >-
+      The four non-disable-able floor booleans (sender_authorized,
+      customer_resolved, duplicate_po_clear, credit_clear). Gateway-
+      sourced via the email_intake gateway (4 operations, all
+      required_for_audit=True). Pillar 1: present even on RED-shadowed
+      records because gateway READS run before shadow_audit (ADR-025).
+  reject_reason_code:
+    tier: conditional
+    depends_on: classification == FATAL_REJECT
+    source: recipe-output
+    rationale: >-
+      Closed reject-reason vocabulary (sender_unauthorized /
+      customer_unresolved / duplicate_po_confirmed / credit_block /
+      corrupt_input / policy_floor_breach). Required when the
+      classification routes to FATAL_REJECT; absent (and rendered as
+      "Context Not Required for Resolution") on every other band.
+  notification_template:
+    tier: contextual
+    source: decorative
+    rationale: Downstream email plumbing; zero audit content.
+
 EdiMismatchAnalysisData:
   sub_type:
     tier: audit-bearing
@@ -945,6 +1084,18 @@ grandfather_clauses:
   # gateway wired on DeliveryDelayResolutionRecipe; at_risk +
   # sla_deadline persist via enrichment_context.
 
+  # email_intake_gateway_stub_only (added 2026-05-04, ADR-034 Phase B):
+  # the four `email_intake` gateway operations (sender_auth,
+  # resolve_customer, duplicate_po_pre_check, credit_check) ship as
+  # StubGateway responses in V1. Real upstream connectors —
+  # Microsoft Graph / customer-master / OMS duplicate pre-check / credit
+  # service — are a separate platform track tracked under Phase D
+  # (proposed ADR-035, MCP tool surface). The four floor_status
+  # booleans are audit-bearing as written; the StubGateway responses
+  # supply deterministic, defensible default evidence for V1.
+  # Deadline: 2026-08-04 (90-day re-evaluation at the next compliance
+  # workshop) — drop the clause when the real connectors land.
+
 # ---------------------------------------------------------------------------
 # Summary tally (for CI fitness test + release-note generation).
 # ---------------------------------------------------------------------------
@@ -972,9 +1123,24 @@ summary:
   # disposition that compares against an existing PO), 1 contextual
   # (agent_reasoning — derived narrative; regenerable from
   # policy_hits + classification).
-  total_fields: 143
-  audit_bearing: 109
-  conditional: 6
-  contextual: 28
+  # 2026-05-05: +9 rows for EmailOrderEntryAnalysisData (ADR-034 Phase B).
+  # 5 audit-bearing (composite_confidence, classification,
+  # recommended_action, autonomy_level, floor_status), 1 conditional
+  # (reject_reason_code — required when classification == FATAL_REJECT),
+  # 3 contextual (validation_failures, floor_breaches —
+  # legitimately-empty lists treated as absent by the composer's
+  # `_populated` rule, audit story carried by floor_status +
+  # classification; notification_template — downstream email plumbing).
+  # 2026-05-06: +7 rows for EmailSourceData (ADR-034 Phase G —
+  # PO-driven IA correction; email source-of-truth substrate on the
+  # Exception Queue detail page). 5 audit-bearing (from_address,
+  # received_at, subject, body_hash, attachment_manifest), 2 contextual
+  # (body_excerpt — decorative; audit trail reads body_hash;
+  # source_email_id — Inbox correlation id for the bidirectional
+  # deep-link).
+  total_fields: 159
+  audit_bearing: 119
+  conditional: 7
+  contextual: 33
   backend_gap_fields: 0
   gateway_dependent_fields: 13

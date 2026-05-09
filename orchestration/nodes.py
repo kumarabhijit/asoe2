@@ -54,6 +54,10 @@ from contracts.policy import (
     DUPLICATE_PO_THRESHOLD_REVIEW_REQUIRED,
     DUPLICATE_PO_THRESHOLD_SOFT_FLAG,
     EDI_MISMATCH_AUTONOMY_LEVELS,
+    EMAIL_ORDER_AUTO_APPROVE_CONFIDENCE,
+    EMAIL_ORDER_AUTO_CORRECT_CONFIDENCE,
+    EMAIL_ORDER_ENTRY_AUTONOMY_LEVELS,
+    EMAIL_ORDER_REVIEW_BAND_LOW,
     MAX_DISCOUNT_ALLOWED,
     MOQ_SEVERE_SHORTFALL_PCT,
     MOQ_UPLIFT_REVIEW_PCT,
@@ -655,6 +659,49 @@ def validate_types(state: GraphState) -> GraphState:
                 "lines": meta.get("pallet_lines"),
                 "min_fill_pct": PALLET_CONFIG_MIN_FILL_PCT,
                 "broken_layer_fill_pct": PALLET_CONFIG_BROKEN_LAYER_FILL_PCT,
+            },
+        )
+    elif state.selected_recipe == "EmailOrderEntryRecipe.py":
+        # ADR-034 Phase B — the email_intake gateway resolves the four
+        # non-disable-able floor checks (sender_auth, resolve_customer,
+        # duplicate_po_pre_check, credit_check) into enrichment_context
+        # BEFORE shadow_audit (ADR-025). Prefer the gateway response;
+        # fall back to event.metadata.non_disableable_floor when a
+        # gateway response is empty (e.g. a soft gateway failure that
+        # left an empty dict per resolve_dependencies' soft-fail path).
+        meta = state.event.metadata
+        floor_meta = meta.get("non_disableable_floor") or {}
+        if not isinstance(floor_meta, dict):
+            floor_meta = {}
+        enrichment = state.enrichment_context
+        gateway_floor: dict[str, bool] = {}
+        for gw_key, flag, recipe_key in (
+            ("sender_auth_context", "sender_authorized", "sender_authorized"),
+            ("customer_resolution_context", "customer_resolved", "customer_resolved"),
+            ("duplicate_po_pre_check_context", "duplicate_po_clear", "duplicate_po_clear"),
+            ("credit_check_context", "credit_clear", "credit_clear"),
+        ):
+            gw = enrichment.get(gw_key)
+            if isinstance(gw, dict) and flag in gw:
+                gateway_floor[recipe_key] = bool(gw.get(flag))
+            elif recipe_key in floor_meta:
+                gateway_floor[recipe_key] = bool(floor_meta.get(recipe_key, False))
+        failures = meta.get("validation_failures") or []
+        if not isinstance(failures, list):
+            failures = []
+        state.invocation = RecipeInvocation(
+            recipe_name=state.selected_recipe,
+            params={
+                "order_id": state.event.order_id,
+                "customer_id": state.event.retailer_id or "",
+                "composite_confidence": float(meta.get("composite_confidence") or 0.0),
+                "validation_failures": failures,
+                "non_disableable_floor": gateway_floor,
+                "autonomy_levels": EMAIL_ORDER_ENTRY_AUTONOMY_LEVELS,
+                "threshold_auto_approve": EMAIL_ORDER_AUTO_APPROVE_CONFIDENCE,
+                "threshold_review_band_low": EMAIL_ORDER_REVIEW_BAND_LOW,
+                "threshold_auto_correct": EMAIL_ORDER_AUTO_CORRECT_CONFIDENCE,
+                "reject_reason_code": meta.get("reject_reason_code"),
             },
         )
     elif state.selected_recipe == "DeliveryDelayResolutionRecipe.py":

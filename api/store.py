@@ -45,6 +45,7 @@ class ExceptionRecord:
         account_name: Optional[str] = None,
         original_event: Optional[Dict[str, Any]] = None,
         enrichment_context: Optional[Dict[str, Any]] = None,
+        parent_case_id: Optional[str] = None,
     ):
         self.id = str(uuid4())
         self.tenant_id = tenant_id
@@ -62,6 +63,12 @@ class ExceptionRecord:
         self.resolution_notes = resolution_notes
         self.account_id = account_id
         self.account_name = account_name
+        # ADR-038 Phase H.2 — parent OrderCase. None for Tier-1 stateless
+        # records (clean Automated events that auto-resolve to COMPLETE
+        # without ever materialising a case). Populated for every T2/T3
+        # record once Phase H.3 wires lazy materialisation in
+        # orchestration/nodes.py::build_analysis.
+        self.parent_case_id: Optional[str] = parent_case_id
         # Original OrderEvent payload, captured at create time so a later
         # re-analysis can faithfully replay through run_graph(). None for
         # records created before the feature shipped.
@@ -153,6 +160,7 @@ class ExceptionStore:
         resolution_data: Optional[Dict[str, Any]] = None,
         original_event: Optional[Dict[str, Any]] = None,
         enrichment_context: Optional[Dict[str, Any]] = None,
+        parent_case_id: Optional[str] = None,
     ) -> ExceptionRecord:
         lifecycle = STATUS_TO_LIFECYCLE.get(final_status or "", "INGESTED")
         record = ExceptionRecord(
@@ -168,6 +176,7 @@ class ExceptionStore:
             resolution_data=resolution_data,
             original_event=original_event,
             enrichment_context=enrichment_context,
+            parent_case_id=parent_case_id,
         )
         with self._lock:
             self._records[record.id] = record
@@ -443,11 +452,18 @@ class DatabaseBackedStore:
         resolution_data: Optional[Dict[str, Any]] = None,
         original_event: Optional[Dict[str, Any]] = None,
         enrichment_context: Optional[Dict[str, Any]] = None,
+        parent_case_id: Optional[str] = None,
     ) -> ExceptionRecord:
         # Verdict Pillar 1: `enrichment_context` is persisted to a
         # dedicated JSONB column (V004). The repository serialises
         # to JSONB (Postgres) / JSON TEXT (SQLite) alongside
         # `original_event` (V002).
+        #
+        # ADR-038 Phase H.3: parent_case_id is accepted on this
+        # signature for API compat with ExceptionStore. The
+        # DB-backed repository persistence of this column lands in
+        # Phase H.7 alongside the orphan-case backfill; until then
+        # the value is captured on the in-memory record only.
         row = self._exceptions.create(
             tenant_id=tenant_id,
             order_id=order_id,
@@ -461,7 +477,9 @@ class DatabaseBackedStore:
             original_event=original_event,
             enrichment_context=enrichment_context,
         )
-        return self._dict_to_record(row)
+        record = self._dict_to_record(row)
+        record.parent_case_id = parent_case_id
+        return record
 
     def get(self, exception_id: str, tenant_id: str) -> Optional[ExceptionRecord]:
         row = self._exceptions.get(exception_id, tenant_id)
@@ -629,3 +647,204 @@ def _create_store():
 
 # Module-level singleton — uses DATABASE_URL when set, else in-memory.
 exception_store = _create_store()
+
+
+# =====================================================================
+# ADR-038 Phase H.2 — OrderCase store + correlation table (in-memory)
+# =====================================================================
+#
+# Parallel to ExceptionStore. Lookup-or-create on inbound events keys
+# off the four correlation identifiers (sales_order_id → customer_po
+# → edi_transaction_id → source_email_id; first match wins). The
+# in-memory implementation here exercises the API surface; the SQL-
+# backed equivalent (V009 + V010 migrations) is wired in Phase H.7
+# alongside the orphan-case backfill.
+
+
+class CaseStore:
+    """Thread-safe in-memory `OrderCase` store.
+
+    Key responsibilities (ADR-038 §6.2):
+      * `lookup_or_create(...)` resolves an inbound event to an existing
+        case via the four correlation key types or opens a new case
+        registering whatever keys the event carried.
+      * `register_correlation(...)` adds a new key to an existing case
+        (e.g., the ERP creates the SO and the new key joins the case).
+      * `get(case_id)` / `update(case_id, ...)` / `list_by_tenant(...)`
+        provide CRUD for the harness and read APIs.
+    """
+
+    def __init__(self) -> None:
+        self._cases: Dict[str, "OrderCase"] = {}
+        # Correlation index: {(tenant_id, key_type, key_value): case_id}
+        self._correlation: Dict[tuple, str] = {}
+        self._lock = threading.RLock()
+
+    # ----- correlation lookup --------------------------------------
+
+    def find_by_correlation(
+        self,
+        tenant_id: str,
+        *,
+        sales_order_id: Optional[str] = None,
+        customer_po_number: Optional[str] = None,
+        edi_transaction_id: Optional[str] = None,
+        source_email_id: Optional[str] = None,
+    ) -> Optional["OrderCase"]:
+        """Return the case matching any of the supplied correlation
+        keys. Resolution priority follows ADR-038 §6.2: SO → PO →
+        EDI txn → email. First match wins. ``None`` if no match.
+        """
+        priority = (
+            ("sales_order_id", sales_order_id),
+            ("customer_po_number", customer_po_number),
+            ("edi_transaction_id", edi_transaction_id),
+            ("source_email_id", source_email_id),
+        )
+        with self._lock:
+            for key_type, key_value in priority:
+                if not key_value:
+                    continue
+                case_id = self._correlation.get((tenant_id, key_type, key_value))
+                if case_id is not None:
+                    return self._cases.get(case_id)
+        return None
+
+    # ----- lookup-or-create ----------------------------------------
+
+    def lookup_or_create(
+        self,
+        tenant_id: str,
+        *,
+        source: str,
+        source_channel: str,
+        customer_id: Optional[str] = None,
+        customer_po_number: Optional[str] = None,
+        sales_order_id: Optional[str] = None,
+        edi_transaction_id: Optional[str] = None,
+        source_email_id: Optional[str] = None,
+        sla_deadline: Optional[str] = None,
+        bundle_version_at_open: Optional[str] = None,
+    ) -> tuple["OrderCase", bool]:
+        """Resolve an inbound event to a case (existing or new).
+
+        Returns ``(case, opened_now)`` where ``opened_now=True`` when
+        a new case was opened on this call. ADR-038 §6.2 multi-PO note:
+        callers split a multi-PO email into N invocations of this
+        method (one per PO); each opens or attaches to its own case.
+        """
+        existing = self.find_by_correlation(
+            tenant_id,
+            sales_order_id=sales_order_id,
+            customer_po_number=customer_po_number,
+            edi_transaction_id=edi_transaction_id,
+            source_email_id=source_email_id,
+        )
+        with self._lock:
+            if existing is not None:
+                # Enrich correlation keys with any new identifiers this
+                # event carried. The case `source` is immutable per ADR-038
+                # §3.1; `source_channel` is the existing one (don't
+                # overwrite — first event wins for the source/channel
+                # pair). New correlation keys join the case.
+                self._register_correlations_locked(
+                    tenant_id, existing.case_id,
+                    sales_order_id=sales_order_id,
+                    customer_po_number=customer_po_number,
+                    edi_transaction_id=edi_transaction_id,
+                    source_email_id=source_email_id,
+                )
+                return existing, False
+
+            # Open a new case.
+            from contracts.models import OrderCase  # local to avoid cycles
+            case = OrderCase(
+                tenant_id=tenant_id,
+                customer_id=customer_id,
+                source=source,  # type: ignore[arg-type]
+                source_channel=source_channel,
+                customer_po_number=customer_po_number,
+                sales_order_id=sales_order_id,
+                edi_transaction_id=edi_transaction_id,
+                source_email_id=source_email_id,
+                sla_deadline=sla_deadline,
+                bundle_version_at_open=bundle_version_at_open,
+            )
+            self._cases[case.case_id] = case
+            self._register_correlations_locked(
+                tenant_id, case.case_id,
+                sales_order_id=sales_order_id,
+                customer_po_number=customer_po_number,
+                edi_transaction_id=edi_transaction_id,
+                source_email_id=source_email_id,
+            )
+            return case, True
+
+    def _register_correlations_locked(
+        self,
+        tenant_id: str,
+        case_id: str,
+        *,
+        sales_order_id: Optional[str] = None,
+        customer_po_number: Optional[str] = None,
+        edi_transaction_id: Optional[str] = None,
+        source_email_id: Optional[str] = None,
+    ) -> None:
+        """Append correlation rows for the case. Caller holds the lock."""
+        for key_type, key_value in (
+            ("sales_order_id", sales_order_id),
+            ("customer_po_number", customer_po_number),
+            ("edi_transaction_id", edi_transaction_id),
+            ("source_email_id", source_email_id),
+        ):
+            if not key_value:
+                continue
+            self._correlation[(tenant_id, key_type, key_value)] = case_id
+
+    def register_correlation(
+        self,
+        tenant_id: str,
+        case_id: str,
+        key_type: str,
+        key_value: str,
+    ) -> None:
+        """Register a single new correlation key after case open
+        (e.g., ERP creates the SO and the SO id joins the case)."""
+        with self._lock:
+            if case_id not in self._cases:
+                raise KeyError(f"Unknown case_id: {case_id}")
+            self._correlation[(tenant_id, key_type, key_value)] = case_id
+
+    # ----- CRUD ----------------------------------------------------
+
+    def get(self, case_id: str) -> Optional["OrderCase"]:
+        return self._cases.get(case_id)
+
+    def update(self, case_id: str, **fields: Any) -> "OrderCase":
+        """Apply field updates and return the updated case.
+
+        Pydantic model is recreated via `model_copy(update=...)` so
+        validators fire. Raises `KeyError` if case_id is unknown.
+        """
+        with self._lock:
+            existing = self._cases.get(case_id)
+            if existing is None:
+                raise KeyError(f"Unknown case_id: {case_id}")
+            updated = existing.model_copy(update=fields)
+            self._cases[case_id] = updated
+            return updated
+
+    def list_by_tenant(self, tenant_id: str) -> List["OrderCase"]:
+        with self._lock:
+            return [c for c in self._cases.values() if c.tenant_id == tenant_id]
+
+    def clear(self) -> None:
+        """Test-helper: reset the in-memory store."""
+        with self._lock:
+            self._cases.clear()
+            self._correlation.clear()
+
+
+# Module-level singleton — case store uses in-memory backing; the
+# DB-backed equivalent ships with the V009/V010 migration in Phase H.7.
+case_store = CaseStore()

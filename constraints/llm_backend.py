@@ -79,20 +79,48 @@ logger = logging.getLogger("asoe.constraints.llm_backend")
 
 
 def _load_skill_catalog(skills_dir: str = "skills") -> str:
-    """Load every `skills/*.md` and concatenate alphabetically.
+    """Load every SKILL.md and concatenate alphabetically.
+
+    ADR-038 Phase H.1: SKILL.md files live under
+    ``knowledge/skills/<bundle-name>/SKILL.md``. The catalog walks the
+    bundle directory preferentially; if no bundles are present (e.g. a
+    test-isolation fixture), it falls back to the legacy
+    ``<skills_dir>/*.md`` flat layout.
+
+    Sorting alphabetically guarantees the byte sequence is stable
+    across processes — required for prompt-cache hits to compose
+    across worker pods. Each entry is annotated with its bundle name
+    so downstream agents can identify which skill a snippet came
+    from without extra lookups.
 
     The result becomes the cacheable head of the system prompt for
-    every LLM call. Sorting alphabetically guarantees the byte
-    sequence is stable across processes — required for prompt-cache
-    hits to compose across worker pods.
+    every LLM call.
     """
+    bundle_root = Path("knowledge/skills")
+    if bundle_root.exists():
+        parts: list[str] = []
+        for bundle_dir in sorted(bundle_root.iterdir()):
+            if not bundle_dir.is_dir():
+                continue
+            skill_md = bundle_dir / "SKILL.md"
+            if not skill_md.exists():
+                continue
+            parts.append(
+                f"<!-- {bundle_dir.name}/SKILL.md -->\n"
+                f"{skill_md.read_text(encoding='utf-8')}"
+            )
+        if parts:
+            return "\n\n".join(parts)
+    # Legacy fallback — only used when no bundles exist.
     root = Path(skills_dir)
     if not root.exists():
         return ""
-    parts: list[str] = []
+    legacy_parts: list[str] = []
     for path in sorted(root.glob("*.md")):
-        parts.append(f"<!-- {path.name} -->\n{path.read_text(encoding='utf-8')}")
-    return "\n\n".join(parts)
+        legacy_parts.append(
+            f"<!-- {path.name} -->\n{path.read_text(encoding='utf-8')}"
+        )
+    return "\n\n".join(legacy_parts)
 
 
 _SKILL_CATALOG_CACHE: dict[str, str] = {}

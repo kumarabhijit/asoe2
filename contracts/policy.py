@@ -202,6 +202,46 @@ split-ship; at/above, reschedule-to-later-window plus buyer notification
 is required."""
 
 # ---------------------------------------------------------------------------
+# Email Order Entry thresholds (ADR-034)
+# Per `docs/specs/order-entry-from-email-product-spec.md` §3 (L2 Behavior
+# Thresholds) and §4 (Resolution Workflows / AUTO_CORRECT confidence floor).
+# ---------------------------------------------------------------------------
+
+EMAIL_ORDER_AUTO_APPROVE_CONFIDENCE: float = 0.95
+"""Composite confidence at or above which a clean (no-validation-failure)
+email-channel order envelope is one-click approve eligible. Closed lower
+bound."""
+
+EMAIL_ORDER_REVIEW_BAND_LOW: float = 0.85
+"""Closed lower bound of the standard-review band. Below this the record
+is classified LOW_CONFIDENCE."""
+
+EMAIL_ORDER_AUTO_CORRECT_CONFIDENCE: float = 0.99
+"""Composite confidence at or above which a deterministic AUTO_CORRECT
+fix may be applied — but only when every validation failure is in the
+auto-correctable allowlist (UOM normalisation, ship-to format, PO-number
+padding). Spec §4 explicitly ties AUTO_CORRECT to confidence ≥ 0.99."""
+
+# Autonomy level per resolution action (spec §5).
+# L4 = full autonomy ("not recommended at launch"), L3 = act & inform,
+# L2 = recommend (human must approve), L1 = observe only.
+# Per ADR-034 §3.5, L4 actions are *demoted to L3 in policy* until the
+# calibration loop (ADR-032) ships graduation signals — so the mapping
+# below contains no L4 entries even though the spec defines an L4 tier.
+EMAIL_ORDER_ENTRY_AUTONOMY_LEVELS: dict[str, str] = {
+    "ONE_CLICK_APPROVE":     "L3",
+    "STANDARD_REVIEW":       "L2",
+    "LOW_CONFIDENCE_FLAG":   "L1",
+    "AUTO_CORRECT":          "L3",
+    "REQUEST_CLARIFICATION": "L2",
+    "ESCALATE":              "L1",
+    "REJECT":                "L1",
+}
+"""Maps EMAIL_ORDER_ENTRY recommended_action → autonomy level. AUTO_CORRECT
+is intentionally *not* L4 — pending ADR-032 calibration graduation, all
+auto-actions remain at most L3 (act & inform)."""
+
+# ---------------------------------------------------------------------------
 # LLM provider routing & cost guardrails
 # ---------------------------------------------------------------------------
 # V1 flips a single deterministic fallback path into a pluggable per-task

@@ -624,6 +624,135 @@ class EdiMismatchAnalysisData(BaseModel):
     notification_template: Optional[str] = None
 
 
+class EmailOrderEntryFloorStatus(BaseModel):
+    """The four "non-disable-able floor" checks (ADR-034 §4).
+
+    Each boolean is the GREEN/RED gate evidence the operator reviews
+    when authorising an email-channel order. Adapter populates these
+    from `record.enrichment_context.{sender_auth_context,
+    customer_resolution_context, duplicate_po_pre_check_context,
+    credit_check_context}` — the four `email_intake` gateway
+    operations declared on the recipe spec — and falls back to
+    `event.metadata.non_disableable_floor` defensively when a
+    gateway response is empty.
+
+    Compliance Pillar 1: even on a RED-shadowed record these fields
+    must be populated (gateway READS run before shadow_audit per
+    ADR-025).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    sender_authorized: bool
+    customer_resolved: bool
+    duplicate_po_clear: bool
+    credit_clear: bool
+
+
+class EmailAttachmentManifestEntry(BaseModel):
+    """One row in `EmailSourceData.attachment_manifest`.
+
+    `name` and `mime_type` are sufficient for the operator to
+    triage what arrived; `bytes` lets the UI render a size hint
+    and lets the audit trail check tampering against the inbound
+    payload. `body_hash` for the email body lives on
+    `EmailSourceData`; per-attachment hashes are out of scope until
+    a real attachment-store gateway lands (Phase F / ADR-036).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    mime_type: str
+    bytes: int = 0
+
+
+class EmailSourceData(BaseModel):
+    """EmailOrderEntryRecipe → UI `email_source` (ADR-034 Phase G).
+
+    Email-channel order intake source-of-truth substrate, projected
+    by `adapt_email_source` from
+    `record.enrichment_context["email_source_context"]` (the
+    `email_intake/fetch_message` gateway response).
+
+    Mirrors `asoe-ui/src/types/exceptions.ts::EmailSourceData`. Mounts on
+    the Exception Queue detail page above `EmailOrderEntrySection`
+    via data-presence dispatch (no per-intent page-level branching —
+    CLAUDE.md Guardrail #1).
+
+    Compliance posture (Verdict 2026-04-22):
+      * `from_address`, `received_at`, `subject`, `body_hash`,
+        `attachment_manifest` are audit-bearing — the operator
+        authorising the order needs to see the source-of-truth
+        substrate the recipe acted on.
+      * `body_excerpt` is contextual — the full body is referenced by
+        `body_hash` for tamper-detection and may be redacted from the
+        excerpt for PII; absence is a structural omission, not an
+        audit gap.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    from_address: str
+    received_at: str  # ISO-8601
+    subject: str
+    body_hash: str
+    """SHA-256 of the canonicalised email body. Lets the audit trail
+    detect post-hoc tampering of the inbound payload without storing
+    PII-shaped body content in the registry."""
+    attachment_manifest: List[EmailAttachmentManifestEntry] = []
+    body_excerpt: Optional[str] = None
+    """Optional human-readable excerpt of the email body — typically
+    the first 240 chars after canonicalisation. Contextual: absent
+    when redaction policy strips PII or when the body is unavailable."""
+
+    source_email_id: Optional[str] = None
+    """Optional Inbox correlation id (ADR-034 Phase G). When present,
+    the Exception Queue detail page surfaces a "View source email"
+    back-link to /inbox?msg=<id>. Contextual: absent when the
+    upstream `email-intelligence-agent` integration (Phase F /
+    proposed ADR-036) hasn't shipped — the inline source rendering
+    on the detail page is the primary surface."""
+
+
+class EmailOrderEntryAnalysisData(BaseModel):
+    """EmailOrderEntryRecipe → UI `email_order_entry_analysis`
+    (ADR-034 Phase B).
+
+    Mirrors `asoe-ui/src/types/exceptions.ts::EmailOrderEntryAnalysisData`.
+    `classification` is the recipe's confidence-band output;
+    `recommended_action` is constrained by `AllowedResolutionAction`
+    on the wire (intentionally `str` here so the UI section can render
+    new actions added downstream without a contract bump — same pattern
+    as EdiMismatchAnalysisData).
+
+    `reject_reason_code` is conditional on classification == FATAL_REJECT;
+    None on every other classification (Pillar 3 conditional field —
+    rendered as "Context Not Required for Resolution" by EvidenceBlock
+    when the predicate doesn't hold).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    composite_confidence: float
+    classification: Literal[
+        "ONE_CLICK_APPROVE", "STANDARD_REVIEW", "LOW_CONFIDENCE", "FATAL_REJECT",
+    ]
+    recommended_action: str
+    autonomy_level: Literal["L1", "L2", "L3", "L4"]
+    validation_failures: List[str] = []
+    floor_breaches: List[str] = []
+    reject_reason_code: Optional[
+        Literal[
+            "sender_unauthorized", "customer_unresolved",
+            "duplicate_po_confirmed", "credit_block",
+            "corrupt_input", "policy_floor_breach",
+        ]
+    ] = None
+    floor_status: EmailOrderEntryFloorStatus
+    notification_template: Optional[str] = None
+
+
 class AlternateDeliveryOption(BaseModel):
     """One ranked alternate delivery option from
     DeliveryDelayResolutionRecipe._rank_options."""
@@ -1188,3 +1317,10 @@ class AnalysisResponse(BaseModel):
     order_comparison: Optional[OrderComparisonData] = None
     backorder_analysis: Optional[BackOrderAnalysisData] = None
     price_analysis: Optional[PriceAnalysisData] = None
+    # ADR-034 Phase B — EmailOrderEntryRecipe enrichment.
+    email_order_entry_analysis: Optional[EmailOrderEntryAnalysisData] = None
+    # ADR-034 Phase G — email source-of-truth substrate (PO-driven IA
+    # correction). SECONDARY adapter on EmailOrderEntryRecipe.py;
+    # mounts on the Exception Queue detail page above
+    # email_order_entry_analysis via data-presence dispatch.
+    email_source: Optional[EmailSourceData] = None

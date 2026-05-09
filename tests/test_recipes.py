@@ -13,6 +13,11 @@ from __future__ import annotations
 from recipes.PriceAdjustmentRecipe import execute_price_correction
 from recipes.CreditHoldReleaseRecipe import release_credit_hold
 from recipes.DuplicatePORecipe import detect_duplicate_po
+from recipes.EmailOrderEntryRecipe import (
+    classify_email_order_entry,
+    FLOOR_KEYS,
+    ALLOWED_REJECT_REASONS,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1410,8 +1415,248 @@ class TestNewRecipePurity:
     def test_no_policy_imports(self):
         import inspect
         for fn in (resolve_back_order, trim_over_max, round_up_moq,
-                   align_pallets, resolve_delivery_delay):
+                   align_pallets, resolve_delivery_delay,
+                   classify_email_order_entry):
             src = inspect.getsource(inspect.getmodule(fn))
             assert "from contracts.policy" not in src, (
                 f"{fn.__module__} must not import from contracts.policy"
             )
+
+
+# ---------------------------------------------------------------------------
+# EmailOrderEntryRecipe (ADR-034)
+# ---------------------------------------------------------------------------
+
+
+def _full_floor() -> dict[str, bool]:
+    return {k: True for k in FLOOR_KEYS}
+
+
+_AUTONOMY = {
+    "ONE_CLICK_APPROVE":     "L3",
+    "STANDARD_REVIEW":       "L2",
+    "LOW_CONFIDENCE_FLAG":   "L1",
+    "AUTO_CORRECT":          "L3",
+    "REQUEST_CLARIFICATION": "L2",
+    "ESCALATE":              "L1",
+    "REJECT":                "L1",
+}
+
+
+class TestEmailOrderEntryRecipe:
+    """Confidence-band decision tree on a post-extraction envelope."""
+
+    def test_one_click_approve_above_threshold(self):
+        out = classify_email_order_entry(
+            order_id="EML-1", customer_id="C-1",
+            composite_confidence=0.97,
+            validation_failures=[],
+            non_disableable_floor=_full_floor(),
+            autonomy_levels=_AUTONOMY,
+        )
+        assert out["status"] == "SUCCESS"
+        assert out["classification"] == "ONE_CLICK_APPROVE"
+        assert out["recommended_action"] == "ONE_CLICK_APPROVE"
+        assert out["autonomy_level"] == "L3"
+        assert out["floor_breaches"] == []
+        assert out["reject_reason_code"] is None
+
+    def test_threshold_boundary_auto_approve_closed_lower_bound(self):
+        # 0.95 is the closed lower bound for auto-approve — must classify ONE_CLICK_APPROVE.
+        out = classify_email_order_entry(
+            order_id="EML-2", customer_id="C-1",
+            composite_confidence=0.95,
+            validation_failures=[],
+            non_disableable_floor=_full_floor(),
+            autonomy_levels=_AUTONOMY,
+        )
+        assert out["classification"] == "ONE_CLICK_APPROVE"
+
+    def test_just_below_auto_approve_threshold_is_standard_review(self):
+        out = classify_email_order_entry(
+            order_id="EML-3", customer_id="C-1",
+            composite_confidence=0.9499,
+            validation_failures=[],
+            non_disableable_floor=_full_floor(),
+            autonomy_levels=_AUTONOMY,
+        )
+        assert out["classification"] == "STANDARD_REVIEW"
+        assert out["recommended_action"] == "STANDARD_REVIEW"
+        assert out["autonomy_level"] == "L2"
+
+    def test_review_band_lower_bound_is_closed(self):
+        out = classify_email_order_entry(
+            order_id="EML-4", customer_id="C-1",
+            composite_confidence=0.85,
+            validation_failures=[],
+            non_disableable_floor=_full_floor(),
+            autonomy_levels=_AUTONOMY,
+        )
+        assert out["classification"] == "STANDARD_REVIEW"
+
+    def test_below_review_band_is_low_confidence(self):
+        out = classify_email_order_entry(
+            order_id="EML-5", customer_id="C-1",
+            composite_confidence=0.84,
+            validation_failures=[],
+            non_disableable_floor=_full_floor(),
+            autonomy_levels=_AUTONOMY,
+        )
+        assert out["classification"] == "LOW_CONFIDENCE"
+        assert out["recommended_action"] == "LOW_CONFIDENCE_FLAG"
+        assert out["autonomy_level"] == "L1"
+
+    def test_floor_breach_rejects_even_at_high_confidence(self):
+        floor = _full_floor()
+        floor["sender_authorized"] = False
+        out = classify_email_order_entry(
+            order_id="EML-6", customer_id="C-1",
+            composite_confidence=0.99,
+            validation_failures=[],
+            non_disableable_floor=floor,
+            autonomy_levels=_AUTONOMY,
+        )
+        assert out["classification"] == "FATAL_REJECT"
+        assert out["recommended_action"] == "REJECT"
+        assert out["status"] == "REJECTED"
+        assert out["reject_reason_code"] == "sender_unauthorized"
+        assert "sender_authorized" in out["floor_breaches"]
+
+    def test_credit_floor_breach_maps_to_credit_block(self):
+        floor = _full_floor()
+        floor["credit_clear"] = False
+        out = classify_email_order_entry(
+            order_id="EML-7", customer_id="C-1",
+            composite_confidence=0.99,
+            validation_failures=[],
+            non_disableable_floor=floor,
+            autonomy_levels=_AUTONOMY,
+        )
+        assert out["reject_reason_code"] == "credit_block"
+
+    def test_explicit_reject_reason_overrides_decision_tree(self):
+        out = classify_email_order_entry(
+            order_id="EML-8", customer_id="C-1",
+            composite_confidence=0.99,
+            validation_failures=[],
+            non_disableable_floor=_full_floor(),
+            autonomy_levels=_AUTONOMY,
+            reject_reason_code="corrupt_input",
+        )
+        assert out["classification"] == "FATAL_REJECT"
+        assert out["reject_reason_code"] == "corrupt_input"
+
+    def test_unknown_reject_reason_collapses_to_corrupt_input(self):
+        out = classify_email_order_entry(
+            order_id="EML-9", customer_id="C-1",
+            composite_confidence=0.99,
+            validation_failures=[],
+            non_disableable_floor=_full_floor(),
+            autonomy_levels=_AUTONOMY,
+            reject_reason_code="not_a_real_code",
+        )
+        assert out["reject_reason_code"] == "corrupt_input"
+
+    def test_clarification_failure_routes_to_request_clarification(self):
+        out = classify_email_order_entry(
+            order_id="EML-10", customer_id="C-1",
+            composite_confidence=0.99,
+            validation_failures=["missing_delivery_date"],
+            non_disableable_floor=_full_floor(),
+            autonomy_levels=_AUTONOMY,
+        )
+        assert out["classification"] == "STANDARD_REVIEW"
+        assert out["recommended_action"] == "REQUEST_CLARIFICATION"
+        assert out["autonomy_level"] == "L2"
+
+    def test_auto_correct_requires_only_correctable_failures(self):
+        out = classify_email_order_entry(
+            order_id="EML-11", customer_id="C-1",
+            composite_confidence=0.99,
+            validation_failures=["uom_normalisation_required", "po_number_padding"],
+            non_disableable_floor=_full_floor(),
+            autonomy_levels=_AUTONOMY,
+        )
+        assert out["recommended_action"] == "AUTO_CORRECT"
+        assert out["status"] == "REVIEW_REQUIRED"
+
+    def test_auto_correct_threshold_is_closed_lower_bound(self):
+        out = classify_email_order_entry(
+            order_id="EML-12", customer_id="C-1",
+            composite_confidence=0.99,
+            validation_failures=["po_number_padding"],
+            non_disableable_floor=_full_floor(),
+            autonomy_levels=_AUTONOMY,
+        )
+        assert out["recommended_action"] == "AUTO_CORRECT"
+
+    def test_auto_correct_blocked_when_failure_is_not_in_allowlist(self):
+        # A pricing-variance failure is internal-team territory, not
+        # auto-correctable. Even at 0.99 confidence the recipe must escalate.
+        out = classify_email_order_entry(
+            order_id="EML-13", customer_id="C-1",
+            composite_confidence=0.99,
+            validation_failures=["pricing_variance_above_tolerance"],
+            non_disableable_floor=_full_floor(),
+            autonomy_levels=_AUTONOMY,
+        )
+        assert out["recommended_action"] == "ESCALATE"
+        assert out["autonomy_level"] == "L1"
+
+    def test_validation_failure_in_review_band_with_unknown_failure_escalates(self):
+        out = classify_email_order_entry(
+            order_id="EML-14", customer_id="C-1",
+            composite_confidence=0.90,
+            validation_failures=["pricing_variance_above_tolerance"],
+            non_disableable_floor=_full_floor(),
+            autonomy_levels=_AUTONOMY,
+        )
+        assert out["recommended_action"] == "ESCALATE"
+
+    def test_missing_floor_keys_default_to_breach(self):
+        # Defensive: any missing floor key is treated as breached.
+        out = classify_email_order_entry(
+            order_id="EML-15", customer_id="C-1",
+            composite_confidence=0.99,
+            validation_failures=[],
+            non_disableable_floor={"sender_authorized": True},  # other keys missing
+            autonomy_levels=_AUTONOMY,
+        )
+        assert out["classification"] == "FATAL_REJECT"
+        assert "customer_resolved" in out["floor_breaches"]
+        assert "duplicate_po_clear" in out["floor_breaches"]
+        assert "credit_clear" in out["floor_breaches"]
+
+    def test_confidence_clamp_does_not_change_echo(self):
+        # An out-of-range confidence (>1.0) is clamped for the decision but
+        # the original value is preserved on the echoed output for audit.
+        out = classify_email_order_entry(
+            order_id="EML-16", customer_id="C-1",
+            composite_confidence=1.2,
+            validation_failures=[],
+            non_disableable_floor=_full_floor(),
+            autonomy_levels=_AUTONOMY,
+        )
+        assert out["composite_confidence"] == 1.2
+        assert out["classification"] == "ONE_CLICK_APPROVE"
+
+    def test_output_has_all_required_keys(self):
+        out = classify_email_order_entry(
+            order_id="EML-17", customer_id="C-1",
+            composite_confidence=0.5,
+            validation_failures=[],
+            non_disableable_floor=_full_floor(),
+            autonomy_levels=_AUTONOMY,
+        )
+        for key in (
+            "status", "classification", "recommended_action",
+            "autonomy_level", "notification_template",
+            "composite_confidence", "validation_failures",
+            "floor_breaches", "reject_reason_code",
+            "order_id", "customer_id",
+        ):
+            assert key in out, f"missing output key: {key}"
+
+    def test_allowed_reject_reasons_vocabulary(self):
+        # Sanity-check that the policy_floor_breach catch-all is in the set.
+        assert "policy_floor_breach" in ALLOWED_REJECT_REASONS

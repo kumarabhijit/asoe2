@@ -277,6 +277,19 @@ def _persist_exception(
     if not resolution_data.get("line_items"):
         resolution_data["line_items"] = _project_line_items(state.event)
 
+    # ADR-038 Phase H.3 — case materialisation policy.
+    # Manual Orders open a case eagerly; Automated Orders open lazily
+    # (only on non-clean terminal status). Clean Automated COMPLETE
+    # records persist with parent_case_id = None.
+    from api.case_resolver import materialise_for_event
+    final_status_value = (
+        state.final_status.value if state.final_status else None
+    )
+    parent_case = materialise_for_event(
+        tenant_id, state.event, final_status_value,
+    )
+    parent_case_id = parent_case.case_id if parent_case else None
+
     record = exception_store.create(
         tenant_id=tenant_id,
         order_id=state.event.order_id,
@@ -285,12 +298,13 @@ def _persist_exception(
         intent=state.intent.value if state.intent else None,
         shadow_verdict=state.shadow.status.value if state.shadow else None,
         selected_recipe=state.selected_recipe,
-        final_status=state.final_status.value if state.final_status else None,
+        final_status=final_status_value,
         resolution_data=resolution_data,
         # Capture the source event so a future re-analysis can replay it
         # through the graph without relying on external state reconstruction.
         original_event=state.event.model_dump(mode="json"),
         enrichment_context=ctx,
+        parent_case_id=parent_case_id,
     )
 
     # Verdict Pillar 2.3: capture a structured audit-gap snapshot on
