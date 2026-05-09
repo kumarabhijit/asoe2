@@ -53,6 +53,8 @@ COPY constraints/  constraints/
 COPY compliance/   compliance/
 COPY recipes/      recipes/
 COPY skills/       skills/
+COPY knowledge/    knowledge/
+COPY agents/       agents/
 COPY gateways/     gateways/
 COPY workflows/    workflows/
 COPY orchestration/ orchestration/

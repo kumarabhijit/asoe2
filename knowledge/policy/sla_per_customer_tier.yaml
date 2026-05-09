@@ -1,0 +1,43 @@
+# ADR-038 Phase H.7 — SLA per customer-tier table.
+#
+# The L4 harness reads this at case open and stamps
+# OrderCase.sla_deadline = opened_at + sla_hours.
+#
+# CODEOWNERS: Compliance + Product + customer-success co-own changes.
+# CHANGES are policy changes; bundle a customer-tier rate card update
+# with the workshop ratification step.
+#
+# Schema:
+#   default_sla_hours: <int>      # fallback when tier is unknown
+#   tiers:
+#     <tier_name>:
+#       sla_hours: <int>          # hours from open to deadline
+#       description: <str>        # human-readable rationale (audit)
+#
+# Initial values:
+#   * Strategic → 4h (high-volume, high-touch accounts)
+#   * Mid-Market → 24h (default for ratified customers)
+#   * Long-tail → 72h (low-volume; tolerate longer review queues)
+#   * default_sla_hours → 48h (safety net for un-tiered customers)
+
+schema_version: 1
+default_sla_hours: 48
+
+tiers:
+  Strategic:
+    sla_hours: 4
+    description: |
+      Walmart / Kroger / Target / Costco strategic accounts. Cases on
+      these customers turn over within 4 hours; reviewer queue is
+      shadow-staffed accordingly.
+  Mid-Market:
+    sla_hours: 24
+    description: |
+      Default tier for ratified non-strategic customers. 24h gives
+      same-business-day resolution headroom for typical NEW_ORDER
+      Manual flows.
+  Long-tail:
+    sla_hours: 72
+    description: |
+      Low-volume customers with thin contracts. Three-day window
+      lets shared review staff batch.
