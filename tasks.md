@@ -1776,9 +1776,22 @@ gates still pending (see "Pending" subsection at the bottom).
       `tenant_id` per ADR-038 §5.8), `extract_attachment()`,
       `fingerprint_for_template()`, `attachment_ref_from_metadata()`.
 - [x] `tests/test_extract_attachment.py` — 15 tests.
-- [ ] **Pending:** real multimodal model wired (procurement —
-      Claude vision vs Azure Document Intelligence vs hybrid;
-      ADR-038 §11.2 open question).
+- [x] Real multimodal extractor wired (procurement closed:
+      **Azure** for both LLM and Document Intelligence).
+      `agents/primitives/extract_providers.py` ships:
+      * `AzureDocumentIntelligenceProvider` — primary; reads
+        endpoint / key / model from `AZURE_DI_*` env vars; calls
+        `begin_analyze_document` and translates key/value pairs
+        and `documents.fields` into `List[ExtractedField]`.
+      * `ChandraOCRProvider` — free fallback (linkinrustle/OCR;
+        a Chandra 2 fork). Lazy import keeps PyTorch /
+        Transformers / vLLM out of the default test runtime.
+      * `select_multimodal_provider()` factory keyed off
+        `ASOE_OCR_PRIMARY` (`azure_di` / `chandra` / `stub`;
+        default `stub` for tests).
+      * 9 tests under `tests/test_azure_providers.py`
+        (TestAzureDocumentIntelligenceProvider +
+        TestChandraOCRProvider + TestSelectMultimodalProvider).
 
 ### 27.5 Phase H.5 — Case Agent loop + tool registry (primitive only)
 - [x] `agents/budget.py` — `CaseBudget.for_tier(N)` with
@@ -2015,8 +2028,21 @@ together). Verdicts produced today are not yet attached to any
       RED short-circuit, YELLOW always-invokes, GREEN floor
       gating, observe-only status invariant, LLMCallTrace
       append, kill-switch, tenant propagation to cache.
-- [ ] **Pending §8.1 procurement gates** (model choice — Haiku vs
-      local Ollama vs hybrid; first earned anchor examples).
+- [x] §8.1 procurement gate closed (post-merge decision: **Azure
+      OpenAI** for L2 Shadow; deployment + version chosen by ops
+      via env). `compliance/shadow_llm_azure.py::AzureOpenAIShadowProvider`
+      uses Azure OpenAI's JSON-schema response_format to enforce
+      the constrained output server-side; the schema deliberately
+      omits `DISAGREE_UPGRADE` so asymmetric authority is
+      structural at the provider boundary too. Failure-mode
+      mapping: 400 → `ValueError` → SKIP_VALIDATION_ERROR; 5xx /
+      connection → SKIP_PROVIDER_UNAVAILABLE; TimeoutError →
+      SKIP_PROVIDER_TIMEOUT. `select_shadow_provider()` factory
+      picks Azure when `AZURE_OPENAI_SHADOW_DEPLOYMENT` is set,
+      else stub (default for tests). 11 tests under
+      `tests/test_azure_providers.py`. Earned anchor examples
+      remain pending — they accrue from X.1 disagreement traces
+      once production traffic flows.
 - [ ] **Pending compliance ratification gates** §4.1 (combination
       rule) and §6 (phased rollout) — required before any X.2
       verdict-affecting deployment.

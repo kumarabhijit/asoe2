@@ -421,11 +421,16 @@ def _l2_shadow() -> Any:
         # Local import keeps the orchestration module importable even
         # if the optional shadow_llm bundle is missing (CI surfaces
         # the bundle as a hard dependency in tests).
-        from compliance.shadow_llm import ShadowLLM, StubLLMShadowProvider, load_bundle
+        from compliance.shadow_llm import ShadowLLM, load_bundle
+        from compliance.shadow_llm_azure import select_shadow_provider
 
         bundle = load_bundle()
+        # `select_shadow_provider()` returns `AzureOpenAIShadowProvider`
+        # when `AZURE_OPENAI_SHADOW_DEPLOYMENT` is set, else the stub.
+        # Tests run without Azure env so this is the deterministic
+        # path; production cut-over is env-only, no code change.
         _l2_shadow_singleton = ShadowLLM(
-            provider=StubLLMShadowProvider(),
+            provider=select_shadow_provider(),
             bundle=bundle,
         )
         return _l2_shadow_singleton
