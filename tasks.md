@@ -1956,10 +1956,21 @@ gates still pending (see "Pending" subsection at the bottom).
       the L4 harness / Case Agent loop that should call it on
       every step boundary is the Thread 4 work (Phase H.5
       agent dormant).
-- [ ] **Pending: four-eyes / cosign / override flows migrated
-      to operate on the case lifecycle** (rather than the
-      exception lifecycle in isolation, as ADR-029 currently
-      does). Phase H.7 closeout requirement.
+- [x] Four-eyes / cosign migration to the case lifecycle
+      **shipped (flag-gated, X.0)** under
+      `docs/adr/ADR-040-cosign-on-case-lifecycle.md` (Proposed).
+      `OrderCase.pending_override: Optional[CasePendingOverride]`
+      contract field; `CaseStore.set_pending_override` /
+      `clear_pending_override` helpers; new endpoints
+      `POST /api/v1/cases/{id}/override` and
+      `POST /api/v1/cases/{id}/override/cosign` behind
+      `ASOE_CASE_COSIGN_ENABLED` (default off — both endpoints
+      404 until the env flip). Same SoD invariants the
+      exception-level flow uses (initiator ≠ cosigner;
+      manager+ role; notes mandatory). The exception-level
+      cosign flow at `api/routes/exceptions.py` is unchanged —
+      this is additive. 11 tests in
+      `tests/test_routes_cases_cosign.py`.
 - [x] Scheduled-job wrapping of `scripts/run_backfill.py`.
       `k8s/core/cronjob-backfill.yaml` registers the Pass 1
       runner as a weekly k8s CronJob (Sun 02:00 UTC; 30-min

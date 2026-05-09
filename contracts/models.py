@@ -201,6 +201,45 @@ class OrderCase(BaseModel):
     last_compaction_at: Optional[str] = None
     bundle_version_at_open: Optional[str] = None
 
+    # ADR-040 X.0 — case-level four-eyes override. Optional so the
+    # field default is None for every case until a high-value
+    # case-level override fires. Mutated atomically through
+    # `CaseStore.set_pending_override` / `clear_pending_override`.
+    pending_override: Optional["CasePendingOverride"] = None
+
+
+class CasePendingOverride(BaseModel):
+    """ADR-040 §2 — what the case carries while waiting for a cosigner.
+
+    Mirrors the per-exception `resolution_data.pending_override` shape
+    but at the case level: one envelope covering every child
+    exception that the operator overrode together.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    initiator: str
+    """User sub of the operator who initiated the case-level override."""
+    initiated_at: str
+    """ISO-8601 timestamp."""
+    pending_action: str
+    """The action being authorised across all child exceptions
+    (e.g. `APPROVE_DESPITE_DOWNGRADE`). Free-form string for now;
+    Compliance vocabulary lands at ratification time."""
+    pending_reason_tag: Optional[str] = None
+    """Closed L0 vocabulary entry from
+    `compliance/audit_bearing_registry.yaml::override_reason_tags`
+    (ADR-033). Optional in X.0; mandatory once ratified."""
+    aggregate_financial_impact_usd: float = 0.0
+    """Sum of the children's `financial_impact_usd`. Drives the
+    cosign-eligibility threshold per ADR-040 §2.1."""
+    child_exception_ids: List[str] = Field(default_factory=list)
+    """The exception ids the override covers — promoted together
+    on cosign-approve, restored together on cosign-reject."""
+    notes: Optional[str] = None
+    """Initiator's free-form rationale. Auditor-visible; compaction
+    keeps the first 200 chars."""
+
 
 CaseCorrelationKeyType = Literal[
     "customer_po_number",

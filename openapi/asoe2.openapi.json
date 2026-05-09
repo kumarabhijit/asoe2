@@ -582,6 +582,26 @@
         "title": "BackOrderAnalysisData",
         "type": "object"
       },
+      "CaseCosignRequest": {
+        "additionalProperties": false,
+        "description": "POST /api/v1/cases/{id}/override/cosign \u2014 second-reviewer\ndecision.",
+        "properties": {
+          "approve": {
+            "title": "Approve",
+            "type": "boolean"
+          },
+          "notes": {
+            "title": "Notes",
+            "type": "string"
+          }
+        },
+        "required": [
+          "approve",
+          "notes"
+        ],
+        "title": "CaseCosignRequest",
+        "type": "object"
+      },
       "CaseListResponse": {
         "description": "GET /api/v1/cases \u2014 list response.\n\nShape matches `asoe-ui/src/lib/api.ts::casesApi.list`'s declared\nreturn type (`{ items: OrderCase[]; total: number }`). Items are\nserialised from `contracts.models.OrderCase`.",
         "properties": {
@@ -600,6 +620,55 @@
           }
         },
         "title": "CaseListResponse",
+        "type": "object"
+      },
+      "CaseOverrideInitRequest": {
+        "additionalProperties": false,
+        "description": "POST /api/v1/cases/{id}/override \u2014 initiate a case-level\noverride that may require a cosigner.",
+        "properties": {
+          "aggregate_financial_impact_usd": {
+            "default": 0.0,
+            "title": "Aggregate Financial Impact Usd",
+            "type": "number"
+          },
+          "child_exception_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Child Exception Ids",
+            "type": "array"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "pending_action": {
+            "title": "Pending Action",
+            "type": "string"
+          },
+          "pending_reason_tag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Reason Tag"
+          }
+        },
+        "required": [
+          "pending_action"
+        ],
+        "title": "CaseOverrideInitRequest",
         "type": "object"
       },
       "ChallengeRequest": {
@@ -5058,6 +5127,148 @@
           }
         },
         "summary": "Get Case",
+        "tags": [
+          "cases"
+        ]
+      }
+    },
+    "/api/v1/cases/{case_id}/override": {
+      "post": {
+        "description": "Initiate a case-level override. ADR-040 \u00a72.1: above the\nthreshold the case enters PENDING_COSIGN with a recorded\n`pending_override`; below the threshold it would be applied\nimmediately, but the immediate-apply path is X.2 work \u2014 for\nX.0 the endpoint always parks the override in PENDING_COSIGN.",
+        "operationId": "initiate_case_override_api_v1_cases__case_id__override_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaseOverrideInitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Initiate Case Override Api V1 Cases  Case Id  Override Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Initiate Case Override",
+        "tags": [
+          "cases"
+        ]
+      }
+    },
+    "/api/v1/cases/{case_id}/override/cosign": {
+      "post": {
+        "description": "ADR-040 \u00a72.2 \u2014 second-reviewer decision on a case-level\noverride.\n\nOutcomes:\n  * `approve=True`  \u2192 clear `pending_override`, transition\n                      status \u2192 RESOLVED.\n  * `approve=False` \u2192 clear `pending_override`, restore status\n                      \u2192 OPEN_AGENT_PROCESSING.\n\nSoD: cosigner must not be the initiator. Notes mandatory.",
+        "operationId": "cosign_case_override_api_v1_cases__case_id__override_cosign_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaseCosignRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Cosign Case Override Api V1 Cases  Case Id  Override Cosign Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cosign Case Override",
         "tags": [
           "cases"
         ]
