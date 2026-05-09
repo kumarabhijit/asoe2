@@ -119,4 +119,93 @@ Boris's argument applies directly: **tool docstrings are the agent's effective b
 
 ---
 
-*Sections §4–§12 follow in subsequent commits. This commit lands the Context, Decision summary, and binding Vocabulary so each later section can refer to fixed terms.*
+## 4. The Five-Layer Architecture
+
+The architecture is described as five layers because each tier has a distinct **lifecycle**, **determinism property**, **governance owner**, and **failure mode**. Conflating any two of them into a single layer (which the codebase implicitly does today between knowledge and code) leads directly to the gaps §1 documents.
+
+### 4.1 Layer-by-layer summary
+
+| Layer | Name | What it holds | Determinism | LLM involvement | Governance | Lifecycle |
+|---|---|---|---|---|---|---|
+| **L0** | **Knowledge** | Skill bundles (`SKILL.md` + examples + assets + specs), `audit_bearing_registry.yaml`, policy thresholds, override-reason vocabularies, customer-tier matrices, channel sub-classification enums | Pure data; deterministic | Read by L2/L3, never executed by it | CODEOWNERS-gated; Compliance + domain SME approval; bundle-versioned | Independently deployable; versioned per bundle |
+| **L1** | **Deterministic primitives** | Recipes (`recipes/*.py`), gateways (`gateways/*.py`), Compliance Shadow rules (`compliance/shadow.py`), recipe registry, audit-coverage gates | Pure code | None directly | Engineering CODEOWNERS + Compliance for shadow.py and audit registry consumption | Code release |
+| **L2** | **Bounded LLM primitives** | Intent classifier, attachment extractor (multimodal pipeline), buyer-email drafter (server-side templated), constrained-generation backends (Guidance/Outlines/fallback) | Effectively deterministic given constrained output + cache | Yes — narrow context per call, structured output | Engineering CODEOWNERS + Compliance for prompt templates | Code release; model version pinning |
+| **L3** | **Case Agent** | The agent loop that coordinates L1+L2 invocations across the case lifetime; tool surface (~18 tools); working-memory loader; case-level judgment | Non-deterministic LLM judgment, but tool-trace deterministically logged | Yes — the agent loop driving tool calls | Engineering CODEOWNERS + Compliance for the system prompt + tool surface | Code release; agent system-prompt versioning |
+| **L4** | **Harness** | The `while`-loop, budget enforcement (tokens/iterations/wall-clock/$), tool-call interception for replay, compaction trigger, concurrency control on the case, persistence, observability | Pure code | None | Engineering CODEOWNERS | Code release |
+
+### 4.2 Interaction topology (not a dependency hierarchy)
+
+```
+                        ┌─────────────────────────┐
+                        │  L4  Harness            │
+                        │  (loop, budgets, persist)│
+                        └─────────┬───────────────┘
+                                  │ drives
+                                  ▼
+                        ┌─────────────────────────┐
+                        │  L3  Case Agent         │ ──reads── ┐
+                        │  (LLM-driven coordinator)│           │
+                        └──┬──────────────────┬───┘           │
+                           │ calls            │ calls         │
+                           ▼                  ▼               │
+                   ┌──────────────┐  ┌──────────────┐         │
+                   │ L1  Det.     │  │ L2  Bounded  │         │
+                   │ Primitives   │  │ LLM Prims    │         │
+                   │ (recipes,    │  │ (classifier, │         │
+                   │  gateways,   │  │  extractor,  │         │
+                   │  shadow)     │  │  drafter)    │         │
+                   └──────┬───────┘  └──────┬───────┘         │
+                          │                 │                 │
+                          └────────┬────────┘─────reads───────┘
+                                   ▼
+                        ┌─────────────────────────┐
+                        │  L0  Knowledge          │
+                        │  (skill bundles,        │
+                        │   policy, audit-registry,│
+                        │   vocabularies)         │
+                        └─────────────────────────┘
+```
+
+**Reading order:**
+
+* **L4 → L3:** the harness loads case state, builds working memory, calls the Case Agent with the current event. The agent runs its loop; the harness intercepts every tool call for replay/observability.
+* **L3 → L1, L2:** the agent invokes primitives as tools. L1 calls are deterministic (recipes / gateways / shadow); L2 calls are bounded LLM operations (classify, extract, draft) with constrained outputs.
+* **L3 → L0:** the agent loads the relevant skill bundle (anchor set into cached prefix; examples on-demand via tool); reads policy values; consults the audit-bearing registry for evidence-coverage decisions.
+* **L1, L2 → L0:** primitives read policy thresholds, vocabulary literals, and audit-registry classifications from the same knowledge tier.
+
+### 4.3 Determinism floor (the load-bearing property)
+
+The **deterministic floor** is **L0 + L1 + L2-with-constrained-output**. Compliance ratifies this floor. The architecture's load-bearing safety claim:
+
+> *L3's non-determinism is bounded by the L1+L2 tool surface. The agent picks tools but the tools themselves remain compliance-bound. No tool produces an action that has not already passed L1 (Compliance Shadow / audit-registry) gates.*
+
+Concretely: the Case Agent cannot invent a "submit_to_erp" path that bypasses Shadow. The L4 harness intercepts the tool call, routes it through the existing graph topology (resolve_dependencies → validate_types → shadow_audit → execute_recipe → apply_effects), and the deterministic gates fire just as they do today. The agent's freedom is in *which* primitives to call and *when*, not in altering what they do.
+
+### 4.4 What is genuinely new (vs reorganisation of what exists)
+
+| Layer | What exists today | What is new |
+|---|---|---|
+| **L0** | `compliance/audit_bearing_registry.yaml`, `contracts/policy.py` constants, `constraints/specs.py` literals, `skills/<name>_SKILL.md` (prose only) | Skill bundle directory structure (`knowledge/skills/<name>/` with `examples/`, `assets/`, `specs/`, `metadata.yaml`); migration of policy constants to `policy/<intent>.yaml` (deferred, optional, see §9); examples-as-CI-tests |
+| **L1** | All 10 existing recipes; gateways; `compliance/shadow.py` deterministic rules; recipe registry | No structural change. New recipes ship as new tools. |
+| **L2** | Intent classifier (`skills/intent_classifier.py`); constrained-generation backends (`constraints/`); `EmailOrderEntryRecipe` extraction (in-flight on ADR-034 branch) | Attachment extractor (multimodal pipeline — PDF / OCR / Excel / image dispatch with template-fingerprint caching); buyer-email drafter (server-side templated) |
+| **L3** | None | The Case Agent module (`agents/case_agent.py`); tool surface (`agents/case_tools.py`); working-memory loader (`agents/working_memory.py`) |
+| **L4** | LangGraph topology (`orchestration/graph.py`, `nodes.py`); recipe executor; gateway executor; HTTP API | Case-aware extensions: `OrderCase` parent persistence; correlation-table lookup-or-create; tier graduation; compaction trigger; budget enforcement at the case-tier granularity |
+
+### 4.5 Why five layers, not four or six
+
+* **Why L0 is its own layer (not folded into L1 or L3):** Knowledge has its own lifecycle (versioned, CODEOWNERS-gated, deployable independently of code), its own governance (Compliance + domain SME, not engineering alone), and its own access pattern (loaded on demand by L2/L3, not invoked as code). Folding it into L1 conflates pure data with pure code; folding it into L3 makes the agent's prompt indistinguishable from policy. Both blur the audit-trail story.
+* **Why L1 and L2 stay separate (not collapsed into "primitives"):** they have different determinism guarantees and therefore different audit treatment. L1 is reproducible bit-for-bit; L2 is reproducible only modulo model + cache + temperature. Compliance treats them differently. Putting them in one layer hides that distinction.
+* **Why L3 and L4 stay separate (not collapsed into "runtime"):** the harness is testable in isolation with the LLM mocked; the agent is testable in isolation with the harness mocked. Replay works because L4 records inputs/outputs at the L3↔L1/L2 boundary deterministically. Conflating them defeats both tests.
+* **Why not a sixth layer for "UI / API surface":** the API surface is part of L4 (the harness's external contract). The UI is a separate repository (`asoe-ui`) with its own architectural document; it consumes L4's API and doesn't sit on top of the agent stack.
+
+### 4.6 What this layering buys us (vs the current implicit structure)
+
+1. **Audit-trail granularity.** Every record carries (skill bundle version, policy version, audit-registry version, recipe version, agent system-prompt version, harness version). Replay against any historical version reproduces the decision.
+2. **Independent evolution.** Knowledge can change (vocabulary, thresholds, examples) without a code release. Code can change without a knowledge migration. The two coordination loops are decoupled.
+3. **Cost discipline.** L0's stable prefix caches; L2's bounded calls are predictable; L3's per-iteration budget is enforceable; L4 measures the whole.
+4. **Compliance posture.** The deterministic floor (L0+L1+L2) is what's ratified. L3's non-determinism is bounded *by* the floor, not above it.
+5. **Modularity.** New capabilities ship by adding a skill bundle (L0) + recipe (L1) + maybe a primitive (L2). The agent (L3) and harness (L4) don't change. This is the "richer skill library beats more agents" property Boris emphasises.
+
+---
+
+*Sections §5–§12 follow in subsequent commits.*
