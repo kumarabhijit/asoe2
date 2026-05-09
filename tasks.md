@@ -2106,11 +2106,25 @@ together). Verdicts produced today are not yet attached to any
       whereas `MANUAL_ORDER_INTAKE` is the abstract semantic
       category (covers email + phone + fax). Skill-bundle
       directory `knowledge/skills/email-order-entry/` retained
-      for now (rename is a separate ~10-file follow-up); the
-      bundle's metadata.yaml `intents` list was updated in
-      this pass. UI generated types regenerated via
+      in the original pass (rename is a separate ~10-file
+      follow-up); the bundle's metadata.yaml `intents` list was
+      updated in this pass. UI generated types regenerated via
       `npm run generate-types`. Full backend regression + UI
       vitest + typecheck green.
+- [x] Bundle directory rename complete:
+      `knowledge/skills/email-order-entry/` →
+      `knowledge/skills/manual-order-intake/` via `git mv`
+      (history preserved). Updates: `skills/loader.py` event-
+      type matcher swap, `metadata.yaml::skill_name` flip,
+      bundle path references in
+      `recipes/EmailOrderEntryRecipe.py`, `contracts/policy.py`,
+      `api/routes/exceptions.py`, `tests/test_e2e_email_order_entry.py`,
+      `tests/test_case_agent.py`, `tests/test_knowledge_bundle.py`,
+      `tests/test_harness.py`, `docs/plans/case-centric-rollout.md`,
+      and `EXPECTED_BUNDLES` in the bundle-integrity tests.
+      ADR-034 / ADR-038 documents kept the historical path
+      (those describe decisions at a point in time). 180/180
+      affected tests + full pytest regression green.
 - [ ] **`architecture_v5.md` draft** — the rollout plan
       promises v5 once ADR-038/039 are *Accepted* and Phase
       H.1 has shipped. Code is ahead but ratification gates

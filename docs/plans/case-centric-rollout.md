@@ -123,17 +123,17 @@ Two options:
 Rationale:
 * Cherry-picking creates a duplicate-commit headache that resolves messily at merge time. Option B's cleanup cost > Option C's adaptation cost.
 * Option A creates a hard dependency between two branches that are otherwise independent. Slows down `case_centric_architecture` review for no architectural benefit.
-* Option C keeps the two efforts decoupled. When `claude/review-...` is ready to merge, it carries a small "migrate to knowledge/skills/email-order-entry/" commit as part of the rebase. The migration is mechanical (the same 4 files Phase H.1 produces for every other skill).
+* Option C keeps the two efforts decoupled. When `claude/review-...` is ready to merge, it carries a small "migrate to knowledge/skills/manual-order-intake/" commit as part of the rebase. The migration is mechanical (the same 4 files Phase H.1 produces for every other skill).
 
 ### 3.4 The in-flight branch's adaptation requirement — RESOLVED in this branch
 
 When the in-flight Phase A/B/G work was rebased on top of the case-centric stack (forming `claude/review-order-entry-architecture-RCIUa`), the bundle-migration was carried out as a coherence-fix commit on the same branch:
 
-1. ✅ `git mv skills/email-order-entry_SKILL.md knowledge/skills/email-order-entry/SKILL.md` (history preserved).
-2. ✅ `knowledge/skills/email-order-entry/metadata.yaml` authored matching the pattern Phase H.1 established for the other 9 skills.
+1. ✅ `git mv skills/email-order-entry_SKILL.md knowledge/skills/manual-order-intake/SKILL.md` (history preserved).
+2. ✅ `knowledge/skills/manual-order-intake/metadata.yaml` authored matching the pattern Phase H.1 established for the other 9 skills.
 3. ✅ No tests reference the old path (`skills/loader.py::select_for_event` uses the legacy filename string as the lookup key, which `_bundle_name_from_legacy_filename` resolves to the bundle path transparently).
 4. ✅ Empty `examples/`, `assets/`, `specs/` directories created per ADR-038 §5.5 (examples are *earned* by real failures, not authored speculatively).
-5. ✅ Spec relocated: `docs/specs/order-entry-from-email-product-spec.md` → `knowledge/skills/email-order-entry/specs/order_entry_spec.md`. The 4 reference paths (recipes/EmailOrderEntryRecipe.py, contracts/policy.py, docs/adr/ADR-034-email-order-entry-skill.md, this plan) updated in the same commit.
+5. ✅ Spec relocated: `docs/specs/order-entry-from-email-product-spec.md` → `knowledge/skills/manual-order-intake/specs/order_entry_spec.md`. The 4 reference paths (recipes/EmailOrderEntryRecipe.py, contracts/policy.py, docs/adr/ADR-034-email-order-entry-skill.md, this plan) updated in the same commit.
 
 After this commit, **all 10 skills** live under `knowledge/skills/<name>/`. The H.1 invariant ("every skill is a bundle") holds.
 

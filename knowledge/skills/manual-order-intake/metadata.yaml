@@ -1,14 +1,15 @@
-# Knowledge bundle manifest for skill `email-order-entry`.
+# Knowledge bundle manifest for skill `manual-order-intake`.
 #
-# Coherence-fix migration: the MANUAL_ORDER_INTAKE skill (ADR-034
-# Phase A) was authored before ADR-038 Phase H.1 introduced the
-# bundle layout; H.1 only migrated the 9 skills present at the
-# time. This commit closes the inconsistency so all skills now
-# live under `knowledge/skills/<name>/`. SKILL.md history is
-# preserved via git-mv.
+# Channel-neutral cleanup per ADR-038 §3.2: the bundle was
+# originally authored as `email-order-entry` (ADR-034 Phase A)
+# when only the email channel was in scope. ADR-038 §3.2 binds
+# the abstract semantic category to the channel-neutral name
+# `manual-order-intake` (covers email + phone + fax). The bundle
+# directory was renamed via `git mv` so SKILL.md history is
+# preserved across the rename.
 
 schema_version: 1
-skill_name: email-order-entry
+skill_name: manual-order-intake
 bundle_version: 1.0.0
 description: |
   Classifies a post-extraction email-channel sales-order envelope into
