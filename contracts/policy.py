@@ -203,7 +203,7 @@ is required."""
 
 # ---------------------------------------------------------------------------
 # Email Order Entry thresholds (ADR-034)
-# Per `docs/specs/order-entry-from-email-product-spec.md` §3 (L2 Behavior
+# Per `knowledge/skills/email-order-entry/specs/order_entry_spec.md` §3 (L2 Behavior
 # Thresholds) and §4 (Resolution Workflows / AUTO_CORRECT confidence floor).
 # ---------------------------------------------------------------------------
 

@@ -1851,20 +1851,41 @@ gates still pending (see "Pending" subsection at the bottom).
       (`sha256(tenant||order_id)[:16]`).
 - [x] `Dockerfile.api` — `COPY knowledge/` and `COPY agents/`
       so runtime-loaded resources ship.
-- [x] `tests/test_compaction_sla_backfill.py` — 27 tests.
+- [x] `tests/test_compaction_sla_backfill.py` — 30 tests
+      (27 original + 3 for `apply_compaction_if_needed`).
+- [x] `agents/compaction.py::apply_compaction_if_needed` —
+      imperative wrapper around `run_compaction()` that also
+      persists `working_memory_summary` + `last_compaction_at`
+      on the case row. Phase H.5 / H.7 callers can fire-and-
+      forget; pure `run_compaction()` is retained for harness
+      sites that own their own persistence.
+- [x] `scripts/run_backfill.py` — ops CLI wrapping
+      `backfill_orphan_cases()` (Pass 1) and
+      `merge_orphan_cases_by_correlation()` (Pass 2). Supports
+      `--pass {1,2,both}`, `--dry-run`, `--tier-map FILE`
+      (JSON customer→tier map for SLA stamping), and a custom
+      `--bundle-version-at-open` sentinel. Emits a JSON report
+      to stdout. Exit codes: 0 success / 2 invalid args / 3
+      runtime error.
+- [x] `tests/test_run_backfill_script.py` — 9 tests covering
+      pass selection, idempotency, dry-run, tier-map loading,
+      and arg validation.
 - [ ] **Pending: per-event-type compaction templates.** Only
       `__general__.template.md` exists. ADR-038 §11.2 open
       question (Compliance + domain SME).
-- [ ] **Pending: compaction trigger wire-up.**
-      `CompactionTrigger.evaluate()` is implemented but no
-      caller is visible — likely the L4 harness extension that
-      is also dormant.
+- [ ] **Pending: agent loop / harness wire-up of
+      `apply_compaction_if_needed`.** The helper exists but
+      the L4 harness / Case Agent loop that should call it on
+      every step boundary is the Thread 4 work (Phase H.5
+      agent dormant).
 - [ ] **Pending: four-eyes / cosign / override flows migrated
       to operate on the case lifecycle** (rather than the
       exception lifecycle in isolation, as ADR-029 currently
       does). Phase H.7 closeout requirement.
-- [ ] **Pending: scheduled backfill runner.** V011 is a SQL
-      file; no ops command or scheduled job invokes it yet.
+- [ ] **Pending: scheduled-job wrapping of
+      `scripts/run_backfill.py`.** The CLI is shipped; ops
+      still has to register it as a cron / k8s CronJob
+      (deployment-side, not code-side).
 
 ### 27.8 ADR-039 — L2 LLM Shadow (entire ADR pending)
 ADR-039 is **0% shipped beyond the document**. None of the X.1
@@ -1893,14 +1914,14 @@ observe-only surface area exists yet.
       compliance ratification gates above.
 
 ### 27.9 Phase 27 follow-ups (deferred from the merged PR)
-- [ ] **Spec relocation** —
+- [x] **Spec relocation** —
       `docs/specs/order-entry-from-email-product-spec.md` →
-      `knowledge/skills/email-order-entry/specs/order_entry_spec.md`.
-      Touches 4 reference paths
+      `knowledge/skills/email-order-entry/specs/order_entry_spec.md`
+      via `git mv` (history preserved). 4 reference paths
+      updated in the same commit
       (`recipes/EmailOrderEntryRecipe.py`, `contracts/policy.py`,
-      `docs/plans/case-centric-rollout.md`,
-      `docs/adr/ADR-034-email-order-entry-skill.md`). Scoped
-      follow-up commit.
+      `docs/adr/ADR-034-email-order-entry-skill.md`,
+      `docs/plans/case-centric-rollout.md`).
 - [ ] **Per-skill anchor example earning** — all 10 bundles
       ship `anchor_examples: []` per §5.5 ("earned, not
       authored"). The first earnings cycle starts when Phase

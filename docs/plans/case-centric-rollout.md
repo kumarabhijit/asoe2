@@ -133,7 +133,7 @@ When the in-flight Phase A/B/G work was rebased on top of the case-centric stack
 2. ✅ `knowledge/skills/email-order-entry/metadata.yaml` authored matching the pattern Phase H.1 established for the other 9 skills.
 3. ✅ No tests reference the old path (`skills/loader.py::select_for_event` uses the legacy filename string as the lookup key, which `_bundle_name_from_legacy_filename` resolves to the bundle path transparently).
 4. ✅ Empty `examples/`, `assets/`, `specs/` directories created per ADR-038 §5.5 (examples are *earned* by real failures, not authored speculatively).
-5. ⏭ Spec relocation deferred to a follow-up: `docs/specs/order-entry-from-email-product-spec.md` → `knowledge/skills/email-order-entry/specs/order_entry_spec.md`. Touches 4 reference paths (recipes/EmailOrderEntryRecipe.py, contracts/policy.py, docs/plans/case-centric-rollout.md, docs/adr/ADR-034-email-order-entry-skill.md); will land in a separate scoped commit.
+5. ✅ Spec relocated: `docs/specs/order-entry-from-email-product-spec.md` → `knowledge/skills/email-order-entry/specs/order_entry_spec.md`. The 4 reference paths (recipes/EmailOrderEntryRecipe.py, contracts/policy.py, docs/adr/ADR-034-email-order-entry-skill.md, this plan) updated in the same commit.
 
 After this commit, **all 10 skills** live under `knowledge/skills/<name>/`. The H.1 invariant ("every skill is a bundle") holds.
 

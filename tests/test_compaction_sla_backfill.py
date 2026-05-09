@@ -29,6 +29,7 @@ from agents.compaction import (
     COMPACTION_TRIGGER_EVENT_COUNT,
     COMPACTION_TRIGGER_TOKEN_BUDGET,
     CompactionTrigger,
+    apply_compaction_if_needed,
     compact_events,
     replay_compaction,
     run_compaction,
@@ -190,6 +191,48 @@ class TestRunCompaction:
         events_tampered = list(events)
         events_tampered[0] = {**events_tampered[0], "outcome": "tampered"}
         assert replay_compaction(case, events_tampered, result) is False
+
+
+# ---------------------------------------------------------------------------
+# apply_compaction_if_needed — wire-up helper that persists too
+# ---------------------------------------------------------------------------
+
+
+class TestApplyCompactionIfNeeded:
+    def test_no_op_below_thresholds(self, case):
+        result = apply_compaction_if_needed(case=case, events=[])
+        assert result is None
+        # No persistence happened either.
+        refreshed = case_store.get(case.case_id)
+        assert refreshed.working_memory_summary is None
+        assert refreshed.last_compaction_at is None
+
+    def test_persists_summary_when_trigger_fires(self, case):
+        events = [
+            {"event_type": "agent_step", "timestamp": f"T{i}", "outcome": "ok"}
+            for i in range(COMPACTION_TRIGGER_EVENT_COUNT)
+        ]
+        result = apply_compaction_if_needed(case=case, events=events)
+        assert result is not None
+        refreshed = case_store.get(case.case_id)
+        assert refreshed.working_memory_summary == result.summary_text
+        assert refreshed.last_compaction_at == result.triggered_at
+
+    def test_idempotent_replay(self, case):
+        """Running the helper twice with the same inputs is a no-op
+        on the second call — `last_compaction_at` advances forward in
+        clock time but the summary text is byte-identical (replay
+        divergence == 0)."""
+        events = [
+            {"event_type": "agent_step", "timestamp": f"T{i}", "outcome": "ok"}
+            for i in range(COMPACTION_TRIGGER_EVENT_COUNT)
+        ]
+        first = apply_compaction_if_needed(case=case, events=events)
+        # `case` is the pre-compaction snapshot; pull the persisted one.
+        case_after = case_store.get(case.case_id)
+        second = apply_compaction_if_needed(case=case_after, events=events)
+        assert first is not None and second is not None
+        assert first.summary_text == second.summary_text
 
 
 # ---------------------------------------------------------------------------

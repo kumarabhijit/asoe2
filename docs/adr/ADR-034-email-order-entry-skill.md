@@ -2,7 +2,7 @@
 
 **Status:** Proposed
 **Date:** 2026-05-04
-**Decision driver:** Product Owner spec `docs/specs/order-entry-from-email-product-spec.md`
+**Decision driver:** Product Owner spec `knowledge/skills/email-order-entry/specs/order_entry_spec.md`
 **Authoring path:** `prompts/po-spec-to-asoe.md` STEP 0 (Spec Analysis Gate) applied to the PO spec.
 **Reviewers required:** AI/LangGraph → Compliance → Tools Admin → Frontend Platform → Compliance veto holder.
 
@@ -42,7 +42,7 @@ ADR — GATEWAY territory (infrastructure I/O the recipe is forbidden from doing
 | Spec section | Bucket | Destination |
 |---|---|---|
 | §1 Overview, Skill Metadata, Use Cases, Routing Notes | SKILL | `skills/email-order-entry_SKILL.md` (intent name, description, recipe selection, routing notes verbatim where they affect classifier behaviour) |
-| §2 Problem Domain, Friction Points | REFERENCE | Already preserved verbatim in `docs/specs/order-entry-from-email-product-spec.md` |
+| §2 Problem Domain, Friction Points | REFERENCE | Already preserved verbatim in `knowledge/skills/email-order-entry/specs/order_entry_spec.md` |
 | §3 8-step pipeline (steps 1, 2, 3, 4, 5, 7, 8) | GATEWAY + REFERENCE | Steps 1–5 + 7–8 are I/O: tenant policy resolution, artifact collection, multi-format extraction, normalisation, entity resolution, ERP simulation, ERP submit. **Recipes never call gateways directly** (CLAUDE.md §1, ADR-025). These become declared `GatewayDependency` entries on the recipe spec and are resolved in `resolve_dependencies` *before* shadow_audit. Stub gateways are deferred to a follow-up PR; this PR ships the declarations and asserts `required_for_audit=False` so a missing gateway routes to `AUDIT_CONTEXT_MISSING` (a typed terminal state per Verdict 2026-04-22) rather than crashing the run. |
 | §3 Confidence Scoring + L2 Behavior Thresholds | RECIPE | The deterministic core of this skill. Inputs `composite_confidence`, `validation_failures`, plus thresholds → outputs `classification`, `recommended_action`, `autonomy_level`. Lives in `recipes/EmailOrderEntryRecipe.py`. Thresholds (0.95 / 0.85 / 0.99 / fatal-floor) live in `contracts/policy.py`. |
 | §4 Resolution Workflows (6 paths) | RECIPE (action vocabulary) + SKILL (routing instruction) | Adds 6 new resolution actions to `AllowedResolutionAction` Literal: `ONE_CLICK_APPROVE`, `STANDARD_REVIEW`, `LOW_CONFIDENCE_FLAG`, `AUTO_CORRECT`, `REQUEST_CLARIFICATION`, `REJECT`. (`ESCALATE` already exists.) `AUTO_RETRY` from the spec is *primitive-internal* and never surfaces as a recipe-level action — it lives inside the entity-resolution gateway's fallback chain. |
@@ -293,7 +293,7 @@ of which list view brought them there. Three commits:
   `tests/test_registry.py` continue to hold (these tests derive expectations
   dynamically from the literals/registry, so the count update is automatic).
 * The new recipe contains no I/O, no LLM calls, no side effects (`grep` rule).
-* The spec file is preserved at `docs/specs/order-entry-from-email-product-spec.md`,
+* The spec file is preserved at `knowledge/skills/email-order-entry/specs/order_entry_spec.md`,
   not under `skills/`.
 
 ---
