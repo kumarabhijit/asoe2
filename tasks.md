@@ -1814,10 +1814,22 @@ gates still pending (see "Pending" subsection at the bottom).
 - [x] **Companion repo** — see `asoe-ui/tasks.md` Phase 27.6
       for the full UI tracking. Backend-side changes recorded
       here:
-- [ ] **Pending: `/api/v1/cases/*` route** — `OrderCase` data
-      is in the database but no FastAPI route exposes it. The
-      asoe-ui `casesApi.list/get` only works in mock mode until
-      this lands. Priority gap.
+- [x] `api/routes/cases.py` — `GET /api/v1/cases` (filters: source,
+      status; sorted newest-first; tenant-isolated) and
+      `GET /api/v1/cases/{case_id}`. RBAC mirrors exceptions
+      (analyst / manager / admin / viewer / partner). Partner +
+      assigned-account scoping derives in-scope cases from their
+      child `ExceptionRecord` rows (case carries no `account_id`)
+      with a `customer_id` fallback for just-opened Manual Order
+      cases that have no child yet.
+- [x] `api/store.py::ExceptionStore.list_by_case` /
+      `DatabaseBackedStore.list_by_case` — children-of-case lookup
+      used by the route's scoping helper.
+- [x] `api/schemas.py::CaseListResponse` — `{ items, total }` shape
+      matching `asoe-ui/src/lib/api.ts::casesApi.list`.
+- [x] `tests/test_routes_cases.py` — 17 tests (auth + tenant
+      isolation + list/filter/sort/limit + detail/missing/cross-
+      tenant + partner & assigned-account scoping).
 
 ### 27.7 Phase H.7 — Compaction + SLA + backfill (partial)
 - [x] `agents/compaction.py` — `CompactionTrigger.evaluate()`
