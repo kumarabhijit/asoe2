@@ -1677,3 +1677,228 @@ gaps the PO observed on the Azure deployment.
       explicit scope note distinguishing the relaxed disposition
       self-block from the still-active cosign self-block.
 
+## PHASE 27 — Case-centric architecture foundation (ADR-038 / ADR-039)
+
+ADRs and Phase H.1 → H.7 of the case-centric rollout. See
+`docs/adr/ADR-038-case-centric-order-intake.md`,
+`docs/adr/ADR-039-llm-compliance-shadow-second-opinion.md`,
+and `docs/plans/case-centric-rollout.md`.
+
+**Status:** primitives shipped on main; integration and compliance
+gates still pending (see "Pending" subsection at the bottom).
+
+### 27.0 Architecture decisions (Proposed → Accepted gate pending)
+- [x] ADR-038 authored (12 sections, ~1300 lines): five-layer
+      architecture (L0 Knowledge / L1 Deterministic / L2 Bounded
+      LLM / L3 Case Agent / L4 Harness); Manual / Automated Order
+      vocabulary; channel-neutral issue/intent naming; OrderCase
+      parent + correlation lookup-or-create; T1/T2/T3 case
+      materialisation; single Case Agent with ~18-tool surface;
+      memory hierarchy + deterministic compaction; per-tier cost
+      and latency budgets ($0.001 / $0.05 / $0.08).
+- [x] ADR-039 authored (8 sections, ~600 lines): constrained-output
+      L2 LLM Shadow alongside the deterministic L1; **asymmetric
+      combination rule** (LLM can DOWNGRADE GREEN → YELLOW but
+      never UPGRADE); two gating triggers; cache discipline;
+      tenant isolation; phased rollout X.1 → X.4.
+- [x] `docs/plans/case-centric-rollout.md` published —
+      meta-decisions, H.1 → H.7 phase plan, per-phase test strategy,
+      §3.4 in-flight branch adaptation (RESOLVED in this branch
+      via the email-order-entry coherence-fix commit).
+- [x] `architecture_v4.md` §15 addendum — Proposed-ADR lineage
+      hint + supersession map.
+- [ ] **Compliance ratification — ADR-038 §7.4 (compaction
+      protocol).** Status: pending workshop.
+- [ ] **Compliance ratification — ADR-038 §8.5 (governance /
+      CODEOWNERS map).** Status: pending workshop.
+- [ ] **Compliance ratification — ADR-039 §4.1 (combination
+      rule).** Status: pending workshop.
+- [ ] **Compliance ratification — ADR-039 §6 (phased rollout
+      X.1 → X.4).** Status: pending workshop.
+
+### 27.1 Phase H.1 — L0 Knowledge layer foundation
+- [x] `knowledge/skills/<name>/` bundle layout for all 10 skills
+      (back-order-resolution, delivery-delay, duplicate-po,
+      edi-mismatch, email-order-entry, moq-round-up, over-max-trim,
+      pallet-alignment, price-hold-release, pricing-reconciliation).
+      `git mv` preserved SKILL.md history.
+- [x] `knowledge/skills/<name>/metadata.yaml` per bundle —
+      schema_version 1; `recipes`, `intents`, `event_types`,
+      empty `anchor_examples` / `on_demand_examples` / `assets`,
+      `runtime_includes: [SKILL.md]`, token budget defaults.
+- [x] Empty `examples/`, `assets/`, `specs/` directories per
+      ADR-038 §5.5 (examples are *earned* by real failures, not
+      authored speculatively).
+- [x] `skills/loader.py` rewritten — bundle-first resolution
+      via `_bundle_name_from_legacy_filename` + `_resolve`, with
+      one-release legacy fallback at `skills/<name>_SKILL.md`.
+- [x] `constraints/llm_backend.py::_load_skill_catalog()` walks
+      `knowledge/skills/<bundle>/SKILL.md` preferentially with
+      legacy fallback; alphabetical for prompt-cache stability.
+- [x] `tests/test_knowledge_bundle.py` — 122 parametrized tests
+      (10 bundles × layout / metadata schema / loader resolution
+      / LLM-catalog walk).
+- [x] §3.4 coherence-fix: `email-order-entry` migrated to bundle
+      layout in the same merged PR so the H.1 invariant ("every
+      skill is a bundle") holds across the combined branch.
+
+### 27.2 Phase H.2 — `OrderCase` primitive + correlation table
+- [x] `contracts/models.py` — `CaseSource` / `CaseStatus` /
+      `CaseTier` Literals; `OrderCase` Pydantic model;
+      `CaseCorrelationKeyType` / `CaseCorrelationKey`.
+- [x] `api/store.py` — `CaseStore` class with `lookup_or_create`
+      (SO → PO → EDI → email priority), `find_by_correlation`,
+      `register_correlation`, `get` / `update` / `list_by_tenant`
+      / `clear`; `case_store` singleton.
+- [x] `ExceptionRecord.parent_case_id` added (nullable; legacy
+      records remain `NULL` until backfill).
+- [x] `db/migrations/V009__order_case.sql`,
+      `V010__case_correlation_keys.sql`.
+- [x] `tests/test_order_case.py` — 22 tests.
+
+### 27.3 Phase H.3 — Lazy case materialisation
+- [x] `api/case_resolver.py` — `derive_source_and_channel(event)`,
+      `should_materialise(event, final_status)`,
+      `resolve_or_open_case`, `materialise_for_event`.
+- [x] Manual Orders open eagerly; Automated Orders open lazily
+      on non-clean terminal status. Clean Automated COMPLETE
+      records persist with `parent_case_id = None`.
+- [x] `api/routes/exceptions.py::_persist_exception` calls
+      `materialise_for_event` and threads `parent_case_id` into
+      `exception_store.create()`.
+- [x] `tests/test_e2e_case_materialisation.py` — 16 tests.
+
+### 27.4 Phase H.4 — L2 attachment-extractor primitive
+- [x] `agents/primitives/extract_attachment.py` —
+      `AttachmentRef`, `ExtractedField`, `ExtractedFields`,
+      `MultimodalProvider` Protocol, `StubMultimodalProvider`,
+      tenant-isolated `ExtractionCache` (cache key includes
+      `tenant_id` per ADR-038 §5.8), `extract_attachment()`,
+      `fingerprint_for_template()`, `attachment_ref_from_metadata()`.
+- [x] `tests/test_extract_attachment.py` — 15 tests.
+- [ ] **Pending:** real multimodal model wired (procurement —
+      Claude vision vs Azure Document Intelligence vs hybrid;
+      ADR-038 §11.2 open question).
+
+### 27.5 Phase H.5 — Case Agent loop + tool registry (primitive only)
+- [x] `agents/budget.py` — `CaseBudget.for_tier(N)` with
+      ADR-038 §8.1 limits (T1 4k/1k/1iter/<500ms/<$0.001;
+      T2 16k/4k/6iter/<8s/<$0.05; T3 8k/2k/8iter/<12s/<$0.08);
+      `is_exhausted()` returns named termination reason.
+- [x] `agents/case_tools.py` — `ToolCall` / `ToolResult` Pydantic
+      envelopes; `ToolSpec` / `ToolRegistry` / `ToolContext`;
+      `invoke_tool()` (errors coerced to `status="error"`);
+      9 wired tools delegating to existing recipes / gateways
+      (no new business logic).
+- [x] `agents/working_memory.py` — `SYSTEM_PROMPT`,
+      `WorkingMemoryFrame`, `build_working_memory()` honouring
+      §5.3 cache-discipline order.
+- [x] `agents/case_agent.py` — `AgentLLMResponse` (constrained:
+      `tool_call | done | escalate`), `AgentLLMProvider`
+      Protocol, `StubAgentLLMProvider`, `AgentRunOutcome` Literal
+      (RESOLVED / ESCALATED / AWAITING_BUYER / AWAITING_ERP /
+      BUDGET_EXHAUSTED / ERROR), bounded while-loop.
+- [x] `tests/test_case_agent.py` — 26 tests.
+- [ ] **Pending: agent is dormant.** `run_case_agent` is not
+      called from `api/`, `orchestration/`, or `workflows/`.
+      Per §H.5 the routing decision (`EMAIL_ORDER_ENTRY_REQUEST`
+      → case agent vs deterministic graph) is part of this phase
+      but has not been implemented yet.
+- [ ] **Pending: L4 harness extensions** —
+      case-aware concurrency lock, tool-call interception for
+      replay log, tier graduation on first non-clean event for
+      Automated. Not visible in the codebase
+      (`harness*.py` does not exist).
+
+### 27.6 Phase H.6 — UI: `/cases` surface (asoe-ui)
+- [x] **Companion repo** — see `asoe-ui/tasks.md` Phase 27.6
+      for the full UI tracking. Backend-side changes recorded
+      here:
+- [ ] **Pending: `/api/v1/cases/*` route** — `OrderCase` data
+      is in the database but no FastAPI route exposes it. The
+      asoe-ui `casesApi.list/get` only works in mock mode until
+      this lands. Priority gap.
+
+### 27.7 Phase H.7 — Compaction + SLA + backfill (partial)
+- [x] `agents/compaction.py` — `CompactionTrigger.evaluate()`
+      (8k tokens / 25 events / 7 days); `compact_events()`
+      (deterministic per-event line; 2k token cap);
+      `run_compaction()` and `replay_compaction()`.
+- [x] `knowledge/compaction/__general__.template.md` — fallback
+      summarisation template.
+- [x] `agents/sla.py` — `SlaPolicy` / `SlaPolicySet`,
+      `get_policy()` / `reload_policy()`,
+      `hours_for_customer_tier()`, `stamp_sla_deadline()`.
+- [x] `knowledge/policy/sla_per_customer_tier.yaml` — Strategic
+      4h / Mid-Market 24h / Long-tail 72h / default 48h.
+- [x] `agents/backfill.py` — `backfill_orphan_cases()` Pass 1;
+      `merge_orphan_cases_by_correlation()` Pass 2 (optional,
+      maintenance-window).
+- [x] `db/migrations/V011__backfill_orphan_cases.sql` — Postgres
+      companion with deterministic `case_id` derivation
+      (`sha256(tenant||order_id)[:16]`).
+- [x] `Dockerfile.api` — `COPY knowledge/` and `COPY agents/`
+      so runtime-loaded resources ship.
+- [x] `tests/test_compaction_sla_backfill.py` — 27 tests.
+- [ ] **Pending: per-event-type compaction templates.** Only
+      `__general__.template.md` exists. ADR-038 §11.2 open
+      question (Compliance + domain SME).
+- [ ] **Pending: compaction trigger wire-up.**
+      `CompactionTrigger.evaluate()` is implemented but no
+      caller is visible — likely the L4 harness extension that
+      is also dormant.
+- [ ] **Pending: four-eyes / cosign / override flows migrated
+      to operate on the case lifecycle** (rather than the
+      exception lifecycle in isolation, as ADR-029 currently
+      does). Phase H.7 closeout requirement.
+- [ ] **Pending: scheduled backfill runner.** V011 is a SQL
+      file; no ops command or scheduled job invokes it yet.
+
+### 27.8 ADR-039 — L2 LLM Shadow (entire ADR pending)
+ADR-039 is **0% shipped beyond the document**. None of the X.1
+observe-only surface area exists yet.
+- [ ] `compliance/shadow_llm.py` — primitive (constrained-output
+      L2 Shadow with `agree | disagree_downgrade | abstain`).
+- [ ] `knowledge/shadow_llm/` bundle — system prompt +
+      `concerns_vocabulary.yaml` + 5–10 few-shot examples.
+- [ ] L4 harness `shadow_audit` extension — invoke L2 on the
+      gating-triggered subset (`financial_impact_usd ≥ $500`
+      OR deterministic-YELLOW).
+- [ ] `LLMCallTrace` extension; `ComplianceDecision.llm_shadow_verdict`
+      new field.
+- [ ] Audit-trail extensions per ADR-039 §7.2.
+- [ ] SLI metrics per §7.3 (Prometheus): disagreement-rate,
+      ABSTAIN-rate, p99 latency, cache hit ratio,
+      validation-error rate.
+- [ ] Cache infrastructure (§5.5) — same per-tenant key
+      discipline as the L4 extraction cache.
+- [ ] **§8.1 open questions blocking X.1:** L2 model choice
+      (Anthropic Haiku vs local Ollama 7B vs hybrid;
+      procurement); concerns vocabulary content; X.1 sample-
+      size threshold; first few-shot example authorship; inter-
+      tenant model contention modelling.
+- [ ] X.2 / X.3 / X.4 — all blocked on X.1 completion + the
+      compliance ratification gates above.
+
+### 27.9 Phase 27 follow-ups (deferred from the merged PR)
+- [ ] **Spec relocation** —
+      `docs/specs/order-entry-from-email-product-spec.md` →
+      `knowledge/skills/email-order-entry/specs/order_entry_spec.md`.
+      Touches 4 reference paths
+      (`recipes/EmailOrderEntryRecipe.py`, `contracts/policy.py`,
+      `docs/plans/case-centric-rollout.md`,
+      `docs/adr/ADR-034-email-order-entry-skill.md`). Scoped
+      follow-up commit.
+- [ ] **Per-skill anchor example earning** — all 10 bundles
+      ship `anchor_examples: []` per §5.5 ("earned, not
+      authored"). The first earnings cycle starts when Phase
+      H.5 routes real traffic through the agent.
+- [ ] **`MANUAL_ORDER_INTAKE` rename of `EMAIL_ORDER_ENTRY`** —
+      optional channel-neutral cleanup (§3.2 binding); deferred
+      until Phase H.5 wire-up.
+- [ ] **`architecture_v5.md` draft** — the rollout plan
+      promises v5 once ADR-038/039 are *Accepted* and Phase
+      H.1 has shipped. Code is ahead but ratification gates
+      above are still pending; drafting v5 before ratification
+      would cement Proposed-status decisions. Defer until the
+      compliance workshops complete.
