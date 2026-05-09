@@ -2040,9 +2040,21 @@ together). Verdicts produced today are not yet attached to any
       SKIP_PROVIDER_TIMEOUT. `select_shadow_provider()` factory
       picks Azure when `AZURE_OPENAI_SHADOW_DEPLOYMENT` is set,
       else stub (default for tests). 11 tests under
-      `tests/test_azure_providers.py`. Earned anchor examples
-      remain pending — they accrue from X.1 disagreement traces
-      once production traffic flows.
+      `tests/test_azure_providers.py`.
+- [x] **Anchor-example accrual mechanism shipped.**
+      `scripts/earn_anchor_examples.py` walks the audit-bearing
+      record store, identifies high-signal disagreement traces
+      (`reverse_disagreement` > `sustained_disagreement` >
+      `borderline_abstain`), and emits a JSON artifact for
+      Compliance review. Operators run weekly during X.1; the
+      first 5–10 examples Compliance lands populate
+      `knowledge/shadow_llm/anchor_examples/<slug>.example.json`
+      and the bundle metadata.yaml `anchor_examples:` list. The
+      script does NOT mutate the bundle directly — that's the
+      Compliance reviewer's prerogative. 10 tests in
+      `tests/test_earn_anchor_examples_script.py` (signal
+      classifier, candidate extraction, CLI artifact, empty-store
+      edge case, invalid-date arg validation).
 - [x] X.2+ combiner code path **shipped (flag-gated)**.
       `compliance/shadow_llm.py::combine_verdicts` encodes the
       ADR-039 §4.1 truth table; `orchestration/nodes.py::_invoke_l2_shadow_observe_only`
