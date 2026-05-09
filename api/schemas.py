@@ -1324,3 +1324,26 @@ class AnalysisResponse(BaseModel):
     # mounts on the Exception Queue detail page above
     # email_order_entry_analysis via data-presence dispatch.
     email_source: Optional[EmailSourceData] = None
+
+
+# ---------------------------------------------------------------------------
+# OrderCase responses — ADR-038 Phase H.6 (case-centric surface)
+# ---------------------------------------------------------------------------
+#
+# The `OrderCase` Pydantic model in `contracts/models.py` is the wire
+# shape; it mirrors `asoe-ui/src/types/cases.ts::OrderCase` 1:1, so the
+# list response simply echoes it. Filters are intentionally narrow
+# (source / status); pagination is a flat top-N for now since case
+# volumes are bounded by the materialisation policy (ADR-038 §7.1).
+
+
+class CaseListResponse(BaseModel):
+    """GET /api/v1/cases — list response.
+
+    Shape matches `asoe-ui/src/lib/api.ts::casesApi.list`'s declared
+    return type (`{ items: OrderCase[]; total: number }`). Items are
+    serialised from `contracts.models.OrderCase`.
+    """
+
+    items: List[Dict[str, Any]] = Field(default_factory=list)
+    total: int = 0

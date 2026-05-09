@@ -224,6 +224,19 @@ class ExceptionStore:
         next_cursor = page[-1].id if has_more and page else None
         return page, next_cursor, has_more
 
+    def list_by_case(
+        self, tenant_id: str, case_id: str,
+    ) -> List[ExceptionRecord]:
+        """ADR-038 Phase H.6 — children-of-case lookup for the
+        ``/api/v1/cases/*`` partner-scope helper. The case itself
+        carries no ``account_id``; scope is derived from its
+        children."""
+        with self._lock:
+            return [
+                r for r in self._records.values()
+                if r.tenant_id == tenant_id and r.parent_case_id == case_id
+            ]
+
     def update(self, exception_id: str, tenant_id: str, **fields) -> Optional[ExceptionRecord]:
         with self._lock:
             record = self._records.get(exception_id)
@@ -501,6 +514,21 @@ class DatabaseBackedStore:
         )
         records = [self._dict_to_record(r) for r in rows]
         return records, next_cursor, has_more
+
+    def list_by_case(
+        self, tenant_id: str, case_id: str,
+    ) -> List[ExceptionRecord]:
+        """Return all child exception records linked to a case.
+
+        ADR-038 Phase H.6 — used by `/api/v1/cases/*` to derive
+        partner-role / assigned-account scope from the case's
+        children, since the case itself doesn't carry account_id.
+        """
+        rows, _, _ = self._exceptions.list(
+            tenant_id=tenant_id, limit=500,
+        )
+        records = [self._dict_to_record(r) for r in rows]
+        return [r for r in records if r.parent_case_id == case_id]
 
     def update(self, exception_id: str, tenant_id: str, **fields) -> Optional[ExceptionRecord]:
         row = self._exceptions.update(exception_id, tenant_id, **fields)

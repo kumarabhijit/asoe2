@@ -263,6 +263,69 @@ class RecipeInvocation(BaseModel):
     params: Dict[str, Any]
 
 
+class ShadowLLMVerdict(BaseModel):
+    """ADR-039 L2 LLM Shadow second-opinion verdict.
+
+    Constrained-output result of one ``compliance/shadow_llm.py``
+    inference. Recorded on every L2-invoked event regardless of
+    rollout phase (X.1 observe-only ships this populated; only
+    later phases let it actually move the final verdict per
+    ADR-039 §6).
+
+    The shape is byte-stable so audit queries
+    (``llm_shadow_verdict.action = 'DISAGREE_DOWNGRADE'``) work
+    against the persisted record. Note the deliberate absence of
+    any ``DISAGREE_UPGRADE`` enum: the asymmetric authority rule
+    in ADR-039 §4 is enforced **in the schema**, not bolted on
+    after the fact.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["AGREE", "DISAGREE_DOWNGRADE", "ABSTAIN"]
+    """ADR-039 §3.2 — the closed action vocabulary. No
+    ``DISAGREE_UPGRADE``; structurally impossible."""
+
+    reason: str = Field(min_length=1, max_length=200)
+    """One-sentence rationale (≤200 chars). Surfaced verbatim to
+    the human reviewer when L2 downgrades a verdict (ADR-039
+    §4.5). Never free-form chain-of-thought."""
+
+    confidence: float = Field(ge=0.0, le=1.0)
+    """LLM-reported confidence in the action."""
+
+    policy_concerns: List[str] = Field(default_factory=list)
+    """Named concerns from the closed
+    ``knowledge/shadow_llm/concerns_vocabulary.yaml`` list. Free-
+    form strings are validated out at gateway-time; this list is
+    typed as ``List[str]`` so the schema works pre-vocabulary-load."""
+
+    bundle_version: str = ""
+    """L0 ``knowledge/shadow_llm`` bundle version active when the
+    L2 call was made. Audit replay requires (model_id,
+    bundle_version, temperature, prompt) byte-identity."""
+
+    model_id: str = ""
+    """Resolved model id reported by the provider (e.g.
+    ``claude-haiku-4-5-20251001``). Audit-bearing per
+    LLMProvenance."""
+
+    request_id: Optional[str] = None
+    """Provider request id for support tickets (Anthropic
+    ``request-id`` header / OpenAI ``x-request-id`` etc.)."""
+
+    cache_hit: bool = False
+    """True when the verdict was served from the L4 per-tenant
+    shadow-LLM cache (ADR-039 §5.5). Even cache hits are recorded
+    so SLI tracking sees the cache yield."""
+
+    latency_ms: int = 0
+    """Wall-clock latency for this invocation. 0 on cache hit."""
+
+    cost_usd_estimate: float = 0.0
+    """USD spend estimate for this invocation. 0 on cache hit."""
+
+
 class ComplianceDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
     status: ShadowStatus
@@ -270,6 +333,12 @@ class ComplianceDecision(BaseModel):
     reasons: List[str] = Field(default_factory=list)
     policy_hits: List[str] = Field(default_factory=list)
     constrained_by: Optional[str] = None
+    llm_shadow_verdict: Optional[ShadowLLMVerdict] = None
+    """ADR-039 X.1 — populated when the L2 LLM Shadow was invoked
+    (gating per ADR-039 §5.2 fired). ``None`` when L2 was not
+    invoked (gating not triggered, L1 returned RED, or L2 was
+    unavailable / timed out — fall-through events are recorded
+    elsewhere as SLI counters, not on this field)."""
 
 
 class ExecutionLog(BaseModel):
@@ -469,8 +538,10 @@ class LLMCallTrace(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    task: Literal["intent", "recipe", "shadow"]
-    """Which trio method this call served."""
+    task: Literal["intent", "recipe", "shadow", "shadow_llm"]
+    """Which trio method this call served. ``shadow_llm`` is the
+    ADR-039 L2 second-opinion call — distinct from ``shadow`` so
+    audit queries can separate L1 deterministic from L2 LLM telemetry."""
 
     provider: str
     """LLMProvider value used for this call ('anthropic' / 'openai' /

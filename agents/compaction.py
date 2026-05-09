@@ -228,6 +228,62 @@ def run_compaction(
 
 
 # ---------------------------------------------------------------------------
+# Wire-up — imperative companion to the pure run_compaction()
+# ---------------------------------------------------------------------------
+#
+# `run_compaction` returns a `CompactionResult` and explicitly leaves
+# persistence to the harness. Phase H.5 / H.7 callers (Case Agent loop,
+# tier-graduation hook) want the persistence too without re-implementing
+# the same store-update on every site, so this helper bundles them:
+#
+#   * call `run_compaction(...)`
+#   * if it fires, write back `working_memory_summary` + `last_compaction_at`
+#     to `case_store` so subsequent reads see the compacted view
+#   * return the result (or None) so the caller can audit-log it
+#
+# Kept here (not in `agents/case_agent.py`) so non-agent sites — e.g.
+# the not-yet-built harness `compaction_audit` extension — can call it
+# without dragging in agent dependencies.
+
+
+def apply_compaction_if_needed(
+    *,
+    case: OrderCase,
+    events: List[Dict[str, Any]],
+    now: Optional[datetime] = None,
+    token_estimate: Optional[int] = None,
+) -> Optional[CompactionResult]:
+    """Trigger-aware wrapper that also persists the new summary.
+
+    Returns the same `CompactionResult` shape as `run_compaction`
+    (None when the trigger does not fire). When it does fire, the
+    case row in the in-memory store is updated with the new
+    `working_memory_summary` and `last_compaction_at` so the next
+    working-memory build picks up the compacted view.
+
+    The DB-backed store wires the same columns via V009; the SQL
+    companion lives alongside the Phase H.5 harness work.
+    """
+    result = run_compaction(
+        case=case,
+        events=events,
+        now=now,
+        token_estimate=token_estimate,
+    )
+    if result is None:
+        return None
+    # Defer the import to avoid a top-level cycle (api → contracts →
+    # agents and back).
+    from api.store import case_store
+    case_store.update(
+        case.case_id,
+        working_memory_summary=result.summary_text,
+        last_compaction_at=result.triggered_at,
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Replay-divergence check (audit-defensibility — ADR-038 §7.5 #4)
 # ---------------------------------------------------------------------------
 
