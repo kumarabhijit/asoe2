@@ -591,3 +591,80 @@ persisted, and v5 documents what's done, not what's planned.
 Operational rollout plan: `docs/plans/case-centric-rollout.md`.
 Reviewer chain: AI/Agentic Engineering → Compliance → Tools Admin
 → Frontend Platform → Domain SME → Product Owner.
+
+### 15.1 Status update (post-merge of Phase H.1 → H.7)
+
+ADR-038's Phase H.1 → H.7 primitives have **shipped on main**
+(merged via `kumarabhijit/asoe2#114`). The §15 trigger conditions
+above are partially met — code is ahead of governance. ADR status
+remains *Proposed* pending Compliance ratification.
+
+**Shipped (primitives):**
+
+* L0 Knowledge layer — 10 skill bundles under
+  `knowledge/skills/<name>/` with `metadata.yaml`,
+  `runtime_includes` allowlist, empty `examples/` / `assets/` /
+  `specs/` (per §5.5: examples are *earned*, not authored).
+  Loader bundle-first with one-release legacy fallback.
+* `OrderCase` parent entity (`contracts/models.py`),
+  `CaseStore` lookup-or-create with SO → PO → EDI → email
+  priority (`api/store.py`), DB migrations V009 / V010,
+  `ExceptionRecord.parent_case_id` nullable column.
+* Lazy materialisation in `_persist_exception` —
+  Manual eager / Automated lazy on non-clean terminal status
+  (`api/case_resolver.py`).
+* L2 attachment-extractor primitive with tenant-isolated cache
+  (`agents/primitives/extract_attachment.py`).
+* Case Agent loop, 9-tool registry, working-memory frame,
+  per-tier budget (`agents/case_agent.py`,
+  `agents/case_tools.py`, `agents/working_memory.py`,
+  `agents/budget.py`). **Currently dormant** — see "Pending"
+  below.
+* Deterministic compaction module
+  (`agents/compaction.py`), SLA loader (`agents/sla.py`),
+  per-customer-tier policy (`knowledge/policy/sla_per_customer_tier.yaml`),
+  backfill module (`agents/backfill.py`) and SQL
+  (`db/migrations/V011__backfill_orphan_cases.sql`).
+
+**Pending — integration and operational closeout:**
+
+* **Case Agent dispatcher** — `run_case_agent` is not yet
+  called from `api/`, `orchestration/`, or `workflows/`.
+  Per ADR-038 §H.5 the wire-up routes only NEW Manual Order
+  events through the agent (existing exception flows continue
+  on the deterministic graph). The routing decision in the
+  graph is the load-bearing remaining work for H.5.
+* **L4 harness extensions** — case-aware concurrency lock,
+  tool-call interception for replay log, tier graduation on
+  first non-clean event for Automated. Not yet visible in the
+  codebase.
+* **Phase H.6 backend route** — `/api/v1/cases/*` does not
+  exist yet. The asoe-ui `/cases` surface ships with mock data
+  only until this lands.
+* **Phase H.7 closeout** — per-event-type compaction templates
+  (only `__general__.template.md` ships); compaction trigger
+  caller (the L4 harness extension above); migration of
+  four-eyes / cosign / override flows to operate on the case
+  lifecycle (currently still on the exception lifecycle per
+  ADR-029); scheduled backfill runner.
+
+**Pending — governance gates:**
+
+* Compliance ratification — ADR-038 §7.4 (compaction protocol)
+  and §8.5 (governance / CODEOWNERS map).
+* Compliance ratification — ADR-039 §4.1 (combination rule)
+  and §6 (phased rollout X.1 → X.4).
+* ADR-039 implementation — **0% shipped beyond the document.**
+  Phase X.1 (observe-only) is the next net-new code surface;
+  blocked on the open §8.1 questions (L2 model choice
+  procurement, concerns vocabulary content, few-shot example
+  authorship).
+
+**Why `architecture_v5.md` is still not drafted.** The §15
+discipline requires *Accepted* ADRs and shipped Phase H.1 before
+re-baselining. Phase H.1 has shipped, but the ADRs are still
+*Proposed*. Drafting v5 against Proposed-status decisions would
+cement them prematurely and force document churn when the
+ratification feedback lands. See `docs/plans/case-centric-rollout.md`
+§3.4 for the deferral rationale and `tasks.md` Phase 27 for
+the per-phase status board.
