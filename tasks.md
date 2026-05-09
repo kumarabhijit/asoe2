@@ -1947,10 +1947,16 @@ gates still pending (see "Pending" subsection at the bottom).
       to operate on the case lifecycle** (rather than the
       exception lifecycle in isolation, as ADR-029 currently
       does). Phase H.7 closeout requirement.
-- [ ] **Pending: scheduled-job wrapping of
-      `scripts/run_backfill.py`.** The CLI is shipped; ops
-      still has to register it as a cron / k8s CronJob
-      (deployment-side, not code-side).
+- [x] Scheduled-job wrapping of `scripts/run_backfill.py`.
+      `k8s/core/cronjob-backfill.yaml` registers the Pass 1
+      runner as a weekly k8s CronJob (Sun 02:00 UTC; 30-min
+      hard cap; concurrencyPolicy: Forbid). Reuses the same
+      `asoe-core` image / configMap / Workload-Identity service
+      account as the API Deployment — no separate build needed.
+      Pass 2 (correlation merge) is intentionally NOT scheduled
+      and runs as a one-off via
+      `kubectl create job --from=cronjob/asoe-backfill-orphan-cases`
+      with `--pass 2` (documented in the manifest header).
 
 ### 27.8 ADR-039 — L2 LLM Shadow (X.1 primitive shipped; harness wire-up pending)
 The X.1 observe-only **primitive** is now in place. The harness

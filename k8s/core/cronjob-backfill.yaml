@@ -1,0 +1,107 @@
+---
+# ADR-038 Phase H.7 — orphan-case backfill CronJob.
+#
+# Wraps `scripts/run_backfill.py` (the in-process Python CLI) in a
+# scheduled CronJob so ops doesn't have to invoke it manually. Pass 1
+# (orphan-case-per-record) is idempotent so weekly cadence is safe;
+# Pass 2 (correlation-merge sweep) needs a maintenance window and is
+# NOT included here — operators run that one-off via:
+#
+#   kubectl create job --from=cronjob/asoe-backfill-orphan-cases \
+#     asoe-backfill-merge-$(date +%s) -- \
+#     python scripts/run_backfill.py --pass 2
+#
+# The image pinned here is the same `asoe-core` image Deployments use
+# (it ships `agents/`, `scripts/`, and `db/` per Dockerfile.api COPY
+# directives), so no separate build is required.
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: asoe-backfill-orphan-cases
+  namespace: asoe
+  labels:
+    app: asoe-core
+    tier: ops
+    component: backfill
+    app.kubernetes.io/part-of: asoe
+spec:
+  # Sunday 02:00 UTC — quiet window, picks up every record the
+  # week's traffic added without a parent_case_id (Tier-1 stateless
+  # records or pre-Phase-H.3 legacy rows).
+  schedule: "0 2 * * 0"
+  timeZone: "Etc/UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 7
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 1  # Pass 1 is idempotent; one retry is enough
+      activeDeadlineSeconds: 1800  # 30-minute hard cap
+      template:
+        metadata:
+          labels:
+            app: asoe-core
+            tier: ops
+            component: backfill
+          annotations:
+            azure.workload.identity/use: "true"
+        spec:
+          serviceAccountName: asoe-core-sa
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            fsGroup: 1000
+          containers:
+            - name: backfill
+              image: your-acr.azurecr.io/asoe-core:latest
+              command:
+                - python
+                - scripts/run_backfill.py
+                - --pass
+                - "1"
+                # Tier-map is optional; uncomment + mount to pin
+                # SLA deadlines onto the backfilled cases.
+                # - --tier-map
+                # - /etc/asoe/tier-map.json
+                - --bundle-version-at-open
+                - "legacy-pre-h2"
+                - --verbose
+              envFrom:
+                - configMapRef:
+                    name: asoe-core-config
+                - secretRef:
+                    name: asoe-secrets
+                    optional: true
+              # Secrets (DATABASE_URL etc.) injected via Azure Key
+              # Vault CSI driver — same pattern as the core
+              # Deployment.
+              volumeMounts:
+                - name: secrets-store
+                  mountPath: /mnt/secrets-store
+                  readOnly: true
+                # Optional tier-map ConfigMap mount. Uncomment +
+                # add a ConfigMap named `asoe-backfill-tier-map`
+                # with a single key `tier-map.json` to enable.
+                # - name: tier-map
+                #   mountPath: /etc/asoe
+                #   readOnly: true
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "256Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "1Gi"
+          volumes:
+            - name: secrets-store
+              csi:
+                driver: secrets-store.csi.k8s.io
+                readOnly: true
+                volumeAttributes:
+                  secretProviderClass: asoe-secrets-spc
+            # - name: tier-map
+            #   configMap:
+            #     name: asoe-backfill-tier-map
