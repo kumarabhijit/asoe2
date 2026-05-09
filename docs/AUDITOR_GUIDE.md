@@ -734,3 +734,123 @@ it from `user.sub` on the JWT. The legacy `OverrideRequest.resolved_by`
 field was removed as part of the `/disposition` consolidation —
 spoofing the auditor identity is no longer representable in the wire
 format.
+
+---
+
+## 19. Case-Centric Audit Controls (ADR-038 — Proposed; Phase H.1 → H.7
+primitives shipped)
+
+ADR-038 introduces a parent `OrderCase` entity above the existing
+`ExceptionRecord` lifecycle. The audit-control implications are
+recorded here ahead of full integration so auditors and operators
+have the contract in writing.
+
+### 19.1 OrderCase parent entity
+
+| Field | Audit relevance |
+|---|---|
+| `case_id` | Stable identifier for every materialised case. Surfaces in trace logs and any case-detail UI link. Backfill (V011) derives a deterministic id (`sha256(tenant ‖ order_id)[:16]`) so re-running the migration is idempotent. |
+| `source` | `manual_order` (email / phone / fax — eager case open) vs `automated_order` (EDI / portal / B2B API — lazy case open on first non-clean event). Set at case-open and **immutable**. |
+| `source_channel` | Channel sub-classification (`edi_x12_850`, `email`, `portal`, `phone`, …). Case-level metadata; does **not** alter intent or recipe selection. |
+| `customer_po_number` / `sales_order_id` / `edi_transaction_id` / `source_email_id` | Correlation keys. The lookup-or-create policy (`api/store.py::CaseStore.lookup_or_create`) checks these in **SO → PO → EDI → email** priority. Emitting two records with the same SO opens **one** case, never two. |
+| `tier` | `1` = stateless / `2` = stateful (default for non-clean events) / `3` = compacted. Tier graduation is monotonic — a case never downgrades. |
+| `bundle_version_at_open` | The L0 bundle version stamp at case-open. Backfilled cases carry the sentinel `legacy-pre-h2`. |
+| `sla_deadline` | ISO timestamp computed via `agents/sla.py::stamp_sla_deadline()` from `knowledge/policy/sla_per_customer_tier.yaml`. Defaults to 48h when the customer's tier isn't in the table. |
+
+The `parent_case_id` column on `ExceptionRecord` (V009) is nullable;
+existing legacy records remain `NULL` until the V011 backfill runs.
+
+### 19.2 Correlation table (V010)
+
+| Element | Audit relevance |
+|---|---|
+| `(tenant_id, key_type, key_value)` | Composite primary key. Tenant scoping is enforced at this layer; the same `customer_po_number` belonging to two tenants opens two separate cases. |
+| `key_type` | One of `sales_order_id`, `customer_po_number`, `edi_transaction_id`, `source_email_id`. Priority order is encoded in `CaseStore.lookup_or_create`. |
+| `registered_at` | Append-only audit field. Re-registration of an existing key is a no-op (`ON CONFLICT DO NOTHING`). |
+
+### 19.3 Lazy materialisation policy (Phase H.3)
+
+Materialisation is delegated to `api/case_resolver.py::materialise_for_event`,
+called from `api/routes/exceptions.py::_persist_exception`:
+
+* **Manual Orders** open a case eagerly — every event materialises a
+  case immediately, regardless of terminal status.
+* **Automated Orders** open lazily — case is materialised only when the
+  pipeline's `final_status` is non-clean (anything other than
+  `COMPLETE`). Clean COMPLETE Automated records persist with
+  `parent_case_id = NULL` and are not visible on the case surface.
+
+The intent here is operational: most automated traffic resolves
+without any human touch. Materialising a case for every clean record
+would inflate the case queue with nothing actionable. The audit trail
+for clean automated traffic remains the existing `ExceptionRecord`
+row plus its hash-chained audit entry; nothing about the existing
+audit log is lost.
+
+### 19.4 Compaction protocol (ADR-038 §7.4 — pending Compliance ratification)
+
+Compaction is **deterministic, not LLM-driven** (§7.4 binding).
+
+* Triggers (`agents/compaction.py::CompactionTrigger.evaluate`):
+  8,000-token working-context budget exceeded **OR** 25 events on
+  the case **OR** 7 days since case-open.
+* Templates: per-event-type Markdown templates under
+  `knowledge/compaction/<event_type>.template.md`. Currently only
+  the fallback `__general__.template.md` ships; per-event-type
+  authorship is part of Compliance + domain SME work that comes
+  with §7.4 ratification.
+* Output cap: 2,000 tokens per compaction summary. Original events
+  are **retained verbatim** — compaction summaries are appended,
+  not destructive.
+* Replay-divergence target: **0%**. Re-running compaction on the
+  same event sequence yields the same summary string, and the
+  test suite enforces this in `tests/test_compaction_sla_backfill.py`.
+
+This determinism matters for SOX replay: the case's narrative
+context can be regenerated bit-identical from the raw event log
+even if the original summary is corrupted or lost.
+
+### 19.5 SLA tracking (Phase H.7)
+
+| Element | Audit relevance |
+|---|---|
+| `knowledge/policy/sla_per_customer_tier.yaml` | The L0 policy artefact. Strategic 4h / Mid-Market 24h / Long-tail 72h / default 48h. Editable through the standard L0 review flow (Compliance + Product + customer-success). |
+| `agents/sla.py::stamp_sla_deadline()` | Pure function — same input always yields the same deadline. Used at case-open to populate `OrderCase.sla_deadline`. |
+| `agents/sla.py::reload_policy()` | Test + Compliance-workshop hot-reload entry point. Runtime policy changes are tracked in git, not in a database. |
+
+### 19.6 Backfill (V011 + `agents/backfill.py`)
+
+For deployments that already have legacy `ExceptionRecord` rows with
+`parent_case_id = NULL`:
+
+* **Pass 1** (`backfill_orphan_cases`): one case per orphan record.
+  `case_id` is derived deterministically so re-running the migration
+  is idempotent. The Python in-memory companion and the Postgres SQL
+  agree on the policy.
+* **Pass 2** (`merge_orphan_cases_by_correlation`, optional): merges
+  cases sharing `(tenant_id, customer_po_number)`. Requires a
+  maintenance window because case_ids change. Not part of the V011
+  migration — operators run it explicitly via `dry_run=True` first.
+
+Pass 1 is safe to run unattended; Pass 2 requires Compliance sign-off
+because it changes case references and downstream UI URLs.
+
+### 19.7 What is **not yet** in scope for the auditor
+
+The following ADR-038 items are still pending and should not be
+relied upon for audit evidence yet:
+
+* The Case Agent itself runs only in unit tests. Production traffic
+  continues on the deterministic graph; `parent_case_id` is set but
+  the agent does not yet act on cases.
+* The `/api/v1/cases/*` HTTP route does not exist. Case data is in
+  the database but the asoe-ui case surface ships in mock mode only.
+* L4 harness extensions (case-aware concurrency lock, tool-call
+  replay log, tier graduation hook) are not yet visible in the
+  codebase.
+* Four-eyes / cosign / override flows still operate on the
+  exception lifecycle (ADR-029); migration to the case lifecycle
+  is part of Phase H.7 closeout.
+* ADR-039 (LLM Compliance Shadow second opinion) — 0% shipped.
+  When Phase X.1 lands, this guide gains a §20 covering the
+  observe-only audit trail extensions.
