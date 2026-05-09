@@ -667,4 +667,113 @@ The prompt structure is **the system architecture made visible to the LLM**. Sta
 
 ---
 
-*Sections §7–§12 follow in subsequent commits.*
+## 7. Tier 1/2/3 Case Materialisation, Memory Hierarchy, Compaction
+
+### 7.1 The graduation policy (the case-cost-vs-capability tradeoff, made explicit)
+
+Not every event needs a case. A clean Automated Order — EDI 850 arrives, ATP passes, MOQ ok, pricing within tolerance, SO created — has zero ambiguity, requires zero human attention, and gains nothing from being persisted as a long-lived case with episodic memory. Forcing every clean automated event through the case-as-stateful-agent surface is an order-of-magnitude cost balloon for no operational benefit.
+
+The graduation policy:
+
+| Tier | Trigger | What's persisted | Agent involvement | Cost target | Latency target |
+|---|---|---|---|---|---|
+| **T1 — Stateless event processing** | Default for every Automated Order on first event | `ExceptionRecord` only (no `OrderCase`); `parent_case_id = NULL` | None — the existing deterministic graph runs end-to-end | <$0.001 / event | <500ms |
+| **T2 — Lightweight stateful case** | (a) Manual Order at email arrival, OR (b) any event reaching `MANUAL_REVIEW_REQUIRED` / `BLOCKED` / `FAIL_TO_HUMAN`, OR (c) any subsequent event for an existing case | `OrderCase` + `ExceptionRecord` children + episodic events | Yes — Case Agent runs | <$0.05 / event | <8s |
+| **T3 — Long-lived compacted case** | Case open >7 days OR >25 episodic events OR working-memory load >8k tokens (whichever fires first) | T2 + compacted summary; older episodic events retained verbatim in DB but not eagerly loaded | Yes — Case Agent runs with compacted working memory | <$0.08 / event (compaction amortised) | <12s |
+
+**Tier transitions are forward-only.** A case never demotes from T2→T1 (cases don't un-open) and never demotes from T3→T2 (compacted summary stays). This keeps audit narrative coherent.
+
+### 7.2 The first-non-clean-event materialisation rule (binding)
+
+For Automated Orders, the case is materialised **lazily**:
+
+```
+Event arrives → existing T1 graph runs → terminal status reached
+  if status == COMPLETE:
+    no case opened. ExceptionRecord (or success record) persists with
+    parent_case_id = NULL. Total cost: ~$0.001.
+  else:
+    open OrderCase, set parent_case_id on this record, transition
+    to T2. Future events for the same correlation key attach to the
+    case. Total cost on this event: ~$0.001 (graph) + ~$0.005 (case
+    open + first agent context build).
+```
+
+For Manual Orders, the case is materialised **eagerly** at email arrival because:
+* The email itself is the substrate the agent reasons over from event #1; deferring case creation forces re-extraction of the same email if/when an issue arises.
+* Manual Orders by definition involve multiple touchpoints (initial email, clarifications, follow-ups). Statelessness doesn't fit the workload shape.
+* SLA tracking on Manual Orders starts at email-receive time per business policy; the case must exist to hold that clock.
+
+### 7.3 The memory hierarchy (MemGPT-style, applied to our domain)
+
+| Tier | What it holds | Where it lives | Loaded into agent context? | Eviction policy |
+|---|---|---|---|---|
+| **Working memory** | Current event + 1-paragraph case summary + last 5 case actions + active L0 skill anchor + tool-call manifest | In-context, current turn | Always | Lives one turn; rebuilt next turn |
+| **Episodic memory** | All prior case events / actions in detail (every tool call, every result, every state transition) | Postgres `case_events` table (append-only) | On-demand via `read_case_events` tool | Retained verbatim; compacted summaries supplement (do not replace) |
+| **Semantic memory** | Customer profile, contract terms, account history, customer-tier matrices | Vector DB / structured retrieval (existing patterns: `entity_profile`, `impact_metrics`) | On-demand | Cache by tenant; refresh on customer-master change |
+| **Procedural memory** | Recipes (L1), L0 skill bundles, policy tables, audit-bearing registry | Code + L0 directory | Loaded by L4 at startup (recipes); L0 loaded per-skill on case open | Code release / bundle deploy |
+
+**Working memory is the bottleneck and the design surface.** Everything in working memory pays input-token cost on every inference. Everything *not* in working memory is retrievable but invisible to the agent unless it asks. The compaction protocol (§7.4) is the mechanism that keeps working memory bounded as cases age.
+
+### 7.4 The compaction protocol (Compliance ratification required)
+
+**Trigger:** working-memory load exceeds 8k tokens, OR 25 episodic events accumulated, OR case open >7 days, whichever fires first. The harness emits a `compact_case_requested` system event; the next agent turn observes it and either calls `request_compaction()` or proceeds (the agent has a small say in timing — it can ask to finish a tool sequence before compaction fires).
+
+**Compaction process (deterministic L4 step, not L3 LLM-driven):**
+
+1. Read all episodic events since the last compaction.
+2. Apply a **deterministic summarisation template** per event-type:
+   * Tool calls → `(tool_name, key_params, result_status, key_output_fields)` reduced form
+   * Recipe results → classification + recommended_action + key audit-bearing fields
+   * Human actions → who, when, action, reason
+   * Buyer communications → drafted/sent flag, template name, fields-substituted
+3. Concatenate summaries; compress with stable structure; cap at ~2k tokens.
+4. **Persist the compaction** as its own audit-log event: `(compaction_id, events_summarised, summary_text, harness_version, timestamp)`.
+5. Update `OrderCase.working_memory_summary` to point at the compaction.
+6. **Original episodic events are retained verbatim in `case_events` table** — never deleted. Compaction affects context-load, not persistence.
+
+**Why deterministic compaction (not LLM-driven):**
+* Replayability: the compacted summary is reproducible bit-for-bit given the same inputs and template version.
+* Audit defensibility: Compliance can challenge a decision and replay against the compaction *and* the underlying events. There's no LLM rewrite to dispute.
+* Cost: deterministic templates are free vs. paying for an LLM compaction call per case.
+* Quality: structured summaries from typed event records are *more* accurate than LLM summaries for our domain (tool calls are already structured; we don't need the LLM to extract structure from prose).
+
+The L0 layer carries the compaction templates: `knowledge/compaction/<event_type>.template.md`. Compliance has CODEOWNERS gate on these templates because the summary IS what the agent sees post-compaction; if the template loses an audit-bearing detail, the agent's next decision degrades.
+
+### 7.5 Compliance ratification of compaction
+
+The user explicitly raised this — Compliance gets veto on compaction because compaction affects what evidence the agent has at decision time. The ADR commits to:
+
+1. **Compaction templates are CODEOWNERS-gated** by Compliance + domain SME.
+2. **Compaction events are themselves audit-log entries** with their own version stamp and reproducibility guarantee.
+3. **Original events are retained in the database forever** (subject to data-retention policy applicable to all audit data). Compaction changes context-load only, not persistence.
+4. **Audit query can replay** any past decision against (a) the compacted summary the agent saw at the time, AND (b) the underlying events. Both views are defensible; compaction-replay-divergence is itself an SLI.
+5. **Compaction-template version** is in every audit-log entry from the moment compaction first fires on a case.
+
+### 7.6 Why MemGPT-style and not "load entire case history"
+
+Brute-force "load entire case" works for the first ~5 events and then falls apart on three counts:
+
+* **Cost:** at 25 events × ~500 tokens each = 12.5k tokens of context just for history, on every inference. Doubles when working memory has ~12k of other content. Per-case agent run cost goes from $0.05 → $0.30+ for long-running cases.
+* **Cache:** every new event invalidates the prefix because history changes. Cache hit rate collapses. Per-inference cost on already-paid-once content goes from cache-rate to full input-rate.
+* **Reasoning quality:** "lost in the middle" is well-documented for transformer attention — material in the middle of a long context is reasoned about less reliably than material at the start or end. A 25k-token history with the current event at the end means the agent's signal-to-noise on what matters today degrades.
+
+Compaction + selective retrieval gives:
+* Bounded context (8k working memory cap)
+* Stable cached prefix (compaction summary changes rarely)
+* Concentrated signal (current event + last 5 actions + summary, not 25 events)
+* Audit-defensible because the underlying events are still persistent
+
+### 7.7 Backfill of existing flat exceptions (operational policy)
+
+When this ADR ships:
+
+* **Existing `ExceptionRecord` rows** keep `parent_case_id = NULL` initially. The system tolerates orphans on the existing graph path (T1).
+* A **batch migration job** (`db/migrations/V010__backfill_order_cases.sql` + Python runner) auto-generates an orphan `OrderCase` per existing record so the data model becomes uniform, with `tier=1` (read-only historical), `source` inferred from `event_type`, `source_channel` set to a "legacy_pre_v10" sentinel where unknown.
+* **Optional second pass:** records sharing `(tenant, customer_id, customer_po)` get merged onto a single case retroactively. This is best-effort and can be deferred indefinitely; the API tolerates one-record-per-case orphans without data-quality issues.
+
+Existing UI tests + e2e assertions on flat exceptions continue to pass — the agent doesn't run on T1 historical records.
+
+---
+
+*Sections §8–§12 follow in subsequent commits.*
