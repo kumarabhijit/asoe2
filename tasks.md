@@ -1924,9 +1924,20 @@ gates still pending (see "Pending" subsection at the bottom).
 - [x] `tests/test_run_backfill_script.py` — 9 tests covering
       pass selection, idempotency, dry-run, tier-map loading,
       and arg validation.
-- [ ] **Pending: per-event-type compaction templates.** Only
-      `__general__.template.md` exists. ADR-038 §11.2 open
-      question (Compliance + domain SME).
+- [x] Per-event-type compaction templates shipped (ADR-038
+      §11.2 closed). Seven new templates under
+      `knowledge/compaction/`: `agent_step` / `tool_call` /
+      `shadow_decision` / `override` / `escalation` /
+      `case_open` / `sla_breach` / `compaction` (recursive).
+      Each ships YAML frontmatter listing the per-event-type
+      `audit_keys` (canonical render order) plus markdown
+      narrative for Compliance reviewers. The runtime in
+      `agents/compaction.py::_summarise_event_line` consults the
+      per-event-type list when present and falls back to the
+      default ADR-038 §6.4 vocabulary otherwise. Replay-
+      divergence is preserved across template rotations because
+      keys appear in canonical order. 7 new tests in
+      `tests/test_compaction_sla_backfill.py`.
 - [ ] **Pending: agent loop / harness wire-up of
       `apply_compaction_if_needed`.** The helper exists but
       the L4 harness / Case Agent loop that should call it on

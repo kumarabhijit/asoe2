@@ -157,6 +157,89 @@ class TestCompactEvents:
         assert "[noop@T] —" in summary
 
 
+# ---------------------------------------------------------------------------
+# Per-event-type templates (ADR-038 §11.2)
+# ---------------------------------------------------------------------------
+
+
+class TestPerEventTypeTemplates:
+    def test_agent_step_template_loads(self):
+        from agents.compaction import load_template
+
+        tmpl = load_template("agent_step")
+        assert tmpl is not None
+        assert tmpl.event_type == "agent_step"
+        # ADR-038 §11.2 — agent_step prioritises outcome / tool_name.
+        assert "outcome" in tmpl.audit_keys
+        assert "tool_name" in tmpl.audit_keys
+
+    def test_unknown_event_type_returns_none(self):
+        from agents.compaction import load_template
+
+        assert load_template("does_not_exist_xyz") is None
+
+    def test_template_overrides_default_keys(self):
+        """Lines for an event type with a template emit only the
+        keys declared in that template — even when the event dict
+        carries other keys the default set would include."""
+        events = [{
+            "event_type": "agent_step",
+            "timestamp": "T1",
+            "tool_name": "declare_done",
+            "outcome": "RESOLVED",
+            "amount_usd": 999.99,  # NOT in agent_step.template.md
+        }]
+        summary = compact_events(events)
+        assert "tool_name=declare_done" in summary
+        assert "outcome=RESOLVED" in summary
+        # `amount_usd` is in the default set but not in the
+        # agent_step template — so it should be filtered out.
+        assert "amount_usd=999.99" not in summary
+
+    def test_default_keys_when_no_template(self):
+        """An unknown event_type falls back to the default
+        ADR-038 §6.4 vocabulary (every key present on the event
+        is rendered, in canonical order)."""
+        events = [{
+            "event_type": "unknown_event_xyz",
+            "timestamp": "T1",
+            "outcome": "ok",
+            "amount_usd": 50.0,
+        }]
+        summary = compact_events(events)
+        assert "outcome=ok" in summary
+        assert "amount_usd=50.0" in summary
+
+    def test_frontmatter_parser_handles_no_frontmatter(self):
+        from agents.compaction import _parse_frontmatter
+
+        text = "# Just a header\n\nNo frontmatter."
+        assert _parse_frontmatter(text) == {}
+
+    def test_frontmatter_parser_handles_unterminated_block(self):
+        from agents.compaction import _parse_frontmatter
+
+        text = "---\nkey: value\nbut never closes"
+        assert _parse_frontmatter(text) == {}
+
+    def test_replay_invariant_across_template_load(self):
+        """Compacting the same event list twice produces byte-
+        identical output — load_template's caching does not
+        introduce non-determinism."""
+        events = [
+            {"event_type": "agent_step", "timestamp": "T1",
+             "outcome": "RESOLVED", "tool_name": "declare_done"},
+            {"event_type": "shadow_decision", "timestamp": "T2",
+             "shadow_verdict": "GREEN", "intent": "EMAIL_ORDER_ENTRY"},
+            {"event_type": "case_open", "timestamp": "T3",
+             "source": "manual_order", "source_channel": "email",
+             "tier": 2, "sla_deadline": "2026-05-10T00:00:00Z"},
+        ]
+        first = compact_events(events)
+        second = compact_events(events)
+        assert first == second
+
+
 class TestRunCompaction:
     def test_returns_none_when_trigger_does_not_fire(self, case):
         result = run_compaction(case=case, events=[])
