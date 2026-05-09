@@ -1953,11 +1953,21 @@ together). Verdicts produced today are not yet attached to any
       behaviour, cache hits + tenant isolation + TTL, out-of-vocab
       concern dropping, all three provider failure modes, and SLI
       counters.
-- [ ] **Pending: L4 harness `shadow_audit` wire-up.** The primitive
-      is in place but `orchestration/nodes.py::shadow_audit` still
-      calls only the L1 deterministic Shadow. ADR-039 §6.1 X.1
-      observe-only invocation moves to Thread 4 (agent + harness
-      extensions land together).
+- [x] L4 harness `shadow_audit` wire-up (Compliance ratified post-
+      merge). `orchestration/nodes.py::shadow_audit` now invokes
+      the L2 Shadow after the deterministic gate; verdict stamped
+      onto `state.shadow.llm_shadow_verdict`; `LLMCallTrace`
+      task='shadow_llm' appended. **X.1 invariant preserved:** the
+      L2 verdict does NOT move `state.shadow.status` or
+      `state.final_status` — that's X.2+ behaviour and lands
+      behind a separate gate. Kill switch:
+      `ASOE_SHADOW_LLM_DISABLED=1`. Tenant id now plumbed onto
+      `GraphState.tenant_id` (load-bearing for ADR-038 §5.8 /
+      ADR-039 §5.5 cache key isolation).
+- [x] `tests/test_shadow_audit_l2_wireup.py` — 10 tests covering
+      RED short-circuit, YELLOW always-invokes, GREEN floor
+      gating, observe-only status invariant, LLMCallTrace
+      append, kill-switch, tenant propagation to cache.
 - [ ] **Pending §8.1 procurement gates** (model choice — Haiku vs
       local Ollama vs hybrid; first earned anchor examples).
 - [ ] **Pending compliance ratification gates** §4.1 (combination

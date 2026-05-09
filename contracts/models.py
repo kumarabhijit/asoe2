@@ -635,6 +635,13 @@ class LLMCallTrace(BaseModel):
 class GraphState(BaseModel):
     model_config = ConfigDict(extra="forbid")
     event: OrderEvent
+    # Request-scoped tenant id stamped at the API boundary (the
+    # orchestration layer has no direct request scope; the API
+    # plumbs the value forward). Optional so existing test fixtures
+    # that build state without an HTTP request still validate.
+    # ADR-038 §5.8 / ADR-039 §5.5 — load-bearing for per-tenant
+    # cache key isolation when the L2 LLM Shadow is invoked.
+    tenant_id: Optional[str] = None
     # Request-scoped trace ID — set at ingest, used to correlate
     # gateway calls / observability events for this run. Distinct
     # from `shadow.trace_id` (which is the ComplianceDecision's own

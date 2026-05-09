@@ -526,7 +526,7 @@ async def resolve(
 ) -> ResolveResponse:
     trace_id = _get_trace_id(request)
     event = _build_order_event(req)
-    state = GraphState(event=event)
+    state = GraphState(event=event, tenant_id=tenant_id)
 
     try:
         final_state = _run_graph_safe(state)
@@ -561,7 +561,7 @@ async def resolve_async(
 ) -> AsyncResolveResponse:
     task_id = str(uuid4())
     event = _build_order_event(req)
-    state = GraphState(event=event)
+    state = GraphState(event=event, tenant_id=tenant_id)
 
     try:
         final_state = _run_graph_safe(state)
@@ -595,7 +595,7 @@ async def resolve_explain(
     tenant_id: str = Depends(get_tenant_id),
 ) -> ResolveResponse:
     event = _build_order_event(req)
-    state = GraphState(event=event)
+    state = GraphState(event=event, tenant_id=tenant_id)
 
     try:
         final_state = _run_graph_safe(state, explain_mode=True)
@@ -1332,7 +1332,7 @@ async def reanalyze_exception(
     prior_trace_data = exception_store.get_trace(exception_id) or {}
     prior_executed_nodes = list(prior_trace_data.get("executed_nodes") or [])
 
-    state = GraphState(event=event)
+    state = GraphState(event=event, tenant_id=tenant_id)
     try:
         final_state = _run_graph_safe(state)
     except Exception as exc:
