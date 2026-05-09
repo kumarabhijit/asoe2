@@ -160,6 +160,7 @@ class ExceptionStore:
         resolution_data: Optional[Dict[str, Any]] = None,
         original_event: Optional[Dict[str, Any]] = None,
         enrichment_context: Optional[Dict[str, Any]] = None,
+        parent_case_id: Optional[str] = None,
     ) -> ExceptionRecord:
         lifecycle = STATUS_TO_LIFECYCLE.get(final_status or "", "INGESTED")
         record = ExceptionRecord(
@@ -175,6 +176,7 @@ class ExceptionStore:
             resolution_data=resolution_data,
             original_event=original_event,
             enrichment_context=enrichment_context,
+            parent_case_id=parent_case_id,
         )
         with self._lock:
             self._records[record.id] = record
@@ -450,11 +452,18 @@ class DatabaseBackedStore:
         resolution_data: Optional[Dict[str, Any]] = None,
         original_event: Optional[Dict[str, Any]] = None,
         enrichment_context: Optional[Dict[str, Any]] = None,
+        parent_case_id: Optional[str] = None,
     ) -> ExceptionRecord:
         # Verdict Pillar 1: `enrichment_context` is persisted to a
         # dedicated JSONB column (V004). The repository serialises
         # to JSONB (Postgres) / JSON TEXT (SQLite) alongside
         # `original_event` (V002).
+        #
+        # ADR-038 Phase H.3: parent_case_id is accepted on this
+        # signature for API compat with ExceptionStore. The
+        # DB-backed repository persistence of this column lands in
+        # Phase H.7 alongside the orphan-case backfill; until then
+        # the value is captured on the in-memory record only.
         row = self._exceptions.create(
             tenant_id=tenant_id,
             order_id=order_id,
@@ -468,7 +477,9 @@ class DatabaseBackedStore:
             original_event=original_event,
             enrichment_context=enrichment_context,
         )
-        return self._dict_to_record(row)
+        record = self._dict_to_record(row)
+        record.parent_case_id = parent_case_id
+        return record
 
     def get(self, exception_id: str, tenant_id: str) -> Optional[ExceptionRecord]:
         row = self._exceptions.get(exception_id, tenant_id)
