@@ -2043,11 +2043,33 @@ together). Verdicts produced today are not yet attached to any
       `tests/test_azure_providers.py`. Earned anchor examples
       remain pending — they accrue from X.1 disagreement traces
       once production traffic flows.
+- [x] X.2+ combiner code path **shipped (flag-gated)**.
+      `compliance/shadow_llm.py::combine_verdicts` encodes the
+      ADR-039 §4.1 truth table; `orchestration/nodes.py::_invoke_l2_shadow_observe_only`
+      now consults it after stamping the verdict. **Default
+      behaviour is unchanged** because
+      `knowledge/shadow_llm/metadata.yaml::rollout.financial_impact_threshold_usd`
+      ships at `null` (X.1 observe-only). The X.2 ratification is
+      a one-line config edit — set the threshold to `10000` for
+      X.2 high-impact-only, `500` for X.3 broadened gating, with
+      no code redeploy. Reasons + policy_concerns are surfaced
+      onto `state.shadow.reasons` / `policy_hits` with the
+      `LLM_SHADOW:` prefix per §4.5 so a reviewer sees WHY the
+      case was downgraded. 21 tests in
+      `tests/test_shadow_llm_combiner.py` (truth-table + asymmetric-
+      authority invariants); 2 tests in
+      `tests/test_shadow_audit_l2_wireup.py::TestX2Downgrade`
+      lock the orchestration-side wire-up (high-impact GREEN
+      downgrades; below-threshold GREEN preserves).
 - [ ] **Pending compliance ratification gates** §4.1 (combination
-      rule) and §6 (phased rollout) — required before any X.2
-      verdict-affecting deployment.
-- [ ] X.2 / X.3 / X.4 — all blocked on X.1 telemetry collection +
-      the compliance ratification gates above.
+      rule) and §6 (phased rollout) — code is ready; the
+      ratification artifact is the bundle metadata.yaml edit
+      flipping `financial_impact_threshold_usd` from null →
+      10000 (X.2) or 500 (X.3). No code change required at
+      flip time.
+- [ ] X.2 / X.3 / X.4 deployment — all blocked on X.1 telemetry
+      collection + the compliance ratification above. X.4 (extended
+      cross-check) remains a separate code-path follow-up.
 
 ### 27.9 Phase 27 follow-ups (deferred from the merged PR)
 - [x] **Spec relocation** —

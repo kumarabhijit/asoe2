@@ -22,7 +22,7 @@ import concurrent.futures
 import os
 import threading
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Dict
 
 from contracts.models import (
     ExecutedNode,
@@ -473,12 +473,24 @@ def _estimate_financial_impact_usd(state: GraphState) -> float:
 
 
 def _invoke_l2_shadow_observe_only(state: GraphState) -> None:
-    """ADR-039 §6.1 X.1 observe-only invocation.
+    """ADR-039 L2 LLM Shadow second-opinion invocation.
 
     Stamps ``state.shadow.llm_shadow_verdict`` when the gating
     triggers fire (deterministic-YELLOW OR financial-impact ≥
-    bundle floor). NEVER moves ``state.shadow.status`` — that is
-    the X.2+ behaviour and lands behind a separate Compliance gate.
+    bundle floor). Whether the verdict is allowed to move
+    ``state.shadow.status`` depends on the bundle's rollout config:
+
+      * `financial_impact_threshold_usd is None` (X.1 observe-only,
+        the default) — the verdict is recorded but
+        ``state.shadow.status`` is left alone.
+      * `financial_impact_threshold_usd >= some-value` (X.2+, post-
+        Compliance ratification) — the
+        `compliance.shadow_llm.combine_verdicts` truth table fires,
+        which can downgrade GREEN → YELLOW for high-impact records.
+        Never upgrades — asymmetric authority is structural.
+
+    The function name retains "observe_only" for backwards-compat
+    with existing imports; the behaviour is now config-driven.
 
     Failure modes (provider down, timeout, validation error) are
     fully absorbed by ``ShadowLLM.evaluate``; this helper logs the
@@ -497,7 +509,7 @@ def _invoke_l2_shadow_observe_only(state: GraphState) -> None:
         # the only thing the caller sees.
         return
 
-    from compliance.shadow_llm import ShadowLLMRequest
+    from compliance.shadow_llm import ShadowLLMRequest, combine_verdicts
 
     impact = _estimate_financial_impact_usd(state)
     request = ShadowLLMRequest(
@@ -524,13 +536,27 @@ def _invoke_l2_shadow_observe_only(state: GraphState) -> None:
         return  # Gating skipped or provider failed; SLI counters
                 # already record the skip.
 
-    # X.1 invariant: stamp the verdict on the existing
-    # ComplianceDecision but do NOT mutate `status`. The harness
-    # records it for the audit trail; downstream enforcement
-    # continues to use only state.shadow.status.
-    state.shadow = state.shadow.model_copy(
-        update={"llm_shadow_verdict": outcome.verdict},
+    # Stamp the verdict on the existing ComplianceDecision regardless
+    # of phase — telemetry is always-on per ADR-039 §6.1.
+    new_status = combine_verdicts(
+        deterministic=state.shadow,
+        llm_verdict=outcome.verdict,
+        financial_impact_usd=impact,
+        bundle=s.bundle,
     )
+    update: Dict[str, Any] = {"llm_shadow_verdict": outcome.verdict}
+    # Add LLM-sourced reasons / policy_concerns when the combiner
+    # changes the verdict — Pillar §4.5 requires the human reviewer
+    # to see WHY the case was downgraded.
+    if new_status != state.shadow.status:
+        update["status"] = new_status
+        update["reasons"] = list(state.shadow.reasons or []) + [
+            f"LLM_SHADOW: {outcome.verdict.reason}",
+        ]
+        update["policy_hits"] = list(state.shadow.policy_hits or []) + [
+            f"LLM_SHADOW:{c}" for c in outcome.verdict.policy_concerns
+        ]
+    state.shadow = state.shadow.model_copy(update=update)
 
     # Append an LLMCallTrace entry tagged task='shadow_llm' so
     # the existing per-call telemetry pipeline picks up the

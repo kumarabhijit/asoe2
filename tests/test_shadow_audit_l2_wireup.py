@@ -199,6 +199,89 @@ class TestKillSwitch:
 # ---------------------------------------------------------------------------
 
 
+class TestX2Downgrade:
+    """ADR-039 §6.2 — X.2 ratification flips
+    `financial_impact_threshold_usd` from None to 10_000. The
+    combiner then downgrades GREEN → YELLOW for high-impact records
+    when L2 returns DISAGREE_DOWNGRADE. This locks the wire-up so
+    flipping the bundle config does what's documented."""
+
+    def _force_x2_bundle(self, monkeypatch):
+        """Patch `_l2_shadow()` to use a bundle with the X.2
+        threshold AND a stub provider that always emits
+        DISAGREE_DOWNGRADE — so we can deterministically observe
+        the downgrade path."""
+        from compliance.shadow_llm import (
+            ShadowLLM,
+            ShadowLLMRequest,
+            ShadowLLMVerdict,
+            load_bundle,
+        )
+        from dataclasses import replace as _replace
+        bundle = load_bundle()
+        bundle = _replace(bundle, financial_impact_threshold_usd=10_000.0)
+
+        class _AlwaysDowngrade:
+            model_id = "test-x2"
+
+            def evaluate(self, request: ShadowLLMRequest, *, bundle, timeout_ms):
+                return ShadowLLMVerdict(
+                    action="DISAGREE_DOWNGRADE",
+                    reason="rules missed customer opt-out",
+                    confidence=0.9,
+                    policy_concerns=["CUSTOMER_OPT_OUT_VIOLATION"],
+                )
+
+        from orchestration import nodes
+        nodes._l2_shadow_singleton = ShadowLLM(
+            provider=_AlwaysDowngrade(), bundle=bundle,
+        )
+
+    def test_high_impact_green_downgrades_to_yellow(self, monkeypatch):
+        self._force_x2_bundle(monkeypatch)
+        # CONTRACTUAL_CORRECTION = small per-line gap; explicit
+        # metadata override sets the financial impact above the
+        # X.2 threshold without triggering MASS_PRICING_ERROR
+        # (which would RED-block before the combiner runs).
+        state = _state(
+            intent=Intent.CONTRACTUAL_CORRECTION,
+            po_price=99.0, sap_base_price=100.0, line_count=1,
+        )
+        state.event.metadata["financial_impact_usd"] = 50_000.0
+        result = shadow_audit(state)
+        # Combiner fired; status went GREEN → YELLOW.
+        assert result.shadow.status == ShadowStatus.YELLOW
+        # Reasons + policy_hits enriched with LLM_SHADOW: prefix so
+        # auditors can distinguish rule-based from LLM-based.
+        assert any(
+            r.startswith("LLM_SHADOW:") for r in result.shadow.reasons
+        )
+        assert any(
+            h.startswith("LLM_SHADOW:CUSTOMER_OPT_OUT_VIOLATION")
+            for h in result.shadow.policy_hits
+        )
+        # Lifecycle now routes to MANUAL_REVIEW_REQUIRED.
+        assert result.final_status == TerminalStatus.MANUAL_REVIEW_REQUIRED
+
+    def test_low_impact_green_no_downgrade(self, monkeypatch):
+        self._force_x2_bundle(monkeypatch)
+        # Impact ABOVE the L2 invocation floor ($500) so the gate
+        # actually invokes L2, but BELOW the X.2 combiner threshold
+        # ($10k) so the verdict isn't allowed to move status.
+        state = _state(
+            intent=Intent.CONTRACTUAL_CORRECTION,
+            po_price=99.0, sap_base_price=100.0, line_count=1,
+        )
+        state.event.metadata["financial_impact_usd"] = 1_500.0
+        result = shadow_audit(state)
+        # Combiner did NOT fire; verdict stays GREEN.
+        assert result.shadow.status == ShadowStatus.GREEN
+        # Verdict is STILL stamped for telemetry — both X.1 (which
+        # never moves status) and X.2-below-threshold record it.
+        assert result.shadow.llm_shadow_verdict is not None
+        assert result.shadow.llm_shadow_verdict.action == "DISAGREE_DOWNGRADE"
+
+
 class TestTenantPropagation:
     def test_tenant_id_threaded_to_cache(self):
         state_a = _state(
