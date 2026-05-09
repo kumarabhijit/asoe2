@@ -1887,31 +1887,60 @@ gates still pending (see "Pending" subsection at the bottom).
       still has to register it as a cron / k8s CronJob
       (deployment-side, not code-side).
 
-### 27.8 ADR-039 — L2 LLM Shadow (entire ADR pending)
-ADR-039 is **0% shipped beyond the document**. None of the X.1
-observe-only surface area exists yet.
-- [ ] `compliance/shadow_llm.py` — primitive (constrained-output
-      L2 Shadow with `agree | disagree_downgrade | abstain`).
-- [ ] `knowledge/shadow_llm/` bundle — system prompt +
-      `concerns_vocabulary.yaml` + 5–10 few-shot examples.
-- [ ] L4 harness `shadow_audit` extension — invoke L2 on the
-      gating-triggered subset (`financial_impact_usd ≥ $500`
-      OR deterministic-YELLOW).
-- [ ] `LLMCallTrace` extension; `ComplianceDecision.llm_shadow_verdict`
-      new field.
-- [ ] Audit-trail extensions per ADR-039 §7.2.
-- [ ] SLI metrics per §7.3 (Prometheus): disagreement-rate,
-      ABSTAIN-rate, p99 latency, cache hit ratio,
-      validation-error rate.
-- [ ] Cache infrastructure (§5.5) — same per-tenant key
-      discipline as the L4 extraction cache.
-- [ ] **§8.1 open questions blocking X.1:** L2 model choice
-      (Anthropic Haiku vs local Ollama 7B vs hybrid;
-      procurement); concerns vocabulary content; X.1 sample-
-      size threshold; first few-shot example authorship; inter-
-      tenant model contention modelling.
-- [ ] X.2 / X.3 / X.4 — all blocked on X.1 completion + the
-      compliance ratification gates above.
+### 27.8 ADR-039 — L2 LLM Shadow (X.1 primitive shipped; harness wire-up pending)
+The X.1 observe-only **primitive** is now in place. The harness
+wire-up that actually invokes it from `shadow_audit` is intentionally
+held back to Thread 4 (so the agent + harness extensions land
+together). Verdicts produced today are not yet attached to any
+`ComplianceDecision` until Thread 4 ships.
+- [x] `compliance/shadow_llm.py` — constrained-output L2 Shadow
+      primitive (`AGREE | DISAGREE_DOWNGRADE | ABSTAIN`) with
+      `LLMShadowProvider` Protocol, `StubLLMShadowProvider`
+      (deterministic stand-in until procurement), per-tenant
+      `ShadowLLMCache` (24h TTL, SHA-256 key over
+      `tenant_id || bundle_version || model_id || canonical(request)`),
+      gating logic per §5.2, and out-of-vocab concern dropping.
+- [x] `knowledge/shadow_llm/` bundle — `system_prompt.md`,
+      `concerns_vocabulary.yaml` (12 seed concerns), `metadata.yaml`
+      (rollout config: `current_phase: X.1`,
+      `financial_impact_threshold_usd: null` = observe-only),
+      empty `few_shot_examples/` (earned, not authored).
+- [x] `contracts/models.py::ShadowLLMVerdict` — Pydantic model with
+      `model_config = ConfigDict(extra="forbid")`. Closed-Literal
+      `action` enum (no `DISAGREE_UPGRADE` — asymmetric authority
+      is enforced **in the schema**). `reason` length-capped at 200
+      chars, `confidence` bounded `[0.0, 1.0]`, `policy_concerns`
+      typed `List[str]`.
+- [x] `contracts/models.py::ComplianceDecision.llm_shadow_verdict`
+      — new optional field. `None` when L2 was skipped (gating /
+      RED short-circuit / provider failure); populated when invoked.
+- [x] `contracts/models.py::LLMCallTrace.task` — Literal extended
+      with `"shadow_llm"` so audit queries separate L1 deterministic
+      from L2 LLM telemetry.
+- [x] SLI counters per §7.3 — `compliance.shadow_llm.shadow_llm_metrics`
+      module-level `ShadowLLMMetrics` (invocations total / by trigger,
+      cache hits, verdicts by action, timeout / unavailable /
+      validation-error counters, latency sum + count, cost). Thread 4
+      will wire these into the `/api/v1/health/metrics` Prometheus
+      surface.
+- [x] `tests/test_shadow_llm.py` — 27 tests covering schema
+      invariants (`DISAGREE_UPGRADE` rejected, length / range bounds),
+      bundle loading, gating triggers / short-circuits, stub provider
+      behaviour, cache hits + tenant isolation + TTL, out-of-vocab
+      concern dropping, all three provider failure modes, and SLI
+      counters.
+- [ ] **Pending: L4 harness `shadow_audit` wire-up.** The primitive
+      is in place but `orchestration/nodes.py::shadow_audit` still
+      calls only the L1 deterministic Shadow. ADR-039 §6.1 X.1
+      observe-only invocation moves to Thread 4 (agent + harness
+      extensions land together).
+- [ ] **Pending §8.1 procurement gates** (model choice — Haiku vs
+      local Ollama vs hybrid; first earned anchor examples).
+- [ ] **Pending compliance ratification gates** §4.1 (combination
+      rule) and §6 (phased rollout) — required before any X.2
+      verdict-affecting deployment.
+- [ ] X.2 / X.3 / X.4 — all blocked on X.1 telemetry collection +
+      the compliance ratification gates above.
 
 ### 27.9 Phase 27 follow-ups (deferred from the merged PR)
 - [x] **Spec relocation** —

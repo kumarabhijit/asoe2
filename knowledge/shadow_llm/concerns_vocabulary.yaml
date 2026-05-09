@@ -1,0 +1,124 @@
+# L2 LLM Shadow — closed vocabulary of policy concerns (ADR-039 §3.3).
+#
+# `ShadowLLMVerdict.policy_concerns` is constrained to entries in this
+# file. The L2 prompt enforces this; the harness double-checks at
+# constrained-generation time. Free-form strings are rejected.
+#
+# Keep concerns NARROW (one shape of failure), NAMED (recognisable in
+# audit query: "show me every CUSTOMER_OPT_OUT_VIOLATION"), and
+# COMPOSABLE (an event can carry multiple concerns).
+#
+# CODEOWNERS: Compliance + Engineering. Compliance has veto on every
+# change to this file — these concern names drive verdicts capable
+# of escalating cases and feed audit-replay queries.
+#
+# Lifecycle:
+#   * Initial seed (X.1): the 12 concerns below, drawn from the
+#     ADR-033 override-reason vocabulary plus net-new shapes the
+#     2026-04-22 compliance workshop flagged.
+#   * X.1 disagreement traces will surface gaps; new concerns land
+#     here via Compliance review (one PR per concern; rationale
+#     captured below).
+#   * Concern strings are stable identifiers — once shipped they
+#     are NOT renamed; deprecation is via a `deprecated: true` flag.
+
+schema_version: 1
+vocabulary_version: 1.0.0
+
+concerns:
+
+  - id: CUSTOMER_OPT_OUT_VIOLATION
+    summary: |
+      The customer has an account-level opt-out from a default
+      policy the rules just applied (e.g., MOQ round-up off,
+      auto-credit-release off). The rules don't carry the opt-out;
+      the LLM does.
+    typical_action: DISAGREE_DOWNGRADE
+
+  - id: BLANKET_PO_RELEASE_MISIDENTIFIED
+    summary: |
+      The proposed action treats a blanket-PO release as a duplicate
+      PO (or vice versa). The structural pattern is recognisable
+      from the recipe params + case context but the rule lookup
+      didn't catch it.
+    typical_action: DISAGREE_DOWNGRADE
+
+  - id: CONTRACT_BAND_VIOLATION
+    summary: |
+      The recipe's pricing decision is within the deterministic
+      tolerance band but contradicts a customer-specific
+      commercial agreement (contract ref visible in recipe params
+      / customer profile).
+    typical_action: DISAGREE_DOWNGRADE
+
+  - id: SKU_FAMILY_SUBSTITUTION_RESTRICTED
+    summary: |
+      The proposed back-order substitution belongs to a SKU family
+      where this customer has explicitly disallowed substitutions.
+      Default rules allow same-family substitution.
+    typical_action: DISAGREE_DOWNGRADE
+
+  - id: HIGH_VALUE_THRESHOLD_PROXIMITY
+    summary: |
+      The financial impact is suspiciously close to (just under)
+      a cosign / approval threshold. May be an artefact of price
+      manipulation or could be coincidence; the LLM flags for
+      review without taking a position on intent.
+    typical_action: DISAGREE_DOWNGRADE
+
+  - id: REPEATED_NEAR_THRESHOLD_PATTERN
+    summary: |
+      Multiple cases on the same customer in a short window each
+      sit just below a threshold. The individual cases pass; the
+      pattern is the concern.
+    typical_action: DISAGREE_DOWNGRADE
+
+  - id: PRIOR_CASE_DECISION_CONTRADICTION
+    summary: |
+      The proposed action contradicts a prior action recorded on
+      the same case (case_context_summary). E.g., the agent is
+      about to auto-resolve something that was manually escalated
+      48 hours ago.
+    typical_action: DISAGREE_DOWNGRADE
+
+  - id: AUDIT_EVIDENCE_INSUFFICIENT
+    summary: |
+      The recipe's evidence chain is missing an audit-bearing
+      field that *should* be present for this action class
+      (e.g., a contract ref for a price-hold release). Rules
+      didn't flag it because the field is "optional" in policy;
+      LLM judges that for this customer / amount it should be
+      mandatory.
+    typical_action: DISAGREE_DOWNGRADE
+
+  - id: NOVEL_CUSTOMER_BEHAVIOUR
+    summary: |
+      The customer's behaviour pattern in this event is
+      out-of-distribution relative to the case context summary
+      (first time pattern, not previously seen). LLM flags so a
+      human can corroborate.
+    typical_action: DISAGREE_DOWNGRADE
+
+  - id: AUTOMATION_BOUNDARY_CONCERN
+    summary: |
+      The proposed action would advance the case past an
+      autonomy-level boundary the customer profile or case tier
+      doesn't permit (e.g., autonomy:L2 customer for a recipe
+      classified L4). Rules check this, but LLM saw a subtle
+      case-tier mismatch.
+    typical_action: DISAGREE_DOWNGRADE
+
+  - id: REGULATORY_HOLD_INDICATION
+    summary: |
+      Recipe params or case context reference a regulatory term
+      (e.g., export control, OFAC list, FDA hold) that the
+      deterministic rules don't model. LLM flags for compliance
+      review even when nothing else is wrong.
+    typical_action: DISAGREE_DOWNGRADE
+
+  - id: CONFIDENCE_INSUFFICIENT
+    summary: |
+      The LLM cannot establish confidence in any of the concerns
+      above, but is also not confident enough to AGREE. Use
+      `ABSTAIN` action with this concern named.
+    typical_action: ABSTAIN

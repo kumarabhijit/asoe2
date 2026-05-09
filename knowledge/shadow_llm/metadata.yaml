@@ -1,0 +1,71 @@
+# L2 LLM Shadow knowledge bundle (ADR-039 §3.3).
+#
+# Mirrors the `knowledge/skills/<name>/metadata.yaml` shape so the
+# bundle integrity tests apply the same invariants. CODEOWNERS:
+# Compliance + Engineering — every change to this file or the
+# system_prompt.md / concerns_vocabulary.yaml requires a Compliance
+# co-sign (ADR-039 §3.3).
+
+schema_version: 1
+bundle_name: shadow_llm
+bundle_version: 1.0.0
+description: |
+  L2 LLM Compliance Shadow second-opinion knowledge bundle.
+  Carries the system prompt, the closed `policy_concerns`
+  vocabulary, and (eventually) earned few-shot examples. Loaded
+  by `compliance/shadow_llm.py::ShadowLLM`. Auditors replay the
+  L2 verdict against this bundle's `bundle_version`.
+
+# Anchor examples — loaded into the cached prefix on every call.
+# Shipped EMPTY per ADR-038 §5.5: examples are EARNED by real
+# disagreement traces, not authored speculatively. The X.1
+# observe-only phase produces the first earnings cycle; Compliance
+# reviews disagreement traces and lands the first 5–10 examples
+# before X.2 ratification (ADR-039 §6.1 exit criterion).
+anchor_examples: []
+
+# On-demand examples — loaded via the L2 harness on a case-by-case
+# basis (e.g., when a particular policy concern fires repeatedly).
+on_demand_examples: []
+
+# No server-rendered assets — the L2 Shadow does not produce
+# customer-facing output (verdict only).
+assets: []
+
+# Allowlist of paths the harness may load at L2 invocation time.
+# Anything outside this list hard-fails per ADR-038 §5.2.
+runtime_includes:
+  - system_prompt.md
+  - concerns_vocabulary.yaml
+
+# Cost guardrails per ADR-039 §5.3.
+token_budget:
+  cached_prefix_max_tokens: 3000
+  on_demand_load_max_tokens: 4000
+  per_invocation_input_max_tokens: 3500
+  per_invocation_output_max_tokens: 200
+
+# Inference parameters bound to this bundle. Replayability requires
+# (model_id, bundle_version, temperature) be byte-identical between
+# original and replay invocations.
+inference:
+  temperature: 0.0
+  wall_clock_timeout_ms: 2000
+  # Concrete model id is resolved by the LLMShadowProvider at runtime
+  # (procurement gate per ADR-039 §8.1). The L2 harness records the
+  # resolved id into LLMCallTrace.model_id.
+  model_id_alias: shadow-llm-default
+
+# Phase-X.1 rollout configuration. Flipping `current_phase` advances
+# the rollout per ADR-039 §6 — this is config, not code, so rollback
+# is a one-line edit + restart.
+rollout:
+  current_phase: X.1
+  # null = observe-only; 10000 (X.2) / 500 (X.3) per phase
+  financial_impact_threshold_usd: null
+  # X.4 = true; X.1–X.3 = false
+  extended_cross_check_enabled: false
+  # Cache TTL per ADR-039 §5.5.
+  cache_ttl_seconds: 86400
+  # Trigger constants per ADR-039 §5.2.
+  invocation_financial_floor_usd: 500.0
