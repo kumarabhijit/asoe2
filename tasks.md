@@ -1841,11 +1841,28 @@ gates still pending (see "Pending" subsection at the bottom).
       routes), L1 Shadow on the agent path, tier graduation as
       the discriminator (harness graduates T2 → T3; graph leaves
       at T2).
-- [ ] **Pending: SQL-backed concurrency lock + replay log.** The
-      in-memory `CaseLockManager` and `ToolCallReplayLog`
-      faithfully model the eventual SQL behaviour
-      (`SELECT FOR UPDATE NOWAIT` + a `case_events` table) but
-      the persistence migration ships separately.
+- [x] SQL-backed concurrency lock + replay log shipped.
+      `db/migrations/V012__case_events.sql` (replay log table
+      with case-time / tenant-time / per-tool indexes) and
+      `db/migrations/V013__case_locks.sql` (lightweight mutex
+      via INSERT-with-UNIQUE-conflict; TTL-based janitor sweep).
+      `db/repository.py::CaseEventRepository` and
+      `CaseLockRepository` provide the persistence API.
+      `agents/harness.py::DatabaseBackedToolCallReplayLog` and
+      `DatabaseBackedCaseLockManager` adapters expose the same
+      surface as the in-memory primitives — `run_agent_step`
+      runs unchanged against either backend.
+      `_select_replay_log()` / `_select_lock_manager()` factories
+      pick DB-backed when `DATABASE_URL` is set, else in-memory.
+      Postgres (V009..V013) and SQLite paths both wired through
+      `db/migrations/runner.py`.
+- [x] `tests/test_harness_sql_backed.py` — 17 tests covering
+      `CaseEventRepository` (record / list / tenant isolation /
+      ordering), `CaseLockRepository` (UNIQUE conflict / release
+      idempotency / cross-tenant PK collision /
+      `sweep_expired` janitor / auto-override of stale entries),
+      adapter surface compatibility, and `DATABASE_URL` factory
+      selection.
 
 ### 27.6 Phase H.6 — UI: `/cases` surface (asoe-ui)
 - [x] **Companion repo** — see `asoe-ui/tasks.md` Phase 27.6

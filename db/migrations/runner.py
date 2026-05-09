@@ -478,6 +478,59 @@ def _apply_sqlite_v008(conn: sqlite3.Connection) -> None:
     )
 
 
+def _apply_sqlite_v012(conn: sqlite3.Connection) -> None:
+    """V012 — case_events replay log (ADR-038 Phase H.5)."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS case_events (
+            event_id    TEXT PRIMARY KEY,
+            case_id     TEXT NOT NULL,
+            tenant_id   TEXT NOT NULL,
+            occurred_at TEXT NOT NULL,
+            tool_name   TEXT NOT NULL,
+            tool_call   TEXT NOT NULL,
+            tool_result TEXT NOT NULL,
+            outcome     TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_case_events_case_time
+            ON case_events (case_id, occurred_at);
+        CREATE INDEX IF NOT EXISTS idx_case_events_tenant_time
+            ON case_events (tenant_id, occurred_at);
+        CREATE INDEX IF NOT EXISTS idx_case_events_tool
+            ON case_events (tenant_id, tool_name);
+        """
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+        ("V012", datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    logger.info("SQLite schema V012 applied (case_events replay log)")
+
+
+def _apply_sqlite_v013(conn: sqlite3.Connection) -> None:
+    """V013 — case_locks cross-pod mutex (ADR-038 Phase H.5)."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS case_locks (
+            case_id     TEXT PRIMARY KEY,
+            tenant_id   TEXT NOT NULL,
+            acquired_at TEXT NOT NULL,
+            acquired_by TEXT,
+            expires_at  TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_case_locks_expires
+            ON case_locks (expires_at);
+        """
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+        ("V013", datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    logger.info("SQLite schema V013 applied (case_locks cross-pod mutex)")
+
+
 def apply_sqlite(conn: sqlite3.Connection) -> None:
     """Apply the SQLite-compatible schema (V001 + subsequent migrations)."""
     conn.executescript(_SQLITE_SCHEMA)
@@ -502,6 +555,8 @@ def apply_sqlite(conn: sqlite3.Connection) -> None:
     _apply_sqlite_v006(conn)
     _apply_sqlite_v007(conn)
     _apply_sqlite_v008(conn)
+    _apply_sqlite_v012(conn)
+    _apply_sqlite_v013(conn)
 
 
 def apply_postgres(database_url: str) -> None:
@@ -560,6 +615,11 @@ def apply_postgres(database_url: str) -> None:
             ("V006", "V006__tenant_config.sql", "PostgreSQL schema V006 applied (tenant_config table)"),
             ("V007", "V007__duplicate_po_metadata_contract.sql", "PostgreSQL schema V007 applied (DUPLICATE_PO metadata-contract trigger)"),
             ("V008", "V008__backfill_line_items.sql", "PostgreSQL schema V008 applied (backfilled resolution_data.line_items for legacy rows)"),
+            ("V009", "V009__order_case.sql", "PostgreSQL schema V009 applied (order_case parent entity)"),
+            ("V010", "V010__case_correlation_keys.sql", "PostgreSQL schema V010 applied (case correlation keys)"),
+            ("V011", "V011__backfill_orphan_cases.sql", "PostgreSQL schema V011 applied (orphan case backfill)"),
+            ("V012", "V012__case_events.sql", "PostgreSQL schema V012 applied (case_events replay log)"),
+            ("V013", "V013__case_locks.sql", "PostgreSQL schema V013 applied (case_locks cross-pod mutex)"),
         ):
             cur.execute(
                 "SELECT version FROM schema_migrations WHERE version = %s",
