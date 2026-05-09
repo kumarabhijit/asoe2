@@ -332,4 +332,242 @@ The L2 Shadow's input is `(intent, recipe_name, recipe_params_hash, proposed_act
 
 ---
 
-*Sections §6–§8 follow in subsequent commits.*
+## 6. Phased Rollout (X.1 → X.4)
+
+This ADR is **not enabled by code merge.** Each rollout phase requires its own ratification gate. Compliance signs off at each transition; below-the-line changes fail the gate.
+
+### 6.1 Phase X.1 — Observe-only (4–6 weeks)
+
+**Behavioural state:** L2 LLM Shadow runs on the gating-triggered subset of events. Its verdict is **logged but does not affect the final verdict.** The deterministic verdict drives lifecycle and routing exactly as today.
+
+**What ships:**
+* `compliance/shadow_llm.py` — primitive in place
+* `knowledge/shadow_llm/` bundle — system prompt + concerns vocabulary + initial few-shot examples (Compliance-authored seed set)
+* L4 harness `shadow_audit` — invokes L2 Shadow on triggered events, records verdict in `LLMCallTrace` + `ComplianceDecision.llm_shadow_verdict` (NEW field)
+* Audit-trail extensions per §7.2
+* SLI metrics emitted per §7.3
+* Cache infrastructure (§5.5)
+
+**What we measure:**
+* Disagreement rate: how often L2 returns `DISAGREE_DOWNGRADE` against deterministic-GREEN.
+* Confidence distribution: histogram of L2 confidence scores; expected median ~0.7; tails inform prompt engineering.
+* ABSTAIN rate: how often L2 declines. High ABSTAIN rate means the prompt or examples need work.
+* Cache hit rate (target ≥ 70% sustained after 30 days).
+* Wall-clock distribution (target p99 ≤ 2s; tighter is better).
+* Failure-mode rates (unavailability, timeout, validation_error).
+
+**Exit criteria for X.2:**
+* Disagreement rate is in a defensible range (5–15% of triggered events; outside that range is either too noisy or not earning its keep).
+* False-DOWNGRADE rate (LLM disagreed but human reviewer subsequently approved the original action without override) ≤ 25%. This is the "is the LLM crying wolf?" check.
+* Cache + cost SLIs at target.
+* No `shadow_llm_validation_error` rate > 0.1% (constrained-output reliability).
+* Compliance workshop reviews 30 days of disagreement traces and explicitly ratifies the combination rule (§4.1) for the next phase.
+
+**X.1 risk if exit criteria miss:** stay in observe-only; iterate on prompt + examples; do not advance.
+
+### 6.2 Phase X.2 — Enable downgrade for high-financial-impact (2–4 weeks)
+
+**Behavioural state:** L2 LLM Shadow's verdict starts affecting final verdict, but **only for events where financial_impact_usd ≥ $10,000** (the existing four-eyes cosign threshold). Below that, L2 verdict is still observe-only.
+
+**Why this gating choice:** the four-eyes threshold is the existing line where extra scrutiny is policy. Aligning L2 Shadow's first verdict-affecting deployment with that line means the worst case (a false DOWNGRADE) lands a $10k-impact decision in the cosign queue rather than auto-resolving it. This is a small reviewer-cost increase in the highest-stakes band.
+
+**What ships:**
+* L4 combiner enables the truth table in §4.1, gated on `financial_impact_usd ≥ HIGH_VALUE_OVERRIDE_THRESHOLD_USD`.
+* UI: the existing exception-detail panel renders the LLM reason + policy_concerns when present (badge indicates "AI second-opinion downgrade").
+* Reviewer training: CSR managers briefed on the new evidence row.
+
+**What we measure (in addition to X.1 metrics):**
+* Override rate on LLM-downgraded records: of cases L2 pushed from GREEN→YELLOW, what fraction does the human reviewer override back to APPROVED? High override = LLM is too conservative on this band.
+* Reviewer time-to-disposition on LLM-downgraded vs deterministic-YELLOW records (should be similar; if LLM-downgraded takes notably longer, the reasons aren't actionable enough).
+
+**Exit criteria for X.3:**
+* Override rate on LLM-downgraded records ≤ 35% (most LLM downgrades land actionable evidence).
+* Reviewer time-to-disposition delta ≤ 10% (LLM evidence is as easy to act on as rule evidence).
+* Compliance workshop ratifies expansion to lower thresholds.
+
+### 6.3 Phase X.3 — Enable downgrade across all financial impact tiers (4–6 weeks)
+
+**Behavioural state:** L2 LLM Shadow's verdict affects final verdict for **all events meeting the §5.2 gating triggers** — `financial_impact_usd ≥ $500` OR deterministic-YELLOW. Below $500 deterministic-GREEN remains untouched (L2 not invoked).
+
+**Why $500 as the lower bound for invocation:** the analysis behind the trigger choice — at this floor, daily traffic per CSR is bounded, the pure cost of L2 Shadow is dominated by the value of catching the rare miss, and review workload remains absorbable.
+
+**What ships:**
+* Combiner gating expands from `≥ $10,000` to `≥ $500`.
+* No code change beyond the threshold constant.
+
+**What we measure (continuing from X.2):**
+* Aggregate override rate across all tiers (target ≤ 35%).
+* CSR-team-level workload impact: review queue depth before/after; team capacity headroom.
+
+**Exit criteria for X.4:**
+* All X.2 / X.3 metrics within target bands sustained for 60 days.
+* No reviewer-team capacity breach (queue depth p95 ≤ 1.5× pre-deployment baseline).
+* Compliance workshop ratifies the phase-X.4 expansion.
+
+### 6.4 Phase X.4 — Extend cross-check to deterministic-primary classifier (Failure-mode-A mitigation)
+
+**Behavioural state:** Phases X.1–X.3 mitigated Failure-mode-B. X.4 widens cross-check coverage for Failure-mode-A.
+
+Currently the `constraints/cross_check.py::cross_check` pattern fires only when an LLM-backed classifier is the **primary**. X.4 makes it fire **always**: deterministic and LLM classifiers run in parallel; on disagreement, route to `MANUAL_REVIEW_REQUIRED`. This is independent of the L2 LLM Shadow but the same architectural philosophy (LLM as second opinion with conservative-bias handling).
+
+**Why X.4 is in this ADR:** symmetry. ADR-039 takes the position that the right answer to "LLM second opinion" is the **constraint of asymmetric authority + observe-first rollout**. The same shape applies at classify time.
+
+**What ships:**
+* `constraints/cross_check.py` — flag flip: cross-check fires regardless of primary backend.
+* `orchestration/nodes.py::classify` — uses cross-check on every classification call.
+* Same SLI / disagreement-tracking as X.1.
+
+**What we measure:**
+* Classify-time disagreement rate.
+* Hidden-misclassification rate uncovered by extended cross-check (compare to baseline classifier-only).
+
+**Why X.4 is the last phase:** widening cross-check has higher operational risk than narrowing it. Existing classifier-disagreement handling routes to `MANUAL_REVIEW_REQUIRED`; if disagreement rate spikes (e.g., model drift between deterministic + LLM versions), reviewer queue can flood. X.4 is gated on observed deterministic-classifier baseline drift rate from X.1–X.3 telemetry.
+
+### 6.5 Rollback policy
+
+At any phase, if Compliance or SRE flags an SLI breach, the rollout is rolled back **one phase**. There's no "rip out the LLM Shadow" emergency switch — that would be a code change. Phases are configuration:
+
+```yaml
+# knowledge/shadow_llm/metadata.yaml::rollout
+current_phase: X.1                      # or X.2 / X.3 / X.4
+financial_impact_threshold_usd: null    # null = observe-only; 10000 / 500 per phase
+extended_cross_check_enabled: false     # X.4 = true
+```
+
+L4 harness reads `current_phase` at startup and on a SIGHUP. Rollback is a one-line config change + restart, not a code revert.
+
+---
+
+## 7. Audit-Trail Extensions, SLI Monitoring, Replayability
+
+### 7.1 What changes in `ComplianceDecision`
+
+The existing `ComplianceDecision` Pydantic model gains an optional second-opinion block:
+
+```python
+# contracts/models.py — additions
+class ShadowLLMVerdict(BaseModel):
+    """Recorded on every L2-invoked event, regardless of phase."""
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["AGREE", "DISAGREE_DOWNGRADE", "ABSTAIN"]
+    reason: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    policy_concerns: list[str] = []
+    bundle_version: str                 # L0 shadow_llm bundle version at decision time
+    model_id: str                       # provider-resolved model id
+    request_id: Optional[str] = None    # provider request id for support tickets
+    cache_hit: bool = False             # whether served from L4 cache (§5.5)
+    latency_ms: int = 0
+    cost_usd_estimate: float = 0.0
+
+
+class ComplianceDecision(BaseModel):
+    # existing fields ...
+    llm_shadow_verdict: Optional[ShadowLLMVerdict] = None    # NEW
+```
+
+When L2 Shadow was not invoked (gating not triggered, OR L2 unavailable, OR phase X.1 deterministic-only), `llm_shadow_verdict` is None. When invoked, it's populated regardless of cache-hit status.
+
+### 7.2 What goes into the audit log
+
+Per audited decision, the audit-bearing record (existing `audit_bearing_registry.yaml::ComplianceDecisionData` plus extensions) carries:
+
+* Deterministic verdict (status, reasons, policy_hits) — existing.
+* `llm_shadow_verdict` block (when applicable) — NEW; full content above.
+* The L4 combiner's resolved final verdict — derivable from the above; recorded explicitly for fast query.
+* The combiner rule version — since the truth table itself is L4 code, the version is the harness version. Stamped on every record.
+
+**Audit query "show me every case where the LLM Shadow downgraded":** SQL `WHERE llm_shadow_verdict.action = 'DISAGREE_DOWNGRADE'`. The structured field makes this a one-line query.
+
+**Replay query "would today's deterministic Shadow alone have approved this case":** SQL `WHERE deterministic_verdict.status = 'GREEN'` — directly from the recorded deterministic verdict. ADR-039 doesn't break the existing replay path; it adds a parallel observation.
+
+### 7.3 SLI dashboard (Prometheus)
+
+| Metric | Target | Alarm threshold |
+|---|---|---|
+| `shadow_llm_invocation_rate` | Phase-dependent (X.1: ~5% of events; X.3: ~10%) | >20% sustained — gating triggers misconfigured |
+| `shadow_llm_disagreement_rate` (DISAGREE_DOWNGRADE / total invocations) | 5–15% | <2% (LLM not earning keep) OR >25% (LLM too conservative) |
+| `shadow_llm_abstain_rate` | <30% | >50% — prompt or examples insufficient |
+| `shadow_llm_false_downgrade_rate` (LLM disagreed but human approved override) | ≤25% (X.1 gate); ≤35% sustained (X.2+) | >40% — LLM systematically wrong; halt rollout |
+| `shadow_llm_cache_hit_rate` | ≥70% sustained | <50% — cache fragmentation; investigate |
+| `shadow_llm_p99_latency_ms` | ≤2000 | >3000 — model latency regression |
+| `shadow_llm_unavailability_rate` | <0.5% | >2% — provider issue; alert SRE |
+| `shadow_llm_validation_error_rate` | <0.1% | >0.5% — constrained-generation regression |
+| `shadow_llm_cost_per_event_usd` | ≤$0.0002 (amortised) | >$0.001 — cache or model regression |
+
+Reviewer-side SLIs (added to existing reviewer telemetry):
+
+| Metric | Target | Alarm threshold |
+|---|---|---|
+| `reviewer_override_rate_on_llm_downgrades` | ≤35% | >50% — LLM systematically wrong |
+| `reviewer_time_to_disposition_llm_vs_rule_delta` | ≤10% | >25% — LLM evidence not actionable |
+| `reviewer_queue_depth_p95` | ≤1.5× pre-deployment | >2× — reviewer-team capacity breach |
+
+### 7.4 Replayability guarantee (the load-bearing audit property)
+
+Given:
+* The same case state (events, prior verdicts) at decision time.
+* The same recipe params and proposed action.
+* The same deterministic Shadow policy version.
+* The same L0 shadow_llm bundle version.
+* The same L2 LLM model id.
+* Temperature 0 for L2 inference.
+
+The L1 deterministic verdict reproduces bit-for-bit. The L2 LLM verdict reproduces with high probability (model-deterministic at temperature 0; small variance possible from provider-side inference-engine non-determinism — documented but bounded). The combined verdict is therefore reproducible to within the LLM's noise floor.
+
+**Audit can therefore:**
+* Replay against the recorded deterministic verdict and verify it matches today's deterministic Shadow output.
+* Replay against the recorded LLM input + prompt + model + bundle and verify the output matches (modulo provider noise).
+* Verify the combiner truth table produces the recorded final verdict.
+
+If any reproduction fails, that's an observability bug or a model-drift event; either is itself an SLI to track.
+
+---
+
+## 8. Open Questions, Lineage, Definition of Done
+
+### 8.1 Open questions
+
+1. **L2 model choice.** Procurement track:
+   * Anthropic Haiku (cheapest commercial; good constrained-generation reliability)
+   * Local Ollama with 7B-class model (cost-zero per-call; quality variable; ops complexity)
+   * Hybrid (local primary, Anthropic fallback)
+   The decision is bounded by cost + reliability + the per-event $0.0002 amortised target. Owner: Tools Admin + Compliance.
+2. **`knowledge/shadow_llm/concerns_vocabulary.yaml` content.** Initial 10-15 named concerns drawn from the override-reason vocabulary (ADR-033) plus net-new concerns Compliance identifies in the X.1 disagreement traces. Owner: Compliance + Engineering.
+3. **The X.1 observe-only telemetry sample size.** Compliance wants to see disagreement traces; how many records constitute "enough"? Suggested ≥100 per disagreement category before X.2 ratification. Owner: Compliance.
+4. **Few-shot example authorship.** First 5–10 examples in `knowledge/shadow_llm/few_shot_examples/`; should be drawn from real production overrides where today's deterministic Shadow gave GREEN but a CSR overrode within 7 days. Owner: Compliance + domain SME.
+5. **Combiner-rule extensibility.** The truth table in §4.1 is small but might need extension if we add more LLM action types (e.g., `DISAGREE_DOWNGRADE_TO_RED` — explicitly NOT in this ADR but might come up). Decision: keep this ADR's table as-is; future actions require their own ADR. Owner: Architecture Review Board.
+6. **Inter-tenant model contention.** With many tenants on a shared local LLM, queueing under load could push p99 latency past 2s. Need to model this against expected concurrent traffic. Owner: SRE.
+
+### 8.2 Lineage
+
+* **ADR-021..033, 037:** unchanged.
+* **ADR-025 (gateway READS before shadow):** unchanged. The L2 LLM Shadow runs *after* gateway READS, just like the L1 deterministic Shadow does today. Same evidence is available to both.
+* **ADR-027 (pipeline visualization, Proposed):** when shipped, the executed-trace gains an `llm_shadow` step alongside `shadow_audit`. The visualization shows both verdicts and the combiner result.
+* **ADR-029 (override merge policy):** unchanged; the LLM Shadow's downgrade routes the same override paths.
+* **ADR-032 (calibration deferral):** the LLM Shadow's audit log feeds calibration data — when CSR overrides an LLM downgrade, the (LLM_input, LLM_output, human_decision) triple is labeled training data for future model improvement. Calibration ADR-032 plumbing absorbs this without ADR-039 changes.
+* **ADR-033 (override reason vocabulary):** the `concerns_vocabulary.yaml` for L2 Shadow leverages the same vocabulary discipline. New concerns are added through the same lifecycle.
+* **ADR-038 (case-centric):** companion. ADR-039 is independently mergeable. If both ship, the L2 Shadow benefits from richer context (case summary + customer profile) per §3.4. If only ADR-039 ships, it operates on the existing event-level context.
+
+### 8.3 Definition of Done for this ADR
+
+ADR-039 is **Accepted** when:
+
+* Reviewer chain has signed off: AI/Agentic Engineering Architect → Compliance Veto Holder → Tools Admin / SRE → Domain SME → Product Owner.
+* Compliance has explicitly ratified §4.1 (combination rule) and §6 (phased rollout).
+* Phase X.1 backlog is open; no implementation has started yet.
+* ADR-038 has been reviewed in parallel (mergeable independently but cleanest to ratify together).
+
+### 8.4 What this ADR does *not* commit to
+
+* **Does not** replace the deterministic Shadow. (L1 stays as the floor.)
+* **Does not** change the override / disposition / cosign flows. (L2 verdict feeds the same paths.)
+* **Does not** expose the LLM's free-form reasoning to UI or audit. (Only the constrained `reason` + named `policy_concerns`.)
+* **Does not** introduce subagents or multi-agent Shadow. (Single L2 inference.)
+* **Does not** commit to a vendor for the L2 model. (Procurement track.)
+* **Does not** handle Failure-mode-A on the LLM-primary classifier path (already addressed by existing cross-check pattern; X.4 widens to deterministic-primary).
+
+---
+
+*End of ADR-039.*
