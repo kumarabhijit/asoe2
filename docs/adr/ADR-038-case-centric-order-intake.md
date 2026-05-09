@@ -416,4 +416,255 @@ Both are explicitly in-scope for **future** L0 work but **out of scope** for thi
 
 ---
 
-*Sections §6–§12 follow in subsequent commits.*
+## 6. OrderCase Entity and L3 Case Agent
+
+### 6.1 The `OrderCase` parent entity (data model)
+
+```python
+# contracts/models.py — additions
+class OrderCase(BaseModel):
+    """Parent record for all events / actions on a single business order.
+
+    Created lazily for Automated Orders (on first non-clean event) and
+    eagerly for Manual Orders (on email arrival). Holds the SLA clock,
+    the case-source classification, and the correlation keys that let
+    incoming events resolve to an existing case via lookup-or-create.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    case_id: str                      # UUID; primary key
+    tenant_id: str
+    customer_id: Optional[str]        # may be None pre-resolution
+
+    # Case source — set at case open, immutable.
+    source: Literal["manual_order", "automated_order"]
+    source_channel: str               # "email" | "edi_x12_850" | "portal" | ...
+
+    # Correlation keys — lookup-or-create resolves incoming events to an
+    # existing case via any of these. First event populates whichever it
+    # has; subsequent resolutions enrich the set.
+    customer_po_number: Optional[str]
+    sales_order_id: Optional[str]
+    edi_transaction_id: Optional[str]
+    source_email_id: Optional[str]
+
+    # Lifecycle.
+    opened_at: str                    # ISO-8601
+    closed_at: Optional[str]
+    status: Literal[
+        "OPEN_AGENT_PROCESSING",      # agent is currently working
+        "OPEN_AWAITING_HUMAN",        # MANUAL_REVIEW_REQUIRED on a child
+        "OPEN_AWAITING_BUYER",        # REQUEST_CLARIFICATION sent
+        "OPEN_AWAITING_ERP",          # submitted; waiting on ERP confirmation
+        "RESOLVED",                   # all children terminal-closed
+        "FAILED",                     # case-level FAIL_TO_HUMAN
+        "BLOCKED",                    # case-level RED verdict
+    ]
+    sla_deadline: Optional[str]       # ISO-8601; per customer-tier policy
+
+    # Tier (see §7 for the materialisation policy).
+    tier: Literal[1, 2, 3]            # T1 stateless / T2 stateful / T3 compacted
+
+    # Children — exception records linked to this case. Materialised at
+    # query time; not stored as a foreign-key list on the case row to
+    # keep writes O(1).
+    # (Not a Pydantic field; resolved via `select * from exception_record where parent_case_id = ?`.)
+
+    # Working-memory pointers — what's in the agent's context vs persisted-only.
+    working_memory_summary: Optional[str]   # compacted summary of episodic events
+    last_compaction_at: Optional[str]
+    bundle_version_at_open: Optional[str]   # L0 bundle version when case opened (audit)
+
+# Existing ExceptionRecord gains:
+class ExceptionRecord(BaseModel):
+    # ... existing fields ...
+    parent_case_id: Optional[str]     # NEW; foreign key to OrderCase.case_id.
+                                      # Optional during Tier-1 stateless path
+                                      # (clean automated orders that never
+                                      # materialise a case). Populated for
+                                      # every Tier-2/3 record.
+```
+
+### 6.2 Correlation table (lookup-or-create policy — answers PO Q1, Q2)
+
+```sql
+-- db/migrations/V009__order_case_correlation.sql (new)
+CREATE TABLE case_correlation_keys (
+  tenant_id          TEXT NOT NULL,
+  key_type           TEXT NOT NULL,    -- 'customer_po' | 'sales_order_id' | 'source_email_id' | 'edi_transaction_id'
+  key_value          TEXT NOT NULL,
+  case_id            TEXT NOT NULL REFERENCES order_case(case_id),
+  registered_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant_id, key_type, key_value)
+);
+CREATE INDEX idx_case_corr_case_id ON case_correlation_keys (case_id);
+```
+
+**Resolution policy (binding):**
+
+1. On every inbound event (Automated EDI, customer email, scheduled scan finding), the harness extracts whichever correlation keys are present (`customer_po_number` if known; `sales_order_id` if the event is post-ERP; `source_email_id` for emails; `edi_transaction_id` for EDI traffic).
+2. The harness performs a lookup against `case_correlation_keys` for each key in the order: `sales_order_id` → `customer_po` → `edi_transaction_id` → `source_email_id`. **First match wins.** Case is bound.
+3. If no key matches, the harness opens a new case (subject to the tier-graduation policy in §7) and registers each known correlation key.
+4. As the case progresses and new identifiers appear (e.g., ERP creates the SO), they're registered to the existing `case_id` — never opening a new case.
+5. **An event mentioning multiple `customer_po`s** (a multi-PO email) opens / attaches to **multiple cases**, one per PO. This is the corner case the PO acknowledged.
+
+**The first-event-wins rule has one explicit exception:** if a Manual Order email's customer_po later matches a pre-existing Automated Order case (the EDI feed already opened a case for the same PO), the email attaches to the EDI case rather than opening a new one. The case `source` doesn't change (it stays whatever opened the case first), but `source_channel` becomes a list to reflect the actual touchpoints. This preserves the "one case per business order" invariant.
+
+### 6.3 The Case Agent — Boris's `while`-loop, applied
+
+```python
+# agents/case_agent.py — the entire harness-driven agent loop, conceptually:
+
+def run_case_agent(
+    case: OrderCase,
+    triggering_event: dict,
+    budget: CaseBudget,
+) -> AgentRunResult:
+    """L3 Case Agent — coordinates L1+L2 primitives across one event.
+
+    The agent's ONLY non-deterministic role is choosing which tools to
+    call. Tools themselves are L1 (deterministic) or L2 (constrained-
+    output LLM). Compliance Shadow runs inside the tool wrapper for any
+    action-emitting tool; the agent cannot emit an action that bypasses
+    Shadow (L4 enforces this).
+    """
+    while not budget.exhausted():
+        ctx = working_memory.build(case, triggering_event)
+        response = llm.invoke(
+            system=CASE_AGENT_SYSTEM_PROMPT,        # stable, cached
+            tools=CASE_AGENT_TOOLS,                 # ~18 tools, stable
+            messages=ctx,                           # per-turn working memory
+            max_tokens=budget.remaining_output_budget(),
+        )
+        for tool_call in response.tool_calls:
+            result = invoke_tool_with_compliance_gates(tool_call, case)
+            case.append_event(tool_call, result)    # persist to episodic memory
+            budget.deduct(tool_call.cost)
+
+        if response.declares_done():
+            return AgentRunResult.SUCCESS
+        if response.escalates():
+            return AgentRunResult.ESCALATED(response.reason)
+        if response.requires_buyer_clarification():
+            return AgentRunResult.AWAITING_BUYER
+
+    # Budget exhausted — escalate rather than running unbounded.
+    return AgentRunResult.ESCALATED("budget_exhausted")
+```
+
+**Boris's seven properties, mapped to this loop:**
+
+1. **It IS a `while` loop.** No framework. No state machine within the agent. The state machine is L4's graph, which the agent calls into via tools.
+2. **Tools are the API contract.** §6.4 below.
+3. **Filesystem / external state is the memory.** `case.append_event()` writes to Postgres immediately; the agent re-reads via `read_case_history` tool, never via in-LLM memory.
+4. **Subagents are a last resort.** None proposed in this ADR. Future tools that need parallelism (e.g., extracting multiple attachments concurrently) are background-Tasks, not subagents — they don't have their own LLM.
+5. **Harness enforces budgets.** `CaseBudget` is L4; the agent operates as if budget is infinite.
+6. **Reproducibility through replay.** Every `tool_call` + `result` is logged with inputs, outputs, latency, cost, model id. Tool trace is deterministically replayable; the LLM call itself is not bit-for-bit reproducible but is replayable modulo model + temperature 0.
+7. **Errors flow back as observations.** `invoke_tool_with_compliance_gates` returns structured failure objects (timeout / unavailable / shadow_red) the agent can reason about. Failures don't crash the loop.
+
+### 6.4 The tool surface (~18 tools, the agent's effective capability set)
+
+Grouped by purpose. **Each tool is a typed function with a structured input schema and a structured output schema.** Boris's "tools are the API contract" rule applies: the docstring + signature is what the agent sees and what shapes its behaviour.
+
+#### Reading the case (memory access)
+
+| Tool | Signature | Purpose |
+|---|---|---|
+| `read_case_summary()` | `() → CaseSummary` | Compacted overview of the case; always cheap (~200 tokens). |
+| `read_case_events(filter, max_n=20)` | `(filter, max_n) → list[CaseEvent]` | Episodic memory retrieval. Filter by event type, action type, time range. |
+| `read_extracted_fields(attachment_id?)` | `(attachment_id?) → ExtractedFields` | Already-extracted structured data from prior `extract_attachment` calls. Cache hit, no re-extraction. |
+
+#### Extraction (L2 multimodal primitive wrapped)
+
+| Tool | Signature | Purpose |
+|---|---|---|
+| `extract_attachment(attachment_id, fields_hint?)` | `(attachment_id, hints?) → ExtractedFields` | Returns structured fields + per-field confidence. Internally template-fingerprints, dispatches to native-PDF / OCR / Excel / multimodal-image path. Persists `attachment_processed` event. |
+
+#### Resolution (L1 wraps)
+
+| Tool | Signature | Purpose |
+|---|---|---|
+| `resolve_customer(sender_address)` | `(sender) → CustomerResolution` | Maps email-from / EDI-partner / portal-account to internal customer_id. |
+| `resolve_material(customer_sku, customer_id)` | `(cust_sku, customer_id) → MaterialResolution` | Customer-SKU → internal SKU mapping with fuzzy fallback. |
+| `resolve_ship_to(address_text, customer_id)` | `(addr, customer_id) → ShipToResolution` | Disambiguates ship-to addresses against the customer's known DCs. |
+
+#### Validation (L1 recipes — issue-specific, channel-neutral)
+
+| Tool | Signature | Purpose |
+|---|---|---|
+| `check_credit(customer_id, order_value)` | | Credit availability. Wraps existing `CreditHoldReleaseRecipe` logic. |
+| `check_atp(lines, requested_eta?)` | | ATP availability. New tool wrapping inventory-snapshot gateway. |
+| `check_duplicate_po(customer_id, po_number)` | | Duplicate-PO pre-check. Wraps existing `DuplicatePORecipe`. |
+| `check_moq(lines)` | | MOQ violation check. Wraps existing `MOQRoundUpRecipe`. |
+| `check_pricing_variance(customer_id, lines)` | | Pricing variance. Wraps `PriceAdjustmentRecipe` / `PriceHoldReleaseRecipe`. |
+| `check_pallet_alignment(lines)` | | Pallet-config check. Wraps `PalletAlignmentRecipe`. |
+
+#### Action (Compliance Shadow runs inside each)
+
+| Tool | Signature | Purpose |
+|---|---|---|
+| `submit_to_erp(order_payload)` | | Idempotent on PO number. Compliance Shadow gates internally. |
+| `apply_auto_correct(field, new_value, reason)` | | Only when confidence ≥ 0.99 (existing rule). Shadow gates. |
+| `request_clarification_email(template, question_bundle)` | | **Drafts only**, does not send. Returns `BuyerEmailDraft` for human approval. Server-side templating (§5.6). |
+| `escalate(reason_code, target_role)` | | Flags for human review with typed reason from L0 vocabulary. Halts the agent loop for this event. |
+
+#### Communication (drafts only — never sends without human)
+
+| Tool | Signature | Purpose |
+|---|---|---|
+| `draft_buyer_email(template, fields)` | `(skill, template, fields) → BuyerEmailDraft` | General-purpose drafting against any L0 asset template. Body never enters agent context. |
+
+#### Memory operations
+
+| Tool | Signature | Purpose |
+|---|---|---|
+| `write_case_note(note, audit_visible?)` | | Agent's working notes for future-self. Persisted to episodic memory. Optional audit visibility (see §7 on compaction). |
+| `request_compaction()` | | Explicit compaction trigger when the agent decides context is heavy and a summary should be persisted. |
+| `load_example(skill, name)` | | Pull one example body from the active L0 bundle into context. Manifest summaries shown in cached prefix; bodies loaded on demand. |
+
+**Total: 18 tools.** Boris's heuristic: this is at the upper end of comfortable. Adding tools beyond this should require a strong case — the marginal tool past ~20 typically buys less capability than refining the prompts that govern the existing tools.
+
+### 6.5 What's deliberately absent from the tool surface
+
+* **No `send_email_to_buyer` tool.** Only `draft_*`. Sending requires the human-review surface compliance has veto over.
+* **No direct DB-write tools.** The agent doesn't write to ERP / billing / CRM directly. All state changes go through `submit_to_erp` / `apply_auto_correct` / `escalate` so Compliance Shadow gates them.
+* **No `delete_*` tools.** Cases are append-only. Compaction summarises; it doesn't delete.
+* **No `change_intent` / `reroute_skill` tools.** Routing is L4's job; the agent works on whatever skill the harness loaded for the current event. Routing decisions go through the existing classify / select_recipe path.
+* **No `spawn_subagent` tool.** Single agent by design (multi-agent failure modes documented in §1.2). Future parallelism happens via L4 task fan-out, not via agent recursion.
+
+### 6.6 The agent's system prompt structure
+
+```
+[CACHED PREFIX — stable per skill]
+  L4 system instructions (small, generic)
+  ────────────────────────────────────────
+  Active L0 skill bundle:
+    SKILL.md (reasoning guide)
+    Anchor examples (1-2 bodies)
+    On-demand example manifest (one-line summaries)
+  ────────────────────────────────────────
+  Tool surface (the ~18 tools with structured schemas)
+
+[PER-TURN — not cached]
+  Case working memory:
+    Compacted summary
+    Last N actions (full detail)
+    Current event payload
+
+[AGENT RESPONSE]
+  Tool calls (executed by L4 with compliance gates)
+  | OR |
+  Decision: done / escalate / awaiting buyer / awaiting ERP
+```
+
+The prompt structure is **the system architecture made visible to the LLM**. Stable elements ride the cache; per-turn elements pay the input cost; the tool surface is the agent's effective capability bound.
+
+### 6.7 Concurrency and idempotency
+
+* **One agent run per case at a time.** The case has a Postgres advisory lock; concurrent events on the same case are serialised. (The L4 harness implements this; the agent doesn't have to think about it.)
+* **Idempotent tool semantics.** `submit_to_erp` is keyed by `(customer_po, idempotency_key)` so retries don't double-submit. `request_clarification_email` carries a uniqueness check on `(case_id, question_bundle_hash)` so the agent cannot send the same clarification twice.
+* **Replay on crash.** If the harness crashes mid-loop, the next start re-reads the case's `last_persisted_event` and resumes from after that. The agent's reasoning gets re-derived; the persisted tool-call results don't.
+
+---
+
+*Sections §7–§12 follow in subsequent commits.*
