@@ -105,6 +105,7 @@ class ExceptionRecord:
             final_status=self.final_status,
             account_id=self.account_id,
             account_name=self.account_name,
+            parent_case_id=self.parent_case_id,
             created_at=self.created_at,
             updated_at=self.updated_at,
         )

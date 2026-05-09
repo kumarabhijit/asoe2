@@ -1978,6 +1978,17 @@
             "title": "Order Id",
             "type": "string"
           },
+          "parent_case_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Case Id"
+          },
           "selected_recipe": {
             "anyOf": [
               {

@@ -226,6 +226,11 @@ class ExceptionSummary(BaseModel):
     final_status: Optional[str] = None
     account_id: Optional[str] = None
     account_name: Optional[str] = None
+    # ADR-038 §H.6 — surfaced on the summary so the UI can deeplink
+    # to the parent case from the exception queue without an extra
+    # round-trip. None on Tier-1 stateless records and pre-Phase-H.3
+    # legacy rows.
+    parent_case_id: Optional[str] = None
     created_at: str
     updated_at: str
 
