@@ -551,3 +551,43 @@ the synthesis of those ADRs reveals a structural shift (e.g.
 the move from "evidence is for GREEN paths only" to "every
 record carries evidence regardless of verdict" was a structural
 shift, not a patch).
+
+---
+
+## 15. Pending architectural shift — ADR-038 / ADR-039 (Proposed)
+
+**Lineage hint for the next reader.** Two ADRs are currently *Proposed*
+that, if ratified and shipped, will trigger an `architecture_v5.md`
+re-baseline:
+
+* **ADR-038 — Case-Centric Order Intake (Five-Layer Agentic
+  Architecture).** Establishes a first-class L0 Knowledge layer
+  (`knowledge/skills/<name>/` bundles with examples, assets, raw
+  specs); an `OrderCase` parent entity with `case_correlation_keys`
+  table; tier-graduated case materialisation (T1 stateless / T2
+  stateful / T3 compacted); a single Case Agent (L3) coordinating
+  the existing deterministic primitives via a ~18-tool surface; a
+  harness (L4) enforcing per-tier budgets and replay logging.
+  Supersedes ADR-034 §6 in part.
+* **ADR-039 — LLM Compliance Shadow Second Opinion (Asymmetric
+  Downgrade-Only Authority).** Adds a constrained-output L2 LLM
+  Shadow alongside the existing deterministic Shadow. Asymmetric
+  combiner — LLM can DOWNGRADE (GREEN→YELLOW) but never UPGRADE.
+  Phased rollout (X.1 observe-only → X.4 extended cross-check).
+
+These ADRs trigger all four §14 versioning conditions: cross-cutting
+governance change (L0 as a tier with its own lifecycle); graph
+topology change (Case Agent above the graph); persistence change
+(`OrderCase` + correlation table + per-case event log + compaction
+summaries); cumulative ADR pressure on the same surface area.
+
+`architecture_v5.md` is **deliberately not yet drafted.** Per v4's own
+discipline ("v4 is the stable re-baseline of what is *done*"),
+v5 is drafted when ADR-038/039 are ratified AND Phase H.1 (knowledge
+layer foundation) has shipped. The natural cut-over is around ADR-038's
+Phase H.4 milestone — by then L0 is real, the case primitive is
+persisted, and v5 documents what's done, not what's planned.
+
+Operational rollout plan: `docs/plans/case-centric-rollout.md`.
+Reviewer chain: AI/Agentic Engineering → Compliance → Tools Admin
+→ Frontend Platform → Domain SME → Product Owner.
