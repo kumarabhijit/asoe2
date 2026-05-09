@@ -947,4 +947,140 @@ This is the operational rollout plan. **None of the phases requires a big-bang r
 
 ---
 
-*Sections §10–§12 follow in subsequent commits.*
+## 10. Non-goals (explicit out-of-scope)
+
+The following are deliberately excluded from this ADR's scope. They each deserve their own ADR or are tracked elsewhere; bundling them here would inflate the document past reviewability and force decisions before the evidence is in.
+
+### 10.1 Multi-agent decomposition
+
+This ADR adopts a **single Case Agent**. The multi-agent failure modes (coordination overhead, IPC cost, cache fragmentation, narrative incoherence across agents) are documented in §1.2 and §6.5; we do not revisit the question. If a future capability genuinely requires parallel reasoning over isolated context (e.g., simultaneous extraction of 10+ attachments), it lands as L4 background-task fan-out (no LLM in the parallel branches), not as agent recursion.
+
+### 10.2 LLM-driven Compliance Shadow
+
+The Compliance Shadow stays L1-deterministic in this ADR. ADR-039 (companion) covers the L2 LLM Shadow second-opinion architecture with asymmetric (downgrade-only) authority. The two ADRs are independently mergeable; ADR-039 doesn't depend on ADR-038's case-centric model.
+
+### 10.3 Calibration / RLHF / RLAIF on the agent
+
+ADR-032 already covers calibration deferral. The Case Agent is non-deterministic but its tool trace is. We don't propose RLHF or any reinforcement learning on the agent's tool-selection behaviour in this ADR. If/when that becomes useful, it builds on top of the audit log this ADR establishes.
+
+### 10.4 Renaming `EMAIL_ORDER_ENTRY` intent
+
+The in-flight ADR-034 work introduced `EMAIL_ORDER_ENTRY` as an Intent enum value. This name technically violates the §3.2 channel-neutrality rule (it names the channel "email"). However:
+
+* The intent semantically describes "order intake from a free-text channel that requires extraction" — which IS specifically the Manual Order path. In that sense the channel-and-issue ARE coupled for this intent.
+* Renaming it would churn the in-flight Phase A/B/G code on the other branch.
+* The follow-up `ManualOrderEntryRecipe` rename is a clean migration once that branch merges.
+
+**Decision:** keep `EMAIL_ORDER_ENTRY` as the V1 intent name. Optionally rename to `MANUAL_ORDER_INTAKE` in a follow-up after ADR-034 ships, with the legacy name aliased per §3.2.
+
+### 10.5 `policy.py` → `knowledge/policy/<intent>.yaml` migration
+
+Useful long-term consolidation; out of scope for this ADR per §5.10. Constants stay in `policy.py` until a follow-up ADR stages the migration.
+
+### 10.6 `compliance/audit_bearing_registry.yaml` location
+
+Stays at `compliance/`. Moving it under `knowledge/` is cosmetic churn. Compliance owns it; that's the file's home.
+
+### 10.7 ADR-026 (event-driven ingestion) and ADR-027 (pipeline visualization)
+
+Both Proposed; both intersect this ADR (the case-centric model would consume an event-driven ingest path; the pipeline-viz framework would render case-level rather than per-event traces). When those ADRs ship, a v4.x architecture revision absorbs the intersection. This ADR doesn't pre-resolve them.
+
+### 10.8 Vendor / model picks
+
+* **Multimodal extraction model** — Claude vision vs Azure Document Intelligence vs hybrid. Procurement decision; flagged in Phase H.4 §non-goals; decide separately based on per-cost evidence.
+* **Local LLM for ADR-039 Shadow second opinion** — Ollama vs local Haiku vs Anthropic-API-low-latency. Same procurement boundary.
+* **Vector DB for semantic memory** — pgvector (already in Postgres) is the lowest-friction default; can change without re-architecting.
+
+---
+
+## 11. Open Questions and Decisions Captured for the Record
+
+These were the decisions made during the agentic-engineering review that fed this ADR. Recorded for the next reviewer so the rationale isn't re-litigated.
+
+### 11.1 Confirmed by PO during review
+
+| Q | Decision |
+|---|---|
+| Tier 1/2/3 graduation policy — open case on first non-clean event for Automated; always for Manual? | **Confirmed.** §7.1, §7.2 binding. |
+| Compaction is auditable; original events retained verbatim; Compliance ratifies templates? | **Confirmed.** §7.4, §7.5 binding. |
+| Single agent owning case lifetime (vs handoffs / multi-agent)? | **Confirmed.** §6.3, §10.1 binding. |
+| LLM-judgment scope is loop-driven (tool selection), not constrained-output? | **Confirmed.** §6.3 binding. |
+| Tenant isolation for extraction caches (cache-key includes tenant_id)? | **Confirmed.** §5.8, Phase H.4 binding. |
+| Tool-surface size (~18, keep tools granular vs composite mega-tool)? | **Confirmed granular.** §6.4 binding. |
+| Vocabulary: Manual Order / Automated Order; portals = Automated? | **Confirmed.** §3.1 binding. |
+| Issue/intent names channel-neutral; `EDI_850_*` legacy aliased; organic cleanup? | **Confirmed.** §3.2 binding. |
+| Bundle directory at `knowledge/skills/<name>/` (PO ask: also store raw specs)? | **Confirmed.** §5.1 binding. Specs live at `knowledge/skills/<name>/specs/` with `runtime: false`. |
+| Skill bundle versioning + audit-log inclusion? | **Confirmed.** §5.9 binding. |
+| Examples-as-CI-tests; per-example A/B lift threshold? | **Confirmed.** §5.5, §5.7 binding. |
+| Server-side asset rendering (templates not in LLM prompt)? | **Confirmed.** §5.6 binding. Compliance + Brand CODEOWNERS gate. |
+
+### 11.2 Open for the next reviewer (not blocking ADR draft, but required before Phase H.5 implementation)
+
+1. **L2 attachment extractor model choice** — Claude Sonnet w/ vision vs Azure Document Intelligence vs hybrid. Decide based on per-document cost + accuracy on a 30-document fixture set drawn from real customer templates. Owner: Tools Admin / SRE.
+2. **Local LLM for ADR-039 Shadow second-opinion** — see ADR-039 §non-goals; same procurement track. Owner: Tools Admin + Compliance.
+3. **Compaction template authorship** — first set of `knowledge/compaction/<event_type>.template.md` templates. Compliance + domain SME draft; reviewed at the next compliance workshop. Owner: Compliance + domain SME.
+4. **SLA per customer-tier table** — `knowledge/policy/sla_per_customer_tier.yaml` content. Owner: Product + customer-success.
+5. **Per-skill anchor example selection** — for each existing skill, what's the 1-2 representative anchor? Earned through Phase H.5 spike, not authored speculatively. Owner: Engineering + Compliance.
+6. **`MANUAL_ORDER_INTAKE` rename of `EMAIL_ORDER_ENTRY`** — optional; defer until ADR-034 in-flight work merges. Owner: Engineering.
+7. **Concurrency policy for cross-case events** — when ASOE scans simultaneously raise issues on 50 cases, the per-case advisory lock serialises within each case but not across. Confirm the L4 harness has appropriate worker-pool sizing. Owner: SRE.
+8. **UI default-view choice for `/cases`** — SLA-deadline-driven sort vs lifecycle-status-driven sort vs customer-tier-driven sort. Owner: Frontend Platform + UX.
+
+---
+
+## 12. Lineage, Supersession, and Document Versioning
+
+### 12.1 Supersession of ADR-034 §6
+
+ADR-034 §6 (the IA decision recorded under "Information-Architecture Decision (corrected post-PO review — Phase G)") is **superseded in part** by this ADR.
+
+**What carries forward unchanged from ADR-034 §6:**
+* The PO's premise that the CSA's lived workflow is one task, not two.
+* The compliance posture that audit lives on the Exception Queue surface, not on `/inbox`.
+* Phase G (`EmailSourceSection` mounted above `EmailOrderEntrySection` via data-presence dispatch) — implemented on `claude/review-order-entry-architecture-RCIUa`. **Phase G's UI work is correct under this ADR's model**; the case detail surface in Phase H.6 builds on it rather than replacing it.
+
+**What this ADR replaces:**
+* The framing of "two list views, unified detail." This ADR's framing is "one case, multiple list-view-projections." Both `/inbox` and `/exceptions` retain as filtered views of `/cases` for backward compatibility, but `/cases` is the primary CSR surface.
+* The implicit assumption that the email and the exception are peer entities. This ADR establishes the case as the parent entity.
+
+**What this ADR explicitly keeps as Phase F (deferred):**
+* Inbox productisation (proposed ADR-036 — Email Intake Surface). The `/inbox` page's upstream `email-intelligence-agent` integration and per-classification audit policy work is still its own ADR; not absorbed here.
+
+### 12.2 Document lineage
+
+* **ADR-021..033:** existing architectural foundations. None invalidated by this ADR; all ratified as-is.
+* **ADR-034:** email-order-entry skill. §6 partially superseded (this ADR §12.1). All other sections of ADR-034 stand.
+* **ADR-035 (Proposed):** MCP tool-surface. Independent of this ADR. When it ships, the L1+L2 tool surface gains MCP-backed gateways without changing L0/L3/L4.
+* **ADR-036 (Proposed):** Email Intake Surface (inbox productisation). Independent; decoupled from case-centric model by keeping `/inbox` as a filtered case-list view.
+* **ADR-037:** **Reserved** for the eventual "single unified surface" decision (drop `/inbox` entirely, every inbound becomes a case). This ADR explicitly defers that question; ADR-037 takes it up if/when the upstream `email-intelligence-agent` integration matures and per-classification audit policy is workshop-ratified.
+* **ADR-038 (this document):** case-centric order intake; five-layer architecture.
+* **ADR-039 (companion):** LLM Compliance Shadow second opinion. Mergeable independently of this ADR.
+
+### 12.3 Versioning of this ADR
+
+* **v1.0 (this document):** Proposed status; pending review-board ratification.
+* **v1.1:** absorbs sign-off feedback, status moves to Accepted.
+* **v2.0:** if a structural change occurs (e.g., L0 expands to absorb `policy/` and `audit_registry/`; or the agent decomposes into multiple specialised agents based on Phase H.5 evidence). Major version bump triggers another full review.
+
+### 12.4 Definition of Done for this ADR
+
+This ADR is **Accepted** when:
+
+* Reviewer chain has signed off in order: Principal AI/Agentic Engineering Architect → Compliance Veto Holder → Tools Admin / SRE → Frontend Platform → Domain SME → Product Owner.
+* Compliance has explicitly ratified §7.4 (compaction protocol) and §8.5 (governance / CODEOWNERS map).
+* Phase H.1 backlog is open; no implementation has started yet.
+* The companion ADR-039 has been reviewed in parallel (the two are mergeable independently but it's cleaner to ratify them together).
+
+### 12.5 What this ADR does *not* commit to
+
+To be explicit one more time, since several adjacent things have been discussed:
+
+* **Does not** delete `/inbox`. (Keeps as filtered case-list view; full deletion is a future ADR.)
+* **Does not** rename `EDI_850_*` event-types in one shot. (Organic cleanup as recipes are touched.)
+* **Does not** introduce LLM into the Compliance Shadow. (ADR-039's job; independent.)
+* **Does not** migrate `policy.py` constants to YAML. (Future ADR.)
+* **Does not** introduce subagents. (Single Case Agent by design.)
+* **Does not** commit to a vendor for the multimodal extractor or the local Shadow LLM. (Procurement track.)
+
+---
+
+*End of ADR-038. Proceed to ADR-039 (LLM Compliance Shadow second-opinion architecture) for the companion decision.*
