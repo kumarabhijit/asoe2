@@ -255,7 +255,7 @@ class TestHitlPriceHoldRelease:
         # recommended_action, so passing it here registers as an APPROVE.
         approve = client.patch(
             f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "ESCALATE", "reason_tag": "policy_exception", "notes": "within contract"},
+            json={"action": "ESCALATE", "reason_tag": "OTHER", "notes": "within contract"},
             headers=_auth(manager_token),
         )
         assert approve.status_code == 200

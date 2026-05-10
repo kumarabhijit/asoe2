@@ -224,7 +224,7 @@ class TestYellowOverride:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "Verified with buyer — both POs are intentional",
-                "reason_tag": "other",
+                "reason_tag": "OTHER",
             },
             headers=_auth(manager_token),
         )
@@ -243,7 +243,7 @@ class TestYellowOverride:
             json={
                 "action": "YOLO",
                 "notes": "test",
-                "reason_tag": "other",
+                "reason_tag": "OTHER",
             },
             headers=_auth(manager_token),
         )
@@ -258,7 +258,7 @@ class TestYellowOverride:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "Reviewed post-execution — action refined",
-                "reason_tag": "other",
+                "reason_tag": "OTHER",
             },
             headers=_auth(manager_token),
         )
@@ -289,7 +289,7 @@ class TestYellowOverride:
             json={
                 "action": "ALLOW_BOTH",
                 # notes missing — should fail validation
-                "reason_tag": "other",
+                "reason_tag": "OTHER",
             },
             headers=_auth(manager_token),
         )
@@ -303,7 +303,7 @@ class TestYellowOverride:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "test",
-                "reason_tag": "other",
+                "reason_tag": "OTHER",
             },
             headers=_auth(analyst_token),
         )
@@ -317,7 +317,7 @@ class TestYellowOverride:
             json={
                 "action": "SUPERSEDE",
                 "notes": "Original PO superseded by revision",
-                "reason_tag": "other",
+                "reason_tag": "OTHER",
             },
             headers=_auth(manager_token),
         )
@@ -348,7 +348,7 @@ class TestYellowOverride:
                 json={
                     "action": action,
                     "notes": f"Testing {action}",
-                    "reason_tag": "other",
+                    "reason_tag": "OTHER",
                 },
                 headers=_auth(manager_token),
             )

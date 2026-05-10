@@ -170,7 +170,7 @@ class TestOverrideEligibilityMatrix:
         exc_id = _create_resolved(client, analyst_token)
         r = client.patch(
             f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "ALLOW_BOTH", "notes": "post-exec refinement", "reason_tag": "other"},
+            json={"action": "ALLOW_BOTH", "notes": "post-exec refinement", "reason_tag": "OTHER"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200, r.json()
@@ -182,7 +182,7 @@ class TestOverrideEligibilityMatrix:
         exc_id = _create_pending_review(client, analyst_token)
         r = client.patch(
             f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "ALLOW_BOTH", "notes": "buyer confirmed", "reason_tag": "other"},
+            json={"action": "ALLOW_BOTH", "notes": "buyer confirmed", "reason_tag": "OTHER"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200, r.json()
@@ -208,7 +208,7 @@ class TestOverrideEligibilityMatrix:
         _force_failed_lifecycle(exc_id)
         r = client.patch(
             f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "ALLOW_BOTH", "notes": "should fail", "reason_tag": "other"},
+            json={"action": "ALLOW_BOTH", "notes": "should fail", "reason_tag": "OTHER"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 409
@@ -218,7 +218,7 @@ class TestOverrideEligibilityMatrix:
         exc_id = _create_pending_review(client, analyst_token)
         r = client.patch(
             f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "ALLOW_BOTH", "notes": "should fail", "reason_tag": "other"},
+            json={"action": "ALLOW_BOTH", "notes": "should fail", "reason_tag": "OTHER"},
             headers=_auth(analyst_token),
         )
         assert r.status_code == 403
@@ -227,7 +227,7 @@ class TestOverrideEligibilityMatrix:
         exc_id = _create_pending_review(client, analyst_token)
         r = client.patch(
             f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "ALLOW_BOTH", "notes": "should fail", "reason_tag": "other"},
+            json={"action": "ALLOW_BOTH", "notes": "should fail", "reason_tag": "OTHER"},
             headers=_auth(viewer_token),
         )
         assert r.status_code == 403
@@ -248,7 +248,7 @@ class TestResolvedByTrustBoundary:
                 "action": "ALLOW_BOTH",
                 "notes": "trying to spoof identity",
                 "resolved_by": "attacker@example.com",
-                "reason_tag": "other",
+                "reason_tag": "OTHER",
             },
             headers=_auth(manager_token),
         )
@@ -309,7 +309,7 @@ class TestOverrideIdempotency:
         self, client, analyst_token, manager_token,
     ):
         exc_id = _create_pending_review(client, analyst_token)
-        body = {"action": "ALLOW_BOTH", "notes": "first pass", "reason_tag": "other"}
+        body = {"action": "ALLOW_BOTH", "notes": "first pass", "reason_tag": "OTHER"}
         headers = {**_auth(manager_token), "Idempotency-Key": "abc_123-XYZ"}
 
         r1 = client.patch(
@@ -346,14 +346,14 @@ class TestOverrideIdempotency:
 
         r1 = client.patch(
             f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "ALLOW_BOTH", "notes": "first", "reason_tag": "other"},
+            json={"action": "ALLOW_BOTH", "notes": "first", "reason_tag": "OTHER"},
             headers=headers,
         )
         assert r1.status_code == 200
 
         r2 = client.patch(
             f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "SUPERSEDE", "notes": "different body", "reason_tag": "other"},
+            json={"action": "SUPERSEDE", "notes": "different body", "reason_tag": "OTHER"},
             headers=headers,
         )
         assert r2.status_code == 409
@@ -472,7 +472,7 @@ class TestSegregationOfDuties:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "first resolution",
-                "reason_tag": "policy_exception",
+                "reason_tag": "OTHER",
             },
             headers=_auth(priya),
         )
@@ -482,7 +482,7 @@ class TestSegregationOfDuties:
             json={
                 "action": "SUPERSEDE",
                 "notes": "self-correction of prior override",
-                "reason_tag": "other",
+                "reason_tag": "OTHER",
             },
             headers=_auth(priya),
         )
@@ -506,7 +506,7 @@ class TestSegregationOfDuties:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "first pass",
-                "reason_tag": "data_error",
+                "reason_tag": "OTHER",
             },
             headers=_auth(priya),
         )
@@ -516,7 +516,7 @@ class TestSegregationOfDuties:
             json={
                 "action": "SUPERSEDE",
                 "notes": "admin correction",
-                "reason_tag": "customer_concession",
+                "reason_tag": "OTHER",
             },
             headers=_auth(raj),
         )
@@ -537,7 +537,7 @@ class TestReasonTagVocabulary:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "buyer confirmed concession",
-                "reason_tag": "customer_concession",
+                "reason_tag": "OTHER",
             },
             headers=_auth(manager_token),
         )
@@ -560,12 +560,12 @@ class TestReasonTagVocabulary:
     def test_omitted_reason_tag_defaults_to_other(
         self, client, analyst_token, manager_token
     ):
-        """Phase 2 compatibility: callers without reason_tag default to 'other'.
+        """Phase 2 compatibility: callers without reason_tag default to 'OTHER'.
         Phase 3 will tighten this to required."""
         exception_id = _create_pending_review(client, analyst_token)
         r = client.patch(
             f"/api/v1/exceptions/{exception_id}/disposition",
-            json={"action": "ALLOW_BOTH", "notes": "legacy caller", "reason_tag": "other"},
+            json={"action": "ALLOW_BOTH", "notes": "legacy caller", "reason_tag": "OTHER"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200
@@ -579,8 +579,8 @@ class TestReasonTagVocabulary:
             f"/api/v1/exceptions/{exception_id}/disposition",
             json={
                 "action": "ALLOW_BOTH",
-                "notes": "recipe misclassified intent",
-                "reason_tag": "agent_misclassification",
+                "notes": "ops chose differently from recipe band recommendation",
+                "reason_tag": "BAND_REVIEW_OVERRIDDEN",
             },
             headers=_auth(manager_token),
         )
@@ -591,7 +591,7 @@ class TestReasonTagVocabulary:
         events = [e for e in audit if e["policy_key"] == "EXCEPTION_RESOLVED"]
         assert events, "EXCEPTION_RESOLVED audit event missing"
         new_value = events[0]["new_value"]
-        assert new_value.get("reason_tag") == "agent_misclassification"
+        assert new_value.get("reason_tag") == "BAND_REVIEW_OVERRIDDEN"
         assert new_value.get("sub_type") in {"APPROVE", "OVERRIDE"}
 
     def test_health_exposes_reason_tag_vocabulary(self, client):
@@ -599,8 +599,8 @@ class TestReasonTagVocabulary:
         assert r.status_code == 200
         body = r.json()
         assert isinstance(body["allowed_override_reason_tags"], list)
-        assert "customer_concession" in body["allowed_override_reason_tags"]
-        assert "other" in body["allowed_override_reason_tags"]
+        assert "OTHER" in body["allowed_override_reason_tags"]
+        assert "OTHER" in body["allowed_override_reason_tags"]
 
 
 # ---------------------------------------------------------------------------
@@ -636,7 +636,7 @@ class TestFourEyesOverride:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "small fix, no cosign",
-                "reason_tag": "data_error",
+                "reason_tag": "OTHER",
             },
             headers=_auth(manager_token),
         )
@@ -653,7 +653,7 @@ class TestFourEyesOverride:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "buyer confirmed concession — large refund",
-                "reason_tag": "customer_concession",
+                "reason_tag": "OTHER",
             },
             headers=_auth(priya),
         )
@@ -665,7 +665,7 @@ class TestFourEyesOverride:
         # pending_override metadata is stashed for cosigner inspection.
         pending = body["resolution_data"]["pending_override"]
         assert pending["action"] == "ALLOW_BOTH"
-        assert pending["reason_tag"] == "customer_concession"
+        assert pending["reason_tag"] == "OTHER"
         assert pending["initiator"] == "priya@x"
         assert pending["financial_impact_usd"] == 25_000.0
 
@@ -678,7 +678,7 @@ class TestFourEyesOverride:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "initiator notes",
-                "reason_tag": "customer_concession",
+                "reason_tag": "OTHER",
             },
             headers=_auth(priya),
         )
@@ -708,7 +708,7 @@ class TestFourEyesOverride:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "initiator notes",
-                "reason_tag": "customer_concession",
+                "reason_tag": "OTHER",
             },
             headers=_auth(priya),
         )
@@ -733,7 +733,7 @@ class TestFourEyesOverride:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "initiator",
-                "reason_tag": "customer_concession",
+                "reason_tag": "OTHER",
             },
             headers=_auth(priya),
         )
@@ -754,7 +754,7 @@ class TestFourEyesOverride:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "initiator",
-                "reason_tag": "customer_concession",
+                "reason_tag": "OTHER",
             },
             headers=_auth(priya),
         )
@@ -776,7 +776,7 @@ class TestFourEyesOverride:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "low-value",
-                "reason_tag": "data_error",
+                "reason_tag": "OTHER",
             },
             headers=_auth(priya),
         )
@@ -796,7 +796,7 @@ class TestFourEyesOverride:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "initiator",
-                "reason_tag": "customer_concession",
+                "reason_tag": "OTHER",
             },
             headers=_auth(priya),
         )
@@ -832,7 +832,7 @@ class TestDispositionUnified:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "confirm agent recommendation",
-                "reason_tag": "other",
+                "reason_tag": "OTHER",
             },
             headers=_auth(analyst_token),
         )
@@ -853,7 +853,7 @@ class TestDispositionUnified:
             json={
                 "action": "NO_ACTION",
                 "notes": "order cancelled upstream",
-                "reason_tag": "data_error",
+                "reason_tag": "OTHER",
             },
             headers=_auth(analyst_token),
         )
@@ -877,7 +877,7 @@ class TestDispositionUnified:
             json={
                 "action": "SUPERSEDE",
                 "notes": "analyst attempt",
-                "reason_tag": "other",
+                "reason_tag": "OTHER",
             },
             headers=_auth(analyst_token),
         )
@@ -893,7 +893,7 @@ class TestDispositionUnified:
             json={
                 "action": "SUPERSEDE",
                 "notes": "manager override",
-                "reason_tag": "policy_exception",
+                "reason_tag": "OTHER",
             },
             headers=_auth(priya),
         )
@@ -914,7 +914,7 @@ class TestDispositionUnified:
             json={
                 "action": "SUPERSEDE",
                 "notes": "manager override",
-                "reason_tag": "customer_concession",
+                "reason_tag": "OTHER",
             },
             headers=_auth(priya),
         )
@@ -934,7 +934,7 @@ class TestDispositionUnified:
             json={
                 "action": "MADE_UP",
                 "notes": "typo",
-                "reason_tag": "other",
+                "reason_tag": "OTHER",
             },
             headers=_auth(analyst_token),
         )
@@ -949,7 +949,7 @@ class TestDispositionUnified:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "   ",
-                "reason_tag": "other",
+                "reason_tag": "OTHER",
             },
             headers=_auth(analyst_token),
         )
@@ -963,31 +963,23 @@ class TestDispositionUnified:
 
 
 class TestPerIntentReasonTag:
-    """The framework is seeded with the global vocabulary today — every
-    intent points at the same six tags, so no operator-visible change.
-    This test locks in the MECHANISM: when a curated per-intent set is
-    introduced, an out-of-set tag is rejected with a clear error that
-    names the intent.
-    """
+    """Phase 5.2 — every intent has a curated vocabulary. Lock test
+    proves an out-of-set tag is rejected with a clear error that
+    names the intent."""
 
     def test_per_intent_narrow_set_rejects_out_of_set_tag(
-        self, client, analyst_token, manager_token, monkeypatch
+        self, client, analyst_token, manager_token,
     ):
-        """Simulate curation: temporarily narrow CONTRACTUAL_CORRECTION
-        to {customer_concession, other} and prove the endpoint enforces it."""
-        import api.routes.exceptions as routes_mod
-        narrowed = {"CONTRACTUAL_CORRECTION": ("customer_concession", "other")}
-        # Patch the import-bound reference the handler actually reads.
-        monkeypatch.setattr(routes_mod, "INTENT_REASON_TAGS", narrowed)
-
+        """A DUPLICATE_PO-only tag (`BLANKET_RELEASE`) must NOT be
+        acceptable on a CONTRACTUAL_CORRECTION record. The
+        per-intent set narrowing is in `constraints/specs.py::INTENT_REASON_TAGS`."""
         exc_id = _create_pending_review(client, analyst_token)
-        # data_error is in the global set but NOT in the narrowed per-intent set.
         r = client.patch(
             f"/api/v1/exceptions/{exc_id}/disposition",
             json={
                 "action": "ALLOW_BOTH",
-                "notes": "not allowed under narrow vocab",
-                "reason_tag": "data_error",
+                "notes": "wrong-intent tag",
+                "reason_tag": "BLANKET_RELEASE",
             },
             headers=_auth(manager_token),
         )
@@ -995,7 +987,8 @@ class TestPerIntentReasonTag:
         body = r.json()["error"]
         assert body["code"] == "INVALID_REASON_TAG"
         assert "CONTRACTUAL_CORRECTION" in body["message"]
-        assert "customer_concession" in body["message"]
+        # The error surface names a tag the operator can use.
+        assert "CUSTOMER_CONCESSION" in body["message"]
 
     def test_per_intent_narrow_set_accepts_listed_tag(
         self, client, analyst_token, manager_token, monkeypatch
@@ -1010,7 +1003,7 @@ class TestPerIntentReasonTag:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "allowed under narrow vocab",
-                "reason_tag": "customer_concession",
+                "reason_tag": "OTHER",
             },
             headers=_auth(manager_token),
         )

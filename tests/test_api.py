@@ -184,7 +184,7 @@ class TestRBAC:
         # Analyst cannot override (RBAC: manager+ only)
         r = client.patch(
             f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "ALLOW_BOTH", "notes": "test", "reason_tag": "other"},
+            json={"action": "ALLOW_BOTH", "notes": "test", "reason_tag": "OTHER"},
             headers=_auth(analyst_token),
         )
         assert r.status_code == 403
@@ -200,7 +200,7 @@ class TestRBAC:
 
         r = client.patch(
             f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "ALLOW_BOTH", "notes": "Verified with buyer", "reason_tag": "other"},
+            json={"action": "ALLOW_BOTH", "notes": "Verified with buyer", "reason_tag": "OTHER"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200
@@ -211,7 +211,7 @@ class TestRBAC:
 
     def test_viewer_cannot_approve(self, client, viewer_token):
         r = client.patch("/api/v1/exceptions/fake-id/disposition",
-            json={"action": "ALLOW_BOTH", "reason_tag": "other", },
+            json={"action": "ALLOW_BOTH", "reason_tag": "OTHER", },
             headers=_auth(viewer_token),
         )
         assert r.status_code == 403
@@ -434,7 +434,7 @@ class TestOverride:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "Verified with buyer",
-                "reason_tag": "other",
+                "reason_tag": "OTHER",
             },
             headers=_auth(manager_token),
         )
@@ -464,7 +464,7 @@ class TestApproveReject:
     def test_approve_pending_review(self, client, analyst_token, manager_token):
         exc_id = self._create_pending_review(client, analyst_token)
         r = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "ALLOW_BOTH", "reason_tag": "other", "notes": "Approved after review"},
+            json={"action": "ALLOW_BOTH", "reason_tag": "OTHER", "notes": "Approved after review"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200
@@ -473,7 +473,7 @@ class TestApproveReject:
     def test_reject_pending_review(self, client, analyst_token, manager_token):
         exc_id = self._create_pending_review(client, analyst_token)
         r = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "NO_ACTION", "reason_tag": "other", "notes": "Not valid"},
+            json={"action": "NO_ACTION", "reason_tag": "OTHER", "notes": "Not valid"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200
@@ -489,7 +489,7 @@ class TestApproveReject:
         exc_id = r.json()["exception_id"]
 
         r = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "ALLOW_BOTH", "reason_tag": "other", "notes": "should fail"},
+            json={"action": "ALLOW_BOTH", "reason_tag": "OTHER", "notes": "should fail"},
             headers=_auth(manager_token),
         )
         # RESOLVED lifecycle + action=ALLOW_BOTH routes to OVERRIDE sub-type;

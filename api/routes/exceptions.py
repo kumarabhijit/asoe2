@@ -1044,24 +1044,21 @@ async def disposition_exception(
             ),
             status_code=422,
         )
-    # Per-intent reason-tag validation (Phase 3 Option A framework).
-    # When the record carries a known intent, narrow the allowed set to
-    # INTENT_REASON_TAGS[intent]; otherwise fall back to the global
-    # AllowedOverrideReasonTag set (FAILED-lifecycle records and any
-    # intent not yet in the map). Today all per-intent sets equal the
-    # global set, so this is a no-op in behavior — the framework is
-    # ready for a data-only swap when product/compliance curates real
-    # per-intent categories.
-    global_tags = list(AllowedOverrideReasonTag.__args__)  # type: ignore[attr-defined]
-    per_intent = INTENT_REASON_TAGS.get(record.intent) if record.intent else None
-    allowed_tags = list(per_intent) if per_intent else global_tags
-    if req.reason_tag not in allowed_tags:
+    # Per-intent reason-tag validation (Phase 5.2 — panel 2026-05-10).
+    # The new validator accepts the per-intent curated set OR the
+    # legacy `_GLOBAL_REASON_TAGS` set during the transition window
+    # (Phase 5.3 grandfather path). Compliance can tighten this in a
+    # follow-up by removing the legacy fallback once the transition
+    # completes.
+    from constraints.specs import is_valid_reason_tag_for_write
+    if not is_valid_reason_tag_for_write(record.intent, req.reason_tag):
+        per_intent = INTENT_REASON_TAGS.get(record.intent) if record.intent else None
         raise ASOEError(
             code="INVALID_REASON_TAG",
             message=(
                 f"reason_tag '{req.reason_tag}' is not allowed"
                 + (f" for intent '{record.intent}'" if per_intent else "")
-                + f". Valid: {allowed_tags}"
+                + f". Valid: {list(per_intent or AllowedOverrideReasonTag.__args__)}"  # type: ignore[attr-defined]
             ),
             status_code=422,
         )

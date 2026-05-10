@@ -71,7 +71,7 @@ def _seed_three_events(client) -> None:
     # Event 3: disposition on eid1 after it was escalated
     client.patch(
         f"/api/v1/exceptions/{eid}/disposition",
-        json={"action": "ALLOW_BOTH", "notes": "manager resolves", "reason_tag": "other"},
+        json={"action": "ALLOW_BOTH", "notes": "manager resolves", "reason_tag": "OTHER"},
         headers=_auth(manager),
     )
 

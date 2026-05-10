@@ -318,15 +318,24 @@ class TestOverrideReasonTagVocabulary:
         assert INTENT_REASON_TAGS["DUPLICATE_PO"] is not _GLOBAL_REASON_TAGS
         assert set(INTENT_REASON_TAGS["DUPLICATE_PO"]) != set(_GLOBAL_REASON_TAGS)
 
-    def test_other_intents_still_use_global_fallback(self):
-        """Intents without a curated vocabulary fall back to _GLOBAL_REASON_TAGS."""
+    def test_every_intent_has_curated_vocabulary(self):
+        """Panel 2026-05-10 — every intent now carries a curated
+        per-intent vocabulary; global fallback is read-only
+        (legacy audit-log rows). Use the AllowedIntent union as
+        the source of truth so adding a new intent without
+        curation surfaces here as a CI failure."""
+        non_curated_intents = []
         for intent in get_args(AllowedIntent):
-            if intent == "DUPLICATE_PO":
-                continue
-            assert INTENT_REASON_TAGS[intent] is _GLOBAL_REASON_TAGS, (
-                f"{intent} should fall back to the global vocabulary "
-                f"until its own is curated (ADR-033 lifecycle)"
-            )
+            if intent == "UNKNOWN":
+                continue  # sentinel value, no overrides land here
+            if INTENT_REASON_TAGS[intent] is _GLOBAL_REASON_TAGS:
+                non_curated_intents.append(intent)
+        assert non_curated_intents == [], (
+            "Intents lacking a curated vocabulary post-2026-05-10: "
+            f"{non_curated_intents}. The panel-output covered "
+            "11 intents; new intents must add their own tuple "
+            "and entry in `_CURATED_INTENT_REASON_TAGS`."
+        )
 
     def test_every_intent_has_a_reason_vocabulary(self):
         """No intent may be missing from INTENT_REASON_TAGS — would

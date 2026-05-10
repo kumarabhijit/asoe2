@@ -259,7 +259,7 @@ class TestRBACEnforcement:
             # Analyst picks an action that differs from the recipe
             # recommendation → /disposition classifies as OVERRIDE sub-type
             # and rejects for insufficient permission.
-            json={"action": "ALLOW_BOTH", "notes": "analyst attempt", "reason_tag": "other"},
+            json={"action": "ALLOW_BOTH", "notes": "analyst attempt", "reason_tag": "OTHER"},
             headers=auth_header(analyst_token),
         )
         assert resp.status_code == 403
