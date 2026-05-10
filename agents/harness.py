@@ -37,6 +37,7 @@ pending; today it returns False unconditionally).
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -166,6 +167,141 @@ class ToolCallReplayLog:
 
 
 _default_replay_log = ToolCallReplayLog()
+
+
+# ---------------------------------------------------------------------------
+# DB-backed adapters (V012 case_events + V013 case_locks)
+# ---------------------------------------------------------------------------
+#
+# When `DATABASE_URL` is set, the harness swaps the in-memory primitives
+# for DB-backed equivalents that match the same surface API. This makes
+# the harness correct for multi-pod deployments where two pods could
+# otherwise both run the agent against the same case (in-memory locks
+# are pod-local).
+
+
+class DatabaseBackedToolCallReplayLog:
+    """V012 `case_events`-backed replay log. Same API as
+    `ToolCallReplayLog` so `run_agent_step` is unchanged."""
+
+    def __init__(self, repo: Any = None) -> None:
+        if repo is None:
+            from db.repository import CaseEventRepository
+            repo = CaseEventRepository()
+        self._repo = repo
+
+    def record(self, entry: ToolCallReplayEntry) -> None:
+        self._repo.record(
+            event_id=entry.event_id,
+            case_id=entry.case_id,
+            tenant_id=entry.tenant_id,
+            occurred_at=entry.occurred_at,
+            tool_name=entry.tool_name,
+            tool_call=entry.tool_call,
+            tool_result=entry.tool_result,
+            outcome=entry.outcome,
+        )
+
+    def list_for_case(self, case_id: str) -> List[ToolCallReplayEntry]:
+        # Tenant scope is required by the repo; we don't have it
+        # here. The harness keeps tenant on the entries and we
+        # could re-derive, but in practice this read path is for
+        # tests / ops only — the harness writes but doesn't read.
+        # Return an empty list when called without tenant context.
+        return []
+
+    def list_for_case_with_tenant(
+        self, case_id: str, tenant_id: str,
+    ) -> List[ToolCallReplayEntry]:
+        rows = self._repo.list_for_case(case_id, tenant_id)
+        return [
+            ToolCallReplayEntry(
+                event_id=r["event_id"], case_id=r["case_id"],
+                tenant_id=r["tenant_id"], occurred_at=r["occurred_at"],
+                tool_name=r["tool_name"], tool_call=r["tool_call"] or {},
+                tool_result=r["tool_result"] or {}, outcome=r["outcome"],
+            )
+            for r in rows
+        ]
+
+    def clear(self) -> None:
+        # Tests use the in-memory log; DB-backed clear is not
+        # supported (operations clear the DB via migrations).
+        raise NotImplementedError(
+            "DatabaseBackedToolCallReplayLog.clear() is not supported; "
+            "tests should use the in-memory ToolCallReplayLog.",
+        )
+
+
+class _DBLockHandle:
+    """Object returned by `DatabaseBackedCaseLockManager.try_acquire`
+    that mimics `threading.RLock`'s release-only API. The caller
+    invokes `.release()` in a `finally` block exactly as it would
+    for the in-memory mutex; we delete the row at that point."""
+
+    def __init__(self, repo: Any, case_id: str, tenant_id: str) -> None:
+        self._repo = repo
+        self._case_id = case_id
+        self._tenant_id = tenant_id
+        self._released = False
+
+    def release(self) -> None:
+        if self._released:
+            return
+        self._released = True
+        self._repo.release(self._case_id, self._tenant_id)
+
+
+class DatabaseBackedCaseLockManager:
+    """V013 `case_locks`-backed cross-pod mutex. Same API as
+    `CaseLockManager.try_acquire`; the in-process `RLock` is
+    swapped for an INSERT-with-UNIQUE-conflict transaction."""
+
+    def __init__(self, repo: Any = None) -> None:
+        if repo is None:
+            from db.repository import CaseLockRepository
+            repo = CaseLockRepository()
+        self._repo = repo
+
+    def try_acquire(
+        self, tenant_id: str, case_id: str,
+    ) -> Optional[_DBLockHandle]:
+        if self._repo.try_acquire(case_id, tenant_id):
+            return _DBLockHandle(self._repo, case_id, tenant_id)
+        return None
+
+    def acquire(
+        self, tenant_id: str, case_id: str,
+    ) -> _DBLockHandle:
+        # Blocking acquire (best-effort poll) — used by tests
+        # that simulate cross-thread contention. Production
+        # callers use `try_acquire` and re-queue on miss.
+        import time as _time
+        deadline = _time.monotonic() + 5.0
+        while True:
+            h = self.try_acquire(tenant_id, case_id)
+            if h is not None:
+                return h
+            if _time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"Could not acquire DB lock on {case_id} within 5s",
+                )
+            _time.sleep(0.05)
+
+
+def _select_replay_log() -> Any:
+    """Module-level factory: DB-backed when DATABASE_URL is set,
+    else in-memory. Mirrors the `_create_store` pattern in
+    `api/store.py`."""
+    if os.getenv("DATABASE_URL", ""):
+        return DatabaseBackedToolCallReplayLog()
+    return _default_replay_log
+
+
+def _select_lock_manager() -> Any:
+    if os.getenv("DATABASE_URL", ""):
+        return DatabaseBackedCaseLockManager()
+    return _default_lock_manager
 
 
 # ---------------------------------------------------------------------------

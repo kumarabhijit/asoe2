@@ -20,7 +20,7 @@ class Intent(str, Enum):
     MIN_ORDER_QTY = "MIN_ORDER_QTY"
     PALLET_CONFIG = "PALLET_CONFIG"
     DELIVERY_DELAY = "DELIVERY_DELAY"
-    EMAIL_ORDER_ENTRY = "EMAIL_ORDER_ENTRY"
+    MANUAL_ORDER_INTAKE = "MANUAL_ORDER_INTAKE"
     UNKNOWN = "UNKNOWN"
 
 
@@ -200,6 +200,45 @@ class OrderCase(BaseModel):
     working_memory_summary: Optional[str] = None
     last_compaction_at: Optional[str] = None
     bundle_version_at_open: Optional[str] = None
+
+    # ADR-040 X.0 — case-level four-eyes override. Optional so the
+    # field default is None for every case until a high-value
+    # case-level override fires. Mutated atomically through
+    # `CaseStore.set_pending_override` / `clear_pending_override`.
+    pending_override: Optional["CasePendingOverride"] = None
+
+
+class CasePendingOverride(BaseModel):
+    """ADR-040 §2 — what the case carries while waiting for a cosigner.
+
+    Mirrors the per-exception `resolution_data.pending_override` shape
+    but at the case level: one envelope covering every child
+    exception that the operator overrode together.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    initiator: str
+    """User sub of the operator who initiated the case-level override."""
+    initiated_at: str
+    """ISO-8601 timestamp."""
+    pending_action: str
+    """The action being authorised across all child exceptions
+    (e.g. `APPROVE_DESPITE_DOWNGRADE`). Free-form string for now;
+    Compliance vocabulary lands at ratification time."""
+    pending_reason_tag: Optional[str] = None
+    """Closed L0 vocabulary entry from
+    `compliance/audit_bearing_registry.yaml::override_reason_tags`
+    (ADR-033). Optional in X.0; mandatory once ratified."""
+    aggregate_financial_impact_usd: float = 0.0
+    """Sum of the children's `financial_impact_usd`. Drives the
+    cosign-eligibility threshold per ADR-040 §2.1."""
+    child_exception_ids: List[str] = Field(default_factory=list)
+    """The exception ids the override covers — promoted together
+    on cosign-approve, restored together on cosign-reject."""
+    notes: Optional[str] = None
+    """Initiator's free-form rationale. Auditor-visible; compaction
+    keeps the first 200 chars."""
 
 
 CaseCorrelationKeyType = Literal[
@@ -635,6 +674,13 @@ class LLMCallTrace(BaseModel):
 class GraphState(BaseModel):
     model_config = ConfigDict(extra="forbid")
     event: OrderEvent
+    # Request-scoped tenant id stamped at the API boundary (the
+    # orchestration layer has no direct request scope; the API
+    # plumbs the value forward). Optional so existing test fixtures
+    # that build state without an HTTP request still validate.
+    # ADR-038 §5.8 / ADR-039 §5.5 — load-bearing for per-tenant
+    # cache key isolation when the L2 LLM Shadow is invoked.
+    tenant_id: Optional[str] = None
     # Request-scoped trace ID — set at ingest, used to correlate
     # gateway calls / observability events for this run. Distinct
     # from `shadow.trace_id` (which is the ComplianceDecision's own

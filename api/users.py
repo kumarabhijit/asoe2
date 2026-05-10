@@ -63,6 +63,12 @@ class UserRecord(BaseModel):
 _PERMISSION_TAB_MAP: List[tuple[str, List[str]]] = [
     ("inbox",      ["exceptions:read"]),
     ("exceptions", ["exceptions:read"]),
+    # ADR-038 Phase H.6 — `/cases` surface is gated by the same
+    # exceptions:read permission since the case detail panel
+    # displays the same audit-bearing evidence as the exception
+    # detail. Partner / assigned-account scoping is enforced at
+    # the route level (api/routes/cases.py).
+    ("cases",      ["exceptions:read"]),
     ("dashboard",  ["dashboard:read"]),
     ("settings",   ["rules:write", "policy:write", "users:manage"]),
 ]

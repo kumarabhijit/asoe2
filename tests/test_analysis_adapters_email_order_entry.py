@@ -30,7 +30,7 @@ def _record(
     resolution_data=None,
     original_event=None,
     selected_recipe="EmailOrderEntryRecipe.py",
-    intent="EMAIL_ORDER_ENTRY",
+    intent="MANUAL_ORDER_INTAKE",
 ) -> ExceptionRecord:
     return ExceptionRecord(
         tenant_id="t1",

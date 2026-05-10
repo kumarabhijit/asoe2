@@ -125,20 +125,114 @@ def _parse_iso(s: Optional[str]) -> Optional[datetime]:
         return None
 
 
+# Default audit-key set used when no per-event-type template
+# specifies one. Sourced from ADR-038 §6.4 vocabulary; ordering is
+# the canonical render order so byte-identical replay is preserved
+# even when templates rotate.
+_DEFAULT_AUDIT_KEYS: tuple[str, ...] = (
+    "outcome", "status", "classification", "recommended_action",
+    "shadow_verdict", "intent", "tool_name", "case_status_after",
+    "reason_code", "autonomy_level", "amount_usd", "po_number",
+)
+
+
+@dataclass(frozen=True)
+class CompactionTemplate:
+    """Frontmatter-extracted directives for one event-type's
+    compaction line. Bundle authors edit the markdown file (which
+    doubles as Compliance-reviewer documentation); the runtime
+    reads only the `audit_keys` list."""
+
+    event_type: str
+    audit_keys: tuple[str, ...]
+
+
+def _parse_frontmatter(text: str) -> Dict[str, Any]:
+    """Read the YAML frontmatter (if present) at the top of a
+    template file. The frontmatter is delimited by ``---`` lines —
+    same shape as Jekyll / Hugo templates, parseable without a
+    YAML lib (we don't import yaml here to keep the compaction
+    module dependency-free)."""
+    if not text.startswith("---"):
+        return {}
+    end_marker_idx = text.find("\n---", 3)
+    if end_marker_idx < 0:
+        return {}
+    block = text[3:end_marker_idx].strip()
+    out: Dict[str, Any] = {}
+    current_list_key: Optional[str] = None
+    for raw in block.splitlines():
+        line = raw.rstrip()
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        # List item ("  - foo")
+        if line.lstrip().startswith("-") and current_list_key:
+            value = line.lstrip()[1:].strip()
+            out.setdefault(current_list_key, []).append(value)
+            continue
+        # "key:" or "key: value"
+        if ":" in line:
+            key, _, val = line.partition(":")
+            key = key.strip()
+            val = val.strip()
+            if not val:
+                current_list_key = key
+                out.setdefault(key, [])
+            else:
+                current_list_key = None
+                out[key] = val
+    return out
+
+
+def load_template(
+    event_type: str,
+    *,
+    template_dir: Path = COMPACTION_TEMPLATE_DIR,
+) -> Optional[CompactionTemplate]:
+    """Load the per-event-type template's frontmatter.
+
+    Returns ``None`` when no matching file exists; the caller
+    falls back to the default audit-key set (still produces a
+    valid summary line — templates customise which keys appear,
+    they don't change the line shape).
+    """
+    path = template_dir / f"{event_type}.template.md"
+    if not path.exists():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    front = _parse_frontmatter(text)
+    keys_raw = front.get("audit_keys")
+    if not isinstance(keys_raw, list):
+        return None
+    keys = tuple(str(k) for k in keys_raw if k)
+    if not keys:
+        return None
+    return CompactionTemplate(event_type=event_type, audit_keys=keys)
+
+
+def _audit_keys_for(event_type: str) -> tuple[str, ...]:
+    template = load_template(event_type)
+    return template.audit_keys if template is not None else _DEFAULT_AUDIT_KEYS
+
+
 def _summarise_event_line(event: Dict[str, Any]) -> str:
     """Reduce one event dict to a single audit-bearing line.
 
     Format: ``[<event_type>@<timestamp>] key=value, ...``
     Drops free-form text and verbose payloads; retains the small,
-    typed fields the agent reasons over post-compaction.
+    typed fields the agent reasons over post-compaction. Per
+    ADR-038 §11.2, the audit-key set is sourced from
+    ``knowledge/compaction/<event_type>.template.md`` when one
+    exists; otherwise the default ADR-038 §6.4 vocabulary applies.
+    Replay-divergence is preserved across template rotations
+    because keys appear in canonical (template-declared) order.
     """
     et = str(event.get("event_type") or event.get("title") or "event")
     ts = str(event.get("timestamp") or event.get("occurred_at") or "")
-    audit_keys = (
-        "outcome", "status", "classification", "recommended_action",
-        "shadow_verdict", "intent", "tool_name", "case_status_after",
-        "reason_code", "autonomy_level", "amount_usd", "po_number",
-    )
+    audit_keys = _audit_keys_for(et)
     pairs: List[str] = []
     for key in audit_keys:
         if key in event and event[key] not in (None, ""):

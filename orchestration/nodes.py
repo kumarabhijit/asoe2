@@ -19,8 +19,10 @@ from __future__ import annotations
 #   - shadow verdict constrained to GREEN|YELLOW|RED via backend.shadow_decision()
 
 import concurrent.futures
+import os
+import threading
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Dict
 
 from contracts.models import (
     ExecutedNode,
@@ -398,6 +400,184 @@ def validate_circuit_breaker(state: GraphState) -> GraphState:
 # shadow_audit — Compliance Shadow must run before any recipe execution
 # ---------------------------------------------------------------------------
 
+# ADR-039 X.1 observe-only L2 LLM Shadow wire-up. Lazily-built singleton
+# so test fixtures that monkeypatch env vars on import-time stay
+# deterministic. Ops can disable at runtime by setting
+# ``ASOE_SHADOW_LLM_DISABLED=1``; the deterministic verdict path is
+# unaffected (X.1 is observe-only by definition — even when invoked,
+# the verdict does not move state.shadow.status).
+_l2_shadow_singleton: Any = None
+_l2_shadow_lock = threading.RLock()
+
+
+def _l2_shadow() -> Any:
+    """Lazy-build (and cache) the X.1 ``ShadowLLM`` singleton."""
+    global _l2_shadow_singleton
+    if _l2_shadow_singleton is not None:
+        return _l2_shadow_singleton
+    with _l2_shadow_lock:
+        if _l2_shadow_singleton is not None:
+            return _l2_shadow_singleton
+        # Local import keeps the orchestration module importable even
+        # if the optional shadow_llm bundle is missing (CI surfaces
+        # the bundle as a hard dependency in tests).
+        from compliance.shadow_llm import ShadowLLM, load_bundle
+        from compliance.shadow_llm_azure import select_shadow_provider
+
+        bundle = load_bundle()
+        # `select_shadow_provider()` returns `AzureOpenAIShadowProvider`
+        # when `AZURE_OPENAI_SHADOW_DEPLOYMENT` is set, else the stub.
+        # Tests run without Azure env so this is the deterministic
+        # path; production cut-over is env-only, no code change.
+        _l2_shadow_singleton = ShadowLLM(
+            provider=select_shadow_provider(),
+            bundle=bundle,
+        )
+        return _l2_shadow_singleton
+
+
+def _reset_l2_shadow_cache() -> None:
+    """Test helper — drop the cached singleton so a fresh
+    ``StubLLMShadowProvider`` is built on the next call."""
+    global _l2_shadow_singleton
+    with _l2_shadow_lock:
+        _l2_shadow_singleton = None
+
+
+def _shadow_llm_disabled() -> bool:
+    """Honour the runtime kill switch. Truthy values: ``1`` / ``true``
+    (case-insensitive). Default: enabled (post-ADR-039 §6.1
+    ratification)."""
+    raw = os.getenv("ASOE_SHADOW_LLM_DISABLED", "").strip().lower()
+    return raw in ("1", "true", "yes")
+
+
+def _estimate_financial_impact_usd(state: GraphState) -> float:
+    """Best-effort impact estimate at shadow-audit time.
+
+    The recipe's ``financial_impact_usd`` is only available after
+    ``execute_recipe`` runs (post-shadow). The cleanest pre-recipe
+    proxy is the price-gap × line_count already computed at ingest
+    (``state.batch_total_variance``). When the gap is zero (non-
+    pricing event, e.g. CREDIT_BLOCK with no variance), the L2
+    Shadow's GREEN-path floor is not met — but the YELLOW path
+    still triggers regardless of impact, which is the load-bearing
+    guarantee per ADR-039 §5.2.
+    """
+    impact = float(state.batch_total_variance or 0.0)
+    metadata = state.event.metadata or {}
+    explicit = metadata.get("financial_impact_usd")
+    if isinstance(explicit, (int, float)):
+        impact = max(impact, float(explicit))
+    return impact
+
+
+def _invoke_l2_shadow_observe_only(state: GraphState) -> None:
+    """ADR-039 L2 LLM Shadow second-opinion invocation.
+
+    Stamps ``state.shadow.llm_shadow_verdict`` when the gating
+    triggers fire (deterministic-YELLOW OR financial-impact ≥
+    bundle floor). Whether the verdict is allowed to move
+    ``state.shadow.status`` depends on the bundle's rollout config:
+
+      * `financial_impact_threshold_usd is None` (X.1 observe-only,
+        the default) — the verdict is recorded but
+        ``state.shadow.status`` is left alone.
+      * `financial_impact_threshold_usd >= some-value` (X.2+, post-
+        Compliance ratification) — the
+        `compliance.shadow_llm.combine_verdicts` truth table fires,
+        which can downgrade GREEN → YELLOW for high-impact records.
+        Never upgrades — asymmetric authority is structural.
+
+    The function name retains "observe_only" for backwards-compat
+    with existing imports; the behaviour is now config-driven.
+
+    Failure modes (provider down, timeout, validation error) are
+    fully absorbed by ``ShadowLLM.evaluate``; this helper logs the
+    skip reason and otherwise leaves the deterministic path
+    unchanged.
+    """
+    if state.shadow is None:
+        return
+    if _shadow_llm_disabled():
+        return
+    try:
+        s = _l2_shadow()
+    except FileNotFoundError:
+        # Bundle absent (e.g. test environment without knowledge/);
+        # silently skip the L2 path so the deterministic verdict is
+        # the only thing the caller sees.
+        return
+
+    from compliance.shadow_llm import ShadowLLMRequest, combine_verdicts
+
+    impact = _estimate_financial_impact_usd(state)
+    request = ShadowLLMRequest(
+        intent=str(state.intent.value if state.intent else ""),
+        recipe_name=state.selected_recipe or "",
+        recipe_params={"order_id": state.event.order_id},
+        proposed_action="",  # recipe hasn't run; we don't know yet
+        deterministic_status=state.shadow.status.value,
+        deterministic_reasons=tuple(state.shadow.reasons or []),
+        deterministic_policy_hits=tuple(state.shadow.policy_hits or []),
+        case_context_summary=None,
+        customer_profile={
+            "tenant_id": state.tenant_id or "",
+            "retailer_id": state.event.retailer_id or "",
+        },
+    )
+    outcome = s.evaluate(
+        tenant_id=state.tenant_id or "default",
+        request=request,
+        deterministic=state.shadow,
+        financial_impact_usd=impact,
+    )
+    if outcome.verdict is None:
+        return  # Gating skipped or provider failed; SLI counters
+                # already record the skip.
+
+    # Stamp the verdict on the existing ComplianceDecision regardless
+    # of phase — telemetry is always-on per ADR-039 §6.1.
+    new_status = combine_verdicts(
+        deterministic=state.shadow,
+        llm_verdict=outcome.verdict,
+        financial_impact_usd=impact,
+        bundle=s.bundle,
+    )
+    update: Dict[str, Any] = {"llm_shadow_verdict": outcome.verdict}
+    # Add LLM-sourced reasons / policy_concerns when the combiner
+    # changes the verdict — Pillar §4.5 requires the human reviewer
+    # to see WHY the case was downgraded.
+    if new_status != state.shadow.status:
+        update["status"] = new_status
+        update["reasons"] = list(state.shadow.reasons or []) + [
+            f"LLM_SHADOW: {outcome.verdict.reason}",
+        ]
+        update["policy_hits"] = list(state.shadow.policy_hits or []) + [
+            f"LLM_SHADOW:{c}" for c in outcome.verdict.policy_concerns
+        ]
+    state.shadow = state.shadow.model_copy(update=update)
+
+    # Append an LLMCallTrace entry tagged task='shadow_llm' so
+    # the existing per-call telemetry pipeline picks up the
+    # invocation. The provider doesn't expose a real trace today
+    # (StubLLMShadowProvider) so we synthesise a minimal one.
+    from contracts.models import LLMCallTrace
+
+    state.llm_call_traces.append(
+        LLMCallTrace(
+            task="shadow_llm",
+            provider="stub",
+            model_id=outcome.verdict.model_id,
+            request_id=outcome.verdict.request_id,
+            input_tokens=0,
+            output_tokens=0,
+            latency_ms=outcome.verdict.latency_ms,
+            cost_usd_estimate=outcome.verdict.cost_usd_estimate,
+        )
+    )
+
+
 def shadow_audit(state: GraphState) -> GraphState:
     entered_at = _now_iso()
     # Per-task backend selection: shadow defaults to deterministic in
@@ -409,6 +589,12 @@ def shadow_audit(state: GraphState) -> GraphState:
     shadow = ComplianceShadow(backend=backend)
     state.shadow = shadow.audit(state)
     _drain_llm_trace(state, backend)
+
+    # ADR-039 X.1 — observe-only L2 LLM Shadow second opinion. Runs
+    # after the deterministic L1 gate has produced its verdict.
+    # Stamps `state.shadow.llm_shadow_verdict` for telemetry; never
+    # changes the verdict itself in X.1.
+    _invoke_l2_shadow_observe_only(state)
 
     # Use the formal enforcement contract from Phase 2.
     enforcement = shadow.enforce(state.shadow)

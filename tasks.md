@@ -1776,9 +1776,22 @@ gates still pending (see "Pending" subsection at the bottom).
       `tenant_id` per ADR-038 §5.8), `extract_attachment()`,
       `fingerprint_for_template()`, `attachment_ref_from_metadata()`.
 - [x] `tests/test_extract_attachment.py` — 15 tests.
-- [ ] **Pending:** real multimodal model wired (procurement —
-      Claude vision vs Azure Document Intelligence vs hybrid;
-      ADR-038 §11.2 open question).
+- [x] Real multimodal extractor wired (procurement closed:
+      **Azure** for both LLM and Document Intelligence).
+      `agents/primitives/extract_providers.py` ships:
+      * `AzureDocumentIntelligenceProvider` — primary; reads
+        endpoint / key / model from `AZURE_DI_*` env vars; calls
+        `begin_analyze_document` and translates key/value pairs
+        and `documents.fields` into `List[ExtractedField]`.
+      * `ChandraOCRProvider` — free fallback (linkinrustle/OCR;
+        a Chandra 2 fork). Lazy import keeps PyTorch /
+        Transformers / vLLM out of the default test runtime.
+      * `select_multimodal_provider()` factory keyed off
+        `ASOE_OCR_PRIMARY` (`azure_di` / `chandra` / `stub`;
+        default `stub` for tests).
+      * 9 tests under `tests/test_azure_providers.py`
+        (TestAzureDocumentIntelligenceProvider +
+        TestChandraOCRProvider + TestSelectMultimodalProvider).
 
 ### 27.5 Phase H.5 — Case Agent loop + tool registry (primitive only)
 - [x] `agents/budget.py` — `CaseBudget.for_tier(N)` with
@@ -1822,17 +1835,47 @@ gates still pending (see "Pending" subsection at the bottom).
       circuit, tool-trace persistence, L2 Shadow invocation +
       RED short-circuit, and the routing predicate's safe-default
       semantics.
-- [ ] **Pending: deterministic graph hot-path replacement.** The
-      harness is in place and the routing predicate is wired but
-      `should_route_to_case_agent` returns `False` unconditionally
-      until Compliance ratifies (ADR-038 §H.5 + ADR-039 §6.1
-      workshop gates). The flag flip is a config-only change in
-      the live deployment.
-- [ ] **Pending: SQL-backed concurrency lock + replay log.** The
-      in-memory `CaseLockManager` and `ToolCallReplayLog`
-      faithfully model the eventual SQL behaviour
-      (`SELECT FOR UPDATE NOWAIT` + a `case_events` table) but
-      the persistence migration ships separately.
+- [x] Routing dispatch wired (Compliance ratified post-merge).
+      `api/routes/exceptions.py::_resolve_state` is the single
+      dispatch point: `should_route_to_case_agent(event,
+      enabled=_case_agent_enabled())` selects between the
+      deterministic graph and `_resolve_via_case_agent`. The
+      agent path runs L1 deterministic Shadow first
+      (CLAUDE.md §4 — never bypassed), opens / attaches the
+      case via `case_resolver`, hands off to
+      `agents.harness.run_agent_step`, and maps the agent's
+      outcome onto `state.final_status`. Default off via
+      `ASOE_CASE_AGENT_ENABLED`; flip to `1` (or `true` / `yes`)
+      to enable. **Live default stays off until the Azure
+      AgentLLMProvider lands in Step 7** — the StubAgentLLMProvider
+      is a placeholder.
+- [x] `tests/test_resolve_dispatch.py` — 15 tests covering env-
+      var matrix, predicate restriction (only EMAIL_ORDER_ENTRY_REQUEST
+      routes), L1 Shadow on the agent path, tier graduation as
+      the discriminator (harness graduates T2 → T3; graph leaves
+      at T2).
+- [x] SQL-backed concurrency lock + replay log shipped.
+      `db/migrations/V012__case_events.sql` (replay log table
+      with case-time / tenant-time / per-tool indexes) and
+      `db/migrations/V013__case_locks.sql` (lightweight mutex
+      via INSERT-with-UNIQUE-conflict; TTL-based janitor sweep).
+      `db/repository.py::CaseEventRepository` and
+      `CaseLockRepository` provide the persistence API.
+      `agents/harness.py::DatabaseBackedToolCallReplayLog` and
+      `DatabaseBackedCaseLockManager` adapters expose the same
+      surface as the in-memory primitives — `run_agent_step`
+      runs unchanged against either backend.
+      `_select_replay_log()` / `_select_lock_manager()` factories
+      pick DB-backed when `DATABASE_URL` is set, else in-memory.
+      Postgres (V009..V013) and SQLite paths both wired through
+      `db/migrations/runner.py`.
+- [x] `tests/test_harness_sql_backed.py` — 17 tests covering
+      `CaseEventRepository` (record / list / tenant isolation /
+      ordering), `CaseLockRepository` (UNIQUE conflict / release
+      idempotency / cross-tenant PK collision /
+      `sweep_expired` janitor / auto-override of stale entries),
+      adapter surface compatibility, and `DATABASE_URL` factory
+      selection.
 
 ### 27.6 Phase H.6 — UI: `/cases` surface (asoe-ui)
 - [x] **Companion repo** — see `asoe-ui/tasks.md` Phase 27.6
@@ -1894,22 +1937,51 @@ gates still pending (see "Pending" subsection at the bottom).
 - [x] `tests/test_run_backfill_script.py` — 9 tests covering
       pass selection, idempotency, dry-run, tier-map loading,
       and arg validation.
-- [ ] **Pending: per-event-type compaction templates.** Only
-      `__general__.template.md` exists. ADR-038 §11.2 open
-      question (Compliance + domain SME).
-- [ ] **Pending: agent loop / harness wire-up of
-      `apply_compaction_if_needed`.** The helper exists but
-      the L4 harness / Case Agent loop that should call it on
-      every step boundary is the Thread 4 work (Phase H.5
-      agent dormant).
-- [ ] **Pending: four-eyes / cosign / override flows migrated
-      to operate on the case lifecycle** (rather than the
-      exception lifecycle in isolation, as ADR-029 currently
-      does). Phase H.7 closeout requirement.
-- [ ] **Pending: scheduled-job wrapping of
-      `scripts/run_backfill.py`.** The CLI is shipped; ops
-      still has to register it as a cron / k8s CronJob
-      (deployment-side, not code-side).
+- [x] Per-event-type compaction templates shipped (ADR-038
+      §11.2 closed). Seven new templates under
+      `knowledge/compaction/`: `agent_step` / `tool_call` /
+      `shadow_decision` / `override` / `escalation` /
+      `case_open` / `sla_breach` / `compaction` (recursive).
+      Each ships YAML frontmatter listing the per-event-type
+      `audit_keys` (canonical render order) plus markdown
+      narrative for Compliance reviewers. The runtime in
+      `agents/compaction.py::_summarise_event_line` consults the
+      per-event-type list when present and falls back to the
+      default ADR-038 §6.4 vocabulary otherwise. Replay-
+      divergence is preserved across template rotations because
+      keys appear in canonical order. 7 new tests in
+      `tests/test_compaction_sla_backfill.py`.
+- [x] Agent-loop / harness wire-up of `apply_compaction_if_needed`
+      shipped in Thread 4 (`89c2f02`).
+      `agents/harness.py::run_agent_step` calls it after every
+      step (`harness.py:461`); the case's working_memory_summary
+      + last_compaction_at fields are updated in the case store
+      whenever the §7.4 binding triggers fire.
+- [x] Four-eyes / cosign migration to the case lifecycle
+      **shipped (flag-gated, X.0)** under
+      `docs/adr/ADR-040-cosign-on-case-lifecycle.md` (Proposed).
+      `OrderCase.pending_override: Optional[CasePendingOverride]`
+      contract field; `CaseStore.set_pending_override` /
+      `clear_pending_override` helpers; new endpoints
+      `POST /api/v1/cases/{id}/override` and
+      `POST /api/v1/cases/{id}/override/cosign` behind
+      `ASOE_CASE_COSIGN_ENABLED` (default off — both endpoints
+      404 until the env flip). Same SoD invariants the
+      exception-level flow uses (initiator ≠ cosigner;
+      manager+ role; notes mandatory). The exception-level
+      cosign flow at `api/routes/exceptions.py` is unchanged —
+      this is additive. 11 tests in
+      `tests/test_routes_cases_cosign.py`.
+- [x] Scheduled-job wrapping of `scripts/run_backfill.py`.
+      `k8s/core/cronjob-backfill.yaml` registers the Pass 1
+      runner as a weekly k8s CronJob (Sun 02:00 UTC; 30-min
+      hard cap; concurrencyPolicy: Forbid). Reuses the same
+      `asoe-core` image / configMap / Workload-Identity service
+      account as the API Deployment — no separate build needed.
+      Pass 2 (correlation merge) is intentionally NOT scheduled
+      and runs as a one-off via
+      `kubectl create job --from=cronjob/asoe-backfill-orphan-cases`
+      with `--pass 2` (documented in the manifest header).
 
 ### 27.8 ADR-039 — L2 LLM Shadow (X.1 primitive shipped; harness wire-up pending)
 The X.1 observe-only **primitive** is now in place. The harness
@@ -1953,18 +2025,75 @@ together). Verdicts produced today are not yet attached to any
       behaviour, cache hits + tenant isolation + TTL, out-of-vocab
       concern dropping, all three provider failure modes, and SLI
       counters.
-- [ ] **Pending: L4 harness `shadow_audit` wire-up.** The primitive
-      is in place but `orchestration/nodes.py::shadow_audit` still
-      calls only the L1 deterministic Shadow. ADR-039 §6.1 X.1
-      observe-only invocation moves to Thread 4 (agent + harness
-      extensions land together).
-- [ ] **Pending §8.1 procurement gates** (model choice — Haiku vs
-      local Ollama vs hybrid; first earned anchor examples).
+- [x] L4 harness `shadow_audit` wire-up (Compliance ratified post-
+      merge). `orchestration/nodes.py::shadow_audit` now invokes
+      the L2 Shadow after the deterministic gate; verdict stamped
+      onto `state.shadow.llm_shadow_verdict`; `LLMCallTrace`
+      task='shadow_llm' appended. **X.1 invariant preserved:** the
+      L2 verdict does NOT move `state.shadow.status` or
+      `state.final_status` — that's X.2+ behaviour and lands
+      behind a separate gate. Kill switch:
+      `ASOE_SHADOW_LLM_DISABLED=1`. Tenant id now plumbed onto
+      `GraphState.tenant_id` (load-bearing for ADR-038 §5.8 /
+      ADR-039 §5.5 cache key isolation).
+- [x] `tests/test_shadow_audit_l2_wireup.py` — 10 tests covering
+      RED short-circuit, YELLOW always-invokes, GREEN floor
+      gating, observe-only status invariant, LLMCallTrace
+      append, kill-switch, tenant propagation to cache.
+- [x] §8.1 procurement gate closed (post-merge decision: **Azure
+      OpenAI** for L2 Shadow; deployment + version chosen by ops
+      via env). `compliance/shadow_llm_azure.py::AzureOpenAIShadowProvider`
+      uses Azure OpenAI's JSON-schema response_format to enforce
+      the constrained output server-side; the schema deliberately
+      omits `DISAGREE_UPGRADE` so asymmetric authority is
+      structural at the provider boundary too. Failure-mode
+      mapping: 400 → `ValueError` → SKIP_VALIDATION_ERROR; 5xx /
+      connection → SKIP_PROVIDER_UNAVAILABLE; TimeoutError →
+      SKIP_PROVIDER_TIMEOUT. `select_shadow_provider()` factory
+      picks Azure when `AZURE_OPENAI_SHADOW_DEPLOYMENT` is set,
+      else stub (default for tests). 11 tests under
+      `tests/test_azure_providers.py`.
+- [x] **Anchor-example accrual mechanism shipped.**
+      `scripts/earn_anchor_examples.py` walks the audit-bearing
+      record store, identifies high-signal disagreement traces
+      (`reverse_disagreement` > `sustained_disagreement` >
+      `borderline_abstain`), and emits a JSON artifact for
+      Compliance review. Operators run weekly during X.1; the
+      first 5–10 examples Compliance lands populate
+      `knowledge/shadow_llm/anchor_examples/<slug>.example.json`
+      and the bundle metadata.yaml `anchor_examples:` list. The
+      script does NOT mutate the bundle directly — that's the
+      Compliance reviewer's prerogative. 10 tests in
+      `tests/test_earn_anchor_examples_script.py` (signal
+      classifier, candidate extraction, CLI artifact, empty-store
+      edge case, invalid-date arg validation).
+- [x] X.2+ combiner code path **shipped (flag-gated)**.
+      `compliance/shadow_llm.py::combine_verdicts` encodes the
+      ADR-039 §4.1 truth table; `orchestration/nodes.py::_invoke_l2_shadow_observe_only`
+      now consults it after stamping the verdict. **Default
+      behaviour is unchanged** because
+      `knowledge/shadow_llm/metadata.yaml::rollout.financial_impact_threshold_usd`
+      ships at `null` (X.1 observe-only). The X.2 ratification is
+      a one-line config edit — set the threshold to `10000` for
+      X.2 high-impact-only, `500` for X.3 broadened gating, with
+      no code redeploy. Reasons + policy_concerns are surfaced
+      onto `state.shadow.reasons` / `policy_hits` with the
+      `LLM_SHADOW:` prefix per §4.5 so a reviewer sees WHY the
+      case was downgraded. 21 tests in
+      `tests/test_shadow_llm_combiner.py` (truth-table + asymmetric-
+      authority invariants); 2 tests in
+      `tests/test_shadow_audit_l2_wireup.py::TestX2Downgrade`
+      lock the orchestration-side wire-up (high-impact GREEN
+      downgrades; below-threshold GREEN preserves).
 - [ ] **Pending compliance ratification gates** §4.1 (combination
-      rule) and §6 (phased rollout) — required before any X.2
-      verdict-affecting deployment.
-- [ ] X.2 / X.3 / X.4 — all blocked on X.1 telemetry collection +
-      the compliance ratification gates above.
+      rule) and §6 (phased rollout) — code is ready; the
+      ratification artifact is the bundle metadata.yaml edit
+      flipping `financial_impact_threshold_usd` from null →
+      10000 (X.2) or 500 (X.3). No code change required at
+      flip time.
+- [ ] X.2 / X.3 / X.4 deployment — all blocked on X.1 telemetry
+      collection + the compliance ratification above. X.4 (extended
+      cross-check) remains a separate code-path follow-up.
 
 ### 27.9 Phase 27 follow-ups (deferred from the merged PR)
 - [x] **Spec relocation** —
@@ -1979,12 +2108,43 @@ together). Verdicts produced today are not yet attached to any
       ship `anchor_examples: []` per §5.5 ("earned, not
       authored"). The first earnings cycle starts when Phase
       H.5 routes real traffic through the agent.
-- [ ] **`MANUAL_ORDER_INTAKE` rename of `EMAIL_ORDER_ENTRY`** —
-      optional channel-neutral cleanup (§3.2 binding); deferred
-      until Phase H.5 wire-up.
-- [ ] **`architecture_v5.md` draft** — the rollout plan
-      promises v5 once ADR-038/039 are *Accepted* and Phase
-      H.1 has shipped. Code is ahead but ratification gates
-      above are still pending; drafting v5 before ratification
-      would cement Proposed-status decisions. Defer until the
-      compliance workshops complete.
+- [x] **`MANUAL_ORDER_INTAKE` rename of `EMAIL_ORDER_ENTRY`** —
+      §3.2 channel-neutral cleanup. The Intent enum value renamed
+      across the backend (~16 files) and the asoe-ui surface
+      (~9 files). The recipe filename / class
+      (`EmailOrderEntryRecipe`), event_type
+      (`EMAIL_ORDER_ENTRY_REQUEST`), and `*AnalysisData` classes
+      all stay — those describe email-channel-specific behaviour,
+      whereas `MANUAL_ORDER_INTAKE` is the abstract semantic
+      category (covers email + phone + fax). Skill-bundle
+      directory `knowledge/skills/email-order-entry/` retained
+      in the original pass (rename is a separate ~10-file
+      follow-up); the bundle's metadata.yaml `intents` list was
+      updated in this pass. UI generated types regenerated via
+      `npm run generate-types`. Full backend regression + UI
+      vitest + typecheck green.
+- [x] Bundle directory rename complete:
+      `knowledge/skills/email-order-entry/` →
+      `knowledge/skills/manual-order-intake/` via `git mv`
+      (history preserved). Updates: `skills/loader.py` event-
+      type matcher swap, `metadata.yaml::skill_name` flip,
+      bundle path references in
+      `recipes/EmailOrderEntryRecipe.py`, `contracts/policy.py`,
+      `api/routes/exceptions.py`, `tests/test_e2e_email_order_entry.py`,
+      `tests/test_case_agent.py`, `tests/test_knowledge_bundle.py`,
+      `tests/test_harness.py`, `docs/plans/case-centric-rollout.md`,
+      and `EXPECTED_BUNDLES` in the bundle-integrity tests.
+      ADR-034 / ADR-038 documents kept the historical path
+      (those describe decisions at a point in time). 180/180
+      affected tests + full pytest regression green.
+- [x] **`architecture_v5.md` draft** shipped as **Proposed**.
+      Documents the five-layer architecture (L0 Knowledge → L4
+      Harness), `OrderCase` parent entity, V012 / V013 case-
+      events / case-locks tables, the L2 LLM Shadow primitive +
+      X.2+ combiner truth table (flag-gated), ADR-040 case-level
+      cosign (flag-gated), `manual-order-intake` channel-neutral
+      naming, and the asoe-ui `/cases` primary surface. v5
+      remains Proposed until Compliance ratifies ADR-038 §6 +
+      §8.5, ADR-039 §4.1 + §6, and ADR-040 §2 + §2.2. Once
+      ratified the X.2 / X.3 / X.4 / case-cosign-on flips are
+      ConfigMap edits with no code redeploy.

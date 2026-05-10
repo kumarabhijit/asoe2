@@ -153,3 +153,180 @@ async def get_case(
             status_code=404,
         )
     return case.model_dump(mode="json")
+
+
+# ---------------------------------------------------------------------------
+# ADR-040 X.0 — case-level four-eyes / cosign (flag-gated, default off)
+# ---------------------------------------------------------------------------
+#
+# These two endpoints land the case-level cosign control behind
+# `ASOE_CASE_COSIGN_ENABLED`. With the flag off, both endpoints
+# return 404 — the route table doesn't even register them. With the
+# flag on, the endpoints behave per ADR-040 §2 truth table.
+#
+# X.1 ratification = config flip in the live ConfigMap. No code
+# change needed at flip time.
+
+import os as _os
+from datetime import datetime, timezone as _tz
+from typing import List as _List
+
+from pydantic import BaseModel, Field, ConfigDict
+
+
+def _case_cosign_enabled() -> bool:
+    """ADR-040 §3.1 X.0 toggle. Truthy values: 1 / true / yes."""
+    return _os.getenv("ASOE_CASE_COSIGN_ENABLED", "").strip().lower() in (
+        "1", "true", "yes",
+    )
+
+
+class CaseOverrideInitRequest(BaseModel):
+    """POST /api/v1/cases/{id}/override — initiate a case-level
+    override that may require a cosigner."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    pending_action: str
+    pending_reason_tag: Optional[str] = None
+    aggregate_financial_impact_usd: float = 0.0
+    child_exception_ids: _List[str] = Field(default_factory=list)
+    notes: Optional[str] = None
+
+
+class CaseCosignRequest(BaseModel):
+    """POST /api/v1/cases/{id}/override/cosign — second-reviewer
+    decision."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    approve: bool
+    notes: str
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(_tz.utc).isoformat()
+
+
+# ADR-040 §2.1 — same threshold as the exception-level flow.
+HIGH_VALUE_OVERRIDE_THRESHOLD_USD = 10_000.0
+
+
+@router.post(
+    "/cases/{case_id}/override",
+    dependencies=[Depends(require_role("manager", "admin"))],
+)
+async def initiate_case_override(
+    case_id: str,
+    req: CaseOverrideInitRequest,
+    tenant_id: str = Depends(get_tenant_id),
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> dict:
+    """Initiate a case-level override. ADR-040 §2.1: above the
+    threshold the case enters PENDING_COSIGN with a recorded
+    `pending_override`; below the threshold it would be applied
+    immediately, but the immediate-apply path is X.2 work — for
+    X.0 the endpoint always parks the override in PENDING_COSIGN.
+    """
+    if not _case_cosign_enabled():
+        raise ASOEError(
+            code="NOT_FOUND",
+            message="Case-level cosign is not enabled in this deployment.",
+            status_code=404,
+        )
+    case = case_store.get(case_id)
+    if case is None or case.tenant_id != tenant_id:
+        raise ASOEError(
+            code="NOT_FOUND",
+            message=f"Case {case_id} not found.",
+            status_code=404,
+        )
+    from contracts.models import CasePendingOverride
+
+    pending = CasePendingOverride(
+        initiator=user.sub,
+        initiated_at=_utc_now_iso(),
+        pending_action=req.pending_action,
+        pending_reason_tag=req.pending_reason_tag,
+        aggregate_financial_impact_usd=req.aggregate_financial_impact_usd,
+        child_exception_ids=list(req.child_exception_ids),
+        notes=req.notes,
+    )
+    try:
+        updated = case_store.set_pending_override(case_id, pending)
+    except ValueError as exc:
+        raise ASOEError(
+            code="CONFLICT",
+            message=str(exc),
+            status_code=409,
+        ) from exc
+    return updated.model_dump(mode="json")
+
+
+@router.post(
+    "/cases/{case_id}/override/cosign",
+    dependencies=[Depends(require_role("manager", "admin"))],
+)
+async def cosign_case_override(
+    case_id: str,
+    req: CaseCosignRequest,
+    tenant_id: str = Depends(get_tenant_id),
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> dict:
+    """ADR-040 §2.2 — second-reviewer decision on a case-level
+    override.
+
+    Outcomes:
+      * `approve=True`  → clear `pending_override`, transition
+                          status → RESOLVED.
+      * `approve=False` → clear `pending_override`, restore status
+                          → OPEN_AGENT_PROCESSING.
+
+    SoD: cosigner must not be the initiator. Notes mandatory.
+    """
+    if not _case_cosign_enabled():
+        raise ASOEError(
+            code="NOT_FOUND",
+            message="Case-level cosign is not enabled in this deployment.",
+            status_code=404,
+        )
+    case = case_store.get(case_id)
+    if case is None or case.tenant_id != tenant_id:
+        raise ASOEError(
+            code="NOT_FOUND",
+            message=f"Case {case_id} not found.",
+            status_code=404,
+        )
+    if case.pending_override is None:
+        raise ASOEError(
+            code="NO_PENDING_OVERRIDE",
+            message=(
+                f"Case {case_id} carries no pending_override; "
+                "nothing to cosign."
+            ),
+            status_code=409,
+        )
+    if case.pending_override.initiator == user.sub:
+        raise ASOEError(
+            code="SOD_VIOLATION",
+            message=(
+                "Segregation of duties: the user who initiated the "
+                "case-level override cannot cosign their own action."
+            ),
+            status_code=403,
+        )
+    if not req.notes or not req.notes.strip():
+        raise ASOEError(
+            code="NOTES_REQUIRED",
+            message="Cosign notes are mandatory (SOX audit requirement).",
+            status_code=422,
+        )
+    if req.approve:
+        case_store.clear_pending_override(case_id)
+        return case_store.update(case_id, status="RESOLVED").model_dump(
+            mode="json",
+        )
+    case_store.clear_pending_override(case_id)
+    return case_store.update(
+        case_id, status="OPEN_AGENT_PROCESSING",
+    ).model_dump(mode="json")

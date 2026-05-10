@@ -154,6 +154,110 @@ def _run_graph_safe(state: GraphState, *, explain_mode: bool | None = None) -> G
     return run_graph(state, explain_mode=explain_mode)
 
 
+def _case_agent_enabled() -> bool:
+    """ADR-038 Phase H.5 routing flag (Compliance ratified post-#120).
+
+    Truthy values (case-insensitive): ``1`` / ``true`` / ``yes``.
+    Default off because the live agent path requires a real
+    `AgentLLMProvider` (Azure wire-up still pending — see
+    Step 7); flipping the flag with the stub provider is fine for
+    sandbox / soak runs and is what tests exercise.
+    """
+    import os as _os
+    return _os.getenv("ASOE_CASE_AGENT_ENABLED", "").strip().lower() in (
+        "1", "true", "yes",
+    )
+
+
+def _resolve_via_case_agent(
+    state: GraphState, tenant_id: str,
+) -> GraphState:
+    """ADR-038 Phase H.5 dispatch path for case-routed events.
+
+    Runs the deterministic L1 Shadow first (Compliance Shadow is
+    mandatory per CLAUDE.md §4 — the agent path does NOT bypass
+    it), opens / attaches an OrderCase, then invokes the L4
+    harness (`agents.harness.run_agent_step`). The agent's
+    outcome is mapped onto `state.final_status` so the existing
+    persistence + response flow can run unchanged.
+
+    The function only runs when ``should_route_to_case_agent``
+    returns True; the predicate restricts the routable set to
+    ``EMAIL_ORDER_ENTRY_REQUEST`` for the cutover phase.
+    """
+    from agents.case_agent import StubAgentLLMProvider
+    from agents.case_tools import build_default_registry
+    from agents.harness import run_agent_step
+    from api.case_resolver import resolve_or_open_case
+    from compliance.shadow import ComplianceShadow
+    from constraints import get_constrained_backend
+    from contracts.models import TerminalStatus
+
+    # 1. Deterministic L1 Shadow — load-bearing per CLAUDE.md §4.
+    backend = get_constrained_backend()
+    shadow = ComplianceShadow(backend=backend)
+    state.shadow = shadow.audit(state)
+    enforcement = shadow.enforce(state.shadow)
+    if enforcement.action == "BLOCK":
+        state.final_status = TerminalStatus.BLOCKED
+        state.explanation = enforcement.explanation
+        return state
+
+    # 2. Lookup-or-create the case for this event.
+    case, _opened = resolve_or_open_case(tenant_id, state.event)
+
+    # 3. Estimate financial impact for the harness's L2 Shadow gate.
+    impact = abs(
+        (state.event.po_price - state.event.sap_base_price)
+        * state.event.line_count
+    )
+
+    # 4. Hand off to the L4 harness. StubAgentLLMProvider is the
+    #    placeholder until the Azure-backed provider lands; the
+    #    routing flag stays disabled in production until then.
+    result = run_agent_step(
+        case=case,
+        skill_name="email-order-entry",
+        current_event=state.event,
+        tool_registry=build_default_registry(),
+        llm_provider=StubAgentLLMProvider(script=[]),
+        is_clean_event=False,
+        deterministic_decision=state.shadow,
+        financial_impact_usd=impact,
+    )
+
+    # 5. Map the agent outcome → terminal status. The agent's
+    #    own outcome vocabulary is richer than TerminalStatus;
+    #    the mapping below is deliberately conservative — anything
+    #    we cannot turn into a clean terminal lands in
+    #    MANUAL_REVIEW_REQUIRED so a human looks at it.
+    outcome = result.agent_result.outcome
+    if outcome == "RESOLVED":
+        state.final_status = TerminalStatus.RESOLVED
+    elif outcome == "ESCALATED":
+        state.final_status = TerminalStatus.MANUAL_REVIEW_REQUIRED
+        state.explanation = result.agent_result.halt_reason
+    elif outcome in ("AWAITING_BUYER", "AWAITING_ERP"):
+        state.final_status = TerminalStatus.MANUAL_REVIEW_REQUIRED
+        state.explanation = (
+            f"Case-agent halted in {outcome}; awaiting external response."
+        )
+    else:  # BUDGET_EXHAUSTED / ERROR
+        state.final_status = TerminalStatus.FAIL_TO_HUMAN
+        state.explanation = result.agent_result.halt_reason or outcome
+    return state
+
+
+def _resolve_state(state: GraphState, tenant_id: str) -> GraphState:
+    """Single dispatch point: route via case agent when the
+    predicate fires, otherwise the deterministic graph."""
+    from agents.harness import should_route_to_case_agent
+
+    if should_route_to_case_agent(state.event, enabled=_case_agent_enabled()):
+        return _resolve_via_case_agent(state, tenant_id)
+    return _run_graph_safe(state)
+
+
 def _state_to_resolve_response(
     exception_id: str, state: GraphState,
 ) -> ResolveResponse:
@@ -526,10 +630,10 @@ async def resolve(
 ) -> ResolveResponse:
     trace_id = _get_trace_id(request)
     event = _build_order_event(req)
-    state = GraphState(event=event)
+    state = GraphState(event=event, tenant_id=tenant_id)
 
     try:
-        final_state = _run_graph_safe(state)
+        final_state = _resolve_state(state, tenant_id)
     except Exception as exc:
         logger.error("Graph execution failed: %s", exc)
         raise ASOEError(
@@ -561,10 +665,10 @@ async def resolve_async(
 ) -> AsyncResolveResponse:
     task_id = str(uuid4())
     event = _build_order_event(req)
-    state = GraphState(event=event)
+    state = GraphState(event=event, tenant_id=tenant_id)
 
     try:
-        final_state = _run_graph_safe(state)
+        final_state = _resolve_state(state, tenant_id)
     except Exception as exc:
         logger.error("Async graph execution failed: %s", exc)
         raise ASOEError(
@@ -595,7 +699,7 @@ async def resolve_explain(
     tenant_id: str = Depends(get_tenant_id),
 ) -> ResolveResponse:
     event = _build_order_event(req)
-    state = GraphState(event=event)
+    state = GraphState(event=event, tenant_id=tenant_id)
 
     try:
         final_state = _run_graph_safe(state, explain_mode=True)
@@ -1332,9 +1436,9 @@ async def reanalyze_exception(
     prior_trace_data = exception_store.get_trace(exception_id) or {}
     prior_executed_nodes = list(prior_trace_data.get("executed_nodes") or [])
 
-    state = GraphState(event=event)
+    state = GraphState(event=event, tenant_id=tenant_id)
     try:
-        final_state = _run_graph_safe(state)
+        final_state = _resolve_state(state, tenant_id)
     except Exception as exc:
         logger.error("Reanalyze graph execution failed: %s", exc)
         raise ASOEError(

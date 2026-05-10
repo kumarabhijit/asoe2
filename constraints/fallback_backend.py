@@ -77,10 +77,10 @@ class DeterministicFallbackBackend:
                 rationale="delivery-delay event type",
             )
         if state.event.event_type in (
-            "EMAIL_ORDER_ENTRY_REQUEST", "EMAIL_ORDER", "EMAIL_ORDER_ENTRY",
+            "EMAIL_ORDER_ENTRY_REQUEST", "EMAIL_ORDER", "MANUAL_ORDER_INTAKE",
         ):
             return IntentDecision(
-                intent="EMAIL_ORDER_ENTRY",
+                intent="MANUAL_ORDER_INTAKE",
                 confidence=0.95,
                 rationale="email-channel order intake event type",
             )
@@ -100,7 +100,7 @@ class DeterministicFallbackBackend:
             Intent.MIN_ORDER_QTY: "MOQRoundUpRecipe.py",
             Intent.PALLET_CONFIG: "PalletAlignmentRecipe.py",
             Intent.DELIVERY_DELAY: "DeliveryDelayResolutionRecipe.py",
-            Intent.EMAIL_ORDER_ENTRY: "EmailOrderEntryRecipe.py",
+            Intent.MANUAL_ORDER_INTAKE: "EmailOrderEntryRecipe.py",
             Intent.MASS_PRICING_ERROR: None,
         }
         recipe_name = mapping.get(state.intent)

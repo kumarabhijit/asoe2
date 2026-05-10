@@ -570,6 +570,76 @@ class ShadowLLM:
 
 
 # ---------------------------------------------------------------------------
+# Combiner — ADR-039 §4.1 truth table (X.2+ behaviour, flag-gated)
+# ---------------------------------------------------------------------------
+#
+# X.1 is observe-only: `state.shadow.llm_shadow_verdict` is stamped, but
+# `state.shadow.status` never moves. The truth table below is what flips
+# on at X.2+ ratification — at that point a deterministic-GREEN +
+# `DISAGREE_DOWNGRADE` from L2 starts producing a final-YELLOW for the
+# subset of records meeting the financial-impact threshold.
+#
+# Ratification = bundle config flip (set
+# `rollout.financial_impact_threshold_usd` to a non-null value in
+# `knowledge/shadow_llm/metadata.yaml`). No code change required at flip
+# time. Default `None` keeps X.1 observe-only.
+#
+# Truth table (per ADR-039 §4.1):
+#
+#   L1 deterministic | L2 LLM action       | Combined verdict
+#   ─────────────────┼─────────────────────┼──────────────────
+#   GREEN            | AGREE / ABSTAIN     | GREEN
+#   GREEN            | DISAGREE_DOWNGRADE  | YELLOW (X.2+ only)
+#   YELLOW           | (any)               | YELLOW (no further downgrade)
+#   RED              | (NEVER INVOKED)     | RED
+#
+# Asymmetric authority: L2 can DOWNGRADE only. The combiner cannot
+# produce a verdict more permissive than the L1 verdict.
+
+
+def combine_verdicts(
+    *,
+    deterministic: ComplianceDecision,
+    llm_verdict: Optional[ShadowLLMVerdict],
+    financial_impact_usd: float,
+    bundle: ShadowLLMBundle,
+) -> ShadowStatus:
+    """Apply ADR-039 §4.1 truth table.
+
+    Returns the final verdict status. When the rollout config
+    keeps `financial_impact_threshold_usd` at None (X.1 observe-
+    only), the deterministic verdict passes through unchanged
+    regardless of what L2 said.
+    """
+    base = deterministic.status
+    threshold = bundle.financial_impact_threshold_usd
+    # X.1 observe-only — never let L2 move the verdict.
+    if threshold is None:
+        return base
+    # L1 RED short-circuits per §5.2 (L2 is never invoked); the
+    # caller passes whatever it has, but defence-in-depth here.
+    if base == ShadowStatus.RED:
+        return ShadowStatus.RED
+    # No L2 verdict (gating skipped, cache miss + provider down,
+    # validation error) → deterministic passes through.
+    if llm_verdict is None:
+        return base
+    # YELLOW already → no further downgrade path; combiner is a
+    # no-op except for telemetry (the verdict is still recorded).
+    if base == ShadowStatus.YELLOW:
+        return ShadowStatus.YELLOW
+    # base == GREEN below.
+    if (
+        llm_verdict.action == "DISAGREE_DOWNGRADE"
+        and financial_impact_usd >= threshold
+    ):
+        return ShadowStatus.YELLOW
+    # AGREE / ABSTAIN / DISAGREE_DOWNGRADE-but-below-threshold
+    # → deterministic verdict stands.
+    return base
+
+
+# ---------------------------------------------------------------------------
 # Module-level helpers
 # ---------------------------------------------------------------------------
 

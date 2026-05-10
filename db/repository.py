@@ -765,3 +765,157 @@ class TenantConfigRepository:
             if v is not None and not isinstance(v, str):
                 r[ts_col] = v.isoformat() if hasattr(v, "isoformat") else str(v)
         return r
+
+
+# ---------------------------------------------------------------------------
+# Case Event Repository — ADR-038 Phase H.5 replay log (V012)
+# ---------------------------------------------------------------------------
+
+
+class CaseEventRepository:
+    """Append-only persistence for `case_events`.
+
+    The agent's `(tool_call, tool_result)` pairs land here so audit
+    replay reads from a single canonical source. Schema mirrors
+    `agents.harness.ToolCallReplayEntry` field-for-field.
+    """
+
+    def __init__(self, adapter=None):
+        self._adapter = adapter or create_adapter()
+
+    def record(
+        self,
+        *,
+        event_id: str,
+        case_id: str,
+        tenant_id: str,
+        occurred_at: str,
+        tool_name: str,
+        tool_call: Dict[str, Any],
+        tool_result: Dict[str, Any],
+        outcome: str,
+    ) -> None:
+        with self._adapter.cursor(tenant_id) as cur:
+            cur.execute(
+                """INSERT INTO case_events
+                   (event_id, case_id, tenant_id, occurred_at,
+                    tool_name, tool_call, tool_result, outcome)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (event_id, case_id, tenant_id, occurred_at,
+                 tool_name, _json_dumps(tool_call),
+                 _json_dumps(tool_result), outcome),
+            )
+
+    def list_for_case(
+        self, case_id: str, tenant_id: str,
+    ) -> List[Dict[str, Any]]:
+        with self._adapter.cursor(tenant_id) as cur:
+            cur.execute(
+                """SELECT event_id, case_id, tenant_id, occurred_at,
+                          tool_name, tool_call, tool_result, outcome
+                   FROM case_events
+                   WHERE case_id = ? AND tenant_id = ?
+                   ORDER BY occurred_at ASC""",
+                (case_id, tenant_id),
+            )
+            rows = cur.fetchall()
+        return [self._to_event_dict(r) for r in rows]
+
+    _EVENT_COLUMNS = (
+        "event_id", "case_id", "tenant_id", "occurred_at",
+        "tool_name", "tool_call", "tool_result", "outcome",
+    )
+
+    def _to_event_dict(self, row) -> Dict[str, Any]:
+        r = _row_to_dict(row, self._EVENT_COLUMNS)
+        for json_col in ("tool_call", "tool_result"):
+            if isinstance(r.get(json_col), str):
+                r[json_col] = _json_loads(r[json_col]) or {}
+        return r
+
+
+# ---------------------------------------------------------------------------
+# Case Lock Repository — ADR-038 Phase H.5 cross-pod mutex (V013)
+# ---------------------------------------------------------------------------
+
+
+class CaseLockRepository:
+    """Cross-pod mutex via INSERT-with-UNIQUE-conflict on `case_locks`.
+
+    The acquire path INSERTs a row keyed on `case_id`; on a UNIQUE
+    constraint violation the lock is held. Release deletes the row.
+    Stale rows are cleaned by a separate janitor query
+    (`sweep_expired`) that ops can run on a schedule.
+    """
+
+    DEFAULT_TTL_SECONDS = 60  # bound by max harness step latency
+
+    def __init__(self, adapter=None):
+        self._adapter = adapter or create_adapter()
+
+    def try_acquire(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        acquired_by: Optional[str] = None,
+        ttl_seconds: int = DEFAULT_TTL_SECONDS,
+    ) -> bool:
+        """Atomically try to claim the lock. Returns True on
+        success; False when another holder has it (UNIQUE
+        violation on the PK)."""
+        from datetime import timedelta
+        now_dt = datetime.now(timezone.utc)
+        expires_at = (now_dt + timedelta(seconds=ttl_seconds)).isoformat()
+        # Sweep stale entries for THIS case first — avoids an
+        # ops-needed window when a process exited mid-step. The
+        # tenant_id predicate is mandatory (PR-tenant-isolation
+        # repo invariant) and a `case_locks.case_id` is globally
+        # unique (UUID) so the narrowing is also semantically correct.
+        try:
+            with self._adapter.cursor(tenant_id) as cur:
+                cur.execute(
+                    """DELETE FROM case_locks
+                       WHERE case_id = ? AND tenant_id = ?
+                         AND expires_at < ?""",
+                    (case_id, tenant_id, now_dt.isoformat()),
+                )
+                cur.execute(
+                    """INSERT INTO case_locks
+                       (case_id, tenant_id, acquired_at, acquired_by, expires_at)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (case_id, tenant_id, now_dt.isoformat(),
+                     acquired_by, expires_at),
+                )
+            return True
+        except Exception as exc:  # noqa: BLE001 — UNIQUE conflict
+            # Both psycopg2 IntegrityError and sqlite3.IntegrityError
+            # land here; we avoid driver-specific exception types
+            # at this layer.
+            msg = str(exc).lower()
+            if "unique" in msg or "duplicate" in msg or "integrity" in msg:
+                return False
+            raise
+
+    def release(self, case_id: str, tenant_id: str) -> None:
+        """Release the lock unconditionally. Idempotent — releasing
+        a non-existent lock is a no-op."""
+        with self._adapter.cursor(tenant_id) as cur:
+            cur.execute(
+                "DELETE FROM case_locks WHERE case_id = ? AND tenant_id = ?",
+                (case_id, tenant_id),
+            )
+
+    def sweep_expired(self, tenant_id: str) -> int:
+        """Janitor: drop every lock past its TTL for the tenant.
+        Returns the number of rows deleted (0 on backends that
+        don't expose `rowcount` reliably)."""
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with self._adapter.cursor(tenant_id) as cur:
+            cur.execute(
+                """DELETE FROM case_locks
+                   WHERE tenant_id = ? AND expires_at < ?""",
+                (tenant_id, now_iso),
+            )
+            count = cur.rowcount if hasattr(cur, "rowcount") else 0
+        return int(count or 0)

@@ -178,7 +178,7 @@ class TestConstrainedOutputs:
             "MASS_PRICING_ERROR", "DUPLICATE_PO",
             "PRICE_HOLD_RELEASE", "EDI_MISMATCH",
             "BACK_ORDER", "OVER_MAX", "MIN_ORDER_QTY",
-            "PALLET_CONFIG", "DELIVERY_DELAY", "EMAIL_ORDER_ENTRY", "UNKNOWN",
+            "PALLET_CONFIG", "DELIVERY_DELAY", "MANUAL_ORDER_INTAKE", "UNKNOWN",
         }
         assert allowed == expected
 

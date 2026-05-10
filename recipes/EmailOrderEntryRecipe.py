@@ -11,7 +11,7 @@ from __future__ import annotations
 # email-intelligence-agent + extraction gateways produce the envelope before the
 # graph runs.
 #
-# Reference spec: knowledge/skills/email-order-entry/specs/order_entry_spec.md (§3, §4, §5).
+# Reference spec: knowledge/skills/manual-order-intake/specs/order_entry_spec.md (§3, §4, §5).
 # Bucketed mapping: docs/adr/ADR-034-email-order-entry-skill.md.
 #
 # Inputs:

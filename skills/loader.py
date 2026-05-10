@@ -122,8 +122,8 @@ class SkillLoader:
         to the coarser event-type match.
         """
         upper = event_type.upper()
-        if "EMAIL_ORDER_ENTRY" in upper or "EMAIL_ORDER" in upper:
-            return self.load_by_name("email-order-entry_SKILL.md")
+        if "MANUAL_ORDER_INTAKE" in upper or "EMAIL_ORDER" in upper:
+            return self.load_by_name("manual-order-intake_SKILL.md")
         if "DUPLICATE" in upper:
             return self.load_by_name("duplicate-po_SKILL.md")
         # Check PRICE_HOLD before the broader PRICE/EDI_850 fork — the

@@ -34,7 +34,7 @@ EXPECTED_BUNDLES: list[str] = [
     "delivery-delay",
     "duplicate-po",
     "edi-mismatch",
-    "email-order-entry",
+    "manual-order-intake",
     "moq-round-up",
     "over-max-trim",
     "pallet-alignment",

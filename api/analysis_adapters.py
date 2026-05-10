@@ -1510,7 +1510,7 @@ INTENT_TO_RECIPE_NAME: Dict[str, str] = {
     "DUPLICATE_PO": "DuplicatePORecipe.py",
     "BACK_ORDER": "BackOrderResolutionRecipe.py",
     "CONTRACTUAL_CORRECTION": "PriceAdjustmentRecipe.py",
-    "EMAIL_ORDER_ENTRY": "EmailOrderEntryRecipe.py",
+    "MANUAL_ORDER_INTAKE": "EmailOrderEntryRecipe.py",
 }
 
 

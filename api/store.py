@@ -105,6 +105,7 @@ class ExceptionRecord:
             final_status=self.final_status,
             account_id=self.account_id,
             account_name=self.account_name,
+            parent_case_id=self.parent_case_id,
             created_at=self.created_at,
             updated_at=self.updated_at,
         )
@@ -865,6 +866,45 @@ class CaseStore:
     def list_by_tenant(self, tenant_id: str) -> List["OrderCase"]:
         with self._lock:
             return [c for c in self._cases.values() if c.tenant_id == tenant_id]
+
+    def set_pending_override(
+        self, case_id: str, override: Any,
+    ) -> "OrderCase":
+        """ADR-040 §3.1 — atomically attach a `CasePendingOverride`
+        to the case. Raises `KeyError` for unknown case_id and
+        `ValueError` when the case already carries a pending
+        override (forward-only invariant per §4)."""
+        with self._lock:
+            existing = self._cases.get(case_id)
+            if existing is None:
+                raise KeyError(f"Unknown case_id: {case_id}")
+            if existing.pending_override is not None:
+                raise ValueError(
+                    f"Case {case_id} already has a pending_override; "
+                    "second initiator must wait for cosign-resolve.",
+                )
+            updated = existing.model_copy(
+                update={
+                    "pending_override": override,
+                    "status": "OPEN_AWAITING_HUMAN",
+                },
+            )
+            self._cases[case_id] = updated
+            return updated
+
+    def clear_pending_override(self, case_id: str) -> "OrderCase":
+        """Lift the pending_override off the case. Used by both
+        the cosign-approve path (after promotion) and the
+        cosign-reject path."""
+        with self._lock:
+            existing = self._cases.get(case_id)
+            if existing is None:
+                raise KeyError(f"Unknown case_id: {case_id}")
+            updated = existing.model_copy(
+                update={"pending_override": None},
+            )
+            self._cases[case_id] = updated
+            return updated
 
     def clear(self) -> None:
         """Test-helper: reset the in-memory store."""
