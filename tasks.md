@@ -2270,19 +2270,21 @@ intents first.
 
 ### 28.4 CODEOWNERS team-handle resolution
 
-- [ ] Map placeholder team handles in
+- [x] Mapped placeholder team handles in
       `.github/CODEOWNERS` (asoe2 + asoe-ui) to real GitHub
-      teams. Placeholders today:
-        * `@compliance-team`
-        * `@backend-team`
-        * `@frontend-team`
-        * `@architect`
-        * `@platform-team`
-        * `@sre-team`
-        * `@domain-sme`
-        * `@tools-admin`
-      Until mapped, the file ships but does not actually
-      enforce reviewer assignment. Repo-admin + ops follow-up.
+      handles. Current human contributors per `git log`:
+        * `@kumarabhijit` — primary maintainer
+        * `@linkinrustle` — secondary maintainer
+      Every team-handle placeholder
+      (`@compliance-team`, `@backend-team`, `@frontend-team`,
+      `@architect`, `@platform-team`, `@sre-team`,
+      `@domain-sme`, `@tools-admin`) resolves to both. The
+      layered structure stays in the comments so the mapping
+      can re-fan-out when GitHub teams are created — at that
+      point reverse the resolution by replacing
+      `@kumarabhijit @linkinrustle` with the appropriate
+      `@org/team` handle per layer; the path patterns stay
+      unchanged.
 
 ### 28.5 Frontend Platform reshape (V5.1)
 

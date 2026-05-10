@@ -12,32 +12,53 @@
 # See: compliance/audit_bearing_registry.md (workshop minutes,
 # 2026-04-22) and prompts/pre_code_session.md §"WORKING-STYLE
 # CONSTRAINTS".
+#
+# ─────────────────────────────────────────────────────────────────────
+# Reviewer resolution (2026-05-09)
+# ─────────────────────────────────────────────────────────────────────
+#
+# The ADR-038 §8.5 five-layer map below was authored with team-handle
+# placeholders (`@compliance-team`, `@backend-team`, `@frontend-team`,
+# `@architect`, `@platform-team`, `@sre-team`, `@domain-sme`,
+# `@tools-admin`). At present the repo has two human contributors
+# besides Claude:
+#
+#   * @kumarabhijit  — primary maintainer / Architect / Compliance lens
+#   * @linkinrustle  — secondary maintainer
+#
+# Every placeholder is therefore resolved to both handles so review
+# load is shared and the file actually enforces assignment. The
+# layered structure is preserved verbatim in the comments so the
+# reviewer-mapping can re-fan-out when GitHub teams are created.
+# When that happens, reverse the resolution by replacing
+# `@kumarabhijit @linkinrustle` with the appropriate `@org/team`
+# handle per layer; the path patterns stay unchanged.
 
 # Audit-bearing field registry (machine-readable + minutes).
 # Both files must stay in sync; any change ships through compliance.
-/compliance/                   @compliance-team
-/compliance/**                 @compliance-team
+/compliance/                     @kumarabhijit @linkinrustle
+/compliance/**                   @kumarabhijit @linkinrustle
 
 # The terminal status vocabulary is tightly coupled to the registry
 # — AUDIT_CONTEXT_MISSING is what the enforcement node emits on a
 # missing audit-bearing field. Review alongside compliance whenever
 # it changes.
-/contracts/models.py           @compliance-team @backend-team
+/contracts/models.py             @kumarabhijit @linkinrustle
 
 # The composition node + adapter registry are the code paths that
 # consume the registry. Code review from both compliance and backend
 # keeps the contract and implementation honest against each other.
-/api/analysis_composer.py      @compliance-team @backend-team
-/api/analysis_adapters.py      @backend-team
-/api/schemas.py                @backend-team
+/api/analysis_composer.py        @kumarabhijit @linkinrustle
+/api/analysis_adapters.py        @kumarabhijit @linkinrustle
+/api/schemas.py                  @kumarabhijit @linkinrustle
 
 # Policy constants (thresholds that the shadow + recipes read).
-/contracts/policy.py           @compliance-team @backend-team
+/contracts/policy.py             @kumarabhijit @linkinrustle
 
 # Pre-session prompt documents the working-style constraints and
 # registry-first discipline; compliance should see changes to its
 # section alongside platform.
-/prompts/pre_code_session.md   @platform-team @compliance-team
+/prompts/pre_code_session.md     @kumarabhijit @linkinrustle
 
 
 # =====================================================================
@@ -57,25 +78,25 @@
 # L2 LLM Shadow bundle, SLA policy. Compliance + domain SME hold
 # veto on every change since these drive both reasoning surface
 # and audit-bearing decisions.
-/knowledge/                    @compliance-team @domain-sme @backend-team
-/knowledge/**                  @compliance-team @domain-sme @backend-team
-/knowledge/shadow_llm/         @compliance-team @backend-team @tools-admin
-/knowledge/shadow_llm/**       @compliance-team @backend-team @tools-admin
-/knowledge/compaction/         @compliance-team @backend-team
-/knowledge/compaction/**       @compliance-team @backend-team
-/knowledge/policy/             @compliance-team @backend-team
-/knowledge/policy/**           @compliance-team @backend-team
+/knowledge/                      @kumarabhijit @linkinrustle
+/knowledge/**                    @kumarabhijit @linkinrustle
+/knowledge/shadow_llm/           @kumarabhijit @linkinrustle
+/knowledge/shadow_llm/**         @kumarabhijit @linkinrustle
+/knowledge/compaction/           @kumarabhijit @linkinrustle
+/knowledge/compaction/**         @kumarabhijit @linkinrustle
+/knowledge/policy/               @kumarabhijit @linkinrustle
+/knowledge/policy/**             @kumarabhijit @linkinrustle
 
 # L1 — Deterministic primitives. Recipes, deterministic Compliance
 # Shadow, gateway operations, validators. Backend leads; recipes
 # also need compliance review when they touch authorisation logic.
-/recipes/                      @backend-team
-/recipes/**                    @backend-team
-/compliance/shadow.py          @compliance-team @backend-team
-/gateways/                     @backend-team
-/gateways/**                   @backend-team
-/constraints/                  @backend-team
-/constraints/**                @backend-team
+/recipes/                        @kumarabhijit @linkinrustle
+/recipes/**                      @kumarabhijit @linkinrustle
+/compliance/shadow.py            @kumarabhijit @linkinrustle
+/gateways/                       @kumarabhijit @linkinrustle
+/gateways/**                     @kumarabhijit @linkinrustle
+/constraints/                    @kumarabhijit @linkinrustle
+/constraints/**                  @kumarabhijit @linkinrustle
 
 # L2 — Bounded LLM primitives. Constrained-output single-call LLM
 # primitives (intent classifier, recipe selector, attachment
@@ -83,58 +104,58 @@
 # alongside engineering — these calls feed verdicts capable of
 # escalating cases (L2 LLM Shadow) or extracting audit-bearing
 # fields from documents (extract_attachment).
-/compliance/shadow_llm.py            @compliance-team @backend-team @tools-admin
-/compliance/shadow_llm_azure.py      @compliance-team @backend-team @tools-admin
-/agents/primitives/                  @backend-team @tools-admin
-/agents/primitives/**                @backend-team @tools-admin
-/agents/primitives/extract_providers.py  @compliance-team @backend-team @tools-admin
-/constraints/llm_backend.py          @backend-team @tools-admin
-/constraints/router.py               @backend-team @tools-admin
+/compliance/shadow_llm.py        @kumarabhijit @linkinrustle
+/compliance/shadow_llm_azure.py  @kumarabhijit @linkinrustle
+/agents/primitives/              @kumarabhijit @linkinrustle
+/agents/primitives/**            @kumarabhijit @linkinrustle
+/agents/primitives/extract_providers.py @kumarabhijit @linkinrustle
+/constraints/llm_backend.py      @kumarabhijit @linkinrustle
+/constraints/router.py           @kumarabhijit @linkinrustle
 
 # L3 — Case Agent. The bounded while-loop, working-memory loader,
 # tool registry, budget enforcer. Engineering + Compliance veto
 # (the agent's tool-call sequence is the audit replay subject).
-/agents/case_agent.py          @compliance-team @backend-team
-/agents/case_tools.py          @compliance-team @backend-team
-/agents/working_memory.py      @backend-team
-/agents/budget.py              @backend-team
+/agents/case_agent.py            @kumarabhijit @linkinrustle
+/agents/case_tools.py            @kumarabhijit @linkinrustle
+/agents/working_memory.py        @kumarabhijit @linkinrustle
+/agents/budget.py                @kumarabhijit @linkinrustle
 
 # L4 — Harness. Cross-cutting concerns: per-case mutex, tool-call
 # interception, tier graduation, compaction trigger, L2 Shadow
 # invocation, SLA monitor. Engineering + SRE hold review (the
 # harness owns operational invariants like the cross-pod lock).
-/agents/harness.py             @backend-team @sre-team
-/agents/compaction.py          @backend-team @compliance-team
-/agents/sla.py                 @backend-team @compliance-team
-/agents/backfill.py            @backend-team @sre-team
+/agents/harness.py               @kumarabhijit @linkinrustle
+/agents/compaction.py            @kumarabhijit @linkinrustle
+/agents/sla.py                   @kumarabhijit @linkinrustle
+/agents/backfill.py              @kumarabhijit @linkinrustle
 
 # Orchestration node integration of L2 Shadow + case-agent dispatch
 # is load-bearing for both Compliance (verdict authority) and SRE
 # (graph traversal). Pin both reviewers.
-/orchestration/nodes.py        @compliance-team @backend-team
-/orchestration/graph.py        @backend-team
+/orchestration/nodes.py          @kumarabhijit @linkinrustle
+/orchestration/graph.py          @kumarabhijit @linkinrustle
 
 # Database migrations affect persistence shape — DBA + backend.
-/db/migrations/                @backend-team @sre-team
-/db/migrations/**              @backend-team @sre-team
-/db/repository.py              @backend-team
+/db/migrations/                  @kumarabhijit @linkinrustle
+/db/migrations/**                @kumarabhijit @linkinrustle
+/db/repository.py                @kumarabhijit @linkinrustle
 
 # k8s manifests — SRE owns deployment surface.
-/k8s/                          @sre-team
-/k8s/**                        @sre-team
-/Dockerfile.*                  @sre-team @backend-team
+/k8s/                            @kumarabhijit @linkinrustle
+/k8s/**                          @kumarabhijit @linkinrustle
+/Dockerfile.*                    @kumarabhijit @linkinrustle
 
 # Architecture spec + ADRs — Architect + Compliance review every
 # change. Workshops produce the pre-read; the doc capture goes
 # through the same review.
-/architecture_v*.md            @architect @compliance-team
-/docs/adr/                     @architect @compliance-team
-/docs/adr/**                   @architect @compliance-team
-/docs/workshops/               @architect @compliance-team
-/docs/workshops/**             @architect @compliance-team
-/docs/runbooks/                @sre-team @architect
-/docs/runbooks/**              @sre-team @architect
+/architecture_v*.md              @kumarabhijit @linkinrustle
+/docs/adr/                       @kumarabhijit @linkinrustle
+/docs/adr/**                     @kumarabhijit @linkinrustle
+/docs/workshops/                 @kumarabhijit @linkinrustle
+/docs/workshops/**               @kumarabhijit @linkinrustle
+/docs/runbooks/                  @kumarabhijit @linkinrustle
+/docs/runbooks/**                @kumarabhijit @linkinrustle
 
 # tasks.md — the single source of truth for project state. Every
 # tick or new bullet should be visible to both compliance + backend.
-/tasks.md                      @compliance-team @backend-team @architect
+/tasks.md                        @kumarabhijit @linkinrustle
