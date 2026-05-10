@@ -2245,24 +2245,27 @@ Each session is Domain-SME-led + Compliance-co-reviewed; ~90
 min per intent. Sequencing recommendation: highest-volume
 intents first.
 
-- [ ] Session 1 — `DUPLICATE_PO`
-- [ ] Session 2 — `CONTRACTUAL_CORRECTION`
-- [ ] Session 3 — `CREDIT_BLOCK`
-- [ ] **Engineering land** of §5.2 wiring after sessions 1–3 prove
-      the mechanism: replace
-      `INTENT_REASON_TAGS = {i: _GLOBAL_REASON_TAGS for i in ...}`
-      seeding in `constraints/specs.py`, regenerate openapi,
-      `cd ../asoe-ui && npm run generate-types`, update
-      `TestPerIntentReasonTag`. **Also** ship the §5.3 grandfather-
-      validator change (read-side accepts legacy tags; forward
-      validation enforces the new vocabulary). Hash chain must
-      not be retroactively invalidated.
-- [ ] Sessions 4–12 — remaining intents
-      (`MANUAL_ORDER_INTAKE`, `EDI_MISMATCH`, `BACK_ORDER`,
-      `PRICE_HOLD_RELEASE`, `OVER_MAX`, `MIN_ORDER_QTY`,
-      `PALLET_CONFIG`, `DELIVERY_DELAY`, `MASS_PRICING_ERROR`).
-      Each lands as an additive entry in `INTENT_REASON_TAGS`;
-      no further code change needed.
+- [x] Sessions 1–11 — consolidated SME panel session
+      2026-05-10, output at
+      `docs/workshops/reason-tags/consolidated-panel-2026-05-10.md`.
+      The panel batched all 11 intents into a single full-day
+      session (DUPLICATE_PO already curated, used as the worked
+      example).
+- [x] **Engineering land of §5.2 + §5.3 wiring** —
+      `constraints/specs.py` carries 11 new
+      `_<INTENT>_REASON_TAGS` tuples + the
+      `_CURATED_INTENT_REASON_TAGS` registry. Forward validation
+      via `is_valid_reason_tag_for_write(intent, tag)`; read-side
+      grandfather acceptance via `is_valid_reason_tag_for_read(tag)`.
+      The /disposition endpoint now calls
+      `is_valid_reason_tag_for_write` per-intent. OpenAPI schema
+      regenerated; UI types regenerated via
+      `npm run generate-types`. ~70 test sites bulk-updated to
+      use the curated `OTHER` / `AGENT_MISCLASSIFICATION` tags;
+      `TestPerIntentReasonTag::test_per_intent_narrow_set_rejects_out_of_set_tag`
+      relocked to use a real cross-intent boundary
+      (`BLANKET_RELEASE` rejected on `CONTRACTUAL_CORRECTION`).
+      Full pytest regression + UI typecheck + UI vitest 665/665 green.
 - [ ] §5.4 ML follow-up — once curated `(intent, reason_tag)`
       tuples exist, the ML team clusters override-pattern
       analysis. Out-of-scope for engineering until the curation

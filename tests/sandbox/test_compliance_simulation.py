@@ -294,7 +294,7 @@ class TestApproveRejectFlow:
         )
         exc_id = self._create_pending_review(client, manager_token)
         resp = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "ALLOW_BOTH", "reason_tag": "other", "notes": "Approved after review"},
+            json={"action": "ALLOW_BOTH", "reason_tag": "OTHER", "notes": "Approved after review"},
             headers=auth_header(manager_token),
         )
         assert resp.status_code == 200
@@ -307,7 +307,7 @@ class TestApproveRejectFlow:
         )
         exc_id = self._create_pending_review(client, manager_token)
         resp = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "NO_ACTION", "reason_tag": "other", "notes": "Not valid"},
+            json={"action": "NO_ACTION", "reason_tag": "OTHER", "notes": "Not valid"},
             headers=auth_header(manager_token),
         )
         assert resp.status_code == 200
@@ -330,7 +330,7 @@ class TestApproveRejectFlow:
         )
         exc_id = resp.json()["exception_id"]
         resp = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "ALLOW_BOTH", "reason_tag": "other", "notes": "revise"},
+            json={"action": "ALLOW_BOTH", "reason_tag": "OTHER", "notes": "revise"},
             headers=auth_header(manager_token),
         )
         assert resp.status_code == 200
@@ -339,7 +339,7 @@ class TestApproveRejectFlow:
     def test_approve_requires_manager_role(self, client, analyst_token):
         exc_id = self._create_pending_review(client, analyst_token)
         resp = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "ALLOW_BOTH", "reason_tag": "other", "notes": "test"},
+            json={"action": "ALLOW_BOTH", "reason_tag": "OTHER", "notes": "test"},
             headers=auth_header(analyst_token),
         )
         assert resp.status_code == 403

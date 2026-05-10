@@ -462,7 +462,7 @@ class TestPartnerUsers:
 
         partner_token = _login(client, "tom.bradley@walmart.com")
         r = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "ALLOW_BOTH", "reason_tag": "other", },
+            json={"action": "ALLOW_BOTH", "reason_tag": "OTHER", },
             headers=_auth(partner_token),
         )
         assert r.status_code == 403
@@ -475,7 +475,7 @@ class TestPartnerUsers:
         partner_token = _login(client, "tom.bradley@walmart.com")
         r = client.patch(
             f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "ALLOW_BOTH", "notes": "test", "reason_tag": "other"},
+            json={"action": "ALLOW_BOTH", "notes": "test", "reason_tag": "OTHER"},
             headers=_auth(partner_token),
         )
         assert r.status_code == 403

@@ -258,7 +258,7 @@ class TestExceptionCRUD:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "Manually reviewed and adjusted",
-                "reason_tag": "other",
+                "reason_tag": "OTHER",
             },
             headers=auth_header(manager_token),
         )
@@ -277,7 +277,7 @@ class TestExceptionCRUD:
         exc_id = resp.json()["exception_id"]
         resp = client.patch(
             f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "ALLOW_BOTH", "notes": "test", "reason_tag": "other"},
+            json={"action": "ALLOW_BOTH", "notes": "test", "reason_tag": "OTHER"},
             headers=auth_header(analyst_token),
         )
         assert resp.status_code == 403

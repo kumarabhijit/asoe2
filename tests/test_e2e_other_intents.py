@@ -328,7 +328,7 @@ class TestCreditBlock:
         exc_id = r.json()["exception_id"]
 
         r = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "ALLOW_BOTH", "reason_tag": "other", "notes": "Credit limit increase approved by Finance"},
+            json={"action": "ALLOW_BOTH", "reason_tag": "OTHER", "notes": "Credit limit increase approved by Finance"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200
@@ -344,7 +344,7 @@ class TestCreditBlock:
         exc_id = r.json()["exception_id"]
 
         r = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "NO_ACTION", "reason_tag": "other", "notes": "Customer has outstanding payment — hold maintained"},
+            json={"action": "NO_ACTION", "reason_tag": "OTHER", "notes": "Customer has outstanding payment — hold maintained"},
             headers=_auth(manager_token),
         )
         assert r.status_code == 200
@@ -364,7 +364,7 @@ class TestCreditBlock:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "One-time exception — VIP customer with pending payment confirmed",
-                "reason_tag": "other",
+                "reason_tag": "OTHER",
             },
             headers=_auth(manager_token),
         )
@@ -458,7 +458,7 @@ class TestMassPricingError:
 
         # Admin approves
         r = client.patch(f"/api/v1/exceptions/{exc_id}/disposition",
-            json={"action": "ALLOW_BOTH", "reason_tag": "other", "notes": "Verified — proceeding with manual review"},
+            json={"action": "ALLOW_BOTH", "reason_tag": "OTHER", "notes": "Verified — proceeding with manual review"},
             headers=_auth(admin_token),
         )
         assert r.status_code == 200
@@ -486,7 +486,7 @@ class TestMassPricingError:
             json={
                 "action": "ALLOW_BOTH",
                 "notes": "Red verdict overridden with risk acknowledged",
-                "reason_tag": "other",
+                "reason_tag": "OTHER",
             },
             headers=_auth(manager_token),
         )

@@ -435,7 +435,7 @@ class TestHumanActions:
         rd = _default_resolution()
         rd["pending_override"] = {
             "action": "MERGE",
-            "reason_tag": "customer_concession",
+            "reason_tag": "OTHER",
             "initiator": "alice@acme.com",
             "initiated_at": "2026-05-01T10:09:00Z",
             "financial_impact_usd": 25_000,
