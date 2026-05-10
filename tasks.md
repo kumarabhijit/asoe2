@@ -1951,11 +1951,12 @@ gates still pending (see "Pending" subsection at the bottom).
       divergence is preserved across template rotations because
       keys appear in canonical order. 7 new tests in
       `tests/test_compaction_sla_backfill.py`.
-- [ ] **Pending: agent loop / harness wire-up of
-      `apply_compaction_if_needed`.** The helper exists but
-      the L4 harness / Case Agent loop that should call it on
-      every step boundary is the Thread 4 work (Phase H.5
-      agent dormant).
+- [x] Agent-loop / harness wire-up of `apply_compaction_if_needed`
+      shipped in Thread 4 (`89c2f02`).
+      `agents/harness.py::run_agent_step` calls it after every
+      step (`harness.py:461`); the case's working_memory_summary
+      + last_compaction_at fields are updated in the case store
+      whenever the §7.4 binding triggers fire.
 - [x] Four-eyes / cosign migration to the case lifecycle
       **shipped (flag-gated, X.0)** under
       `docs/adr/ADR-040-cosign-on-case-lifecycle.md` (Proposed).
