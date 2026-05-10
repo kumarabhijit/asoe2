@@ -137,6 +137,69 @@ class TestEventSchema:
         )
         assert event.timestamp  # non-empty ISO 8601 string
 
+    # -- ADR-038 §H.6 / Phase 28.5 case-level events --------------------
+
+    def test_case_open_event_carries_case_id_not_exception_id(self):
+        event = WSEvent.case_open(
+            trace_id="t-c-1",
+            case_id="case-001",
+            tenant_id="tenant-a",
+            source="manual_order",
+            source_channel="email",
+            status="OPEN_AGENT_PROCESSING",
+            sla_deadline="2026-05-12T08:00:00Z",
+            customer_po_number="PO-7842",
+        )
+        assert event.type == "case_open"
+        assert event.case_id == "case-001"
+        assert event.exception_id is None
+        assert event.payload["source"] == "manual_order"
+        assert event.payload["customer_po_number"] == "PO-7842"
+
+    def test_case_update_event_lists_changed_fields(self):
+        event = WSEvent.case_update(
+            trace_id="t-c-2",
+            case_id="case-001",
+            tenant_id="tenant-a",
+            status="OPEN_AWAITING_HUMAN",
+            updated_fields=["status", "sla_deadline"],
+            sla_deadline="2026-05-12T16:00:00Z",
+        )
+        assert event.type == "case_update"
+        assert event.case_id == "case-001"
+        assert event.payload["status"] == "OPEN_AWAITING_HUMAN"
+        assert event.payload["updated_fields"] == ["status", "sla_deadline"]
+
+    def test_case_close_event_records_terminal_status(self):
+        event = WSEvent.case_close(
+            trace_id="t-c-3",
+            case_id="case-001",
+            tenant_id="tenant-a",
+            status="RESOLVED",
+            closed_at="2026-05-13T12:00:00Z",
+        )
+        assert event.type == "case_close"
+        assert event.case_id == "case-001"
+        assert event.payload["status"] == "RESOLVED"
+        assert event.payload["closed_at"] == "2026-05-13T12:00:00Z"
+
+    def test_case_event_roundtrip_through_pubsub(self, pubsub):
+        event = WSEvent.case_open(
+            trace_id="t",
+            case_id="case-002",
+            tenant_id="tenant-x",
+            source="automated_order",
+            source_channel="edi_x12_850",
+            status="OPEN_AGENT_PROCESSING",
+        )
+        pubsub.publish("tenant-x", event)
+        recent = pubsub.get_recent("tenant-x")
+        assert len(recent) == 1
+        parsed = json.loads(recent[0])
+        assert parsed["type"] == "case_open"
+        assert parsed["case_id"] == "case-002"
+        assert parsed["exception_id"] is None
+
 
 # ---------------------------------------------------------------------------
 # InMemoryPubSub

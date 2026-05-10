@@ -16,6 +16,14 @@ from pydantic import BaseModel, Field
 EventType = Literal[
     "pipeline_progress", "exception_update", "task_complete", "error",
     "reanalysis_started",
+    # ADR-038 §H.6 / Phase 28.5 — case-level events. Emitted on
+    # OrderCase open / status change / SLA breach / close so that
+    # `/inbox`, `/exceptions`, and `/cases` (all projected from the
+    # same case set in V5.1) can invalidate their list views without
+    # polling. Carry `case_id` rather than `exception_id`; the WS
+    # envelope makes both fields optional so the same channel can
+    # multiplex per-event and per-case streams.
+    "case_open", "case_update", "case_close",
 ]
 NodeStatus = Literal["started", "completed", "failed"]
 
@@ -74,6 +82,38 @@ class ReanalysisStartedPayload(BaseModel):
     prior_final_status: Optional[str] = None
 
 
+# ADR-038 §H.6 / Phase 28.5 — case-level event payloads. Mirrors the
+# UI's `WSEvent.case_*` invalidation contract (`useCases` hook).
+
+
+class CaseOpenedPayload(BaseModel):
+    """Published when a new OrderCase is materialised (T2/T3)."""
+    source: str
+    source_channel: str
+    status: str
+    sla_deadline: Optional[str] = None
+    customer_po_number: Optional[str] = None
+    sales_order_id: Optional[str] = None
+
+
+class CaseUpdatedPayload(BaseModel):
+    """Published on case status / SLA / working-memory changes.
+
+    `updated_fields` enumerates which OrderCase fields changed so the
+    UI can decide whether a re-fetch is needed (status change → yes,
+    working_memory_summary touch → maybe).
+    """
+    status: str
+    updated_fields: List[str] = Field(default_factory=list)
+    sla_deadline: Optional[str] = None
+
+
+class CaseClosedPayload(BaseModel):
+    """Published when a case reaches RESOLVED / FAILED / BLOCKED."""
+    status: str
+    closed_at: str
+
+
 class WSEvent(BaseModel):
     """Standard event envelope for Redis Pub/Sub and WebSocket delivery.
 
@@ -83,7 +123,12 @@ class WSEvent(BaseModel):
     """
     type: EventType
     trace_id: str
-    exception_id: str
+    # `exception_id` carries the per-event subject for pipeline /
+    # exception / task events. Case events (`case_open`, `case_update`,
+    # `case_close`) carry `case_id` instead. Exactly one of the two
+    # MUST be set per event type — enforced by the factory methods.
+    exception_id: Optional[str] = None
+    case_id: Optional[str] = None
     tenant_id: str
     timestamp: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
@@ -213,4 +258,78 @@ class WSEvent(BaseModel):
             exception_id=exception_id,
             tenant_id=tenant_id,
             payload=payload.model_dump(exclude_none=True),
+        )
+
+    # ------------------------------------------------------------------
+    # Case-level events (ADR-038 §H.6 / Phase 28.5)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def case_open(
+        cls,
+        trace_id: str,
+        case_id: str,
+        tenant_id: str,
+        source: str,
+        source_channel: str,
+        status: str,
+        sla_deadline: Optional[str] = None,
+        customer_po_number: Optional[str] = None,
+        sales_order_id: Optional[str] = None,
+    ) -> "WSEvent":
+        payload = CaseOpenedPayload(
+            source=source,
+            source_channel=source_channel,
+            status=status,
+            sla_deadline=sla_deadline,
+            customer_po_number=customer_po_number,
+            sales_order_id=sales_order_id,
+        )
+        return cls(
+            type="case_open",
+            trace_id=trace_id,
+            case_id=case_id,
+            tenant_id=tenant_id,
+            payload=payload.model_dump(exclude_none=True),
+        )
+
+    @classmethod
+    def case_update(
+        cls,
+        trace_id: str,
+        case_id: str,
+        tenant_id: str,
+        status: str,
+        updated_fields: Optional[List[str]] = None,
+        sla_deadline: Optional[str] = None,
+    ) -> "WSEvent":
+        payload = CaseUpdatedPayload(
+            status=status,
+            updated_fields=updated_fields or [],
+            sla_deadline=sla_deadline,
+        )
+        return cls(
+            type="case_update",
+            trace_id=trace_id,
+            case_id=case_id,
+            tenant_id=tenant_id,
+            payload=payload.model_dump(exclude_none=True),
+        )
+
+    @classmethod
+    def case_close(
+        cls,
+        trace_id: str,
+        case_id: str,
+        tenant_id: str,
+        status: str,
+        closed_at: str,
+    ) -> "WSEvent":
+        payload = CaseClosedPayload(status=status, closed_at=closed_at)
+        return cls(
+            type="case_close",
+            trace_id=trace_id,
+            case_id=case_id,
+            tenant_id=tenant_id,
+            payload=payload.model_dump(),
         )
