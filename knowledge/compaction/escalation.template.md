@@ -5,6 +5,14 @@ audit_keys:
   - target_role
   - autonomy_level
   - amount_usd
+learning_signals:
+  - escalation_cause_distribution:
+      describes: reason_code frequency per intent on agent-driven escalations
+      trains: agent-loop early-termination calibration; rule-tightness review
+  - autonomy_boundary_violations:
+      describes: events where the proposed action crossed the customer's
+                 autonomy boundary and triggered escalation
+      trains: AUTOMATION_BOUNDARY_CONCERN ADR-039 vocabulary refinement
 ---
 # Compaction template — escalation
 

@@ -5,6 +5,14 @@ audit_keys:
   - reason_code
   - amount_usd
   - autonomy_level
+learning_signals:
+  - breach_rate_per_customer_tier:
+      describes: SLA breach incidence per Strategic / Mid-Market / Long-tail
+      trains: tier-policy refinement
+              (knowledge/policy/sla_per_customer_tier.yaml)
+  - breach_correlation_with_intent:
+      describes: which intents disproportionately breach SLA
+      trains: per-intent processing-time SLA review
 ---
 # Compaction template — sla_breach
 

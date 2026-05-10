@@ -3,6 +3,15 @@ event_type: compaction
 audit_keys:
   - reason_code
   - case_status_after
+learning_signals:
+  - trigger_distribution:
+      describes: which §7.4 trigger fired
+                 (token_budget / event_count / age_days)
+      trains: compaction-threshold tuning per ADR-038 §7.4
+  - case_status_at_compaction:
+      describes: status when compaction fires
+                 (long-running awaiting-buyer / awaiting-ERP cases)
+      trains: long-running-case detection + capacity planning
 ---
 # Compaction template — compaction (recursive)
 
