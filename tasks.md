@@ -2289,41 +2289,77 @@ intents first.
       `@org/team` handle per layer; the path patterns stay
       unchanged.
 
-### 28.5 Frontend Platform reshape (V5.1)
+### 28.5 Frontend Platform reshape (V5.1) — shipped 2026-05-10
 
 The Round 3 + Round 4 UI work shipped scaffolding — `useCases`
 hook, `CaseViewBanner`, `Manual Cases` MetricTile, View-case
-deeplink, `PolicyHitBadge`. The full reshape is V5.1 and
-needs detail-panel work for `OrderCase`.
+deeplink, `PolicyHitBadge`. The V5.1 reshape closed in this
+session.
 
-- [ ] **Replace INBOX mock on `/inbox`** with rows projected
-      from `casesApi.list({ source: "manual_order" })`. Each
-      row's data shape changes from `InboxItem` (sender / subject /
-      preview) to `OrderCase`-projected (case_id / source_channel /
-      status / sla_band).
-- [ ] **Replace `exceptionsApi.list` on `/exceptions`** with
-      rows projected from `casesApi.list()` (no source filter).
-      Each row's data shape changes from `ExceptionSummary` to
-      `OrderCase`-projected.
-- [ ] **Reshape detail panels** (`ExceptionDetailPanel`,
-      `InboxDetailPanel`) to consume `OrderCase` fields where
-      the row ID resolves to a case. The existing per-intent
-      `*Section.tsx` components stay as dumb projectors per
-      Guardrail #6 — they continue to render whatever the
-      backend hands them.
-- [ ] **WebSocket-driven case invalidation** through the
-      `useCases` hook so the inbox / exception count stays
-      live without a page refresh. Mirrors the existing
-      `WSEvent.exception_*` pattern but emits
-      `WSEvent.case_*` events from the backend on case
-      open / status change / SLA breach. Backend deliverable:
-      `api/events.py` extension; UI deliverable: `useCases`
-      subscribes to `case_*` topic.
-- [ ] **UI L1-vs-L2 badge** (`PolicyHitBadge`) extended to
-      the case detail panel when `OrderCase`-routed cases
-      surface ADR-039 verdicts. Today the badge wires only
-      into `AgentReasoningCard` + `EventsTimeline::PolicyHits`.
-      Case detail integration lands with the data-hook swap.
+- [x] **Replaced INBOX mock on `/inbox`** with rows projected
+      from `useManualOrderCases()` (`casesApi.list({ source: "manual_order" })`).
+      Row shape: customer_po_number → sales_order_id → case_id
+      fallback, source_channel, status, SLA band. Click-through
+      goes to `/cases/{case_id}`.
+- [x] **Replaced `exceptionsApi.list` on `/exceptions`** with
+      rows projected from `useCases()` (no source filter). Same
+      row shape as `/inbox`. Source filter chips drive off
+      `ALLOWED_CASE_SOURCES`. Sort = SLA urgency.
+- [x] **Detail panels** — clicks on `/inbox` or `/exceptions`
+      route to `/cases/{id}` (`CaseDetailPanel`), the canonical
+      OrderCase-aware detail surface. Right pane on the list
+      pages projects the case header (source / channel / status /
+      SLA / PO/SO / opened_at) inline with an "Open case"
+      deeplink. `ExceptionDetailPanel` remains at
+      `/exceptions/[id]` for direct per-event detail
+      navigation (used by browser specs / runbook deeplinks).
+- [x] **WebSocket-driven case invalidation** —
+      `api/events.py` ships `case_open` / `case_update` /
+      `case_close` event types + payloads (commit `32cdaa2`).
+      UI mirrors the contract in `src/types/websocket.ts`;
+      `useCases` exposes `refetch()` + `isCaseInvalidationEvent`
+      helper that pages compose into their existing
+      `useWebSocket` handler. `/inbox`, `/exceptions`, `/cases`
+      all wire silent refresh on `case_*` + `onReconnect` +
+      `onPollFallback`. Backend emission per-event-type is
+      deferred until the per-record case-attachment paths land
+      (Phase H.6 follow-up); the contract is in place so the
+      backend can start emitting without further UI work.
+- [x] **PolicyHitBadge** extended into `CaseDetailPanel`. New
+      optional `policyHits?: string[]` prop renders a
+      "Compliance hits" section (hidden when empty per
+      Guardrail #6). L1 rule names render plain mono; hits
+      prefixed with `LLM_SHADOW:` carry the AI text-pill per
+      ADR-039 §4.5 (WCAG 1.4.1: text-not-color). The
+      `/cases/[id]` page will populate the prop from aggregated
+      child-record decisions when the attached-record loader
+      ships.
+
+#### 28.5.x Frontend follow-ups (deferred from V5.1 closeout)
+
+- [ ] **CaseListPane**. The ExceptionListPane that previously
+      drove `/exceptions` carried intent + lifecycle filter
+      chips, free-text search with operator parsing, saved
+      views, and arrow-key keyboard navigation. The V5.1
+      reshape replaced it with a thinner case-projected list
+      pane (source filter chip + SLA sort only). Re-introducing
+      the rich feature set against case-level fields (status,
+      sla_band, source) is a CaseListPane build that didn't fit
+      this session's scope.
+- [ ] **Case-attached-record loader** at `/cases/[id]`. The
+      `CaseDetailPanel` "Attached records" placeholder needs a
+      backend roundtrip that lists the per-event records under
+      the case and stacks each through the existing
+      `*Section.tsx` projectors. Once that lands,
+      `CaseDetailPanel` populates `policyHits` from the
+      aggregated `ComplianceDecision.policy_hits` of the child
+      records and the L2-LLM badge wiring starts surfacing
+      against real data.
+- [ ] **Backend emission of `case_*` events**. Contract is
+      shipped; emission sites (`OrderCase` open in the
+      lookup-or-create path, status transitions, close) are not
+      yet wired. Until they are, the UI's invalidation handler
+      is a no-op against live traffic.
 
 ### 28.6 Operational follow-ups (SRE)
 
