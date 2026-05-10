@@ -38,3 +38,103 @@
 # registry-first discipline; compliance should see changes to its
 # section alongside platform.
 /prompts/pre_code_session.md   @platform-team @compliance-team
+
+
+# =====================================================================
+# ADR-038 §8.5 — Five-layer CODEOWNERS map
+# =====================================================================
+#
+# The case-centric architecture (ADR-038) introduces a five-layer
+# stack: L0 Knowledge → L1 Deterministic primitives → L2 Bounded
+# LLM primitives → L3 Case Agent → L4 Harness. Each layer carries
+# distinct review requirements; this section makes them
+# machine-enforced.
+#
+# See: architecture_v5.md §1 (layer responsibilities) and
+# docs/adr/ADR-038-case-centric-order-intake.md §8.5.
+
+# L0 — Knowledge layer. Skill bundles, compaction templates, the
+# L2 LLM Shadow bundle, SLA policy. Compliance + domain SME hold
+# veto on every change since these drive both reasoning surface
+# and audit-bearing decisions.
+/knowledge/                    @compliance-team @domain-sme @backend-team
+/knowledge/**                  @compliance-team @domain-sme @backend-team
+/knowledge/shadow_llm/         @compliance-team @backend-team @tools-admin
+/knowledge/shadow_llm/**       @compliance-team @backend-team @tools-admin
+/knowledge/compaction/         @compliance-team @backend-team
+/knowledge/compaction/**       @compliance-team @backend-team
+/knowledge/policy/             @compliance-team @backend-team
+/knowledge/policy/**           @compliance-team @backend-team
+
+# L1 — Deterministic primitives. Recipes, deterministic Compliance
+# Shadow, gateway operations, validators. Backend leads; recipes
+# also need compliance review when they touch authorisation logic.
+/recipes/                      @backend-team
+/recipes/**                    @backend-team
+/compliance/shadow.py          @compliance-team @backend-team
+/gateways/                     @backend-team
+/gateways/**                   @backend-team
+/constraints/                  @backend-team
+/constraints/**                @backend-team
+
+# L2 — Bounded LLM primitives. Constrained-output single-call LLM
+# primitives (intent classifier, recipe selector, attachment
+# extractor, L2 LLM Shadow). Compliance + Tools Admin hold veto
+# alongside engineering — these calls feed verdicts capable of
+# escalating cases (L2 LLM Shadow) or extracting audit-bearing
+# fields from documents (extract_attachment).
+/compliance/shadow_llm.py            @compliance-team @backend-team @tools-admin
+/compliance/shadow_llm_azure.py      @compliance-team @backend-team @tools-admin
+/agents/primitives/                  @backend-team @tools-admin
+/agents/primitives/**                @backend-team @tools-admin
+/agents/primitives/extract_providers.py  @compliance-team @backend-team @tools-admin
+/constraints/llm_backend.py          @backend-team @tools-admin
+/constraints/router.py               @backend-team @tools-admin
+
+# L3 — Case Agent. The bounded while-loop, working-memory loader,
+# tool registry, budget enforcer. Engineering + Compliance veto
+# (the agent's tool-call sequence is the audit replay subject).
+/agents/case_agent.py          @compliance-team @backend-team
+/agents/case_tools.py          @compliance-team @backend-team
+/agents/working_memory.py      @backend-team
+/agents/budget.py              @backend-team
+
+# L4 — Harness. Cross-cutting concerns: per-case mutex, tool-call
+# interception, tier graduation, compaction trigger, L2 Shadow
+# invocation, SLA monitor. Engineering + SRE hold review (the
+# harness owns operational invariants like the cross-pod lock).
+/agents/harness.py             @backend-team @sre-team
+/agents/compaction.py          @backend-team @compliance-team
+/agents/sla.py                 @backend-team @compliance-team
+/agents/backfill.py            @backend-team @sre-team
+
+# Orchestration node integration of L2 Shadow + case-agent dispatch
+# is load-bearing for both Compliance (verdict authority) and SRE
+# (graph traversal). Pin both reviewers.
+/orchestration/nodes.py        @compliance-team @backend-team
+/orchestration/graph.py        @backend-team
+
+# Database migrations affect persistence shape — DBA + backend.
+/db/migrations/                @backend-team @sre-team
+/db/migrations/**              @backend-team @sre-team
+/db/repository.py              @backend-team
+
+# k8s manifests — SRE owns deployment surface.
+/k8s/                          @sre-team
+/k8s/**                        @sre-team
+/Dockerfile.*                  @sre-team @backend-team
+
+# Architecture spec + ADRs — Architect + Compliance review every
+# change. Workshops produce the pre-read; the doc capture goes
+# through the same review.
+/architecture_v*.md            @architect @compliance-team
+/docs/adr/                     @architect @compliance-team
+/docs/adr/**                   @architect @compliance-team
+/docs/workshops/               @architect @compliance-team
+/docs/workshops/**             @architect @compliance-team
+/docs/runbooks/                @sre-team @architect
+/docs/runbooks/**              @sre-team @architect
+
+# tasks.md — the single source of truth for project state. Every
+# tick or new bullet should be visible to both compliance + backend.
+/tasks.md                      @compliance-team @backend-team @architect
