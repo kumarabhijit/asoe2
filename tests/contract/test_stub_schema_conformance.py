@@ -33,11 +33,26 @@ from recipes.registry import REGISTRY as RECIPE_REGISTRY
 
 # Module-import-time stub registration: collection-time parametrization
 # needs the registry populated before pytest expands the parametrize
-# marker. ASOE_ENV is pinned to sandbox by tests/conftest.py's session
-# autouse fixture, but at *import* time that fixture has not run yet —
-# pin defensively here.
-os.environ.setdefault("ASOE_ENV", "sandbox")
-register_sandbox_gateways()
+# marker. `register_sandbox_gateways()` is a no-op unless ASOE_ENV is
+# "sandbox" — but the conftest autouse fixture that pins ASOE_ENV runs
+# AFTER collection-time module import, so we must pin it here too.
+#
+# CRITICAL: do NOT use `os.environ.setdefault` — that leaks the value
+# into the rest of the pytest session and changes downstream module
+# import behavior (notably `api.deps._resolve_token_ttls`, which reads
+# ASOE_ENV at module import to choose 7-day vs 30-day refresh TTLs).
+# Save → set → register → restore so the rest of the test session
+# sees the original env (or absence thereof) and `tests/conftest.py`
+# remains the single fixture that pins ASOE_ENV.
+_prev_asoe_env = os.environ.get("ASOE_ENV")
+os.environ["ASOE_ENV"] = "sandbox"
+try:
+    register_sandbox_gateways()
+finally:
+    if _prev_asoe_env is None:
+        os.environ.pop("ASOE_ENV", None)
+    else:
+        os.environ["ASOE_ENV"] = _prev_asoe_env
 
 
 def _stub_responses() -> Iterator[Tuple[str, str, GatewayResponse]]:
