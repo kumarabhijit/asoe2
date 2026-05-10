@@ -256,15 +256,23 @@ of which list view brought them there. Three commits:
     `email_source` payload so the section renders in demos.
   - Component test + architectural lock test.
 
-* **G.3 (asoe-ui inbox bridge):**
-  - `/inbox` NEW_ORDER rows whose `exception_id` is set deep-link to
-    `/exceptions/{exception_id}` on click.
+* **G.3 (asoe-ui inbox bridge) — superseded 2026-05-10, see §6.1.**
+  - Original behaviour: `/inbox` NEW_ORDER rows whose `exception_id`
+    was set deep-linked to `/exceptions/{exception_id}` on click.
+  - Current behaviour (PO supersession 2026-05-10): every `/inbox`
+    row selects locally (consistent master-detail UX). The right-pane
+    detail renders an explicit "Open in Exception Queue" jump button
+    when `selected.exception_id` is present; the operator chooses
+    when to leave the inbox surface. The button pushes
+    `/exceptions/{exception_id}?from=inbox` so the detail page
+    renders "Back to Inbox" instead of the default "Back to Queue".
   - Exception Queue detail surfaces a "View source email" back-link
     when `event.metadata.source_email_id` is present, navigating to
-    `/inbox?msg={id}`.
-  - Inbox-side click handler is the only `/inbox` change in scope —
-    the page's static-mock substrate stays intact (productisation is
-    still Phase F / proposed ADR-036).
+    `/inbox?msg={id}`. (Unchanged.)
+  - Inbox-side change in scope: the row-click dispatch + the new
+    jump-button affordance on the right pane. The page's static-mock
+    substrate stays intact (productisation is still Phase F /
+    proposed ADR-036).
 
 ### Phase F — Inbox productisation (deferred, separate ADR pointer)
 
@@ -377,6 +385,99 @@ under proposed ADR-036) remains valid: it covers `/inbox`'s upstream
 plumbing and the per-classification surface for the non-exception
 categories. Phase G is the surface-level merge that solves the CSA's
 workflow tax without waiting on F.
+
+---
+
+## 6.1 Supersession (PO ruling 2026-05-10) — Consistent inbox UX + explicit jump button
+
+A second product review (2026-05-10) **partially superseded the
+Phase G.3 inbox dispatch behaviour** documented above. The detail
+surface unification (§6, §6.G.1, §6.G.2) is unchanged; only the
+*navigation* into that surface from `/inbox` changes.
+
+### What the operator reported
+
+Three observations from operator usage:
+
+1. **Inconsistent UX across inbox rows.** Clicking a NEW_ORDER row
+   that carries an `exception_id` jumped straight to
+   `/exceptions/{id}` (full-page navigation), while clicking
+   SHIPMENT_INQUIRY / INVOICE_QUERY / COMPLAINT rows updated the
+   right-pane detail in place. Same row affordance, two different
+   outcomes — operator could not predict the page transition until
+   it happened.
+2. **Missing return path.** The deep-link jumped to a detail page
+   whose breadcrumb only said "Back to Queue", taking the operator
+   to `/exceptions` instead of back to `/inbox`. (Addressed by the
+   `?from=inbox` referrer change; documented here for completeness.)
+3. **Implicit navigation is user-hostile.** The operator's stated
+   preference is to *browse* the inbox and choose when to leave it.
+   A row click that silently navigates off the surface violates the
+   browse-inbound mental model the inbox is supposed to provide.
+
+### Updated decision
+
+* **Every `/inbox` row click selects locally.** The dispatch in
+  `src/app/inbox/page.tsx::handleActivate` no longer branches on
+  `item.exception_id`; all rows invoke `setSelectedId(item.id)`
+  unconditionally. Master-detail UX is now consistent across every
+  inbox category.
+* **The right-pane detail renders an explicit jump button** when
+  `selected.exception_id` is present. The button is labelled
+  "Open in Exception Queue" and pushes
+  `/exceptions/{exception_id}?from=inbox`. The operator chooses
+  when to leave the inbox surface; navigation is no longer a side
+  effect of clicking a row.
+* **`?from=inbox` is whitelisted** in
+  `src/app/exceptions/[id]/page.tsx::BACK_TARGETS` so the detail
+  page renders "Back to Inbox" instead of the default
+  "Back to Queue". The bidirectional navigation requirement from §6
+  (3) is preserved.
+* **Exception Queue → inbox back-link is unchanged** (`event.metadata.source_email_id`
+  → `/inbox?msg={id}`).
+
+### What stays from §6
+
+* The unified *detail surface* itself — `<EmailSourceSection>` above
+  `<EmailOrderEntrySection>`, audit-bearing rows, no per-intent
+  page-level dispatch — is unchanged. The operator still sees the
+  same source-email + agent-recommendation + resolution-actions
+  page when they choose to navigate.
+* The compliance posture is unchanged. The audit-bearing fields on
+  the detail surface are unaffected by where the operator clicked
+  to get there.
+* Phase F (inbox productisation under proposed ADR-036) remains
+  the right home for the upstream `email-intelligence-agent`
+  integration and the per-classification surface; this supersession
+  is purely a UX-layer change in front of the existing Phase G data
+  contract.
+
+### Why now
+
+The Phase G.3 deep-link was a one-click-to-detail optimisation
+predicated on the assumption that operators always want the detail
+page when they click a row. The operator's actual workflow — browse,
+triage, decide where to dive in — does not match that assumption.
+A consistent master-detail UX with an explicit jump button costs
+one extra click for the cases the operator chooses to act on, and
+zero clicks (with much better predictability) for the cases they
+choose to skim. The trade-off lands on the operator's side.
+
+### Tests guarding this decision
+
+* `asoe-ui/tests/contract/test_navigation_chrome.test.ts` — file-scan
+  assertions that the inbox handler invokes `setSelectedId` for
+  every row (no `router.push` in the row dispatch) AND that the
+  right-pane detail renders an "Open in Exception Queue" button
+  with `?from=inbox` when the selected item has an `exception_id`.
+* `asoe-ui/tests/browser/inbox-navigation-chrome.spec.ts::N1` —
+  end-to-end: row click stays on `/inbox`, right pane updates,
+  jump button click navigates to `/exceptions/{id}?from=inbox`,
+  Back button returns to `/inbox`.
+
+If a future change reverts to the deep-link dispatch, both tests
+fail and force a rationale + this ADR sub-section to be revised
+in the same PR.
 
 ---
 
