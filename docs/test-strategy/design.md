@@ -241,8 +241,86 @@ Locked decisions from `/plan-eng-review`:
 | CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | not run |
 | Codex Review | `/codex review` | Independent 2nd opinion | 0 | — | codex not on PATH |
 | Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | CLEAR (PLAN) | 3 arch + 3 quality + 0 perf + 5 test-plan items; 5 decisions locked |
-| Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | n/a (no UI surface in this plan) |
+| Design Review | `/plan-design-review` | UI/UX gaps | 0 | MISS (see amendment v1.1) | initially marked n/a; reopened after behavioral coverage gap surfaced |
 | DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | n/a (internal infra plan) |
 
 **UNRESOLVED:** 0 decisions left open.
 **VERDICT:** ENG CLEARED — ready to implement. Run `/ship` after W1 commits land.
+
+---
+
+## Plan Amendment v1.1 — Behavioral Coverage Gap (2026-05-10)
+
+### The miss
+
+The v1.0 plan targets *spec-vs-impl drift* — data-shape parity between OpenAPI, registries, enums, and renderers. Real-world UI bugs surfaced post-review that the plan does not catch:
+
+1. **V1 — Context-aware navigation:** opening a case from the customer inbox routes to the exception page, but the exception page only offers "Back to queue" (→ exception queue), not "Back to customer inbox." Entry-path context is lost.
+2. **V2 — Affordance regression:** sign-out (and surrounding auth chrome) is present on the exception queue page but disappears during forward/backward navigation across case ↔ exception detail.
+3. **V3 — Inconsistent click semantics:** most inbox items populate the right pane on click; "Email Order Entry" jumps directly to the exception page without a right-pane preview. Either the spec is silent, or the implementation drifted from a spec the test layer never enforced.
+
+These are *interaction drift*, not *data drift*. None of W1–W6 walks a click sequence and asserts the resulting screen state. Root cause of the miss: I marked `/plan-design-review` as n/a in the v1.0 review report. That was wrong — the bug population includes flow bugs, and a design-eye review of the test plan would have surfaced this gap.
+
+### Amendment scope (locked 2026-05-10)
+
+**W6 EXTENSION — global authenticated-chrome invariant.** Catches V2 and the entire "global affordance regression" class.
+
+- New test: `tests/contract/test_authenticated_chrome_invariant.test.tsx` (asoe-ui).
+- Mechanism: maintain a registry `tests/contract/authenticated-routes.ts` enumerating every route that requires auth chrome. The test mounts each route (RTL or Playwright component test) and asserts the chrome contract — sign-out button, user-menu, breadcrumb shell — is present.
+- Spec-as-oracle compatible: registry IS the spec; impl drift fails the test. Same shape as `audit_bearing_registry.yaml` for compliance.
+- Cost: ~0.5 week added to Lane 2, runs after W6 baseline lands.
+
+**W7 NEW — Playwright flow tests with YAML flow registry.** Catches V1, V3, and future flow regressions.
+
+- New directory: `e2e/flows/` (asoe-ui).
+- Pattern: each user flow is a YAML file declaring entry route, action sequence, and expected post-state (URL, visible affordances, focused element). A Playwright runner derives one test per flow.
+- Example registry shape:
+  ```yaml
+  # e2e/flows/email-order-entry-from-inbox.yaml
+  name: email_order_entry_from_inbox
+  entry: /inbox
+  steps:
+    - action: click
+      selector: '[data-testid="inbox-item-email-order-entry"]'
+    - assert_url_matches: /exception/.*
+    - assert_visible: '[data-testid="back-to-customer-inbox"]'
+    - action: click
+      selector: '[data-testid="back-to-customer-inbox"]'
+    - assert_url_matches: /inbox/customer
+  ```
+- Initial flow set (~6 flows): inbox-to-exception (per inbox-item type), forward/back navigation across case ↔ exception detail, sign-in to first authenticated page, sign-out from each role's home, exception triage approval path.
+- Catches V1 directly (declares the expected back-target), V3 directly (declares per-item-type click behavior — silence is not a default; every inbox-item type must have a flow entry).
+- Cost: ~1.5 weeks added as a new lane (Lane 3, asoe-ui-only). Runs in parallel with Lane 2 W5/W6 once `generated.ts` is published by Lane 1 W1.
+
+### Updated timeline
+
+| Lane | Repo | Workstreams | Duration | Depends on |
+|---|---|---|---|---|
+| Lane 1 | asoe2 | W1 → W2 → W3 → W4 | 4 weeks | — |
+| Lane 2 | asoe-ui | W4 → W5 → W6 (+ chrome invariant ext.) | 4.5 weeks | Lane 1 W1.5 |
+| Lane 3 | asoe-ui | W7 (Playwright flow registry) | 1.5 weeks | Lane 1 W1.5 |
+
+**Calendar total:** 6 weeks if Lanes 2 & 3 fully parallelize; 7 weeks if serialized for review bandwidth. Recommend parallel — Lanes 2 and 3 touch disjoint test directories (`tests/contract/` vs `e2e/flows/`).
+
+### Failure modes added by the amendment
+
+| Codepath | Realistic failure | Test? | Mitigation |
+|---|---|---|---|
+| `authenticated-routes.ts` registry | Dev adds a new authenticated route, forgets to register it → chrome regression undetected | **GAP** — same shape as audit-registry brittleness; accepted | Pair with a meta-test: scan `src/app/**/page.tsx` for authenticated layout markers, assert each has a registry entry |
+| Playwright flow YAML | Dev changes UX (e.g., legitimately removes "back to inbox") but doesn't update YAML → test fails for the right reason | Built-in (test fails loud) | None needed; this is the desired behavior |
+| Playwright flakiness | Network/timing flake → false fails | Standard Playwright retry budget; nightly long-soak | Tier the flow tests: critical flows on every PR, full set nightly |
+
+**Critical gaps post-amendment: 1** (cross-repo artifact fallback, unchanged from v1.0). The chrome-registry brittleness is acceptable because the meta-test above bounds it.
+
+### Updated GSTACK REVIEW REPORT
+
+| Review | Runs | Status | Notes |
+|---|---|---|---|
+| CEO Review | 0 | — | not required |
+| Codex Review | 0 | — | codex not on PATH |
+| Eng Review (v1.0) | 1 | CLEAR (PLAN) | 5 decisions locked |
+| Design Review | 0 | DEFERRED | gap surfaced post-review; amendment v1.1 closes it without a formal `/plan-design-review` run. Recommend running it before W7 implementation begins. |
+| DX Review | 0 | — | not required |
+
+**UNRESOLVED:** 0.
+**VERDICT (v1.1):** ENG CLEARED with amendment. Recommend a `/plan-design-review` pass before W7 lands to catch any further interaction-drift gaps the post-review missed.
