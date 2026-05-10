@@ -1223,15 +1223,29 @@ without dashes.
       No grandfather — recipe + UI shapes are 1:1.
 
 ### 23.5 Remaining adapters (gateway-dependent — out of this phase)
-- [ ] `adapt_price` (PriceAdjustmentRecipe → price_analysis).
-      Blocked on price_analysis_gateway_gap clause + 2026-06-21
-      deadline.
-- [ ] `adapt_duplicate` (DuplicatePORecipe → duplicate_detection).
-      Blocked on persisting matched_po_details on the record.
-- [ ] `adapt_order_comparison` — synthesised from duplicate; lands
-      after adapt_duplicate.
-- [ ] `adapt_back_order` (BackOrderResolutionRecipe →
-      backorder_analysis). Blocked on persisting warehouse snapshots.
+- [x] `adapt_price` (PriceAdjustmentRecipe → price_analysis).
+      Implemented at `api/analysis_adapters.py:961`; reads from
+      `record.enrichment_context["price_context"]`. The
+      `price_analysis_gateway_gap` grandfather clause in
+      `compliance/audit_bearing_registry.yaml` carries the
+      2026-06-21 deadline; the adapter shipped early so the
+      contract is in place when the gateway lands.
+- [x] `adapt_duplicate` (DuplicatePORecipe → duplicate_detection).
+      Implemented at `api/analysis_adapters.py:836`. Reads
+      `record.enrichment_context["matched_po_details"]` (V004
+      enrichment_context column persists it; gateway dep
+      registered in `recipes/registry.py:97`). 14 tests in
+      `tests/test_analysis_adapters_duplicate.py`.
+- [x] `adapt_order_comparison` — synthesised from
+      `matched_po_details` at `api/analysis_adapters.py:914`.
+      Same gateway source as `adapt_duplicate`; secondary
+      adapter on `DuplicatePORecipe.py` per
+      `SECONDARY_ANALYSIS_ADAPTERS` registry entry.
+- [x] `adapt_back_order` (BackOrderResolutionRecipe →
+      backorder_analysis). Implemented at
+      `api/analysis_adapters.py:1162`. Reads
+      `record.enrichment_context["inventory_snapshot"]` (gateway
+      dep registered in `recipes/registry.py:198`).
 
 ### 23.6 CLAUDE.md guardrails
 - [x] Guardrail 6: "UI richness is a strict product commitment";
