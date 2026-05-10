@@ -31,3 +31,22 @@ Repos: kumarabhijit/asoe2, kumarabhijit/asoe-ui
 - `tests/contract/test_terminal_status_parity.test.ts` (asoe-ui) — asserts `TerminalStatus` union matches asoe2's enum, including `AUDIT_CONTEXT_MISSING`
 - `tests/contract/test_lifecycle_state_no_executing.test.ts` (asoe-ui) — asserts no fixture, mock, or response contains `EXECUTING`
 - `tests/contract/test_override_tag_casing.py` (asoe2) — asserts `AllowedOverrideReasonTag` values follow a documented casing convention
+
+## Behavioral coverage (amendment v1.1 — 2026-05-10)
+
+### W6 extension — global affordance invariant
+- `tests/contract/test_authenticated_chrome_invariant.test.tsx` (asoe-ui) — registry `tests/contract/authenticated-routes.ts` enumerates every authenticated route; for each, mount the route and assert sign-out + user-menu + breadcrumb shell render. Catches the class "global affordance disappears on a specific route" (V2 in design doc).
+- `tests/contract/test_authenticated_routes_registry_coverage.test.tsx` (asoe-ui) — meta-test scanning `src/app/**/page.tsx` for authenticated layout markers, asserting each has a registry entry. Bounds the registry brittleness.
+
+### W7 — Playwright flow registry
+- `e2e/flows/*.yaml` + `e2e/flow-runner.spec.ts` (asoe-ui) — YAML-declared flows; runner derives one Playwright test per flow.
+- Initial flows (one per file):
+  - `email-order-entry-from-inbox.yaml` — entry `/inbox`, click email-order-entry item, expect back-to-customer-inbox affordance, click it, expect `/inbox/customer`. Catches V1.
+  - `inbox-item-click-behavior-catalog.yaml` — for each declared inbox-item type, declares whether click jumps to detail page or populates right pane. Catches V3 (silence is not a default — every type must be declared).
+  - `case-to-exception-detail-roundtrip.yaml` — case detail → exception detail → back; assert sign-out persists at every step. Catches V2 from a flow angle, complementing the W6 invariant.
+  - `signin-to-home.yaml`, `signout-from-each-role.yaml`, `exception-triage-approval.yaml` — golden paths.
+
+### Behavioral edge cases
+- Forward/back browser navigation across case ↔ exception detail must preserve the route's authenticated chrome (sign-out, user-menu).
+- Inbox item click behavior must be declared per-item-type; an undeclared type is a test failure, not silent passthrough.
+- Context-aware back-targets: navigating to a shared destination (exception page) from different entry paths (customer inbox vs. exception queue) must offer entry-path-appropriate back affordances, not only the most recent queue.
