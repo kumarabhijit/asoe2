@@ -45,3 +45,40 @@ async def health() -> HealthResponse:
         allowed_override_reason_tags=_ALLOWED_OVERRIDE_REASON_TAGS,
         allowed_override_reason_tags_by_intent=_REASON_TAGS_BY_INTENT,
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/metrics — Prometheus SLI surface (ADR-039 §7.3)
+# ---------------------------------------------------------------------------
+#
+# Public endpoint (no auth) so the in-cluster Prometheus
+# scraper can read it without managing a service-account
+# credential. The response shape is the standard Prometheus
+# text exposition format; see api/metrics.py for the metric
+# families emitted.
+#
+# Operators wire the scrape config via the existing
+# ServiceMonitor pattern; the metric namespace is
+# `shadow_llm_*` so the dashboard import is a one-step.
+
+from fastapi import Response  # noqa: E402
+
+from api.metrics import render_all as _render_metrics  # noqa: E402
+
+
+@router.get(
+    "/metrics",
+    response_class=Response,
+    include_in_schema=False,  # Prometheus scrape, not part of the UI contract
+)
+async def metrics() -> Response:
+    """Emit the ADR-039 §7.3 Prometheus SLI surface.
+
+    Content-Type per the Prometheus text-exposition spec:
+    `text/plain; version=0.0.4; charset=utf-8`. Scrapers expect
+    that exact value; do not change it.
+    """
+    return Response(
+        content=_render_metrics(),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
