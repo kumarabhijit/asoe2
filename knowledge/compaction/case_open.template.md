@@ -5,6 +5,13 @@ audit_keys:
   - source_channel
   - tier
   - sla_deadline
+learning_signals:
+  - case_volume_by_source_channel:
+      describes: case open rate per (source, source_channel) tuple
+      trains: capacity planning + per-channel agent-budget tuning
+  - tier_graduation_pattern:
+      describes: how often a case graduates T2 → T3 within N events
+      trains: ADR-038 §7.1 tier policy refinement (forward-only; never demote)
 ---
 # Compaction template — case_open
 

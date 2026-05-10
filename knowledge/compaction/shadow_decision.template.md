@@ -5,6 +5,17 @@ audit_keys:
   - intent
   - recommended_action
   - amount_usd
+learning_signals:
+  - l1_l2_disagreement:
+      describes: pairs of (L1 deterministic, L2 LLM) verdicts on same case
+      trains: ADR-039 §6.1 anchor-example accrual + X.2 rollout gate
+  - per_intent_verdict_distribution:
+      describes: GREEN/YELLOW/RED breakdown per intent
+      trains: rule-tightness dashboard + Compliance workshop input
+  - amount_at_verdict_threshold:
+      describes: amount_usd distribution near the four-eyes / L2 thresholds
+      trains: threshold calibration + REPEATED_NEAR_THRESHOLD_PATTERN
+              concern detection for the ADR-039 vocabulary
 ---
 # Compaction template — shadow_decision
 

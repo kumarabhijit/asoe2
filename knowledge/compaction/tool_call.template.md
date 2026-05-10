@@ -6,6 +6,13 @@ audit_keys:
   - case_status_after
   - amount_usd
   - reason_code
+learning_signals:
+  - per_tool_failure_rate:
+      describes: tool error-rate bucketed by tool_name
+      trains: tool-reliability dashboard + retry-policy calibration
+  - amount_distribution_by_tool:
+      describes: financial impact distribution per tool
+      trains: per-tool autonomy-level boundary calibration (ADR-038 §6.4)
 ---
 # Compaction template — tool_call
 

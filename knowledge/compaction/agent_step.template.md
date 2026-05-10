@@ -6,6 +6,16 @@ audit_keys:
   - status
   - case_status_after
   - reason_code
+learning_signals:
+  - tool_selection_outcome:
+      describes: which tool the agent picked given the working-memory frame
+      trains: tool-selection calibration (ADR-032 future calibration target)
+  - halt_pattern:
+      describes: which halt-tool fired (escalate / declare_done / clarify)
+      trains: agent-loop early-termination calibration
+  - reason_code_distribution:
+      describes: closed-vocab reason_code on escalations
+      trains: per-intent override-reason-tag refinement (Phase 5.1 input)
 ---
 # Compaction template — agent_step
 

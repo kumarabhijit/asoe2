@@ -240,6 +240,72 @@ class TestPerEventTypeTemplates:
         assert first == second
 
 
+class TestLearningSignalsFrontmatter:
+    """ML lens ask from the 2026-05-09 virtual-workshop pre-read:
+    every per-event-type compaction template carries a
+    `learning_signals:` block declaring which downstream
+    calibration / dashboard the captured audit keys train.
+
+    This test uses real YAML parsing (PyYAML) — distinct from
+    `agents.compaction._parse_frontmatter` which only handles the
+    flat `audit_keys:` shape and intentionally does not pull
+    PyYAML into the runtime. The pipelines that consume
+    `learning_signals` are out-of-band tooling
+    (ML calibration, dashboards), so PyYAML there is fine.
+    """
+
+    EXPECTED_TEMPLATES = (
+        "agent_step", "tool_call", "shadow_decision", "override",
+        "escalation", "case_open", "sla_breach", "compaction",
+    )
+
+    def _frontmatter(self, slug: str) -> dict:
+        import yaml
+        path = Path("knowledge/compaction") / f"{slug}.template.md"
+        text = path.read_text(encoding="utf-8")
+        assert text.startswith("---"), f"{slug}: no frontmatter"
+        end = text.find("\n---", 3)
+        assert end > 0, f"{slug}: unterminated frontmatter"
+        return yaml.safe_load(text[3:end])
+
+    def test_every_template_has_learning_signals(self):
+        for slug in self.EXPECTED_TEMPLATES:
+            front = self._frontmatter(slug)
+            assert "learning_signals" in front, slug
+            assert isinstance(front["learning_signals"], list), slug
+            assert len(front["learning_signals"]) >= 1, slug
+
+    def test_each_signal_has_describes_and_trains(self):
+        for slug in self.EXPECTED_TEMPLATES:
+            front = self._frontmatter(slug)
+            for entry in front["learning_signals"]:
+                # Each entry is a single-key dict whose value is
+                # a {describes, trains} dict.
+                assert isinstance(entry, dict), f"{slug}: {entry}"
+                assert len(entry) == 1, f"{slug}: {entry}"
+                signal_name, body = next(iter(entry.items()))
+                assert "describes" in body, f"{slug}/{signal_name}"
+                assert "trains" in body, f"{slug}/{signal_name}"
+
+    def test_audit_keys_still_present(self):
+        # Adding the learning_signals block must not break the
+        # existing audit_keys contract the runtime depends on.
+        for slug in self.EXPECTED_TEMPLATES:
+            front = self._frontmatter(slug)
+            assert "audit_keys" in front, slug
+            assert isinstance(front["audit_keys"], list), slug
+
+    def test_runtime_loader_unaffected(self):
+        # `agents.compaction.load_template` only reads audit_keys;
+        # the learning_signals block must not change its return.
+        from agents.compaction import load_template
+        for slug in self.EXPECTED_TEMPLATES:
+            tmpl = load_template(slug)
+            assert tmpl is not None, slug
+            assert tmpl.event_type == slug
+            assert len(tmpl.audit_keys) >= 1
+
+
 class TestRunCompaction:
     def test_returns_none_when_trigger_does_not_fire(self, case):
         result = run_compaction(case=case, events=[])
