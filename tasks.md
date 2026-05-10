@@ -2162,3 +2162,202 @@ together). Verdicts produced today are not yet attached to any
       §8.5, ADR-039 §4.1 + §6, and ADR-040 §2 + §2.2. Once
       ratified the X.2 / X.3 / X.4 / case-cosign-on flips are
       ConfigMap edits with no code redeploy.
+
+
+---
+
+## PHASE 28 — Next-session pickup (post 2026-05-09 round)
+
+This phase consolidates everything left over after Round 4 (the
+virtual-workshop-deliverable closeout). All engineering-side
+work for ADR-038 / ADR-039 / ADR-040 is shipped; what remains
+is either (a) workshop / ratification meetings, (b) operational
+soak / training time, (c) per-intent SME deep-dives, or (d)
+Frontend Platform reshape (V5.1).
+
+The 16 remaining `- [ ]` checkboxes elsewhere in this file fall
+into one of these categories — the section below is the
+canonical pickup list so a new session can scan it without
+having to grep across §5 / §23.4 / §27.
+
+### 28.1 Compliance workshop (live)
+
+- [ ] **Run the live ratification workshop** against the
+      pre-read at
+      `docs/workshops/2026-05-09-deferred-items-virtual-workshop.md`.
+      Engineering deliverables for every gate are already in
+      place; the live session is a reconciliation, not a
+      discovery. Outputs: workshop minutes (binding) + sign-off
+      per gate.
+
+  Gates expected to clear at the live session:
+
+  - [ ] ADR-038 §7.4 — compaction protocol. Engineering ready;
+        `learning_signals:` ML ask closed in `b7db08c`.
+  - [ ] ADR-038 §8.5 — CODEOWNERS map. File shipped in `e7929f5`
+        (asoe2) + `eca7d4c` (asoe-ui); needs team-handle
+        resolution (see §28.4) before it actually enforces.
+  - [ ] ADR-039 §4.1 — combination rule. Engineering ready;
+        SLI dashboard wired (`db7b5e4`); UI badge shipped
+        (asoe-ui `5d6753d`); runbook + training brief shipped
+        (`79727b8`). **Only the 1-week soak remains** (§28.2).
+  - [ ] ADR-039 §6 — phased rollout (X.1 → X.4). Engineering
+        ready; runbook + training brief shipped.
+  - [ ] ADR-040 §2 + §2.2 — case-level cosign truth table + SoD.
+        Code path shipped behind `ASOE_CASE_COSIGN_ENABLED`
+        (`6eb66ad`); endpoints 404 until ratification flip.
+
+### 28.2 Operational soak + flip
+
+- [ ] **1-week observe-only X.1 soak with Azure provider.**
+      Domain-SME ask before X.2 flip per the workshop pre-read.
+      Set `AZURE_OPENAI_SHADOW_DEPLOYMENT=<deployment>` (and
+      the matching `AZURE_OPENAI_*` env vars) in the live
+      ConfigMap; leave
+      `knowledge/shadow_llm/metadata.yaml::rollout.financial_impact_threshold_usd`
+      at `null` (X.1 observe-only). Scrape the `/api/v1/metrics`
+      endpoint for 7 days; review:
+        * `shadow_llm_disagreement_rate` — target band 5–15%.
+        * `shadow_llm_abstain_rate` — target <30%.
+        * `shadow_llm_validation_errors_total` — should stay
+          near zero.
+        * `shadow_llm_unavailable_total` / `shadow_llm_timeouts_total`
+          — should stay near zero on a healthy provider.
+- [ ] **X.2 flip** (post-soak + Compliance ratification): edit
+      `knowledge/shadow_llm/metadata.yaml::rollout.financial_impact_threshold_usd:
+      10000`. SIGHUP per `docs/runbooks/shadow_llm_x2_rollback.md` §3.1.A.
+      Watch the SLI dashboard for the first 24 hours.
+- [ ] **Case-cosign flip** (independent of X.2): set
+      `ASOE_CASE_COSIGN_ENABLED=1` in the asoe-core ConfigMap.
+      Endpoints `POST /api/v1/cases/{id}/override` and
+      `/cases/{id}/override/cosign` activate.
+- [ ] **Case-agent routing flip** (independent of the above):
+      set `ASOE_CASE_AGENT_ENABLED=1`. Routes
+      `EMAIL_ORDER_ENTRY_REQUEST` events through the agent
+      harness (`agents/harness.py::run_agent_step`).
+- [ ] **OCR provider flip** (procurement decision = Azure DI):
+      set `ASOE_OCR_PRIMARY=azure_di` + `AZURE_DI_*` env vars.
+
+### 28.3 Per-intent reason-tag curation (Phase 5)
+
+The mechanism is shipped (`docs/templates/override_reason_tag_review_template.md`).
+Each session is Domain-SME-led + Compliance-co-reviewed; ~90
+min per intent. Sequencing recommendation: highest-volume
+intents first.
+
+- [ ] Session 1 — `DUPLICATE_PO`
+- [ ] Session 2 — `CONTRACTUAL_CORRECTION`
+- [ ] Session 3 — `CREDIT_BLOCK`
+- [ ] **Engineering land** of §5.2 wiring after sessions 1–3 prove
+      the mechanism: replace
+      `INTENT_REASON_TAGS = {i: _GLOBAL_REASON_TAGS for i in ...}`
+      seeding in `constraints/specs.py`, regenerate openapi,
+      `cd ../asoe-ui && npm run generate-types`, update
+      `TestPerIntentReasonTag`. **Also** ship the §5.3 grandfather-
+      validator change (read-side accepts legacy tags; forward
+      validation enforces the new vocabulary). Hash chain must
+      not be retroactively invalidated.
+- [ ] Sessions 4–12 — remaining intents
+      (`MANUAL_ORDER_INTAKE`, `EDI_MISMATCH`, `BACK_ORDER`,
+      `PRICE_HOLD_RELEASE`, `OVER_MAX`, `MIN_ORDER_QTY`,
+      `PALLET_CONFIG`, `DELIVERY_DELAY`, `MASS_PRICING_ERROR`).
+      Each lands as an additive entry in `INTENT_REASON_TAGS`;
+      no further code change needed.
+- [ ] §5.4 ML follow-up — once curated `(intent, reason_tag)`
+      tuples exist, the ML team clusters override-pattern
+      analysis. Out-of-scope for engineering until the curation
+      is sufficient.
+
+### 28.4 CODEOWNERS team-handle resolution
+
+- [ ] Map placeholder team handles in
+      `.github/CODEOWNERS` (asoe2 + asoe-ui) to real GitHub
+      teams. Placeholders today:
+        * `@compliance-team`
+        * `@backend-team`
+        * `@frontend-team`
+        * `@architect`
+        * `@platform-team`
+        * `@sre-team`
+        * `@domain-sme`
+        * `@tools-admin`
+      Until mapped, the file ships but does not actually
+      enforce reviewer assignment. Repo-admin + ops follow-up.
+
+### 28.5 Frontend Platform reshape (V5.1)
+
+The Round 3 + Round 4 UI work shipped scaffolding — `useCases`
+hook, `CaseViewBanner`, `Manual Cases` MetricTile, View-case
+deeplink, `PolicyHitBadge`. The full reshape is V5.1 and
+needs detail-panel work for `OrderCase`.
+
+- [ ] **Replace INBOX mock on `/inbox`** with rows projected
+      from `casesApi.list({ source: "manual_order" })`. Each
+      row's data shape changes from `InboxItem` (sender / subject /
+      preview) to `OrderCase`-projected (case_id / source_channel /
+      status / sla_band).
+- [ ] **Replace `exceptionsApi.list` on `/exceptions`** with
+      rows projected from `casesApi.list()` (no source filter).
+      Each row's data shape changes from `ExceptionSummary` to
+      `OrderCase`-projected.
+- [ ] **Reshape detail panels** (`ExceptionDetailPanel`,
+      `InboxDetailPanel`) to consume `OrderCase` fields where
+      the row ID resolves to a case. The existing per-intent
+      `*Section.tsx` components stay as dumb projectors per
+      Guardrail #6 — they continue to render whatever the
+      backend hands them.
+- [ ] **WebSocket-driven case invalidation** through the
+      `useCases` hook so the inbox / exception count stays
+      live without a page refresh. Mirrors the existing
+      `WSEvent.exception_*` pattern but emits
+      `WSEvent.case_*` events from the backend on case
+      open / status change / SLA breach. Backend deliverable:
+      `api/events.py` extension; UI deliverable: `useCases`
+      subscribes to `case_*` topic.
+- [ ] **UI L1-vs-L2 badge** (`PolicyHitBadge`) extended to
+      the case detail panel when `OrderCase`-routed cases
+      surface ADR-039 verdicts. Today the badge wires only
+      into `AgentReasoningCard` + `EventsTimeline::PolicyHits`.
+      Case detail integration lands with the data-hook swap.
+
+### 28.6 Operational follow-ups (SRE)
+
+- [ ] **ServiceMonitor + Grafana dashboard JSON** for the
+      ADR-039 §7.3 metric surface. The metric namespace is
+      stable (see `api/metrics.py`); both can be authored
+      before X.2 flip. Dashboard panels recommended:
+        * `shadow_llm_invocations_total` (counter; rate by trigger)
+        * `shadow_llm_disagreement_rate` (gauge)
+        * `shadow_llm_abstain_rate` (gauge)
+        * `shadow_llm_cache_hit_rate` (gauge)
+        * `shadow_llm_avg_latency_ms` (gauge)
+        * `shadow_llm_cost_usd_total` (gauge; rate)
+        * `reviewer_override_rate_on_llm_downgrades` (derived;
+          requires asoe-core to emit a counter on
+          override-of-LLM-downgrade — small backend follow-up)
+- [ ] **Reviewer-override-of-LLM-downgrade counter** —
+      backend emits a Prometheus counter when a reviewer
+      overrides a case whose `ComplianceDecision.llm_shadow_verdict.action
+      == "DISAGREE_DOWNGRADE"`. Feeds the X.2 → X.3
+      ratification gate (target `false_downgrade_rate ≤ 35%`).
+      Likely a small extension to `api/metrics.py` + an
+      override-handler hook in `api/routes/exceptions.py`.
+
+### 28.7 Things explicitly NOT in scope for next session
+
+* `architecture_v5.md` flips Proposed → Accepted only after
+  all §28.1 ratifications. Don't pre-empt.
+* `adapt_back_order` already shipped; the warehouse-snapshot
+  gateway dep is registered (`recipes/registry.py:198`).
+  No further engineering needed.
+* The X.4 cross-check extension (extending
+  `constraints/cross_check.py` to fire on
+  deterministic-primary too) is a separate ADR-039 §6.4
+  follow-up. Out of scope until X.3 telemetry validates the
+  approach.
+
+---
+
+*Phase 28 authored 2026-05-09 as the Round 4 closeout doc.
+Re-read before the next session to skip the autobiographical
+re-discovery work.*
