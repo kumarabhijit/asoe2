@@ -1352,3 +1352,40 @@ class CaseListResponse(BaseModel):
 
     items: List[Dict[str, Any]] = Field(default_factory=list)
     total: int = 0
+
+
+class CaseRecordsResponse(BaseModel):
+    """GET /api/v1/cases/{id}/records — attached-record loader response
+    (Phase 28.5.x §28.5 follow-up).
+
+    `items` is the list of `ExceptionDetail`-shaped child records
+    attached to the case (`ExceptionRecord.parent_case_id == case_id`).
+    The UI's CaseDetailPanel uses this both to render the stack of
+    per-event sections and to aggregate `aggregated_policy_hits` into
+    the L1/L2 PolicyHitBadge surface (ADR-039 §4.5).
+
+    Why a separate field for the aggregate (rather than re-deriving it
+    client-side):
+
+      * Authoritative: the backend already has the deduped union with
+        the LLM_SHADOW: prefix preserved; making the client recompute
+        it from `items[*].shadow_policy_hits` invites drift.
+      * Empty-set distinction: the UI hides the section when the
+        aggregate is empty (Guardrail #6 — no synthesised "no hits"
+        placeholder); we want one place that decides "no hits".
+      * Telemetry surface: a future SLI on case-level disagreement
+        rate reads off the same aggregate without re-iterating
+        children.
+    """
+
+    items: List[Dict[str, Any]] = Field(default_factory=list)
+    total: int = 0
+    aggregated_policy_hits: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Deduped union of `shadow_policy_hits` across all attached "
+            "records. L1 rule names (bare strings) and L2 LLM-derived "
+            "concerns (LLM_SHADOW: prefix) are preserved; the UI's "
+            "PolicyHitBadge distinguishes the two visually."
+        ),
+    )
