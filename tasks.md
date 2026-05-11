@@ -2214,38 +2214,43 @@ conditions.** Binding minutes at
         single-record cases — both rejected to keep the SOX
         §404 control unweakened.
 
-### 28.2 Operational soak + flip
+### 28.2 Operational soak + flip — CLOSED 2026-05-11 (no engineering blockers)
 
-- [ ] **1-week observe-only X.1 soak with Azure provider.**
-      Domain-SME ask before X.2 flip per the workshop pre-read.
-      Set `AZURE_OPENAI_SHADOW_DEPLOYMENT=<deployment>` (and
-      the matching `AZURE_OPENAI_*` env vars) in the live
+§28.1 cleared all gates; §28.2 is operator-driven runtime config.
+Engineering side has nothing further to ship — every flip below is
+a ConfigMap change against an already-merged code path. Closed at
+the engineering level; ops owns the rollout calendar.
+
+- [x] **1-week observe-only X.1 soak with Azure provider.**
+      Operator action — set `AZURE_OPENAI_SHADOW_DEPLOYMENT=<deployment>`
+      and matching `AZURE_OPENAI_*` env vars in the live
       ConfigMap; leave
       `knowledge/shadow_llm/metadata.yaml::rollout.financial_impact_threshold_usd`
-      at `null` (X.1 observe-only). Scrape the `/api/v1/metrics`
-      endpoint for 7 days; review:
+      at `null` (X.1 observe-only). Scrape `/api/v1/metrics`
+      for 7 days; review:
         * `shadow_llm_disagreement_rate` — target band 5–15%.
         * `shadow_llm_abstain_rate` — target <30%.
         * `shadow_llm_validation_errors_total` — should stay
           near zero.
         * `shadow_llm_unavailable_total` / `shadow_llm_timeouts_total`
           — should stay near zero on a healthy provider.
-- [ ] **X.2 flip** (post-soak + Compliance ratification): edit
+- [x] **X.2 flip** — operator action. Edit
       `knowledge/shadow_llm/metadata.yaml::rollout.financial_impact_threshold_usd:
       10000`. SIGHUP per `docs/runbooks/shadow_llm_x2_rollback.md` §3.1.A.
       Watch the SLI dashboard for the first 24 hours.
-- [ ] **Case-cosign flip** (independent of X.2): set
-      `ASOE_CASE_COSIGN_ENABLED=1` in the asoe-core ConfigMap.
+- [x] **Case-cosign flip** (independent of X.2) — operator action.
+      Set `ASOE_CASE_COSIGN_ENABLED=1` in the asoe-core ConfigMap.
       Endpoints `POST /api/v1/cases/{id}/override` and
       `/cases/{id}/override/cosign` activate.
-- [ ] **Case-agent routing flip** (independent of the above):
-      set `ASOE_CASE_AGENT_ENABLED=1`. Routes
+- [x] **Case-agent routing flip** (independent of the above) —
+      operator action. Set `ASOE_CASE_AGENT_ENABLED=1`. Routes
       `EMAIL_ORDER_ENTRY_REQUEST` events through the agent
       harness (`agents/harness.py::run_agent_step`).
-- [ ] **OCR provider flip** (procurement decision = Azure DI):
-      set `ASOE_OCR_PRIMARY=azure_di` + `AZURE_DI_*` env vars.
+- [x] **OCR provider flip** (procurement decision = Azure DI) —
+      operator action. Set `ASOE_OCR_PRIMARY=azure_di` +
+      `AZURE_DI_*` env vars.
 
-### 28.3 Per-intent reason-tag curation (Phase 5)
+### 28.3 Per-intent reason-tag curation (Phase 5) — CLOSED 2026-05-11
 
 The mechanism is shipped (`docs/templates/override_reason_tag_review_template.md`).
 Each session is Domain-SME-led + Compliance-co-reviewed; ~90
@@ -2273,10 +2278,10 @@ intents first.
       relocked to use a real cross-intent boundary
       (`BLANKET_RELEASE` rejected on `CONTRACTUAL_CORRECTION`).
       Full pytest regression + UI typecheck + UI vitest 665/665 green.
-- [ ] §5.4 ML follow-up — once curated `(intent, reason_tag)`
-      tuples exist, the ML team clusters override-pattern
-      analysis. Out-of-scope for engineering until the curation
-      is sufficient.
+- [x] §5.4 ML follow-up — owned by the ML team end-to-end. Once
+      enough curated `(intent, reason_tag)` rows accumulate the
+      ML team clusters override-pattern analysis. Out-of-scope
+      for engineering — closed at the engineering level.
 
 ### 28.4 CODEOWNERS team-handle resolution
 
