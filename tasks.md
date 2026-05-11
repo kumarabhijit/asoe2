@@ -2166,19 +2166,31 @@ together). Verdicts produced today are not yet attached to any
 
 ---
 
-## PHASE 28 — Next-session pickup (post 2026-05-09 round)
+## PHASE 28 — CLOSED 2026-05-11 (engineering scope empty)
 
-This phase consolidates everything left over after Round 4 (the
-virtual-workshop-deliverable closeout). All engineering-side
-work for ADR-038 / ADR-039 / ADR-040 is shipped; what remains
-is either (a) workshop / ratification meetings, (b) operational
-soak / training time, (c) per-intent SME deep-dives, or (d)
-Frontend Platform reshape (V5.1).
+Originally consolidated everything left over after Round 4 (the
+virtual-workshop-deliverable closeout). After the 2026-05-11
+marathon every engineering-side item is shipped or operator-
+driven runtime config; what genuinely remains is V5.2 (deferred)
+and the Domain-SME-triggered backlog.
 
-The 16 remaining `- [ ]` checkboxes elsewhere in this file fall
-into one of these categories — the section below is the
-canonical pickup list so a new session can scan it without
-having to grep across §5 / §23.4 / §27.
+**Closeout state (read first when picking up a new session):**
+
+| § | Title | Status |
+|---|---|---|
+| 28.1 | Compliance ratification (5 ADR gates) | ✅ All 5 cleared as-is (`docs/workshops/2026-05-11-compliance-ratification-decisions.md`) |
+| 28.2 | Operational soak + flip | ✅ Closed — operator-driven ConfigMap changes; no engineering blockers |
+| 28.3 | Per-intent reason-tag curation | ✅ Closed — §5.4 ML follow-up is ML-team-owned end-to-end |
+| 28.4 | CODEOWNERS team-handle resolution | ✅ Shipped |
+| 28.5 | V5.1 Frontend reshape | ✅ Shipped (PRs #134/#141) |
+| 28.5.x | V5.1.1 CaseListPane + V5.1.2 records-stack drill-in | ✅ Shipped (PRs #135/#136/#137/#138/#142/#143/#144/#145) |
+| 28.6 | SRE observability + multi-target deployment | ✅ Shipped (PR #135) |
+
+**Engineering scope for the next session:** empty. The §28.5.x
+V5.1.x deferred sub-list below carries the pickup-ready items
+(V5.2 full-detail-in-pane, server-side cursor pagination on the
+SLI trigger, by-customer sort on SME ask, inbox match-reason
+parity).
 
 ### 28.1 Compliance workshop — CLEARED 2026-05-11
 
@@ -2370,43 +2382,111 @@ session.
       hardcoded literal comparisons retired per the audit
       addendum on 2026-05-11. Binding decisions doc:
       `docs/workshops/2026-05-11-case-list-pane-decisions.md`.
-- [ ] **Case-attached-record loader** at `/cases/[id]`. The
-      `CaseDetailPanel` "Attached records" placeholder needs a
-      backend roundtrip that lists the per-event records under
-      the case and stacks each through the existing
-      `*Section.tsx` projectors. Once that lands,
-      `CaseDetailPanel` populates `policyHits` from the
-      aggregated `ComplianceDecision.policy_hits` of the child
-      records and the L2-LLM badge wiring starts surfacing
-      against real data.
-- [ ] **Backend emission of `case_*` events**. Contract is
-      shipped; emission sites (`OrderCase` open in the
-      lookup-or-create path, status transitions, close) are not
-      yet wired. Until they are, the UI's invalidation handler
-      is a no-op against live traffic.
+- [x] **Case-attached-record loader** (shipped 2026-05-11).
+      Backend `GET /api/v1/cases/{id}/records` returns
+      ExceptionDetail-shaped child records + a deduped
+      `aggregated_policy_hits` union. UI `casesApi.getRecords` +
+      `/cases/[id]` Promise.all-loads the case header + records
+      list and hands the aggregated policy hits to
+      `CaseDetailPanel`. The PolicyHitBadge surface now
+      populates against real data.
+- [x] **Backend emission of `case_*` events** (shipped
+      2026-05-11). `api/case_events.py` wraps
+      `WSEvent.case_open` / `case_update` / `case_close`;
+      wired into `case_resolver.materialise_for_event` (open),
+      `POST /api/v1/cases/{id}/override` (status flip), and
+      `POST /api/v1/cases/{id}/override/cosign` (terminal close
+      on approve / non-terminal update on reject). UI's
+      `useCases().refetch()` invalidation handler now silently
+      refreshes on every case-state mutation.
+- [x] **V5.1.1 CaseListPane backend + frontend** (shipped
+      2026-05-11, asoe2 PR #137 + asoe-ui PR #143). Backend:
+      `/api/v1/health.allowed_case_statuses` + `_case_sources`,
+      `child_intents` in `/api/v1/cases` response with cache
+      invalidation on `case_*` events, multi-value `status` /
+      `intents` / `since` / `q` query params,
+      `asoe_cases_returned_p99` SLI. Frontend: CaseListPane
+      with cluster chips + intent multi-select + search +
+      saved views + keyboard nav, `useKeyboardListNav` hook,
+      `useSavedViews` v2 with v1 migration, `src/lib/cases.ts`
+      consolidation, vitest-axe a11y scaffolding.
+- [x] **V5.1.2 records-stack drill-in + match-reason + saved-view
+      kbd parity** (shipped 2026-05-11, asoe-ui PR #145 — draft,
+      awaiting merge). `/exceptions` right pane now follows a
+      four-state machine: placeholder → case header → records
+      stack → inline `ExceptionDetailPanel`. Single-record
+      cases auto-skip the stack so the operator drills straight
+      into the HITL surface (Approve / Reject / Override /
+      Escalate / Re-analyze / cosign banner). Match-reason
+      announcement on search hits (per-row "matched on PO"
+      badges + per-list `aria-live="polite"` summary).
+      `useSavedViews.rename()` + Escape-to-close on the
+      saved-views menu + window.prompt rename + window.confirm
+      destructive-delete + visible focus rings on all three
+      row actions. Closes the operator's HITL-without-leaving-
+      the-queue concern raised during the V5.1.x scope
+      conversation.
 
-### 28.6 Operational follow-ups (SRE)
+##### V5.1.x deferred — pickup-ready for the next session
 
-- [ ] **ServiceMonitor + Grafana dashboard JSON** for the
-      ADR-039 §7.3 metric surface. The metric namespace is
-      stable (see `api/metrics.py`); both can be authored
-      before X.2 flip. Dashboard panels recommended:
-        * `shadow_llm_invocations_total` (counter; rate by trigger)
-        * `shadow_llm_disagreement_rate` (gauge)
-        * `shadow_llm_abstain_rate` (gauge)
-        * `shadow_llm_cache_hit_rate` (gauge)
-        * `shadow_llm_avg_latency_ms` (gauge)
-        * `shadow_llm_cost_usd_total` (gauge; rate)
-        * `reviewer_override_rate_on_llm_downgrades` (derived;
-          requires asoe-core to emit a counter on
-          override-of-LLM-downgrade — small backend follow-up)
-- [ ] **Reviewer-override-of-LLM-downgrade counter** —
-      backend emits a Prometheus counter when a reviewer
-      overrides a case whose `ComplianceDecision.llm_shadow_verdict.action
-      == "DISAGREE_DOWNGRADE"`. Feeds the X.2 → X.3
-      ratification gate (target `false_downgrade_rate ≤ 35%`).
-      Likely a small extension to `api/metrics.py` + an
-      override-handler hook in `api/routes/exceptions.py`.
+- [ ] **Full-detail-in-pane V5.2.** True split-pane shape:
+      records stack always visible above the per-record
+      `ExceptionDetailPanel`, both rendered simultaneously
+      (no "Back to records" round-trip). V5.1.2 closed the
+      HITL access gap with a drill-in pattern, but the
+      Outlook-style master-detail muscle memory CSRs had on
+      V5.0 isn't fully restored. Estimate ~4-5 days; needs a
+      min-height design pass for smaller monitors.
+- [ ] **Server-side cursor pagination.** Stays deferred until
+      any tenant's `asoe_cases_returned_p99` sustains ≥ 150
+      (the §D7 re-open trigger). SLI is shipped and watching;
+      Grafana panel plots the gauge. Re-open the build when
+      the alert fires; estimate ~2-3 days backend + UI.
+- [ ] **Tertiary by-customer sort.** Add as an optional toggle
+      next to "SLA urgency / Recently opened" in `CaseListPane`.
+      Deferred until a Domain SME flags need. Trivial to add
+      when prioritised — pure UI sort, no backend change.
+- [ ] **Match-reason announcement for the inbox.** The V5.1.2
+      pattern landed on `CaseListPane` only; `/inbox` keeps the
+      simpler row UX. If Domain SME asks for parity, the same
+      `parseSearchQuery` / `findMatchReason` helpers in
+      `CaseListPane.tsx` lift cleanly into a shared
+      `src/lib/search.ts` module.
+
+##### V5.1.x explicitly out of scope
+
+- ADR-038 §H.7 closeout (full case-lifecycle migration of
+  cosign / override / disposition handlers from the per-
+  exception lifecycle). Tracked under §27.7 in this file;
+  not a V5.1.x item.
+- L4 case-aware harness extensions (concurrency lock, tool-
+  call replay log, tier graduation hook). Tracked under ADR-
+  038 §H.x; orthogonal to the queue UX work.
+
+### 28.6 Operational follow-ups (SRE) — CLOSED 2026-05-11
+
+- [x] **ServiceMonitor + Grafana dashboard JSON** for the
+      ADR-039 §7.3 metric surface (shipped 2026-05-11, PR
+      #135). Canonical assets at `ops/observability/`:
+      `prometheus.yml`, `grafana/dashboards/shadow_llm.json`,
+      `grafana/provisioning/`. Deploys to three targets from a
+      single set: docker-compose overlay
+      (`docker-compose.observability.yml`), Azure Container
+      Apps (`Dockerfile.prometheus` + `Dockerfile.grafana` +
+      Bicep `deployObservability=true`), Kubernetes
+      (`k8s/core/observability/servicemonitor.yaml`).
+- [x] **Reviewer-override-of-LLM-downgrade counter** (shipped
+      2026-05-11, PR #135). `ShadowLLMMetrics.reviewer_overrides_of_llm_downgrade_total`
+      + `reviewer_override_rate_on_llm_downgrades()` gauge.
+      Wired into `_record_reviewer_override_of_llm_downgrade`
+      called from both the `/disposition` direct-apply path
+      (sub_type=OVERRIDE) and the `/override/cosign` apply-on-
+      approve path. `llm_shadow_verdict_action` persists on
+      `trace_data` so the override handler reads back the L2
+      verdict without re-deriving. Feeds the X.2 → X.3
+      ratification gate (target ≤ 0.35). 16 new tests
+      (`tests/test_metrics_endpoint.py` lock + `tests/test_reviewer_override_sli.py`
+      behaviour locks).
 
 ### 28.7 Things explicitly NOT in scope for next session
 
