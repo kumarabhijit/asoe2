@@ -2337,15 +2337,27 @@ session.
 
 #### 28.5.x Frontend follow-ups (deferred from V5.1 closeout)
 
-- [ ] **CaseListPane**. The ExceptionListPane that previously
-      drove `/exceptions` carried intent + lifecycle filter
-      chips, free-text search with operator parsing, saved
-      views, and arrow-key keyboard navigation. The V5.1
-      reshape replaced it with a thinner case-projected list
-      pane (source filter chip + SLA sort only). Re-introducing
-      the rich feature set against case-level fields (status,
-      sla_band, source) is a CaseListPane build that didn't fit
-      this session's scope.
+- [x] **CaseListPane** (shipped 2026-05-11 / V5.1.1). The full
+      filter / search / saved-views / keyboard-nav surface
+      against case-level fields. Mounted on `/exceptions`
+      (`src/app/exceptions/CaseListPane.tsx`). Cluster filter
+      chips (Live / Waiting / Terminal) sourced from
+      `useHealth().allowed_case_statuses` + the cluster grouping
+      in `src/lib/cases.ts`. Multi-select intent chips
+      (`useHealth().allowed_intents`). Source filter chip.
+      `since=` preset filter. Search box with URL sync. Sort
+      toggle (SLA urgency / Recently opened). Saved views
+      (v2 storage shape, `useSavedViews("cases")`). Keyboard
+      nav via new `useKeyboardListNav` hook
+      (`src/hooks/useKeyboardListNav.ts`); rows render with
+      `role="option"` inside `role="listbox"` parent. Inbox
+      (`src/app/inbox/page.tsx`) updated to the same A11y role
+      pattern for consistency. vitest-axe a11y scaffolding +
+      tests. STATUS_LABEL + isAwaitingHuman consolidated into
+      `src/lib/cases.ts`; the four duplicate maps + two
+      hardcoded literal comparisons retired per the audit
+      addendum on 2026-05-11. Binding decisions doc:
+      `docs/workshops/2026-05-11-case-list-pane-decisions.md`.
 - [ ] **Case-attached-record loader** at `/cases/[id]`. The
       `CaseDetailPanel` "Attached records" placeholder needs a
       backend roundtrip that lists the per-event records under
