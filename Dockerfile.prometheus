@@ -1,0 +1,40 @@
+# Dockerfile.prometheus — ASOE Prometheus image.
+#
+# Bakes the canonical scrape config from ops/observability/prometheus.yml
+# into the upstream Prometheus image so the same image runs identically
+# in any container host (Azure Container Apps, ECS, plain `docker run`)
+# without needing a volume mount.
+#
+# Build:  docker build -f Dockerfile.prometheus -t asoe-prometheus .
+# Run:    docker run --rm -p 9090:9090 \
+#           -e ASOE_API_TARGET=host.docker.internal:8000 \
+#           asoe-prometheus
+#
+# Override `ASOE_API_TARGET` and `ASOE_ENVIRONMENT` at runtime — the
+# config uses ${...} template interpolation handled by Prometheus
+# 2.55+ via `--enable-feature=expand-external-labels` and standard
+# scrape target substitution.
+
+FROM prom/prometheus:v2.55.1
+
+# Drop in the canonical scrape config. The default config path is
+# /etc/prometheus/prometheus.yml — we overwrite it so no CLI arg
+# changes are needed.
+COPY ops/observability/prometheus.yml /etc/prometheus/prometheus.yml
+
+# 9090 is Prometheus's default HTTP port. Keep it stable so the
+# Bicep ingress and the Compose service map to the same value.
+EXPOSE 9090
+
+# `--config.file` is the default value — kept explicit so the entry
+# point doesn't break if upstream changes the default. The other
+# flags match docker-compose.observability.yml for parity.
+ENTRYPOINT ["/bin/prometheus"]
+CMD [ \
+    "--config.file=/etc/prometheus/prometheus.yml", \
+    "--storage.tsdb.path=/prometheus", \
+    "--storage.tsdb.retention.time=15d", \
+    "--web.console.libraries=/usr/share/prometheus/console_libraries", \
+    "--web.console.templates=/usr/share/prometheus/consoles", \
+    "--web.enable-lifecycle" \
+]

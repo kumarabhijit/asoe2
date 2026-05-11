@@ -1,0 +1,22 @@
+# Grafana datasource provisioning — automatic on first start.
+#
+# Mounted at /etc/grafana/provisioning/datasources/ in the Grafana
+# container. The dashboard JSON at
+# ops/observability/grafana/dashboards/shadow_llm.json references
+# the datasource by name `Prometheus`, so don't rename without
+# updating the dashboard's `__inputs` block.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: asoe-prometheus
+    url: ${PROMETHEUS_URL:-http://prometheus:9090}
+    access: proxy
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 30s
+      httpMethod: POST
+      manageAlerts: false
