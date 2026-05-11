@@ -854,11 +854,21 @@ class CaseStore:
 
         Pydantic model is recreated via `model_copy(update=...)` so
         validators fire. Raises `KeyError` if case_id is unknown.
+
+        Issue #133 PO #17 — `updated_at` is bumped to "now" whenever
+        a mutation lands, unless the caller passes an explicit
+        ``updated_at`` (audit replay, sandbox seeding). Callers
+        therefore never need to remember to set it.
         """
         with self._lock:
             existing = self._cases.get(case_id)
             if existing is None:
                 raise KeyError(f"Unknown case_id: {case_id}")
+            if "updated_at" not in fields:
+                fields = {
+                    **fields,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
             updated = existing.model_copy(update=fields)
             self._cases[case_id] = updated
             return updated
@@ -883,10 +893,12 @@ class CaseStore:
                     f"Case {case_id} already has a pending_override; "
                     "second initiator must wait for cosign-resolve.",
                 )
+            # PO #17 — bump updated_at on every mutation.
             updated = existing.model_copy(
                 update={
                     "pending_override": override,
                     "status": "OPEN_AWAITING_HUMAN",
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
                 },
             )
             self._cases[case_id] = updated
@@ -900,8 +912,12 @@ class CaseStore:
             existing = self._cases.get(case_id)
             if existing is None:
                 raise KeyError(f"Unknown case_id: {case_id}")
+            # PO #17 — bump updated_at on every mutation.
             updated = existing.model_copy(
-                update={"pending_override": None},
+                update={
+                    "pending_override": None,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                },
             )
             self._cases[case_id] = updated
             return updated

@@ -101,11 +101,14 @@ class CaseUpdatedPayload(BaseModel):
 
     `updated_fields` enumerates which OrderCase fields changed so the
     UI can decide whether a re-fetch is needed (status change → yes,
-    working_memory_summary touch → maybe).
+    working_memory_summary touch → maybe). `updated_at` is the new
+    canonical "last activity" timestamp the UI surfaces (issue #133
+    PO #17); always present from the V014 migration onward.
     """
     status: str
     updated_fields: List[str] = Field(default_factory=list)
     sla_deadline: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 class CaseClosedPayload(BaseModel):
@@ -302,11 +305,13 @@ class WSEvent(BaseModel):
         status: str,
         updated_fields: Optional[List[str]] = None,
         sla_deadline: Optional[str] = None,
+        updated_at: Optional[str] = None,
     ) -> "WSEvent":
         payload = CaseUpdatedPayload(
             status=status,
             updated_fields=updated_fields or [],
             sla_deadline=sla_deadline,
+            updated_at=updated_at,
         )
         return cls(
             type="case_update",

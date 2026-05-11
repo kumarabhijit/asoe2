@@ -88,6 +88,10 @@ def publish_case_update(
         status=case.status,
         updated_fields=list(updated_fields),
         sla_deadline=case.sla_deadline,
+        # Issue #133 PO #17 — surface the canonical "last activity"
+        # timestamp on every case_update so the UI's Last-activity
+        # badge can update without an extra fetch.
+        updated_at=case.updated_at,
     )
     event_publisher.publish(case.tenant_id, event)
     # Phase 28.5.x §D2 — every case_update is a potential
