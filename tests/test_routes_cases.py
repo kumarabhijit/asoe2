@@ -215,6 +215,103 @@ class TestList:
 
 
 # ---------------------------------------------------------------------------
+# Cursor pagination (ADR-038 §D7 amendment, 2026-05-11)
+# ---------------------------------------------------------------------------
+
+class TestCursorPagination:
+    """Cursor pagination on /api/v1/cases — added after the case-projected
+    exception queue surfaced as silently capped at the first page."""
+
+    def test_first_page_returns_cursor_when_more_exist(
+        self, client, analyst_token,
+    ):
+        for i in range(5):
+            _open_case(customer_po_number=f"PO-{i:03d}")
+        r = client.get(
+            "/api/v1/cases?limit=2", headers=_auth(analyst_token),
+        )
+        body = r.json()
+        assert body["has_more"] is True
+        assert body["cursor"] is not None
+        # Cursor is the case_id of the last item on the page.
+        assert body["cursor"] == body["items"][-1]["case_id"]
+
+    def test_last_page_omits_cursor(self, client, analyst_token):
+        for i in range(3):
+            _open_case(customer_po_number=f"PO-{i:03d}")
+        r = client.get(
+            "/api/v1/cases?limit=10", headers=_auth(analyst_token),
+        )
+        body = r.json()
+        assert body["has_more"] is False
+        assert body["cursor"] is None
+        assert len(body["items"]) == 3
+
+    def test_full_loop_covers_every_case_exactly_once(
+        self, client, analyst_token,
+    ):
+        for i in range(7):
+            _open_case(customer_po_number=f"PO-{i:03d}")
+        collected: list[str] = []
+        cursor: str | None = None
+        # Mirror the asoe-ui `do { fetch } while (cursor)` loop.
+        for _ in range(20):  # belt-and-braces; should resolve in 4 iters at limit=2.
+            url = "/api/v1/cases?limit=2"
+            if cursor:
+                url += f"&cursor={cursor}"
+            r = client.get(url, headers=_auth(analyst_token))
+            body = r.json()
+            collected.extend(item["case_id"] for item in body["items"])
+            if not body["has_more"]:
+                break
+            cursor = body["cursor"]
+        assert len(collected) == 7
+        assert len(set(collected)) == 7
+
+    def test_unknown_cursor_falls_through_to_first_page(
+        self, client, analyst_token,
+    ):
+        # Grandfathered behaviour — stale cursor tokens from a
+        # previous browser session must not 500 or 422.
+        _open_case(customer_po_number="PO-001")
+        r = client.get(
+            "/api/v1/cases?cursor=case-deleted-or-never-existed",
+            headers=_auth(analyst_token),
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert len(body["items"]) == 1
+
+    def test_cursor_pagination_respects_filters(
+        self, client, analyst_token,
+    ):
+        # Two manual_order cases + three automated_order cases, page
+        # the manual_order subset at limit=1.
+        for i in range(2):
+            _open_case(
+                customer_po_number=f"M-{i:03d}",
+                source="manual_order",
+                source_channel="email",
+            )
+        for i in range(3):
+            _open_case(customer_po_number=f"A-{i:03d}", source="automated_order")
+
+        url = "/api/v1/cases?source=manual_order&limit=1"
+        r = client.get(url, headers=_auth(analyst_token))
+        body = r.json()
+        assert body["total"] == 2
+        assert len(body["items"]) == 1
+        assert body["has_more"] is True
+
+        r2 = client.get(url + f"&cursor={body['cursor']}", headers=_auth(analyst_token))
+        body2 = r2.json()
+        assert body2["has_more"] is False
+        assert len(body2["items"]) == 1
+        # Items across the two pages must be disjoint.
+        assert body["items"][0]["case_id"] != body2["items"][0]["case_id"]
+
+
+# ---------------------------------------------------------------------------
 # Detail endpoint
 # ---------------------------------------------------------------------------
 

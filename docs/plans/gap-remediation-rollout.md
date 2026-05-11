@@ -29,17 +29,17 @@ All work stacks on `claude/analyze-asoe-gaps-0LzG5` in each repo (no per-session
 |---|---|---|---|---|---|
 | S0 | scaffold | asoe2 | This planning doc + status table | MERGED | `a1fdaf0` (PR #144) |
 | S1 | P0.1 — `reason_tag` casing fix | asoe-ui | Action hook + mock health alignment + first 3 scenarios | IN_PROGRESS | `5caf9d1` (asoe-ui PR #148) |
-| S2 | P1.0 — failing CSA one-task test (PO amendment) | asoe-ui | One skip-marked failing test capturing `/cases/[id]` deferral | PENDING | — |
-| S3 | P2.0 — mirror asoe2 stub conformance suite (Boris/SRE/Compliance amendment) | asoe-ui | UI-side mock-conformance test suite + `slo_category` tagging | PENDING | — |
-| S4 | P1.1 — cursor pagination on case-projected queue | asoe-ui | `useCases` cursor loop + mock paginator + cursor tests | PENDING | — |
-| S5 | P1.2 — silent refresh on case_* events | asoe-ui | WS handler invariants + 3 deleted describe blocks restored | PENDING | — |
-| S6 | P1.3 — parameterised action-matrix coverage | asoe-ui | `describe.each(SCENARIOS)` for ExceptionDetailPanel | PENDING | — |
-| S7 | P1.4 + P1.5 — email-source data presence + stats invariant | asoe-ui | Parameterised section dispatch + `MOCK_STATS` total invariant | PENDING | — |
-| S8 | P2.1 — mock `disposition` validates `reason_tag` (split write/read) | asoe-ui | Two-rule mock validator + parity test | PENDING | — |
-| S9 | P2.2 — mock lifecycle/SoD/role gating | asoe-ui | Mock enforces terminal-state, initiator SoD, role gates | PENDING | — |
-| S10 | P2.3 — mock WS emits `case_*` events | asoe-ui | Mock state mutations fire `case_open`/`case_update`/`case_close` | PENDING | — |
+| S2 | P1.0 — failing CSA one-task test (PO amendment) | asoe-ui | One skip-marked failing test capturing `/cases/[id]` deferral | IN_PROGRESS | `6a9d3b2` (asoe-ui PR #148) |
+| S3 | P2.0 — mirror asoe2 stub conformance suite (Boris/SRE/Compliance amendment) | asoe-ui | UI-side mock-conformance test suite + `slo_category` tagging | IN_PROGRESS | `c28efe0` (asoe-ui PR #148) |
+| S4 | P1.1 — cursor pagination on case-projected queue | both | **Two-stage land:** S4a — `useCases({limit})` + truncation disclosure (`e213bf1`). S4b — ADR-038 §D7 amendment: backend gains cursor + has_more (asoe2 `ef09070`); UI cursor loop + un-skip deferred test (asoe-ui `c1a990a`). | IN_PROGRESS | `ef09070` (asoe2) + `c1a990a` (asoe-ui) |
+| S5 | P1.2 — silent refresh on case_* events | asoe-ui | WS handler invariants + 3 deleted describe blocks restored | IN_PROGRESS | `e81c962` (asoe-ui PR #148) |
+| S6 | P1.3 — parameterised action-matrix coverage | asoe-ui | `describe.each(SCENARIOS)` for ExceptionDetailPanel | IN_PROGRESS | `35915a3` (asoe-ui PR #148) |
+| S7 | P1.4 + P1.5 — email-source data presence + stats invariant | asoe-ui | Parameterised section dispatch + `MOCK_STATS` total invariant | IN_PROGRESS | `2a924a4` (asoe-ui PR #148) |
+| S8 | P2.1 — mock `disposition` validates `reason_tag` (split write/read) | asoe-ui | Two-rule mock validator + parity test | IN_PROGRESS | `fe26506` (asoe-ui PR #148) |
+| S9 | P2.2 — mock lifecycle/SoD/role gating | asoe-ui | Mock enforces terminal-state, initiator SoD, role gates | IN_PROGRESS | `52d10c8` (asoe-ui PR #148) |
+| S10 | P2.3 — mock WS emits `case_*` events | asoe-ui | Mock state mutations fire `case_open`/`case_update`/`case_close` (Tier 1: event log; Tier 2 deferred) | IN_PROGRESS | `4fb4f09` (asoe-ui PR #148) |
 | S11 | P2.4 — dual-mode CI + Prometheus counter | both | Vitest mode switch + `tests_scenario_failed_total` exporter | PENDING | — |
-| S12 | P1.6 — fill scenarios to 12 intents | asoe-ui | Remaining 9 scenarios with curated reason tags | PENDING | — |
+| S12 | P1.6 — fill scenarios to 12 intents | asoe-ui | Remaining 9 scenarios with curated reason tags | IN_PROGRESS | `7cd23b5` (asoe-ui PR #148) |
 | S13 | ADR-034 §6.2 amendment | asoe2 | Decide `EMAIL_ORDER_ENTRY_REQUEST` permanence; ratify rename scope | PENDING | — |
 | S14 | P3 — vocabulary rename cleanup | asoe2 | `EmailOrderEntryRecipe.py` rename, constant rename, docstring | BLOCKED:S13 | — |
 

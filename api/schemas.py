@@ -1356,12 +1356,21 @@ class CaseListResponse(BaseModel):
     """GET /api/v1/cases — list response.
 
     Shape matches `asoe-ui/src/lib/api.ts::casesApi.list`'s declared
-    return type (`{ items: OrderCase[]; total: number }`). Items are
-    serialised from `contracts.models.OrderCase`.
+    return type. Items are serialised from `contracts.models.OrderCase`.
+
+    Cursor pagination (added 2026-05-11 via ADR-038 §D7 amendment):
+    `cursor` is the opaque page-anchor token for the next page, set
+    only when `has_more` is True. Clients loop `do { fetch } while
+    (cursor)` to accumulate every page. The cursor is the `case_id`
+    of the last item on the current page; the server's stable sort
+    (opened_at DESC, case_id DESC tiebreak) means re-fetches with
+    the same cursor are deterministic.
     """
 
     items: List[Dict[str, Any]] = Field(default_factory=list)
     total: int = 0
+    cursor: Optional[str] = None
+    has_more: bool = False
 
 
 class CaseRecordsResponse(BaseModel):
