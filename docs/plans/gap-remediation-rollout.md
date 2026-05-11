@@ -31,7 +31,7 @@ All work stacks on `claude/analyze-asoe-gaps-0LzG5` in each repo (no per-session
 | S1 | P0.1 — `reason_tag` casing fix | asoe-ui | Action hook + mock health alignment + first 3 scenarios | IN_PROGRESS | `5caf9d1` (asoe-ui PR #148) |
 | S2 | P1.0 — failing CSA one-task test (PO amendment) | asoe-ui | One skip-marked failing test capturing `/cases/[id]` deferral | IN_PROGRESS | `6a9d3b2` (asoe-ui PR #148) |
 | S3 | P2.0 — mirror asoe2 stub conformance suite (Boris/SRE/Compliance amendment) | asoe-ui | UI-side mock-conformance test suite + `slo_category` tagging | IN_PROGRESS | `c28efe0` (asoe-ui PR #148) |
-| S4 | P1.1 — cursor pagination on case-projected queue | asoe-ui | **Re-scoped:** backend `/cases` has no cursor; shipped `useCases({limit})` + `truncated` disclosure + ADR-amendment skip-test. | IN_PROGRESS | `e213bf1` (asoe-ui PR #148) |
+| S4 | P1.1 — cursor pagination on case-projected queue | both | **Two-stage land:** S4a — `useCases({limit})` + truncation disclosure (`e213bf1`). S4b — ADR-038 §D7 amendment: backend gains cursor + has_more (asoe2 `ef09070`); UI cursor loop + un-skip deferred test (asoe-ui `c1a990a`). | IN_PROGRESS | `ef09070` (asoe2) + `c1a990a` (asoe-ui) |
 | S5 | P1.2 — silent refresh on case_* events | asoe-ui | WS handler invariants + 3 deleted describe blocks restored | IN_PROGRESS | `e81c962` (asoe-ui PR #148) |
 | S6 | P1.3 — parameterised action-matrix coverage | asoe-ui | `describe.each(SCENARIOS)` for ExceptionDetailPanel | IN_PROGRESS | `35915a3` (asoe-ui PR #148) |
 | S7 | P1.4 + P1.5 — email-source data presence + stats invariant | asoe-ui | Parameterised section dispatch + `MOCK_STATS` total invariant | IN_PROGRESS | `2a924a4` (asoe-ui PR #148) |
