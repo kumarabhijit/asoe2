@@ -603,8 +603,24 @@
         "type": "object"
       },
       "CaseListResponse": {
-        "description": "GET /api/v1/cases \u2014 list response.\n\nShape matches `asoe-ui/src/lib/api.ts::casesApi.list`'s declared\nreturn type (`{ items: OrderCase[]; total: number }`). Items are\nserialised from `contracts.models.OrderCase`.",
+        "description": "GET /api/v1/cases \u2014 list response.\n\nShape matches `asoe-ui/src/lib/api.ts::casesApi.list`'s declared\nreturn type. Items are serialised from `contracts.models.OrderCase`.\n\nCursor pagination (added 2026-05-11 via ADR-038 \u00a7D7 amendment):\n`cursor` is the opaque page-anchor token for the next page, set\nonly when `has_more` is True. Clients loop `do { fetch } while\n(cursor)` to accumulate every page. The cursor is the `case_id`\nof the last item on the current page; the server's stable sort\n(opened_at DESC, case_id DESC tiebreak) means re-fetches with\nthe same cursor are deterministic.",
         "properties": {
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cursor"
+          },
+          "has_more": {
+            "default": false,
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
             "items": {
               "additionalProperties": true,
@@ -5132,6 +5148,24 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Pagination cursor. Opaque page-anchor token; clients loop `do { fetch } while (cursor)` until `has_more` is False. ADR-038 \u00a7D7 amendment (2026-05-11) \u2014 adds cursor pagination to /cases so the case-projected exception queue is no longer silently capped at the first page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Pagination cursor. Opaque page-anchor token; clients loop `do { fetch } while (cursor)` until `has_more` is False. ADR-038 \u00a7D7 amendment (2026-05-11) \u2014 adds cursor pagination to /cases so the case-projected exception queue is no longer silently capped at the first page.",
+              "title": "Cursor"
             }
           },
           {

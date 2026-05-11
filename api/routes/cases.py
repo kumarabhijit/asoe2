@@ -146,6 +146,16 @@ async def list_cases(
         ),
     ),
     limit: int = Query(200, ge=1, le=500),
+    cursor: Optional[str] = Query(
+        None,
+        description=(
+            "Pagination cursor. Opaque page-anchor token; clients loop "
+            "`do { fetch } while (cursor)` until `has_more` is False. "
+            "ADR-038 §D7 amendment (2026-05-11) — adds cursor pagination "
+            "to /cases so the case-projected exception queue is no longer "
+            "silently capped at the first page."
+        ),
+    ),
 ) -> CaseListResponse:
     cases = case_store.list_by_tenant(tenant_id)
 
@@ -185,16 +195,38 @@ async def list_cases(
             cases = [c for c in cases if _matches_q(c, needle)]
 
     cases = _scope_to_user(cases, user)
-    cases.sort(key=lambda c: c.opened_at, reverse=True)
-    capped = cases[:limit]
+    # Stable sort (opened_at DESC, case_id DESC tiebreak) — cursor
+    # determinism depends on a total ordering, so a unique tiebreaker
+    # is required. case_id is UUID-shaped, never collides.
+    cases.sort(key=lambda c: (c.opened_at, c.case_id), reverse=True)
+    total = len(cases)
+
+    # Cursor-anchored slicing (ADR-038 §D7 amendment). The cursor is
+    # the case_id of the last item returned on the previous page; we
+    # advance past it in the sorted list. Unknown cursors fall through
+    # silently (treated as start-of-list) — matches the
+    # exception_store.list grandfathering for stale cursor tokens.
+    if cursor:
+        try:
+            start = next(i for i, c in enumerate(cases) if c.case_id == cursor) + 1
+        except StopIteration:
+            start = 0
+    else:
+        start = 0
+    page = cases[start : start + limit]
+    has_more = (start + limit) < total
+    next_cursor = page[-1].case_id if (has_more and page) else None
+
     # Phase 28.5.x §D7 — track payload size for the pagination
-    # re-open trigger. We record the size of the response (capped),
+    # re-open trigger. We record the size of the response (page),
     # NOT the post-filter total, because the alert is about render
     # cost on the client, not about tenant case volume.
-    record_cases_returned(len(capped))
+    record_cases_returned(len(page))
     return CaseListResponse(
-        items=[_serialise_case(c, tenant_id) for c in capped],
-        total=len(cases),
+        items=[_serialise_case(c, tenant_id) for c in page],
+        total=total,
+        cursor=next_cursor,
+        has_more=has_more,
     )
 
 
