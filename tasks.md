@@ -2180,32 +2180,39 @@ into one of these categories — the section below is the
 canonical pickup list so a new session can scan it without
 having to grep across §5 / §23.4 / §27.
 
-### 28.1 Compliance workshop (live)
+### 28.1 Compliance workshop — CLEARED 2026-05-11
 
-- [ ] **Run the live ratification workshop** against the
-      pre-read at
-      `docs/workshops/2026-05-09-deferred-items-virtual-workshop.md`.
-      Engineering deliverables for every gate are already in
-      place; the live session is a reconciliation, not a
-      discovery. Outputs: workshop minutes (binding) + sign-off
-      per gate.
+Asynchronous workshop convened against the
+`docs/workshops/2026-05-09-deferred-items-virtual-workshop.md`
+pre-read; operator (PO + Compliance Veto Holder, offline
+clearance) acted as chair. **All five gates ratified as-is, no
+conditions.** Binding minutes at
+`docs/workshops/2026-05-11-compliance-ratification-decisions.md`.
 
-  Gates expected to clear at the live session:
+  Gates cleared:
 
-  - [ ] ADR-038 §7.4 — compaction protocol. Engineering ready;
-        `learning_signals:` ML ask closed in `b7db08c`.
-  - [ ] ADR-038 §8.5 — CODEOWNERS map. File shipped in `e7929f5`
-        (asoe2) + `eca7d4c` (asoe-ui); needs team-handle
-        resolution (see §28.4) before it actually enforces.
-  - [ ] ADR-039 §4.1 — combination rule. Engineering ready;
-        SLI dashboard wired (`db7b5e4`); UI badge shipped
-        (asoe-ui `5d6753d`); runbook + training brief shipped
-        (`79727b8`). **Only the 1-week soak remains** (§28.2).
-  - [ ] ADR-039 §6 — phased rollout (X.1 → X.4). Engineering
-        ready; runbook + training brief shipped.
-  - [ ] ADR-040 §2 + §2.2 — case-level cosign truth table + SoD.
-        Code path shipped behind `ASOE_CASE_COSIGN_ENABLED`
-        (`6eb66ad`); endpoints 404 until ratification flip.
+  - [x] ADR-038 §7.4 — compaction protocol. Ratified as-is. No
+        per-template Compliance checklist annex required;
+        `learning_signals:` ML ask remains closed.
+  - [x] ADR-038 §8.5 — CODEOWNERS map. Ratified as-is with the
+        current `@kumarabhijit @linkinrustle` two-maintainer
+        resolution. Real GitHub team creation is a future
+        operations task, not a precondition.
+  - [x] ADR-039 §4.1 — combination rule (asymmetric
+        DOWNGRADE-only). Ratified as-is. Symmetric
+        `DISAGREE_UPGRADE` variant explicitly rejected to keep
+        the bounded-blast-radius guarantee. X.3 false-downgrade
+        gate at ≤ 35% (the wired
+        `shadow_llm_reviewer_override_rate_on_downgrades` gauge)
+        is the empirical lock for the next promotion.
+  - [x] ADR-039 §6 — phased rollout (X.1 → X.4). Pre-ratified
+        end-to-end. Manual SIGHUP rollback per the existing
+        runbook stays operator-driven; auto-rollback hook
+        explicitly deferred.
+  - [x] ADR-040 §2 + §2.2 — case-level cosign + SoD. Ratified
+        as-is. No emergency-bypass key, no SoD waiver on
+        single-record cases — both rejected to keep the SOX
+        §404 control unweakened.
 
 ### 28.2 Operational soak + flip
 
