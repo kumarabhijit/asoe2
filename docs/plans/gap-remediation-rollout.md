@@ -28,7 +28,7 @@ All work stacks on `claude/analyze-asoe-gaps-0LzG5` in each repo (no per-session
 | Session | Phase | Repo(s) | Scope | Status | Commit |
 |---|---|---|---|---|---|
 | S0 | scaffold | asoe2 | This planning doc + status table | MERGED | `a1fdaf0` (PR #144) |
-| S1 | P0.1 — `reason_tag` casing fix | asoe-ui | Action hook + mock health alignment + first 3 scenarios | PENDING | — |
+| S1 | P0.1 — `reason_tag` casing fix | asoe-ui | Action hook + mock health alignment + first 3 scenarios | IN_PROGRESS | `5caf9d1` (asoe-ui PR #148) |
 | S2 | P1.0 — failing CSA one-task test (PO amendment) | asoe-ui | One skip-marked failing test capturing `/cases/[id]` deferral | PENDING | — |
 | S3 | P2.0 — mirror asoe2 stub conformance suite (Boris/SRE/Compliance amendment) | asoe-ui | UI-side mock-conformance test suite + `slo_category` tagging | PENDING | — |
 | S4 | P1.1 — cursor pagination on case-projected queue | asoe-ui | `useCases` cursor loop + mock paginator + cursor tests | PENDING | — |
