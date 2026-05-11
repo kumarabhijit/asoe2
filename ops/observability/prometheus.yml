@@ -1,0 +1,44 @@
+# Prometheus scrape config — ADR-039 §7.3 SLI surface.
+#
+# Used by:
+#   * docker-compose.observability.yml — local dev + Container-host
+#     deployments.
+#   * Container-Apps-hosted Prometheus on Azure (mounted from a
+#     Config storage account, see infra/main.bicep).
+#   * As a template for the kube-prometheus-stack ServiceMonitor in
+#     k8s/core/observability/servicemonitor.yaml (Kubernetes path).
+#
+# The scrape target name `asoe-api` resolves differently in each
+# deployment, but the URL contract (`/api/v1/metrics`, 30s interval,
+# Prometheus text exposition) is the same.
+
+global:
+  scrape_interval: 30s
+  scrape_timeout: 10s
+  evaluation_interval: 30s
+  external_labels:
+    # Replaced per-environment by the deploy substitution layer
+    # (docker-compose `env_file`, ACA env var, Helm values, etc.).
+    environment: "${ASOE_ENVIRONMENT:-local}"
+
+scrape_configs:
+  - job_name: asoe-api
+    metrics_path: /api/v1/metrics
+    # The asoe-api FastAPI app emits a small static payload (16 metric
+    # families today). 30s is generous; drop to 15s only if alert
+    # burn-rate calcs need finer resolution.
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    static_configs:
+      - targets:
+          # Default = docker-compose service DNS. Override via
+          # ${ASOE_API_TARGET} for Container Apps (internal FQDN like
+          # `asoe-api.internal.<env>.azurecontainerapps.io:8000`) or
+          # for direct-IP scrape.
+          - "${ASOE_API_TARGET:-asoe-api:8000}"
+        labels:
+          service: asoe-api
+          # The dashboard's Langfuse deep-links use the time window
+          # of the panel; no per-trace label is needed on the
+          # Prometheus side. Keep labels minimal so cardinality
+          # stays low.

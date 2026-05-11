@@ -149,6 +149,25 @@ param deployContainerApp bool = false
 @description('Independent gate for the UI Container App. The deploy script flips this true on its third stage (after the UI image has been built into ACR with NEXT_PUBLIC_API_URL baked in). Kept independent of deployContainerApp so the API and UI can be deployed/redeployed separately without dragging the other along.')
 param deployUiContainerApp bool = false
 
+@description('Gate for the ADR-039 §7.3 observability stack — Prometheus + Grafana Container Apps that scrape /api/v1/metrics on the asoe-api app. Kept independent so observability can roll out (or back) without dragging the API. Set true once both images are built into ACR via `docker build -f Dockerfile.prometheus|grafana . && az acr build ...`.')
+param deployObservability bool = false
+
+@description('Prometheus container image (built from Dockerfile.prometheus; bakes in ops/observability/prometheus.yml). Placeholder until set-secrets.sh / deploy pipeline overrides.')
+param prometheusImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+
+@description('Grafana container image (built from Dockerfile.grafana; bakes in datasource + dashboard provisioning). Placeholder until set-secrets.sh / deploy pipeline overrides.')
+param grafanaImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+
+@description('Grafana initial admin password. Override at deploy time via --parameters; never commit. Empty string keeps the default `admin` which is acceptable only for sandbox.')
+@secure()
+param grafanaAdminPassword string = ''
+
+@description('LangFuse base URL plumbed into Grafana so the dashboard panels can deep-link from "disagreement spike at 14:32" → individual traces in one click. Falls back to the langfuseHost parameter when empty.')
+param grafanaLangfuseBaseUrl string = ''
+
+@description('LangFuse project slug plumbed into the same Grafana deep-links.')
+param grafanaLangfuseProject string = 'asoe'
+
 // ───────────────────────────────────────────────────────────── Derived names
 
 var logAnalyticsName = '${namePrefix}logs'
@@ -160,6 +179,8 @@ var caeName          = '${namePrefix}env'
 var appName          = '${namePrefix}api'
 var uiAppName        = '${namePrefix}ui'
 var uamiName         = '${namePrefix}identity'
+var prometheusAppName = '${namePrefix}prom'
+var grafanaAppName    = '${namePrefix}graf'
 
 var commonTags = {
   project: 'asoe'
@@ -643,6 +664,201 @@ resource uiApp 'Microsoft.App/containerApps@2024-03-01' = if (deployUiContainerA
   }
 }
 
+// ───────────────────────────────────────────────────── Observability stack
+//
+// Two Container Apps that, together, deliver the ADR-039 §7.3 SLI
+// surface on Azure without depending on Kubernetes or Azure Monitor's
+// managed-Prometheus addon (which currently requires AKS + Container
+// Insights). Both images bake the canonical configs from
+// ops/observability/ at build time so the runtime container has no
+// volume mounts to manage.
+//
+// Topology:
+//   asoe-api (existing) — emits /api/v1/metrics in Prometheus text format.
+//   asoe-prom (new)     — scrapes asoe-api over the managed-env internal
+//                         network every 30s; 15-day TSDB retention.
+//   asoe-graf (new)     — reads asoe-prom; provisions the SLI dashboard
+//                         on first start. External ingress on 443 so an
+//                         operator can hit it directly.
+//
+// Both apps are guarded by `deployObservability` so the API can deploy
+// without the observability stack and vice versa. Min replicas = 0 so
+// idle preprod environments cost nothing; scale.rules omitted because
+// neither service handles bursty traffic that needs KEDA.
+
+var apiInternalFqdn = deployContainerApp
+  ? '${appName}.internal.${cae.properties.defaultDomain}'
+  : ''
+
+resource prometheusApp 'Microsoft.App/containerApps@2024-03-01' = if (deployObservability) {
+  name: prometheusAppName
+  location: location
+  tags: commonTags
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${uami.id}': {}
+    }
+  }
+  properties: {
+    managedEnvironmentId: cae.id
+    configuration: {
+      activeRevisionsMode: 'Single'
+      // Internal-only ingress — Grafana is the public-facing surface.
+      ingress: {
+        external: false
+        targetPort: 9090
+        transport: 'auto'
+        traffic: [
+          {
+            latestRevision: true
+            weight: 100
+          }
+        ]
+      }
+      registries: [
+        {
+          server: '${acrName}.azurecr.io'
+          identity: uami.id
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'prometheus'
+          image: prometheusImage
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+          env: [
+            {
+              name: 'ASOE_ENVIRONMENT'
+              value: asoeEnv
+            }
+            {
+              // The scrape target. Container Apps internal DNS resolves
+              // app names against the managed-env defaultDomain; port
+              // 8000 matches Dockerfile.api EXPOSE.
+              name: 'ASOE_API_TARGET'
+              value: apiInternalFqdn != '' ? '${apiInternalFqdn}:8000' : 'asoe-api:8000'
+            }
+          ]
+          probes: [
+            {
+              type: 'Liveness'
+              httpGet: {
+                path: '/-/healthy'
+                port: 9090
+              }
+              initialDelaySeconds: 30
+              periodSeconds: 30
+            }
+          ]
+        }
+      ]
+      scale: {
+        minReplicas: deployObservability ? 1 : 0
+        maxReplicas: 1
+      }
+    }
+  }
+}
+
+resource grafanaApp 'Microsoft.App/containerApps@2024-03-01' = if (deployObservability) {
+  name: grafanaAppName
+  location: location
+  tags: commonTags
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${uami.id}': {}
+    }
+  }
+  properties: {
+    managedEnvironmentId: cae.id
+    configuration: {
+      activeRevisionsMode: 'Single'
+      ingress: {
+        external: true
+        targetPort: 3000
+        transport: 'auto'
+        traffic: [
+          {
+            latestRevision: true
+            weight: 100
+          }
+        ]
+      }
+      registries: [
+        {
+          server: '${acrName}.azurecr.io'
+          identity: uami.id
+        }
+      ]
+      secrets: [
+        {
+          name: 'grafana-admin-password'
+          value: empty(grafanaAdminPassword) ? 'admin' : grafanaAdminPassword
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'grafana'
+          image: grafanaImage
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+          env: [
+            {
+              name: 'GF_SECURITY_ADMIN_USER'
+              value: 'admin'
+            }
+            {
+              name: 'GF_SECURITY_ADMIN_PASSWORD'
+              secretRef: 'grafana-admin-password'
+            }
+            {
+              name: 'PROMETHEUS_URL'
+              value: deployObservability ? 'http://${prometheusAppName}.internal.${cae.properties.defaultDomain}:9090' : ''
+            }
+            {
+              name: 'LANGFUSE_BASE_URL'
+              value: empty(grafanaLangfuseBaseUrl) ? langfuseHost : grafanaLangfuseBaseUrl
+            }
+            {
+              name: 'LANGFUSE_PROJECT'
+              value: grafanaLangfuseProject
+            }
+          ]
+          probes: [
+            {
+              type: 'Liveness'
+              httpGet: {
+                path: '/api/health'
+                port: 3000
+              }
+              initialDelaySeconds: 30
+              periodSeconds: 30
+            }
+          ]
+        }
+      ]
+      scale: {
+        minReplicas: deployObservability ? 1 : 0
+        maxReplicas: 1
+      }
+    }
+  }
+  dependsOn: [
+    prometheusApp
+  ]
+}
+
 // ──────────────────────────────────────────────────────────────── Outputs
 
 // Outputs that reference the conditional `app` / `uiApp` resources use
@@ -667,5 +883,10 @@ output redisSslPort      int    = redisDatabase.properties.port
 output redisDatabaseName string = redisDatabase.name
 output logAnalyticsId    string = logAnalytics.id
 output uamiResourceId             string = uami.id
+// Observability stack — empty strings until deployObservability=true.
+output prometheusAppName  string = prometheusApp.?name ?? ''
+output prometheusAppFqdn  string = prometheusApp.?properties.configuration.ingress.fqdn ?? ''
+output grafanaAppName     string = grafanaApp.?name ?? ''
+output grafanaAppFqdn     string = grafanaApp.?properties.configuration.ingress.fqdn ?? ''
 output uamiPrincipalId            string = uami.properties.principalId
 output uamiClientId               string = uami.properties.clientId

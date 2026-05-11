@@ -1,0 +1,104 @@
+# docker-compose.observability.yml ─ SRE observability overlay
+#
+# Adds Prometheus + Grafana to the base docker-compose.yml stack so
+# the ADR-039 §7.3 SLI surface works locally + in any plain-Docker
+# environment, not only on Kubernetes.
+#
+# Files under ops/observability/ are the canonical source — the same
+# Prometheus scrape config and dashboard JSON are reused by the
+# Container-Apps-hosted Prometheus on Azure (see infra/main.bicep)
+# and by the kube-prometheus-stack ServiceMonitor on Kubernetes
+# (see k8s/core/observability/servicemonitor.yaml).
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.observability.yml up
+#
+# Then:
+#   http://localhost:9090/  — Prometheus UI (target status + ad-hoc queries)
+#   http://localhost:3001/  — Grafana   (admin / admin on first login,
+#                                        change via GF_SECURITY_ADMIN_PASSWORD)
+#
+# The Grafana dashboard at "ASOE → L2 LLM Shadow SLIs (ADR-039 §7.3)"
+# is auto-provisioned from ops/observability/grafana/dashboards/.
+
+name: asoe
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: asoe-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--web.enable-lifecycle"
+    ports:
+      - "9090:9090"
+    environment:
+      ASOE_ENVIRONMENT: "${ASOE_ENVIRONMENT:-local}"
+      ASOE_API_TARGET: "${ASOE_API_TARGET:-asoe-api:8000}"
+    volumes:
+      - ./ops/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      api:
+        # Wait for the metrics endpoint to be live before scraping —
+        # otherwise the first 30s of dashboard data is empty.
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    container_name: asoe-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # Allow plain-IP scrape (Prometheus container by service name)
+      # without an explicit proxy header check.
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_LOG_LEVEL: "warn"
+      # The dashboard JSON carries `${LANGFUSE_BASE_URL}` and
+      # `${LANGFUSE_PROJECT}` template variables that the on-call
+      # drill-down links substitute. Override per environment via
+      # the host shell or .env so the deep-links resolve to the
+      # right Langfuse instance.
+      LANGFUSE_BASE_URL: "${LANGFUSE_BASE_URL:-https://us.cloud.langfuse.com}"
+      LANGFUSE_PROJECT: "${LANGFUSE_PROJECT:-asoe}"
+      PROMETHEUS_URL: "http://prometheus:9090"
+    volumes:
+      # Datasource + dashboard providers — read on every container
+      # start, so the Prometheus datasource and the auto-import path
+      # for the SLI dashboard are wired without manual setup.
+      - ./ops/observability/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./ops/observability/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      # The dashboard JSON. The provider's path is
+      # /var/lib/grafana/dashboards — keep the file name stable so
+      # `uid` doesn't change on reload (Grafana keys dashboards by
+      # uid for editing + alerting).
+      - ./ops/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+  grafana-data:

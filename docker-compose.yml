@@ -75,6 +75,42 @@ services:
       start_period: 20s
     restart: on-failure
 
+  # ── FastAPI HTTP surface ────────────────────────────────────────────────────
+  # Hosts the REST + WebSocket API the asoe-ui front-end consumes, plus
+  # the Prometheus exposition endpoint at /api/v1/metrics that the
+  # docker-compose.observability.yml overlay scrapes. Built from
+  # Dockerfile.api (uvicorn on :8000). Source-mounted for hot reload
+  # during development; remove the volume in production.
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+      args:
+        HTTP_PROXY: "${HTTP_PROXY:-}"
+        HTTPS_PROXY: "${HTTPS_PROXY:-}"
+        NO_PROXY: "${NO_PROXY:-}"
+    image: ${ASOE_API_IMAGE_REPO:-asoe-api}:${ASOE_API_IMAGE_TAG:-local}
+    container_name: asoe-api
+    environment:
+      <<: *core-env
+      ASOE_ENV: "${ASOE_ENV:-sandbox}"
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
   # ── Streamlit sandbox UI ────────────────────────────────────────────────────
   # Interactive execution trace visualiser. Accessible at http://localhost:8501.
   # Imports the core package directly (shared source volume).

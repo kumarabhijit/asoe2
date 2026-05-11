@@ -1,0 +1,46 @@
+# Dockerfile.grafana — ASOE Grafana image.
+#
+# Bakes the canonical datasource + dashboard provisioning into the
+# upstream Grafana image so the same image runs identically in any
+# container host (Azure Container Apps, ECS, plain `docker run`)
+# without needing a volume mount.
+#
+# Build:  docker build -f Dockerfile.grafana -t asoe-grafana .
+# Run:    docker run --rm -p 3001:3000 \
+#           -e PROMETHEUS_URL=http://host.docker.internal:9090 \
+#           -e LANGFUSE_BASE_URL=https://us.cloud.langfuse.com \
+#           -e LANGFUSE_PROJECT=asoe \
+#           asoe-grafana
+#
+# Open http://localhost:3001 → admin / admin (override via
+# GF_SECURITY_ADMIN_PASSWORD). The "ASOE — L2 LLM Shadow SLIs
+# (ADR-039 §7.3)" dashboard auto-provisions on first start.
+
+FROM grafana/grafana:11.2.2
+
+# Provisioning paths Grafana reads on every start. Drop in the
+# datasource (Prometheus, name `Prometheus` so the dashboard JSON
+# matches) and the dashboard provider that loads everything under
+# /var/lib/grafana/dashboards.
+COPY ops/observability/grafana/provisioning/datasources/prometheus.yaml \
+     /etc/grafana/provisioning/datasources/prometheus.yaml
+COPY ops/observability/grafana/provisioning/dashboards/asoe.yaml \
+     /etc/grafana/provisioning/dashboards/asoe.yaml
+
+# Dashboard JSON. Add new dashboards under
+# ops/observability/grafana/dashboards/ — the provider auto-imports
+# every JSON in the directory.
+COPY ops/observability/grafana/dashboards/ \
+     /var/lib/grafana/dashboards/
+
+# Grafana listens on 3000 by default. The Container Apps ingress
+# maps this to 443 externally; the docker-compose overlay maps to
+# 3001 to avoid colliding with the asoe-ui front-end on 3000.
+EXPOSE 3000
+
+# Default env tuning — override per environment via Container App
+# env vars or `docker run -e ...`. Admin password MUST be overridden
+# in any non-local deployment.
+ENV GF_USERS_ALLOW_SIGN_UP=false \
+    GF_AUTH_ANONYMOUS_ENABLED=false \
+    GF_LOG_LEVEL=warn

@@ -1,0 +1,21 @@
+# Grafana dashboard provider — picks up every JSON under
+# /var/lib/grafana/dashboards/ on container start and on edit
+# (foldersFromFilesStructure preserves the on-disk folder).
+#
+# The dashboard JSON in ops/observability/grafana/dashboards/ is the
+# canonical source for all three deployment targets (docker compose,
+# Container Apps, Kubernetes). Edit it there; the provisioning paths
+# below mount it into Grafana.
+
+apiVersion: 1
+
+providers:
+  - name: asoe
+    folder: ASOE
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

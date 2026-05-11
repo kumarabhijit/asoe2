@@ -32,6 +32,11 @@ Derived ratios are emitted as gauges for dashboard convenience:
   shadow_llm_abstain_rate               gauge   (ABSTAIN / total)
   shadow_llm_cache_hit_rate             gauge   (cache_hits / total)
   shadow_llm_avg_latency_ms             gauge   (sum / count)
+
+Reviewer-override surface (ADR-039 §6.3 X.2→X.3 gate):
+
+  shadow_llm_reviewer_overrides_of_downgrade_total  counter
+  shadow_llm_reviewer_override_rate_on_downgrades   gauge   (counter / DISAGREE_DOWNGRADE verdicts)
 """
 
 from __future__ import annotations
@@ -206,6 +211,29 @@ def render_shadow_llm_metrics(metrics: ShadowLLMMetrics) -> str:
         "gauge",
     ))
     lines.append(_line("shadow_llm_avg_latency_ms", metrics.avg_latency_ms()))
+
+    # Reviewer-override counter — ADR-039 §6.3 X.2→X.3 gate.
+    lines.extend(_help_type(
+        "shadow_llm_reviewer_overrides_of_downgrade_total",
+        "Reviewer overrides on cases where L2 LLM Shadow returned "
+        "DISAGREE_DOWNGRADE. Feeds the X.2→X.3 ratification gate.",
+        "counter",
+    ))
+    lines.append(_line(
+        "shadow_llm_reviewer_overrides_of_downgrade_total",
+        metrics.reviewer_overrides_of_llm_downgrade_total,
+    ))
+
+    lines.extend(_help_type(
+        "shadow_llm_reviewer_override_rate_on_downgrades",
+        "Reviewer overrides / DISAGREE_DOWNGRADE verdicts. ADR-039 "
+        "§6.3 X.2→X.3 gate target: ≤ 0.35.",
+        "gauge",
+    ))
+    lines.append(_line(
+        "shadow_llm_reviewer_override_rate_on_downgrades",
+        metrics.reviewer_override_rate_on_llm_downgrades(),
+    ))
 
     return "\n".join(lines) + "\n"
 
