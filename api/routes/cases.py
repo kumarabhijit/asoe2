@@ -32,8 +32,13 @@ from api.deps import (
     get_tenant_id,
     require_role,
 )
+from api.case_events import (
+    is_terminal_status,
+    publish_case_close,
+    publish_case_update,
+)
 from api.errors import ASOEError
-from api.schemas import CaseListResponse
+from api.schemas import CaseListResponse, CaseRecordsResponse
 from api.store import case_store, exception_store
 
 logger = logging.getLogger("asoe.api.cases")
@@ -156,6 +161,81 @@ async def get_case(
 
 
 # ---------------------------------------------------------------------------
+# GET /api/v1/cases/{id}/records — attached-record loader
+# ---------------------------------------------------------------------------
+#
+# Phase 28.5.x §28.5 follow-up — populates the CaseDetailPanel's
+# "Attached records" stack and the aggregated `policyHits` surface
+# the L1-vs-L2 PolicyHitBadge section consumes. The endpoint reads
+# from the existing `exception_store.list_by_case` join key
+# (`ExceptionRecord.parent_case_id`); no new persistence is needed.
+#
+# RBAC inherits from `_scope_to_user` — a caller who can read the
+# parent case can read its children. Partner / assigned-account
+# scope is enforced at the parent level (the child list will be
+# subset-filtered anyway because the case already passed scope).
+
+@router.get(
+    "/cases/{case_id}/records",
+    response_model=CaseRecordsResponse,
+    dependencies=[Depends(require_role(
+        "analyst", "manager", "admin", "viewer", "partner",
+    ))],
+)
+async def list_case_records(
+    case_id: str,
+    tenant_id: str = Depends(get_tenant_id),
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> CaseRecordsResponse:
+    case = case_store.get(case_id)
+    if case is None or case.tenant_id != tenant_id:
+        raise ASOEError(
+            code="NOT_FOUND",
+            message=f"Case {case_id} not found.",
+            status_code=404,
+        )
+    # Scope-check the parent first — same NOT_FOUND response as
+    # /cases/{id} when out of scope, so we don't leak existence to
+    # cross-account callers.
+    if not _scope_to_user([case], user):
+        raise ASOEError(
+            code="NOT_FOUND",
+            message=f"Case {case_id} not found.",
+            status_code=404,
+        )
+
+    records = exception_store.list_by_case(tenant_id, case_id)
+    # Stable order — most-recently-updated first so the operator's
+    # eye lands on the row that just changed.
+    records.sort(
+        key=lambda r: r.updated_at or r.created_at, reverse=True,
+    )
+
+    # Aggregate `shadow_policy_hits` across children. Dedupe while
+    # preserving insertion order so the UI's badge list is stable
+    # across refetches (PolicyHitBadge keys on the string itself —
+    # an unstable order would re-mount every badge on every event).
+    # The policy hits live on the persisted trace
+    # (`shadow_policy_hits`), not on ExceptionRecord itself, so we
+    # walk traces for each child.
+    seen: set[str] = set()
+    aggregated: list[str] = []
+    for record in records:
+        trace = exception_store.get_trace(record.id) or {}
+        for hit in trace.get("shadow_policy_hits") or []:
+            if not isinstance(hit, str) or hit in seen:
+                continue
+            seen.add(hit)
+            aggregated.append(hit)
+
+    return CaseRecordsResponse(
+        items=[record.to_detail().model_dump(mode="json") for record in records],
+        total=len(records),
+        aggregated_policy_hits=aggregated,
+    )
+
+
+# ---------------------------------------------------------------------------
 # ADR-040 X.0 — case-level four-eyes / cosign (flag-gated, default off)
 # ---------------------------------------------------------------------------
 #
@@ -260,6 +340,12 @@ async def initiate_case_override(
             message=str(exc),
             status_code=409,
         ) from exc
+    # ADR-038 §H.6 — propagate the status flip (→ OPEN_AWAITING_HUMAN)
+    # + pending_override attachment to live listeners so the case list
+    # surfaces the "needs cosign" affordance without polling.
+    publish_case_update(
+        updated, updated_fields=["status", "pending_override"],
+    )
     return updated.model_dump(mode="json")
 
 
@@ -323,10 +409,18 @@ async def cosign_case_override(
         )
     if req.approve:
         case_store.clear_pending_override(case_id)
-        return case_store.update(case_id, status="RESOLVED").model_dump(
-            mode="json",
+        # Stamp closed_at so `publish_case_close` carries the
+        # transition timestamp consumers rely on.
+        updated = case_store.update(
+            case_id, status="RESOLVED", closed_at=_utc_now_iso(),
         )
+        # Terminal status → `case_close` (not `case_update`).
+        # Subscribers can drop the case from their open-list view.
+        publish_case_close(updated)
+        return updated.model_dump(mode="json")
     case_store.clear_pending_override(case_id)
-    return case_store.update(
-        case_id, status="OPEN_AGENT_PROCESSING",
-    ).model_dump(mode="json")
+    updated = case_store.update(case_id, status="OPEN_AGENT_PROCESSING")
+    # Rejection puts the case back into the agent-processing state
+    # — visible to the case list as a status flip, but not terminal.
+    publish_case_update(updated, updated_fields=["status", "pending_override"])
+    return updated.model_dump(mode="json")

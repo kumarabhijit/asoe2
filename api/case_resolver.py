@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from typing import Any, Optional, Tuple
 
+from api.case_events import publish_case_open
 from api.store import case_store
 from contracts.models import OrderCase, OrderEvent, TerminalStatus
 
@@ -145,7 +146,14 @@ def materialise_for_event(
     """
     if not should_materialise(event, final_status):
         return None
-    case, _opened_now = resolve_or_open_case(
+    case, opened_now = resolve_or_open_case(
         tenant_id, event, bundle_version_at_open=bundle_version_at_open,
     )
+    # ADR-038 §H.6 / Phase 28.5 — emit `case_open` once per materialisation
+    # so the UI's `useCases` hook can refetch and the listening client
+    # sees the new case without polling. We emit only on `opened_now`;
+    # subsequent events attaching to the same case are routed through
+    # the per-exception telemetry already in place.
+    if opened_now:
+        publish_case_open(case)
     return case

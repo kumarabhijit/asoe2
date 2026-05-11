@@ -671,6 +671,34 @@
         "title": "CaseOverrideInitRequest",
         "type": "object"
       },
+      "CaseRecordsResponse": {
+        "description": "GET /api/v1/cases/{id}/records \u2014 attached-record loader response\n(Phase 28.5.x \u00a728.5 follow-up).\n\n`items` is the list of `ExceptionDetail`-shaped child records\nattached to the case (`ExceptionRecord.parent_case_id == case_id`).\nThe UI's CaseDetailPanel uses this both to render the stack of\nper-event sections and to aggregate `aggregated_policy_hits` into\nthe L1/L2 PolicyHitBadge surface (ADR-039 \u00a74.5).\n\nWhy a separate field for the aggregate (rather than re-deriving it\nclient-side):\n\n  * Authoritative: the backend already has the deduped union with\n    the LLM_SHADOW: prefix preserved; making the client recompute\n    it from `items[*].shadow_policy_hits` invites drift.\n  * Empty-set distinction: the UI hides the section when the\n    aggregate is empty (Guardrail #6 \u2014 no synthesised \"no hits\"\n    placeholder); we want one place that decides \"no hits\".\n  * Telemetry surface: a future SLI on case-level disagreement\n    rate reads off the same aggregate without re-iterating\n    children.",
+        "properties": {
+          "aggregated_policy_hits": {
+            "description": "Deduped union of `shadow_policy_hits` across all attached records. L1 rule names (bare strings) and L2 LLM-derived concerns (LLM_SHADOW: prefix) are preserved; the UI's PolicyHitBadge distinguishes the two visually.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Aggregated Policy Hits",
+            "type": "array"
+          },
+          "items": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "default": 0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "title": "CaseRecordsResponse",
+        "type": "object"
+      },
       "ChallengeRequest": {
         "description": "POST /api/v1/exceptions/{id}/challenge \u2014 post-execution challenge.\n\nAvailable on RESOLVED exceptions (GREEN verdict post-execution review).\nTransitions RESOLVED \u2192 ESCALATED for investigation.",
         "properties": {
@@ -5280,6 +5308,64 @@
           }
         },
         "summary": "Cosign Case Override",
+        "tags": [
+          "cases"
+        ]
+      }
+    },
+    "/api/v1/cases/{case_id}/records": {
+      "get": {
+        "operationId": "list_case_records_api_v1_cases__case_id__records_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaseRecordsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Case Records",
         "tags": [
           "cases"
         ]
