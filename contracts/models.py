@@ -189,6 +189,16 @@ class OrderCase(BaseModel):
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
     )
     closed_at: Optional[str] = None
+    # Issue kumarabhijit/asoe2#133 PO #17 — operators flagged "Created /
+    # Updated" as audit-critical for SLA tracking but `updated_at` did
+    # not exist on OrderCase. Stamped to opened_at on creation and
+    # bumped on every status flip, pending-override write, or
+    # correlation-key append performed by the CaseStore. The
+    # case_update WSEvent carries the new value so the UI's "Last
+    # activity" badge stays live without a refetch.
+    updated_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+    )
     status: CaseStatus = "OPEN_AGENT_PROCESSING"
     sla_deadline: Optional[str] = None
 

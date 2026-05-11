@@ -164,11 +164,16 @@ class TestEventSchema:
             status="OPEN_AWAITING_HUMAN",
             updated_fields=["status", "sla_deadline"],
             sla_deadline="2026-05-12T16:00:00Z",
+            updated_at="2026-05-11T14:00:00Z",
         )
         assert event.type == "case_update"
         assert event.case_id == "case-001"
         assert event.payload["status"] == "OPEN_AWAITING_HUMAN"
         assert event.payload["updated_fields"] == ["status", "sla_deadline"]
+        # Issue #133 PO #17 — `updated_at` rides the case_update
+        # payload so the UI's "Last activity" badge updates without
+        # an extra fetch.
+        assert event.payload["updated_at"] == "2026-05-11T14:00:00Z"
 
     def test_case_close_event_records_terminal_status(self):
         event = WSEvent.case_close(

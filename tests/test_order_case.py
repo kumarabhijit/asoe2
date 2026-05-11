@@ -45,8 +45,46 @@ class TestOrderCaseModel:
         )
         assert case.case_id  # auto-generated UUID
         assert case.opened_at  # auto-generated ISO timestamp
+        # Issue #133 PO #17 — updated_at defaults to "now" on creation
+        # and is bumped on every CaseStore mutation. On a brand new
+        # case it equals opened_at (both stamped during model init).
+        assert case.updated_at
+        assert case.updated_at >= case.opened_at
         assert case.status == "OPEN_AGENT_PROCESSING"  # default
         assert case.tier == 2  # default
+
+    def test_updated_at_bumped_on_store_update(self):
+        # PO #17 — every mutation routed through CaseStore.update
+        # must bump updated_at, even when the caller doesn't pass it.
+        store = CaseStore()
+        case = OrderCase(
+            tenant_id="t1",
+            source="manual_order",
+            source_channel="email",
+        )
+        store._cases[case.case_id] = case  # pre-seed
+        original = case.updated_at
+        # Sleep a hair to guarantee a different ISO timestamp; the
+        # mutation should land on a strictly-later updated_at.
+        import time
+        time.sleep(0.001)
+        bumped = store.update(case.case_id, status="OPEN_AWAITING_HUMAN")
+        assert bumped.updated_at > original
+        assert bumped.status == "OPEN_AWAITING_HUMAN"
+
+    def test_updated_at_explicit_override_honoured(self):
+        # Audit-replay path can stamp a specific timestamp; the auto-
+        # bump must not clobber an explicit value the caller passed.
+        store = CaseStore()
+        case = OrderCase(
+            tenant_id="t1",
+            source="manual_order",
+            source_channel="email",
+        )
+        store._cases[case.case_id] = case
+        explicit = "2020-01-01T00:00:00+00:00"
+        bumped = store.update(case.case_id, updated_at=explicit)
+        assert bumped.updated_at == explicit
 
     def test_extra_fields_forbidden(self):
         with pytest.raises(ValidationError):

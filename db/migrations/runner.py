@@ -620,6 +620,7 @@ def apply_postgres(database_url: str) -> None:
             ("V011", "V011__backfill_orphan_cases.sql", "PostgreSQL schema V011 applied (orphan case backfill)"),
             ("V012", "V012__case_events.sql", "PostgreSQL schema V012 applied (case_events replay log)"),
             ("V013", "V013__case_locks.sql", "PostgreSQL schema V013 applied (case_locks cross-pod mutex)"),
+            ("V014", "V014__order_case_updated_at.sql", "PostgreSQL schema V014 applied (order_case.updated_at)"),
         ):
             cur.execute(
                 "SELECT version FROM schema_migrations WHERE version = %s",
