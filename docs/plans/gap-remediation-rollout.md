@@ -36,7 +36,7 @@ All work stacks on `claude/analyze-asoe-gaps-0LzG5` in each repo (no per-session
 | S6 | P1.3 — parameterised action-matrix coverage | asoe-ui | `describe.each(SCENARIOS)` for ExceptionDetailPanel | IN_PROGRESS | `35915a3` (asoe-ui PR #148) |
 | S7 | P1.4 + P1.5 — email-source data presence + stats invariant | asoe-ui | Parameterised section dispatch + `MOCK_STATS` total invariant | IN_PROGRESS | `2a924a4` (asoe-ui PR #148) |
 | S8 | P2.1 — mock `disposition` validates `reason_tag` (split write/read) | asoe-ui | Two-rule mock validator + parity test | IN_PROGRESS | `fe26506` (asoe-ui PR #148) |
-| S9 | P2.2 — mock lifecycle/SoD/role gating | asoe-ui | Mock enforces terminal-state, initiator SoD, role gates | PENDING | — |
+| S9 | P2.2 — mock lifecycle/SoD/role gating | asoe-ui | Mock enforces terminal-state, initiator SoD, role gates | IN_PROGRESS | `52d10c8` (asoe-ui PR #148) |
 | S10 | P2.3 — mock WS emits `case_*` events | asoe-ui | Mock state mutations fire `case_open`/`case_update`/`case_close` | PENDING | — |
 | S11 | P2.4 — dual-mode CI + Prometheus counter | both | Vitest mode switch + `tests_scenario_failed_total` exporter | PENDING | — |
 | S12 | P1.6 — fill scenarios to 12 intents | asoe-ui | Remaining 9 scenarios with curated reason tags | PENDING | — |
