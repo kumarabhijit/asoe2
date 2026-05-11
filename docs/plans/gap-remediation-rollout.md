@@ -13,26 +13,35 @@ Source documents (read before starting any session):
 4. `constraints/specs.py::_CURATED_INTENT_REASON_TAGS` — binding reason-tag vocabulary.
 5. `api/routes/health.py::_REASON_TAGS_BY_INTENT` — wire contract the UI must match.
 
+## Decisions ratified 2026-05-11 (open questions closed)
+
+1. **Snapshot sync direction.** Sibling-checkout. The asoe-ui sync script reads `../asoe2/constraints/specs.py` from a sibling working tree on disk. Cross-repo work in the same session is a companion-PR pair (one PR per repo, same branch name).
+2. **PR ownership.** All work stacks onto **`claude/analyze-asoe-gaps-0LzG5`** in each repo as separate commits. Each session = one commit (or a small tight commit group). asoe2 PR #144 is the umbrella; asoe-ui gets its own PR on its `claude/analyze-asoe-gaps-0LzG5` branch when the first commit lands there.
+3. **S13 ADR amendment is its own session.** Renumbered: **S13 = ADR-034 §6.2 amendment** (decide if `EMAIL_ORDER_ENTRY_REQUEST` is permanent or transitional). **S14 = rename completion**. S14 is blocked until S13 merges.
+
 ---
 
 ## 1. Status table (the autonomous agent updates this every session)
 
-| Session | Phase | Repo(s) | Scope | Status | Branch | PR |
-|---|---|---|---|---|---|---|
-| S0 | scaffold | asoe2 | This planning doc + status table | PENDING | `claude/analyze-asoe-gaps-0LzG5` | — |
-| S1 | P0.1 — `reason_tag` casing fix | asoe-ui | Action hook + mock health alignment + first 3 scenarios | PENDING | `claude/p0-reason-tag-casing` | — |
-| S2 | P1.0 — failing CSA one-task test (PO amendment) | asoe-ui | One skip-marked failing test capturing `/cases/[id]` deferral | PENDING | `claude/p1-csa-one-task-failing` | — |
-| S3 | P2.0 — mirror asoe2 stub conformance suite (Boris/SRE/Compliance amendment) | asoe-ui | UI-side mock-conformance test suite + `slo_category` tagging | PENDING | `claude/p2-mock-conformance-mirror` | — |
-| S4 | P1.1 — cursor pagination on case-projected queue | asoe-ui | `useCases` cursor loop + mock paginator + cursor tests | PENDING | `claude/p1-cursor-pagination` | — |
-| S5 | P1.2 — silent refresh on case_* events | asoe-ui | WS handler invariants + 3 deleted describe blocks restored | PENDING | `claude/p1-case-ws-silent-refresh` | — |
-| S6 | P1.3 — parameterised action-matrix coverage | asoe-ui | `describe.each(SCENARIOS)` for ExceptionDetailPanel | PENDING | `claude/p1-action-matrix` | — |
-| S7 | P1.4 + P1.5 — email-source data presence + stats invariant | asoe-ui | Parameterised section dispatch + `MOCK_STATS` total invariant | PENDING | `claude/p1-data-presence-stats` | — |
-| S8 | P2.1 — mock `disposition` validates `reason_tag` (split write/read) | asoe-ui | Two-rule mock validator + parity test | PENDING | `claude/p2-mock-disposition-validation` | — |
-| S9 | P2.2 — mock lifecycle/SoD/role gating | asoe-ui | Mock enforces terminal-state, initiator SoD, role gates | PENDING | `claude/p2-mock-lifecycle-gating` | — |
-| S10 | P2.3 — mock WS emits `case_*` events | asoe-ui | Mock state mutations fire `case_open`/`case_update`/`case_close` | PENDING | `claude/p2-mock-ws-case-events` | — |
-| S11 | P2.4 — dual-mode CI + Prometheus counter | both | Vitest mode switch + `tests_scenario_failed_total` exporter | PENDING | `claude/p2-dual-mode-ci` | — |
-| S12 | P1.6 — fill scenarios to 12 intents | asoe-ui | Remaining 9 scenarios with curated reason tags | PENDING | `claude/p1-scenarios-twelve-intents` | — |
-| S13 | P3 — vocabulary rename cleanup | asoe2 | `EmailOrderEntryRecipe.py` rename, constant rename, docstring | PENDING | `claude/p3-rename-completion` | — |
+All work stacks on `claude/analyze-asoe-gaps-0LzG5` in each repo (no per-session branches).
+
+| Session | Phase | Repo(s) | Scope | Status | Commit |
+|---|---|---|---|---|---|
+| S0 | scaffold | asoe2 | This planning doc + status table | MERGED | `a1fdaf0` (PR #144) |
+| S1 | P0.1 — `reason_tag` casing fix | asoe-ui | Action hook + mock health alignment + first 3 scenarios | PENDING | — |
+| S2 | P1.0 — failing CSA one-task test (PO amendment) | asoe-ui | One skip-marked failing test capturing `/cases/[id]` deferral | PENDING | — |
+| S3 | P2.0 — mirror asoe2 stub conformance suite (Boris/SRE/Compliance amendment) | asoe-ui | UI-side mock-conformance test suite + `slo_category` tagging | PENDING | — |
+| S4 | P1.1 — cursor pagination on case-projected queue | asoe-ui | `useCases` cursor loop + mock paginator + cursor tests | PENDING | — |
+| S5 | P1.2 — silent refresh on case_* events | asoe-ui | WS handler invariants + 3 deleted describe blocks restored | PENDING | — |
+| S6 | P1.3 — parameterised action-matrix coverage | asoe-ui | `describe.each(SCENARIOS)` for ExceptionDetailPanel | PENDING | — |
+| S7 | P1.4 + P1.5 — email-source data presence + stats invariant | asoe-ui | Parameterised section dispatch + `MOCK_STATS` total invariant | PENDING | — |
+| S8 | P2.1 — mock `disposition` validates `reason_tag` (split write/read) | asoe-ui | Two-rule mock validator + parity test | PENDING | — |
+| S9 | P2.2 — mock lifecycle/SoD/role gating | asoe-ui | Mock enforces terminal-state, initiator SoD, role gates | PENDING | — |
+| S10 | P2.3 — mock WS emits `case_*` events | asoe-ui | Mock state mutations fire `case_open`/`case_update`/`case_close` | PENDING | — |
+| S11 | P2.4 — dual-mode CI + Prometheus counter | both | Vitest mode switch + `tests_scenario_failed_total` exporter | PENDING | — |
+| S12 | P1.6 — fill scenarios to 12 intents | asoe-ui | Remaining 9 scenarios with curated reason tags | PENDING | — |
+| S13 | ADR-034 §6.2 amendment | asoe2 | Decide `EMAIL_ORDER_ENTRY_REQUEST` permanence; ratify rename scope | PENDING | — |
+| S14 | P3 — vocabulary rename cleanup | asoe2 | `EmailOrderEntryRecipe.py` rename, constant rename, docstring | BLOCKED:S13 | — |
 
 **Status values:** `PENDING`, `IN_PROGRESS`, `BLOCKED:<reason>`, `MERGED`, `SKIPPED:<reason>`.
 
@@ -42,14 +51,14 @@ Source documents (read before starting any session):
 
 Before doing any work in a session, the agent must:
 
-1. `git fetch origin` in both repos. Verify `main` is up to date.
-2. Read this file (`docs/plans/gap-remediation-rollout.md`) and find the first row whose status is `PENDING`. That row is the session's scope. **Do not skip rows** — phases have ordering invariants.
-3. If the previous row's status is `BLOCKED`, stop and report. Do not advance.
-4. Read the gap report and reviewer panel from the transcript history (or the linked summary if persisted). The reviewer panel's three amendments are non-negotiable.
-5. Run the baseline test suites and record pass/fail counts:
+1. `git fetch origin` in both repos.
+2. Read this file (`docs/plans/gap-remediation-rollout.md`) and find the first row whose status is `PENDING`. That row is the session's scope. **Do not skip rows** — phases have ordering invariants. If the row is `BLOCKED:<reason>`, halt.
+3. Read the gap report and reviewer panel from the transcript history. The reviewer panel's three amendments are non-negotiable.
+4. Run the baseline test suites in the repo(s) the session touches and record pass/fail counts:
    - `cd /home/user/asoe-ui && npm ci && npx vitest run --reporter=basic 2>&1 | tail -20`
    - `cd /home/user/asoe2 && uv sync && pytest -q 2>&1 | tail -20`
-6. Create the session branch off `main` (not off a prior session's branch — phases must merge independently).
+   If `npm ci` or `uv sync` is unavailable in the environment, document that in the post-flight summary and rely on CI for verification.
+5. Confirm the working tree is on `claude/analyze-asoe-gaps-0LzG5` in each repo touched. No branch switching during a session.
 
 If any pre-flight step fails, halt and ask. Do not proceed.
 
@@ -59,14 +68,13 @@ If any pre-flight step fails, halt and ask. Do not proceed.
 
 After the session's scope is complete:
 
-1. All new tests pass locally.
-2. No existing test is regressed (compare to baseline from step 5 above).
-3. Commit with a Conventional-Commits message that names the phase: e.g. `feat(p0): align reason_tag casing with curated vocabulary (S1)`.
-4. `git push -u origin <branch>` with the standard exponential-backoff retry loop.
-5. Open a **draft** PR with the body template in §6 below.
-6. Update this status table: set the row to `IN_PROGRESS` (linked PR) or `BLOCKED:<reason>`.
-7. Commit the status update to a `claude/plan-status-update-<session>` branch and open a tiny PR for it. The status doc must stay merge-clean.
-8. Stop. Do not pick up the next session — that is a new invocation.
+1. All new tests pass locally (or, if the local environment lacks deps, the postlude summary documents what CI will verify).
+2. No existing test is regressed (compare to baseline).
+3. Commit with a Conventional-Commits message that names the phase: e.g. `feat(p0): align reason_tag casing with curated vocabulary (S1)`. One commit per session unless the scope truly needs splitting.
+4. `git push -u origin claude/analyze-asoe-gaps-0LzG5` with the standard exponential-backoff retry loop.
+5. If this is the first commit on the asoe-ui side of `claude/analyze-asoe-gaps-0LzG5`, open a draft PR mirroring asoe2's PR #144. Otherwise no new PR — the stacked commit appears in the existing PR automatically.
+6. Update this status table in the same session: set the row's `Status` to `MERGED` (post-merge — only the human can do this) or `IN_PROGRESS` (PR open) or `BLOCKED:<reason>`. Fill the `Commit` column with the short SHA. Commit the status update on top of the work commit in the same session.
+7. Stop. Do not pick up the next session — that is a new invocation.
 
 ---
 
