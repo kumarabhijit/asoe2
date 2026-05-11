@@ -90,7 +90,7 @@ class TestComputeVisibleTabs:
     def test_admin_sees_all_tabs(self):
         perms = expand_permissions(["admin"])
         tabs = compute_visible_tabs(perms)
-        assert "inbox" in tabs
+        assert "home" in tabs
         assert "exceptions" in tabs
         assert "dashboard" in tabs
         assert "settings" in tabs
@@ -104,7 +104,7 @@ class TestComputeVisibleTabs:
         perms = expand_permissions(["analyst"])
         tabs = compute_visible_tabs(perms)
         assert "settings" not in tabs
-        assert "inbox" in tabs
+        assert "home" in tabs
         assert "exceptions" in tabs
         assert "dashboard" in tabs
 
@@ -113,12 +113,12 @@ class TestComputeVisibleTabs:
         tabs = compute_visible_tabs(perms)
         assert "settings" not in tabs
         assert "dashboard" in tabs
-        assert "inbox" in tabs
+        assert "home" in tabs
 
     def test_partner_minimal(self):
         perms = expand_permissions(["partner"])
         tabs = compute_visible_tabs(perms)
-        assert "inbox" in tabs
+        assert "home" in tabs
         assert "exceptions" in tabs
         assert "dashboard" not in tabs
         assert "settings" not in tabs
@@ -436,7 +436,7 @@ class TestPartnerUsers:
             json={"email": "tom.bradley@walmart.com", "password": "password"},
         )
         tabs = r.json()["user"]["visible_tabs"]
-        assert "inbox" in tabs
+        assert "home" in tabs
         assert "exceptions" in tabs
         assert "dashboard" not in tabs
         assert "settings" not in tabs

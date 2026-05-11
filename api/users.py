@@ -61,7 +61,15 @@ class UserRecord(BaseModel):
 # ---------------------------------------------------------------------------
 
 _PERMISSION_TAB_MAP: List[tuple[str, List[str]]] = [
-    ("inbox",      ["exceptions:read"]),
+    # Issue #133 (PO #5 / #6): "Home" is the operational landing
+    # surface — case-centric (SLA, awaiting review, awaiting buyer).
+    # Anyone who can read exceptions can see it. `/dashboard` remains
+    # reserved for agent-performance analytics.
+    ("home",       ["exceptions:read"]),
+    # Issue #133 (PO #9): the `/inbox` route is now a server redirect
+    # into `/cases?source=manual_order` in the UI. The tab id is
+    # retired from the visible-tabs map; deep-link clients still hit
+    # the redirect.
     ("exceptions", ["exceptions:read"]),
     # ADR-038 Phase H.6 — `/cases` surface is gated by the same
     # exceptions:read permission since the case detail panel
