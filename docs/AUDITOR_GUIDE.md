@@ -396,6 +396,7 @@ to the `asoe.observability` Python logger.  The record contains:
 | `intent_selected` | Constrained intent value |
 | `shadow_verdict` | `GREEN` / `YELLOW` / `RED` |
 | `shadow_policy_hits` | List of policy identifiers that fired |
+| `llm_shadow_verdict_action` | ADR-039 §6.3 — the L2 LLM Shadow's action (`AGREE` / `DISAGREE_DOWNGRADE` / `ABSTAIN`) when L2 was invoked; `null` when gating skipped L2. Read by the override-handler post-commit to drive the X.2 → X.3 ratification SLI (see §11 Observability surface). |
 | `recipe_name` | Selected recipe filename (or `null`) |
 | `rag_chunks` | Reserved for V2 RAG integration — always empty in V1.0 (forward-compatible field) |
 | `constrained_output_schemas` | Map of layer → schema name (e.g. `intent → IntentDecision`) |
@@ -851,6 +852,62 @@ relied upon for audit evidence yet:
 * Four-eyes / cosign / override flows still operate on the
   exception lifecycle (ADR-029); migration to the case lifecycle
   is part of Phase H.7 closeout.
-* ADR-039 (LLM Compliance Shadow second opinion) — 0% shipped.
-  When Phase X.1 lands, this guide gains a §20 covering the
-  observe-only audit trail extensions.
+* ADR-039 (LLM Compliance Shadow second opinion) — X.1 primitive
+  has shipped (observe-only); X.2 → X.3 promotion gated on the
+  live 1-week soak + Compliance ratification workshop. See §20
+  for the audit-bearing surface that the primitive emits today.
+
+---
+
+## 20. L2 LLM Compliance Shadow — Observe-Only Audit Surface (ADR-039 X.1)
+
+The Phase X.1 primitive ships an observe-only L2 second opinion behind the deterministic Compliance Shadow. The shadow runs after the L1 verdict, never blocks execution, and is asymmetric — only `DISAGREE_DOWNGRADE` is treated as a policy signal (the shipped path applies a `combine_verdicts` rule, see ADR-039 §4.5). Three audit-bearing surfaces exist today.
+
+### 20.1 `ComplianceDecision.llm_shadow_verdict` and the persisted trace
+
+Every `run_graph()` whose gating triggered L2 populates `ComplianceDecision.llm_shadow_verdict` (`contracts/models.py::ShadowLLMVerdict`). The trace persisted by `_persist_exception` (`api/routes/exceptions.py`) carries:
+
+| Field | Source | Audit Use |
+|---|---|---|
+| `llm_shadow_verdict_action` | `state.shadow.llm_shadow_verdict.action` | `AGREE` / `DISAGREE_DOWNGRADE` / `ABSTAIN` — the field the override handler reads back to drive the X.2 → X.3 SLI |
+| `shadow_policy_hits` | `state.shadow.policy_hits` | Concatenates L1 rule names + L2 hits prefixed with `LLM_SHADOW:` (per `compliance.shadow_llm.combine_verdicts`) — preserved into the case-level `aggregated_policy_hits` (Phase 28.5.x §28.5) so an auditor can drill from a case → matching trace |
+
+Read with: `GET /api/v1/exceptions/{id}/trace`.
+
+### 20.2 Per-tenant cache isolation (ADR-039 §5.5)
+
+L2 invocations are cached at L4 per tenant. The cache key includes `tenant_id` so a cross-tenant cache hit is impossible (lock + Compliance ratification gate §4.1). Cache hits emit `shadow_llm_cache_hits_total` to the SLI surface §20.3 below; they do NOT re-emit a Langfuse trace.
+
+### 20.3 Operational SLI surface — `/api/v1/metrics`
+
+The asoe-core API serves a Prometheus text-format exposition at `/api/v1/metrics` (no auth — payload carries no tenant data; service is internal-cluster only per the ServiceMonitor at `k8s/core/observability/servicemonitor.yaml`). The §7.3 SLI families are emitted from `compliance.shadow_llm.ShadowLLMMetrics` via `api/metrics.py`:
+
+| Family | Type | Audit Use |
+|---|---|---|
+| `shadow_llm_invocations_total` + `shadow_llm_invocations_by_trigger{trigger}` | counters | Total L2 calls + breakdown by gating reason |
+| `shadow_llm_verdicts_total{action}` | counter | Verdict distribution (AGREE / DISAGREE_DOWNGRADE / ABSTAIN) |
+| `shadow_llm_cache_hits_total` + `shadow_llm_cache_hit_rate` | counter + gauge | Cache effectiveness |
+| `shadow_llm_timeouts_total`, `shadow_llm_unavailable_total`, `shadow_llm_validation_errors_total` | counters | Failure-mode telemetry |
+| `shadow_llm_disagreement_rate`, `shadow_llm_abstain_rate` | gauges | X.1 → X.2 promotion gate; target bands per ADR-039 §6 |
+| `shadow_llm_avg_latency_ms`, `shadow_llm_cost_usd_total` | gauges | Cost / latency observability; cost is recorded once at the call site and re-projected to Langfuse so the two never drift |
+| `shadow_llm_reviewer_overrides_of_downgrade_total` | counter | **Phase 28.6** — increments on `/disposition` OVERRIDE + `/override/cosign` apply when `llm_shadow_verdict_action == "DISAGREE_DOWNGRADE"`. Wired in `api/routes/exceptions.py::_record_reviewer_override_of_llm_downgrade` |
+| `shadow_llm_reviewer_override_rate_on_downgrades` | gauge | **Phase 28.6** — derived ratio; X.2 → X.3 ratification gate target ≤ 0.35 |
+| `asoe_cases_returned_p99` (Phase 28.5.x §D7) | gauge | Rolling-window /api/v1/cases response size; the SLI re-opens cursor pagination when sustained ≥ 150 |
+
+The Grafana dashboard JSON at `ops/observability/grafana/dashboards/shadow_llm.json` plots all of the above. Every panel carries a Langfuse trace-search deep link so an on-call operator drills from an aggregate spike to individual traces in one click.
+
+### 20.4 Audit trust boundaries
+
+* The SLI counters are operational telemetry — they are **not** the source of audit truth. The hash-chain audit log (`§10`, `policy_audit_log`) remains the SOX evidence-of-control surface.
+* Reviewer override is recorded twice: once in the audit log (under `EXCEPTION_RESOLVED` / `EXCEPTION_OVERRIDE_COSIGNED` per §18.3) and once as the §20.3 counter increment. The audit row is load-bearing; the counter is a derived view operations watches for drift.
+* `llm_shadow_verdict_action` persistence on `trace_data` is forward-only — overrides on records whose trace pre-dates the field do not contribute to the §20.3 reviewer-override counter (best-effort drift detection only).
+
+### 20.5 Pending Compliance ratification before X.2 promotion
+
+Per ADR-039 §6 the X.2 flip requires:
+
+* 1-week observe-only X.1 soak with the Azure provider.
+* Compliance ratification of §4.1 (combination rule) — pre-read at `docs/workshops/2026-05-09-deferred-items-virtual-workshop.md`, minutes pending.
+* `knowledge/shadow_llm/metadata.yaml::rollout.financial_impact_threshold_usd` flipped from `null` to `10000` via SIGHUP per `docs/runbooks/shadow_llm_x2_rollback.md` §3.1.A.
+
+Until those clear, X.2/X.3/X.4 are gated.

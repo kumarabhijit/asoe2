@@ -676,11 +676,16 @@ for the complete env-var inventory.
 
 ---
 
-### LangFuse observability (optional)
+### LangFuse + Prometheus observability
 
-Every `run_graph()` call emits a `TraceRecord` to the stdlib `asoe.observability`
-logger.  When LangFuse is configured, the same record is also forwarded to
-LangFuse as a trace with spans — no code changes needed.
+Two complementary observability surfaces:
+
+* **LangFuse (per-trace)** — every `run_graph()` call emits a `TraceRecord` to the stdlib `asoe.observability` logger, forwarded to LangFuse as a trace with spans when configured. Audience: AI engineers + compliance auditors debugging individual LLM decisions.
+* **Prometheus + Grafana (aggregate SLI)** — `/api/v1/metrics` serves the Prometheus text-format exposition for the ADR-039 §7.3 SLI surface (disagreement rate, abstain rate, cache hit rate, reviewer-override rate, cost, latency). Audience: SRE / on-call rotation.
+
+The two share a single source of truth at the LLM call site (`compliance.shadow_llm.ShadowLLMMetrics`) and project two ways — never re-derive. Every Grafana panel carries a deep-link back to the matching Langfuse trace search so on-call drills from "disagreement spike at 14:32" to individual traces in one click. See [`ops/observability/README.md`](ops/observability/README.md) for the multi-target deployment guide (Docker Compose overlay, Azure Container Apps Bicep, Kubernetes kube-prometheus-stack). Deployment-target-agnostic assets — `prometheus.yml`, Grafana dashboard JSON — live under `ops/observability/`; target-specific scrape configs in `k8s/core/observability/`.
+
+#### LangFuse forwarding
 
 **Install:**
 
