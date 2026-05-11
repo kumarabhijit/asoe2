@@ -2215,6 +2215,20 @@
       "HealthResponse": {
         "description": "GET /api/v1/health",
         "properties": {
+          "allowed_case_sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Case Sources",
+            "type": "array"
+          },
+          "allowed_case_statuses": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Case Statuses",
+            "type": "array"
+          },
           "allowed_intents": {
             "items": {
               "type": "string"
@@ -5037,7 +5051,7 @@
             }
           },
           {
-            "description": "Filter by case status (CaseStatus literal)",
+            "description": "Filter by case status. Multi-value via comma-separated list (e.g. status=OPEN_AWAITING_HUMAN,OPEN_AWAITING_BUYER). Any-match: a case in any of the listed statuses passes.",
             "in": "query",
             "name": "status",
             "required": false,
@@ -5050,8 +5064,62 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by case status (CaseStatus literal)",
+              "description": "Filter by case status. Multi-value via comma-separated list (e.g. status=OPEN_AWAITING_HUMAN,OPEN_AWAITING_BUYER). Any-match: a case in any of the listed statuses passes.",
               "title": "Status"
+            }
+          },
+          {
+            "description": "Filter by child-record intent (Phase 28.5.x \u00a7D2). Multi-value via comma-separated list (e.g. intents=DUPLICATE_PO,CONTRACTUAL_CORRECTION). Any-match: a case with at least one child carrying one of the listed intents passes.",
+            "in": "query",
+            "name": "intents",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by child-record intent (Phase 28.5.x \u00a7D2). Multi-value via comma-separated list (e.g. intents=DUPLICATE_PO,CONTRACTUAL_CORRECTION). Any-match: a case with at least one child carrying one of the listed intents passes.",
+              "title": "Intents"
+            }
+          },
+          {
+            "description": "Filter by recency: presets `today` / `24h` / `7d` / `30d`. Cases opened within the window pass. Anything else falls through unfiltered.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by recency: presets `today` / `24h` / `7d` / `30d`. Cases opened within the window pass. Anything else falls through unfiltered.",
+              "title": "Since"
+            }
+          },
+          {
+            "description": "Free-text fuzzy match over case_id / customer_po_number / sales_order_id / customer_id. Case-insensitive substring. Operators (po:, so:, customer:) are parsed client-side; the backend sees the free-text term only.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Free-text fuzzy match over case_id / customer_po_number / sales_order_id / customer_id. Case-insensitive substring. Operators (po:, so:, customer:) are parsed client-side; the backend sees the free-text term only.",
+              "title": "Q"
             }
           },
           {

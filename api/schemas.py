@@ -196,6 +196,16 @@ class HealthResponse(BaseModel):
     # product/compliance will curate these in a follow-up. Consumed by
     # the UI Override chooser to narrow its options by record.intent.
     allowed_override_reason_tags_by_intent: Dict[str, List[str]]
+    # Phase 28.5.x §D1 (CaseListPane) — the seven case-status values
+    # (`contracts/models.py::CaseStatus`). Sourced once via
+    # `useHealth.allowed_case_statuses` so the UI's CaseListPane
+    # filter chips don't hardcode the enum, preserving Guardrail #1.
+    allowed_case_statuses: List[str] = Field(default_factory=list)
+    # Phase 28.5.x §D1 — the case-source values. Until this field
+    # ships the UI carries an ALLOWED_CASE_SOURCES constant in
+    # `src/lib/api.ts`; once available, the UI consumes from health
+    # exclusively.
+    allowed_case_sources: List[str] = Field(default_factory=list)
 
 
 class ResolveResponse(BaseModel):
