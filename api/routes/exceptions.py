@@ -85,6 +85,7 @@ from contracts.policy import (
 from api.events import WSEvent
 from api.pubsub import event_publisher
 from api.store import exception_store
+from compliance.shadow_llm import shadow_llm_metrics
 from constraints.specs import (
     INTENT_REASON_TAGS,
     AllowedOverrideReasonTag,
@@ -120,6 +121,29 @@ def _get_or_404(exception_id: str, tenant_id: str):
             status_code=404,
         )
     return record
+
+
+def _record_reviewer_override_of_llm_downgrade(exception_id: str) -> None:
+    """Increment the ADR-039 §6.3 X.2→X.3 ratification-gate counter
+    when an operator overrides an exception whose L2 LLM Shadow had
+    returned ``DISAGREE_DOWNGRADE``.
+
+    No-op when no trace was persisted, when the trace pre-dates the
+    `llm_shadow_verdict_action` field, or when the field is anything
+    other than ``DISAGREE_DOWNGRADE``. Best-effort: a failure to read
+    the trace must never block a legitimate override commit, so any
+    exception from the store is swallowed (and logged).
+    """
+    try:
+        trace = exception_store.get_trace(exception_id) or {}
+    except Exception:  # noqa: BLE001 — telemetry must never block override
+        logger.exception(
+            "Failed to read trace for reviewer-override SLI (exception_id=%s)",
+            exception_id,
+        )
+        return
+    if trace.get("llm_shadow_verdict_action") == "DISAGREE_DOWNGRADE":
+        shadow_llm_metrics.reviewer_overrides_of_llm_downgrade_total += 1
 
 
 def _require_state(record, allowed_states: set, action: str) -> None:
@@ -424,6 +448,20 @@ def _persist_exception(
         audit_missing_class = _composed.class_name
         audit_missing_fields = list(_composed.missing_audit_fields)
 
+    # ADR-039 §6.3 X.2→X.3 gate — persist the L2 LLM Shadow's action
+    # so the override handler can recognise a "reviewer overrode a
+    # DOWNGRADE" event and increment the SLI counter that feeds the
+    # ratification gate. None when L2 was not invoked (gating skipped
+    # or X.1 observe-only with no verdict).
+    llm_verdict = (
+        state.shadow.llm_shadow_verdict
+        if state.shadow is not None
+        else None
+    )
+    llm_shadow_verdict_action = (
+        llm_verdict.action if llm_verdict is not None else None
+    )
+
     trace_data = {
         "trace_id": trace_id or "",
         "event_id": state.event.order_id,
@@ -439,6 +477,7 @@ def _persist_exception(
         "intent_confidence": state.confidence,
         "shadow_verdict": state.shadow.status.value if state.shadow else None,
         "shadow_policy_hits": state.shadow.policy_hits if state.shadow else [],
+        "llm_shadow_verdict_action": llm_shadow_verdict_action,
         "recipe_name": state.selected_recipe,
         "constrained_output_schemas": state.execution_log.constrained_outputs if state.execution_log else {},
         "gateway_calls": [],
@@ -933,6 +972,9 @@ async def cosign_override(
             changed_by=user.sub,
             change_reason=req.notes,
         )
+        # ADR-039 §6.3 — high-value cosign-approved override is also a
+        # "reviewer overrode the L2 downgrade" signal, count it.
+        _record_reviewer_override_of_llm_downgrade(exception_id)
     else:
         # Restore prior lifecycle; clear pending_override; audit rejection.
         from_lifecycle = pending.get("from_lifecycle_state") or "PENDING_REVIEW"
@@ -1210,6 +1252,14 @@ async def disposition_exception(
         changed_by=user.sub,
         change_reason=req.notes,
     )
+
+    # ADR-039 §6.3 X.2→X.3 ratification gate — count overrides on
+    # L2-LLM-DOWNGRADED cases so operations can monitor the
+    # false-downgrade rate against the ≤ 35% target. Only the OVERRIDE
+    # sub-type counts (APPROVE / REJECT are not "reviewer disagrees
+    # with L2 downgrade" signals).
+    if sub_type == "OVERRIDE":
+        _record_reviewer_override_of_llm_downgrade(exception_id)
 
     response = updated.to_detail()
     if key is not None:
@@ -1491,6 +1541,14 @@ async def reanalyze_exception(
         "intent_confidence": final_state.confidence,
         "shadow_verdict": new_verdict,
         "shadow_policy_hits": final_state.shadow.policy_hits if final_state.shadow else [],
+        "llm_shadow_verdict_action": (
+            final_state.shadow.llm_shadow_verdict.action
+            if (
+                final_state.shadow is not None
+                and final_state.shadow.llm_shadow_verdict is not None
+            )
+            else None
+        ),
         "recipe_name": final_state.selected_recipe,
         "constrained_output_schemas": (
             final_state.execution_log.constrained_outputs

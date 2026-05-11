@@ -1,0 +1,66 @@
+# ServiceMonitor — ADR-039 §7.3 SLI scrape config.
+#
+# The asoe-core service exposes a Prometheus text-format payload at
+# `/api/v1/metrics` (see `api/metrics.py`). This ServiceMonitor tells
+# the kube-prometheus-stack operator to scrape that endpoint every
+# 30s and feed the data to the cluster's Prometheus instance, which
+# the Grafana dashboard (`grafana_shadow_llm_dashboard.json` in the
+# same directory) plots from.
+#
+# Why a Prometheus surface when the project already uses Langfuse:
+#   * Langfuse is per-trace LLM observability (prompt + completion +
+#     per-call cost), audience = AI engineers + compliance auditors.
+#   * The §7.3 SLIs (`shadow_llm_disagreement_rate`,
+#     `shadow_llm_abstain_rate`, `shadow_llm_cache_hit_rate`,
+#     `shadow_llm_reviewer_override_rate_on_downgrades`) are
+#     aggregate ratios over windows that drive on-call alerting and
+#     the X.1→X.2→X.3 ratification gates. Burn-rate alerting +
+#     standard Alertmanager/PagerDuty hooks are the SRE workflow
+#     Langfuse does not cover.
+#   * Cost / latency are recorded once at the LLM call site
+#     (`ShadowLLMMetrics`) and projected two ways: Langfuse for
+#     per-trace context, Prometheus for the aggregate. Every panel
+#     in the Grafana dashboard carries a deep-link back to the
+#     matching Langfuse trace search, so on-call drills from
+#     "disagreement spike at 14:32" → individual traces in one
+#     click.
+#
+# Apply with:
+#   kubectl apply -f k8s/core/observability/servicemonitor.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: asoe-core-shadow-llm
+  namespace: asoe
+  labels:
+    app: asoe-core
+    release: kube-prometheus-stack
+    # The `release` label MUST match the kube-prometheus-stack Helm
+    # release name in the cluster — otherwise the operator's
+    # serviceMonitorSelector won't pick this up. Adjust the value
+    # per environment.
+spec:
+  selector:
+    matchLabels:
+      app: asoe-core
+  namespaceSelector:
+    matchNames:
+      - asoe
+  endpoints:
+    - port: http
+      path: /api/v1/metrics
+      # 30s aligns with the §7.3 dashboard's default refresh and is
+      # cheap given the 16-line payload. Drop to 15s if alert burn-
+      # rate calculations need finer resolution.
+      interval: 30s
+      scrapeTimeout: 10s
+      # The metrics endpoint is unauthenticated by design (Section 7
+      # of api/metrics.py): the body carries no tenant data and the
+      # Service is ClusterIP-only, so Prometheus reaches it on the
+      # pod network without an APIM hop or bearer token.
+      honorLabels: false
+      # Tag every series with the trigger source so the dashboard
+      # can split "what fired L2" vs "verdict distribution" without
+      # an extra label lookup. The metric body already labels by
+      # `trigger` and `action`; nothing else to relabel.
+      metricRelabelings: []

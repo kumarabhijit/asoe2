@@ -347,6 +347,13 @@ class ShadowLLMMetrics:
     skipped_red_total: int = 0
     skipped_below_floor_total: int = 0
 
+    # Reviewer-override counter — ADR-039 §6.3 X.2→X.3 ratification
+    # gate. Incremented when a reviewer overrides an exception whose
+    # L2 LLM Shadow had returned `DISAGREE_DOWNGRADE`. Feeds the
+    # `reviewer_override_rate_on_llm_downgrades` derived gauge that
+    # operations gates X.3 promotion against (target ≤ 35%).
+    reviewer_overrides_of_llm_downgrade_total: int = 0
+
     def reset(self) -> None:
         self.invocations_total = 0
         self.invocations_by_trigger.clear()
@@ -360,6 +367,7 @@ class ShadowLLMMetrics:
         self.cost_usd_total = 0.0
         self.skipped_red_total = 0
         self.skipped_below_floor_total = 0
+        self.reviewer_overrides_of_llm_downgrade_total = 0
 
     def disagreement_rate(self) -> float:
         """ADR-039 §7.3 — DISAGREE_DOWNGRADE / total invocations."""
@@ -382,6 +390,17 @@ class ShadowLLMMetrics:
         if self.latency_ms_count == 0:
             return 0.0
         return self.latency_ms_sum / self.latency_ms_count
+
+    def reviewer_override_rate_on_llm_downgrades(self) -> float:
+        """ADR-039 §6.3 X.2→X.3 gate — share of L2 DOWNGRADE verdicts
+        the operator overrode. Target band: ≤ 35%. Returns 0.0 when
+        no DOWNGRADE verdicts have been emitted yet (denominator 0
+        is treated as "no signal", not as a false-positive 100%).
+        """
+        downgrades = self.verdicts_by_action.get("DISAGREE_DOWNGRADE", 0)
+        if downgrades == 0:
+            return 0.0
+        return self.reviewer_overrides_of_llm_downgrade_total / downgrades
 
 
 shadow_llm_metrics = ShadowLLMMetrics()

@@ -59,6 +59,9 @@ class TestRenderShadowLLMMetrics:
             "shadow_llm_abstain_rate",
             "shadow_llm_cache_hit_rate",
             "shadow_llm_avg_latency_ms",
+            # ADR-039 §6.3 X.2→X.3 ratification gate.
+            "shadow_llm_reviewer_overrides_of_downgrade_total",
+            "shadow_llm_reviewer_override_rate_on_downgrades",
         ):
             assert f"# HELP {name} " in body, name
             assert f"# TYPE {name} " in body, name
@@ -91,6 +94,27 @@ class TestRenderShadowLLMMetrics:
         assert "shadow_llm_abstain_rate 0.0" in body
         assert "shadow_llm_cache_hit_rate 0.0" in body
         assert "shadow_llm_avg_latency_ms 0.0" in body
+        assert "shadow_llm_reviewer_overrides_of_downgrade_total 0" in body
+        assert "shadow_llm_reviewer_override_rate_on_downgrades 0.0" in body
+
+    def test_reviewer_override_rate_uses_downgrade_count_as_denominator(self):
+        m = ShadowLLMMetrics()
+        m.invocations_total = 100
+        m.verdicts_by_action["DISAGREE_DOWNGRADE"] = 20
+        m.reviewer_overrides_of_llm_downgrade_total = 5
+        # 5 / 20 = 0.25 — not 5 / 100. The X.2→X.3 gate's denominator
+        # is the L2-issued downgrade count, not total invocations.
+        assert m.reviewer_override_rate_on_llm_downgrades() == 0.25
+        body = render_shadow_llm_metrics(m)
+        assert "shadow_llm_reviewer_overrides_of_downgrade_total 5" in body
+        assert "shadow_llm_reviewer_override_rate_on_downgrades 0.25" in body
+
+    def test_reviewer_override_rate_is_zero_when_no_downgrades(self):
+        m = ShadowLLMMetrics()
+        # No DISAGREE_DOWNGRADE verdicts → denominator 0; the rate
+        # must be 0.0 (no signal), NOT a division-by-zero or 100%.
+        m.reviewer_overrides_of_llm_downgrade_total = 3
+        assert m.reviewer_override_rate_on_llm_downgrades() == 0.0
 
     def test_label_value_escaping(self):
         m = ShadowLLMMetrics()

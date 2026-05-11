@@ -1,0 +1,441 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "Cluster Prometheus scraping `asoe-core-shadow-llm` (see servicemonitor.yaml).",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "__notes": [
+    "ADR-039 §7.3 — L2 LLM Shadow SLI surface.",
+    "",
+    "Panel taxonomy (left-to-right, top-to-bottom):",
+    "  Row 1 — Health: invocations, cache hit rate, avg latency, cost",
+    "  Row 2 — Verdicts: distribution + disagreement / abstain rates",
+    "  Row 3 — Failures: timeouts, unavailable, validation errors",
+    "  Row 4 — X.2→X.3 gate: reviewer-override-of-downgrade rate (target ≤ 35%)",
+    "",
+    "Every panel carries a Langfuse deep-link in its links[] array so",
+    "on-call can drill from an aggregate spike to the matching traces.",
+    "The link substitutes the global `$tenant` and `$trigger` variables",
+    "into the Langfuse trace-search URL. Set the LANGFUSE_BASE_URL",
+    "templating variable per environment (e.g. https://cloud.langfuse.com).",
+    "",
+    "Schema version 39 matches Grafana 10.x. The dashboard imports",
+    "cleanly into Grafana 10.0+ via the Import → Upload JSON flow."
+  ],
+  "annotations": {
+    "list": [
+      {
+        "name": "Rollout phase",
+        "datasource": "$datasource",
+        "enable": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "type": "tags",
+        "tags": ["shadow-llm-rollout"],
+        "limit": 50
+      }
+    ]
+  },
+  "description": "ADR-039 §7.3 SLI surface for the L2 LLM Compliance Shadow. Pairs with Langfuse per-trace observability via the deep-link on every panel.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "title": "Langfuse — all shadow_llm traces",
+      "url": "${LANGFUSE_BASE_URL}/project/${LANGFUSE_PROJECT}/traces?filter=metadata.system%3Dshadow_llm",
+      "icon": "external link",
+      "tooltip": "Drill into individual L2 traces in Langfuse",
+      "targetBlank": true,
+      "type": "link"
+    },
+    {
+      "title": "ADR-039 §7.3 — SLI spec",
+      "url": "https://github.com/kumarabhijit/asoe2/blob/main/docs/adr/ADR-039-l2-llm-compliance-shadow.md#73-sli-surface",
+      "icon": "doc",
+      "targetBlank": true,
+      "type": "link"
+    },
+    {
+      "title": "Runbook — X.2 rollback",
+      "url": "https://github.com/kumarabhijit/asoe2/blob/main/docs/runbooks/shadow_llm_x2_rollback.md",
+      "icon": "doc",
+      "targetBlank": true,
+      "type": "link"
+    }
+  ],
+  "panels": [
+    {
+      "title": "Invocations (rate over 5m)",
+      "type": "timeseries",
+      "datasource": "$datasource",
+      "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {"mode": "palette-classic"}
+        }
+      },
+      "options": {"legend": {"displayMode": "list"}, "tooltip": {"mode": "multi"}},
+      "links": [
+        {
+          "title": "Langfuse — invocations in this window",
+          "url": "${LANGFUSE_BASE_URL}/project/${LANGFUSE_PROJECT}/traces?filter=metadata.system%3Dshadow_llm&fromTimestamp=${__from}&toTimestamp=${__to}",
+          "targetBlank": true
+        }
+      ],
+      "targets": [
+        {
+          "datasource": "$datasource",
+          "expr": "sum by (trigger) (rate(shadow_llm_invocations_by_trigger{trigger=~\"$trigger\"}[5m]))",
+          "legendFormat": "{{trigger}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Cache hit rate",
+      "type": "stat",
+      "datasource": "$datasource",
+      "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 0.3},
+              {"color": "green", "value": 0.5}
+            ]
+          }
+        }
+      },
+      "options": {"colorMode": "background", "graphMode": "area"},
+      "targets": [
+        {
+          "datasource": "$datasource",
+          "expr": "shadow_llm_cache_hit_rate",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Avg cold-path latency (ms)",
+      "type": "stat",
+      "datasource": "$datasource",
+      "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 2000},
+              {"color": "red", "value": 5000}
+            ]
+          }
+        }
+      },
+      "options": {"colorMode": "background"},
+      "links": [
+        {
+          "title": "Langfuse — latency outliers in this window",
+          "url": "${LANGFUSE_BASE_URL}/project/${LANGFUSE_PROJECT}/traces?filter=metadata.system%3Dshadow_llm&sort=latency_desc&fromTimestamp=${__from}&toTimestamp=${__to}",
+          "targetBlank": true
+        }
+      ],
+      "targets": [
+        {
+          "datasource": "$datasource",
+          "expr": "shadow_llm_avg_latency_ms",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Cumulative cost (USD)",
+      "type": "stat",
+      "datasource": "$datasource",
+      "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null}
+            ]
+          }
+        }
+      },
+      "options": {"colorMode": "background"},
+      "targets": [
+        {
+          "datasource": "$datasource",
+          "expr": "shadow_llm_cost_usd_total",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Verdict distribution",
+      "type": "timeseries",
+      "datasource": "$datasource",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {"stacking": {"mode": "normal"}}
+        }
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "right", "values": ["last", "max"]}},
+      "links": [
+        {
+          "title": "Langfuse — DISAGREE_DOWNGRADE traces",
+          "url": "${LANGFUSE_BASE_URL}/project/${LANGFUSE_PROJECT}/traces?filter=metadata.system%3Dshadow_llm%20AND%20metadata.verdict%3DDISAGREE_DOWNGRADE&fromTimestamp=${__from}&toTimestamp=${__to}",
+          "targetBlank": true
+        }
+      ],
+      "targets": [
+        {
+          "datasource": "$datasource",
+          "expr": "sum by (action) (rate(shadow_llm_verdicts_total[5m]))",
+          "legendFormat": "{{action}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Disagreement + abstain rate (X.1→X.2 gate)",
+      "type": "timeseries",
+      "datasource": "$datasource",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 0.15},
+              {"color": "red", "value": 0.30}
+            ]
+          },
+          "custom": {"thresholdsStyle": {"mode": "dashed"}}
+        }
+      },
+      "options": {"legend": {"displayMode": "list"}, "tooltip": {"mode": "multi"}},
+      "links": [
+        {
+          "title": "Langfuse — traces driving disagreement spike",
+          "url": "${LANGFUSE_BASE_URL}/project/${LANGFUSE_PROJECT}/traces?filter=metadata.system%3Dshadow_llm%20AND%20metadata.verdict%3DDISAGREE_DOWNGRADE&fromTimestamp=${__from}&toTimestamp=${__to}",
+          "targetBlank": true
+        }
+      ],
+      "targets": [
+        {
+          "datasource": "$datasource",
+          "expr": "shadow_llm_disagreement_rate",
+          "legendFormat": "disagreement",
+          "refId": "A"
+        },
+        {
+          "datasource": "$datasource",
+          "expr": "shadow_llm_abstain_rate",
+          "legendFormat": "abstain",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "title": "Timeouts / unavailable / validation errors (rate over 5m)",
+      "type": "timeseries",
+      "datasource": "$datasource",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 0.1}
+            ]
+          }
+        }
+      },
+      "options": {"legend": {"displayMode": "list"}, "tooltip": {"mode": "multi"}},
+      "links": [
+        {
+          "title": "Langfuse — failed traces in this window",
+          "url": "${LANGFUSE_BASE_URL}/project/${LANGFUSE_PROJECT}/traces?filter=metadata.system%3Dshadow_llm%20AND%20level%3DERROR&fromTimestamp=${__from}&toTimestamp=${__to}",
+          "targetBlank": true
+        }
+      ],
+      "targets": [
+        {
+          "datasource": "$datasource",
+          "expr": "rate(shadow_llm_timeouts_total[5m])",
+          "legendFormat": "timeouts",
+          "refId": "A"
+        },
+        {
+          "datasource": "$datasource",
+          "expr": "rate(shadow_llm_unavailable_total[5m])",
+          "legendFormat": "unavailable",
+          "refId": "B"
+        },
+        {
+          "datasource": "$datasource",
+          "expr": "rate(shadow_llm_validation_errors_total[5m])",
+          "legendFormat": "validation_errors",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "title": "Skipped (gated out)",
+      "type": "timeseries",
+      "datasource": "$datasource",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "fieldConfig": {
+        "defaults": {"unit": "ops"}
+      },
+      "options": {"legend": {"displayMode": "list"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {
+          "datasource": "$datasource",
+          "expr": "rate(shadow_llm_skipped_red_total[5m])",
+          "legendFormat": "deterministic-RED short-circuit",
+          "refId": "A"
+        },
+        {
+          "datasource": "$datasource",
+          "expr": "rate(shadow_llm_skipped_below_floor_total[5m])",
+          "legendFormat": "below financial-impact floor",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "title": "X.2 → X.3 gate — reviewer-override rate on L2 downgrades",
+      "type": "stat",
+      "datasource": "$datasource",
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 24},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 0.25},
+              {"color": "red", "value": 0.35}
+            ]
+          }
+        }
+      },
+      "options": {"colorMode": "background", "graphMode": "area", "textMode": "value_and_name"},
+      "description": "ADR-039 §6.3 — share of L2 DISAGREE_DOWNGRADE verdicts that a reviewer subsequently overrode. Target band for X.3 promotion: ≤ 35%. Above 35% means the L2 model is calling false downgrades and X.3 is blocked.",
+      "links": [
+        {
+          "title": "Langfuse — DOWNGRADE traces overridden by reviewer",
+          "url": "${LANGFUSE_BASE_URL}/project/${LANGFUSE_PROJECT}/traces?filter=metadata.system%3Dshadow_llm%20AND%20metadata.verdict%3DDISAGREE_DOWNGRADE%20AND%20metadata.reviewer_overrode%3Dtrue&fromTimestamp=${__from}&toTimestamp=${__to}",
+          "targetBlank": true
+        }
+      ],
+      "targets": [
+        {
+          "datasource": "$datasource",
+          "expr": "shadow_llm_reviewer_override_rate_on_downgrades",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Reviewer overrides on L2 downgrades (cumulative)",
+      "type": "stat",
+      "datasource": "$datasource",
+      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 24},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{"color": "blue", "value": null}]
+          }
+        }
+      },
+      "options": {"colorMode": "background", "graphMode": "area"},
+      "targets": [
+        {
+          "datasource": "$datasource",
+          "expr": "shadow_llm_reviewer_overrides_of_downgrade_total",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["asoe", "shadow-llm", "adr-039", "sli"],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {"selected": false, "text": "Prometheus", "value": "Prometheus"}
+      },
+      {
+        "name": "LANGFUSE_BASE_URL",
+        "label": "Langfuse base URL",
+        "type": "constant",
+        "query": "https://cloud.langfuse.com",
+        "current": {"selected": false, "text": "https://cloud.langfuse.com", "value": "https://cloud.langfuse.com"},
+        "description": "Override per-environment. Example: https://langfuse.internal.acme.com"
+      },
+      {
+        "name": "LANGFUSE_PROJECT",
+        "label": "Langfuse project",
+        "type": "constant",
+        "query": "asoe",
+        "current": {"selected": false, "text": "asoe", "value": "asoe"},
+        "description": "Langfuse project slug for the ASOE deployment."
+      },
+      {
+        "name": "trigger",
+        "label": "Trigger",
+        "type": "query",
+        "datasource": "$datasource",
+        "query": "label_values(shadow_llm_invocations_by_trigger, trigger)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {"selected": false, "text": "All", "value": "$__all"}
+      }
+    ]
+  },
+  "time": {"from": "now-6h", "to": "now"},
+  "timepicker": {},
+  "timezone": "",
+  "title": "ASOE — L2 LLM Shadow SLIs (ADR-039 §7.3)",
+  "uid": "asoe-shadow-llm-sli",
+  "version": 1,
+  "weekStart": ""
+}
