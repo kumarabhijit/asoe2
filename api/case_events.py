@@ -22,6 +22,7 @@ from __future__ import annotations
 from typing import Iterable, Optional
 from uuid import uuid4
 
+from api import case_intents_cache
 from api.events import WSEvent
 from api.pubsub import event_publisher
 from contracts.models import OrderCase
@@ -57,6 +58,13 @@ def publish_case_open(
         sales_order_id=case.sales_order_id,
     )
     event_publisher.publish(case.tenant_id, event)
+    # Phase 28.5.x §D2 — invalidate the per-case intents cache so
+    # the next /api/v1/cases read re-derives from the exception
+    # store. The case has no children at the moment of open, but
+    # opening + first-event-persist happen in close succession;
+    # invalidating here means the cache entry is correct on the
+    # first request after the materialise.
+    case_intents_cache.invalidate(case.tenant_id, case.case_id)
 
 
 def publish_case_update(
@@ -82,6 +90,12 @@ def publish_case_update(
         sla_deadline=case.sla_deadline,
     )
     event_publisher.publish(case.tenant_id, event)
+    # Phase 28.5.x §D2 — every case_update is a potential
+    # child-set mutation (a new exception just attached, or an
+    # existing one was reclassified). Invalidate the per-case
+    # intents cache so the filter chips see the new intent on the
+    # next /api/v1/cases read.
+    case_intents_cache.invalidate(case.tenant_id, case.case_id)
 
 
 def publish_case_close(

@@ -46,6 +46,62 @@ from typing import Iterable
 from compliance.shadow_llm import ShadowLLMMetrics, shadow_llm_metrics
 
 
+# ---------------------------------------------------------------------------
+# Per-request case-list SLI (Phase 28.5.x §D7 — pagination deferral)
+# ---------------------------------------------------------------------------
+#
+# `cases_returned_per_request` tracks how many cases a /api/v1/cases
+# response carried. The §D7 decision deferred cursor pagination, with
+# a re-open trigger when any tenant approaches 150 open cases. This
+# SLI is the trigger: when the p99 of this gauge sustains ≥ 150, the
+# dashboard surfaces a "shift to server-side pagination" alert.
+#
+# Tracked as a rolling window (last N requests) rather than a
+# histogram — the values are small integers (0..500 limit cap) and
+# we only need p95 / p99 for the alert; a simple list-as-circular-
+# buffer keeps the calculation overhead negligible.
+
+from collections import deque
+from threading import Lock as _CaseLock
+from typing import Deque
+
+_CASE_REQUEST_WINDOW = 1024  # last 1024 /api/v1/cases responses
+_case_request_lock = _CaseLock()
+_case_request_window: Deque[int] = deque(maxlen=_CASE_REQUEST_WINDOW)
+
+
+def record_cases_returned(count: int) -> None:
+    """Record one /api/v1/cases response's payload size. Called by
+    the route handler immediately before serialising the response.
+    Tenant-agnostic intentionally: the pagination decision is global,
+    not per-tenant (a single big-tenant trigger forces the rollout
+    for everyone).
+    """
+    with _case_request_lock:
+        _case_request_window.append(count)
+
+
+def cases_returned_snapshot() -> tuple[int, float, int, int]:
+    """Return `(samples, avg, p95, p99)` over the rolling window.
+    Returns `(0, 0.0, 0, 0)` when the window is empty so the gauge
+    plots as zero (Prometheus 0-baseline contract from §28.6)."""
+    with _case_request_lock:
+        if not _case_request_window:
+            return 0, 0.0, 0, 0
+        sorted_window = sorted(_case_request_window)
+        n = len(sorted_window)
+        avg = sum(sorted_window) / n
+        p95_idx = max(0, min(n - 1, int(0.95 * (n - 1))))
+        p99_idx = max(0, min(n - 1, int(0.99 * (n - 1))))
+        return n, avg, sorted_window[p95_idx], sorted_window[p99_idx]
+
+
+def reset_cases_returned_window() -> None:
+    """Test helper — drop all samples."""
+    with _case_request_lock:
+        _case_request_window.clear()
+
+
 def _line(name: str, value: float, *, labels: dict[str, str] | None = None) -> str:
     if not labels:
         return f"{name} {value}"
@@ -238,6 +294,49 @@ def render_shadow_llm_metrics(metrics: ShadowLLMMetrics) -> str:
     return "\n".join(lines) + "\n"
 
 
+def render_cases_returned_metrics() -> str:
+    """Phase 28.5.x §D7 — emit the rolling-window stats on
+    /api/v1/cases payload size as a gauge surface. The Grafana
+    dashboard plots these against the §28.6 layout; alert fires at
+    p99 ≥ 150 (re-open trigger for cursor pagination).
+    """
+    samples, avg, p95, p99 = cases_returned_snapshot()
+    lines: list[str] = []
+
+    lines.extend(_help_type(
+        "asoe_cases_returned_samples",
+        "Rolling-window sample count for /api/v1/cases payload size.",
+        "gauge",
+    ))
+    lines.append(_line("asoe_cases_returned_samples", samples))
+
+    lines.extend(_help_type(
+        "asoe_cases_returned_avg",
+        "Rolling-window mean of /api/v1/cases response size.",
+        "gauge",
+    ))
+    lines.append(_line("asoe_cases_returned_avg", avg))
+
+    lines.extend(_help_type(
+        "asoe_cases_returned_p95",
+        "Rolling-window p95 of /api/v1/cases response size.",
+        "gauge",
+    ))
+    lines.append(_line("asoe_cases_returned_p95", p95))
+
+    lines.extend(_help_type(
+        "asoe_cases_returned_p99",
+        "Rolling-window p99 of /api/v1/cases response size. Alert fires at >= 150 (re-open cursor pagination per Phase 28.5.x §D7).",
+        "gauge",
+    ))
+    lines.append(_line("asoe_cases_returned_p99", p99))
+
+    return "\n".join(lines) + "\n"
+
+
 def render_all() -> str:
     """Convenience entrypoint for the route handler."""
-    return render_shadow_llm_metrics(shadow_llm_metrics)
+    return (
+        render_shadow_llm_metrics(shadow_llm_metrics)
+        + render_cases_returned_metrics()
+    )

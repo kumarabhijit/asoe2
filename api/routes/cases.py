@@ -32,12 +32,14 @@ from api.deps import (
     get_tenant_id,
     require_role,
 )
+from api import case_intents_cache
 from api.case_events import (
     is_terminal_status,
     publish_case_close,
     publish_case_update,
 )
 from api.errors import ASOEError
+from api.metrics import record_cases_returned
 from api.schemas import CaseListResponse, CaseRecordsResponse
 from api.store import case_store, exception_store
 
@@ -110,23 +112,138 @@ async def list_cases(
         description="Filter by case source (manual_order | automated_order)",
     ),
     status: Optional[str] = Query(
-        None, description="Filter by case status (CaseStatus literal)",
+        None,
+        description=(
+            "Filter by case status. Multi-value via comma-separated list "
+            "(e.g. status=OPEN_AWAITING_HUMAN,OPEN_AWAITING_BUYER). "
+            "Any-match: a case in any of the listed statuses passes."
+        ),
+    ),
+    intents: Optional[str] = Query(
+        None,
+        description=(
+            "Filter by child-record intent (Phase 28.5.x §D2). Multi-value "
+            "via comma-separated list (e.g. intents=DUPLICATE_PO,CONTRACTUAL_CORRECTION). "
+            "Any-match: a case with at least one child carrying one of "
+            "the listed intents passes."
+        ),
+    ),
+    since: Optional[str] = Query(
+        None,
+        description=(
+            "Filter by recency: presets `today` / `24h` / `7d` / `30d`. "
+            "Cases opened within the window pass. Anything else falls "
+            "through unfiltered."
+        ),
+    ),
+    q: Optional[str] = Query(
+        None,
+        description=(
+            "Free-text fuzzy match over case_id / customer_po_number / "
+            "sales_order_id / customer_id. Case-insensitive substring. "
+            "Operators (po:, so:, customer:) are parsed client-side; the "
+            "backend sees the free-text term only."
+        ),
     ),
     limit: int = Query(200, ge=1, le=500),
 ) -> CaseListResponse:
     cases = case_store.list_by_tenant(tenant_id)
+
     if source:
         cases = [c for c in cases if c.source == source]
+
+    # Multi-value status: any-match. The empty list (after parse) is
+    # treated as "no filter" so a trailing comma in the URL doesn't
+    # silently zero the list.
     if status:
-        cases = [c for c in cases if c.status == status]
+        status_set = {s.strip() for s in status.split(",") if s.strip()}
+        if status_set:
+            cases = [c for c in cases if c.status in status_set]
+
+    # Multi-value intent filter — consults the per-case intents cache
+    # (api/case_intents_cache.py). Empty after parse → no filter.
+    if intents:
+        intent_set = frozenset(
+            i.strip() for i in intents.split(",") if i.strip()
+        )
+        if intent_set:
+            cases = [
+                c for c in cases
+                if case_intents_cache.matches_any(
+                    tenant_id, c.case_id, intent_set,
+                )
+            ]
+
+    if since:
+        cutoff = _since_cutoff(since)
+        if cutoff is not None:
+            cases = [c for c in cases if c.opened_at >= cutoff]
+
+    if q:
+        needle = q.strip().lower()
+        if needle:
+            cases = [c for c in cases if _matches_q(c, needle)]
 
     cases = _scope_to_user(cases, user)
     cases.sort(key=lambda c: c.opened_at, reverse=True)
     capped = cases[:limit]
+    # Phase 28.5.x §D7 — track payload size for the pagination
+    # re-open trigger. We record the size of the response (capped),
+    # NOT the post-filter total, because the alert is about render
+    # cost on the client, not about tenant case volume.
+    record_cases_returned(len(capped))
     return CaseListResponse(
-        items=[c.model_dump(mode="json") for c in capped],
+        items=[_serialise_case(c, tenant_id) for c in capped],
         total=len(cases),
     )
+
+
+def _since_cutoff(since: str) -> Optional[str]:
+    """Map a preset (`today` / `24h` / `7d` / `30d`) to an ISO 8601
+    cutoff string. Returns None for unrecognised input so the filter
+    falls through unfiltered (Compliance veto on silent truncation).
+    """
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    preset = since.strip().lower()
+    delta_map = {
+        "today": timedelta(days=1),
+        "24h":   timedelta(hours=24),
+        "7d":    timedelta(days=7),
+        "30d":   timedelta(days=30),
+    }
+    delta = delta_map.get(preset)
+    if delta is None:
+        return None
+    return (now - delta).isoformat()
+
+
+def _matches_q(case, needle: str) -> bool:
+    """Free-text substring match across the four searchable fields."""
+    for value in (
+        case.case_id,
+        case.customer_po_number,
+        case.sales_order_id,
+        case.customer_id,
+    ):
+        if value and needle in value.lower():
+            return True
+    return False
+
+
+def _serialise_case(case, tenant_id: str) -> dict:
+    """Project an OrderCase to the wire shape, plus the
+    Phase 28.5.x §D2 derived `child_intents` field. Derived fields
+    are added to the response dict, NOT to the OrderCase model
+    (which is `extra="forbid"`); the UI's typed contract widens to
+    accept them via a separate response interface.
+    """
+    payload = case.model_dump(mode="json")
+    payload["child_intents"] = sorted(
+        case_intents_cache.intents_for(tenant_id, case.case_id),
+    )
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +274,7 @@ async def get_case(
             message=f"Case {case_id} not found.",
             status_code=404,
         )
-    return case.model_dump(mode="json")
+    return _serialise_case(case, tenant_id)
 
 
 # ---------------------------------------------------------------------------

@@ -17,7 +17,7 @@ from constraints.specs import (
     AllowedRecipeName,
     AllowedResolutionAction,
 )
-from contracts.models import LIFECYCLE_STATES
+from contracts.models import CaseSource, CaseStatus, LIFECYCLE_STATES
 from hardening.explain_mode import is_explain_mode_active
 from hardening.kill_switch import is_kill_switch_active
 
@@ -29,6 +29,11 @@ _ALLOWED_RECIPES = list(AllowedRecipeName.__args__)  # type: ignore[attr-defined
 _ALLOWED_RESOLUTION_ACTIONS = list(AllowedResolutionAction.__args__)  # type: ignore[attr-defined]
 _ALLOWED_OVERRIDE_REASON_TAGS = list(AllowedOverrideReasonTag.__args__)  # type: ignore[attr-defined]
 _REASON_TAGS_BY_INTENT = {k: list(v) for k, v in INTENT_REASON_TAGS.items()}
+# Phase 28.5.x §D1 — case-level vocabularies sourced from the same
+# contracts/models.py Literal definitions so a backend rename surfaces
+# in the UI Guardrail #1 lock before it silently empties a chip group.
+_ALLOWED_CASE_STATUSES = list(CaseStatus.__args__)  # type: ignore[attr-defined]
+_ALLOWED_CASE_SOURCES = list(CaseSource.__args__)  # type: ignore[attr-defined]
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -44,6 +49,8 @@ async def health() -> HealthResponse:
         allowed_resolution_actions=_ALLOWED_RESOLUTION_ACTIONS,
         allowed_override_reason_tags=_ALLOWED_OVERRIDE_REASON_TAGS,
         allowed_override_reason_tags_by_intent=_REASON_TAGS_BY_INTENT,
+        allowed_case_statuses=_ALLOWED_CASE_STATUSES,
+        allowed_case_sources=_ALLOWED_CASE_SOURCES,
     )
 
 
