@@ -499,7 +499,7 @@ this S13 amendment.
 
 `event_type="EMAIL_ORDER_ENTRY_REQUEST"` is **transitional**, not
 permanent. The canonical name post-cutover is
-`event_type="MANUAL_ORDER_INTAKE_REQUEST"` — channel-neutral, in
+`event_type="MANUAL_ORDER_INTAKE"` — channel-neutral, in
 line with the rest of the ADR-038 vocabulary work.
 
 Three rules govern the transition:
@@ -507,14 +507,14 @@ Three rules govern the transition:
 1. **Dual acceptance** — `api/case_resolver.py::_MANUAL_EVENT_TYPES`,
    `constraints/fallback_backend.py`, and
    `agents/harness.py::ROUTABLE_EVENT_TYPES` accept **both**
-   `EMAIL_ORDER_ENTRY_REQUEST` and `MANUAL_ORDER_INTAKE_REQUEST`
+   `EMAIL_ORDER_ENTRY_REQUEST` and `MANUAL_ORDER_INTAKE`
    during the transition window. Routing decisions (case-agent
    dispatch, fallback intent classification, sandbox stub
    emission) treat the two as equivalent.
 2. **Producer migration** — every producer (sandbox stub gateway,
    real EDI ingestion, `email-intelligence-agent` integration when
    it lands per Phase F) switches to emitting
-   `MANUAL_ORDER_INTAKE_REQUEST` before the deadline. The
+   `MANUAL_ORDER_INTAKE` before the deadline. The
    canonical name on new code paths is the new one; the old name
    stays as a read-side compatibility shim only.
 3. **Hard cutover deadline — 2026-08-12** (three months from this
@@ -533,7 +533,7 @@ rejected. Three reasons:
 
 * **Audit-trail clarity.** Hash-chained `policy_audit_log` rows
   (ADR-023) carry the event_type verbatim. A permanent dual-name
-  state means audit queries `WHERE event_type = 'MANUAL_ORDER_INTAKE_REQUEST'`
+  state means audit queries `WHERE event_type = 'MANUAL_ORDER_INTAKE'`
   silently miss half the relevant rows. The right answer is to
   cut producers over once; the rows written before the cutover
   are grandfathered (existing rows do not change).
@@ -585,7 +585,7 @@ Two Prometheus metrics track the migration:
 
 * `tests/contract/test_event_type_alias_compatibility.py` (S14)
   — invariant: both `EMAIL_ORDER_ENTRY_REQUEST` and
-  `MANUAL_ORDER_INTAKE_REQUEST` resolve to the same intent /
+  `MANUAL_ORDER_INTAKE` resolve to the same intent /
   recipe / autonomy levels. Locks the dual-acceptance contract
   until the deadline.
 * `tests/contract/test_deprecated_event_type_metric.py` (S14)
