@@ -395,13 +395,21 @@ class TestScoping:
         ids = {item["case_id"] for item in r.json()["items"]}
         assert case.case_id in ids
 
-    def test_partner_detail_404_when_out_of_scope(
+    def test_partner_detail_visible_post_s15a_alignment(
         self, client, partner_token,
     ):
+        # S15a alignment 2026-05-12 — GET /api/v1/cases/{id} now
+        # matches GET /api/v1/exceptions/{id}: tenant-scoped only,
+        # no account/role-based scope filter. The case-list endpoint
+        # still applies `_scope_to_user` so a partner's queue stays
+        # filtered to their own retailer; this lock asserts the
+        # detail endpoint is reachable when the partner has the
+        # case_id (e.g. via a notification deep-link).
         case = _open_case(customer_po_number="PO-NO-WMT")
         _attach_child(order_id="TARGET-999", parent_case_id=case.case_id)
         r = client.get(
             f"/api/v1/cases/{case.case_id}",
             headers=_auth(partner_token),
         )
-        assert r.status_code == 404
+        assert r.status_code == 200, r.text
+        assert r.json()["case_id"] == case.case_id

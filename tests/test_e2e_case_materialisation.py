@@ -112,13 +112,23 @@ class TestShouldMaterialise:
         assert should_materialise(event, "MANUAL_REVIEW_REQUIRED") is True
         assert should_materialise(event, None) is True
 
-    def test_automated_complete_does_not_materialise(self):
-        """T1 stateless path — clean Automated COMPLETE bypasses case."""
+    def test_automated_complete_materialises_post_s15a(self):
+        """S15a amendment 2026-05-12 — every persisted record gets a case.
+
+        Pre-amendment, clean Automated COMPLETE bypassed case
+        materialisation (Tier-1 stateless path, parent_case_id=None).
+        Post-amendment the asoe-ui case-centric pivot retired the
+        /exceptions/[id] surface; without a case there's nowhere for
+        these records to live. Policy widened: clean COMPLETE
+        Automated records now also open a case (essentially
+        "already resolved" — operators don't need to act, but the
+        audit surface and bookmarkable /cases/{id} URL are present).
+        """
         event = OrderEvent(
             order_id="SO-1", po_price=100.0, sap_base_price=100.0,
             event_type="EDI_850_DUPLICATE_PO",
         )
-        assert should_materialise(event, "COMPLETE") is False
+        assert should_materialise(event, "COMPLETE") is True
 
     def test_automated_non_clean_terminals_materialise(self):
         event = OrderEvent(
@@ -133,14 +143,19 @@ class TestShouldMaterialise:
                 f"Automated {status} must materialise a case"
             )
 
-    def test_automated_unknown_status_does_not_materialise(self):
-        # Defensive: unknown / None status on Automated → no case.
+    def test_automated_unknown_status_materialises_post_s15a(self):
+        """S15a amendment — every persisted record gets a case.
+
+        Pre-amendment, unknown / None status on Automated bypassed
+        case open. Post-amendment everything materialises (see the
+        section comment in ``api/case_resolver.py``).
+        """
         event = OrderEvent(
             order_id="SO-1", po_price=100.0, sap_base_price=100.0,
             event_type="EDI_850_DUPLICATE_PO",
         )
-        assert should_materialise(event, None) is False
-        assert should_materialise(event, "EXOTIC_STATE") is False
+        assert should_materialise(event, None) is True
+        assert should_materialise(event, "EXOTIC_STATE") is True
 
 
 # ---------------------------------------------------------------------------
@@ -149,15 +164,19 @@ class TestShouldMaterialise:
 
 
 class TestMaterialiseForEvent:
-    def test_clean_automated_returns_none(self):
+    def test_clean_automated_opens_case_post_s15a(self):
+        # S15a amendment 2026-05-12 — every persisted record gets a
+        # case, including clean-COMPLETE Automated Orders. Pre-
+        # amendment this returned None and persisted nothing.
         event = OrderEvent(
             order_id="SO-1", po_price=100.0, sap_base_price=100.0,
             event_type="EDI_850_DUPLICATE_PO",
+            retailer_id="R-100",
         )
         case = materialise_for_event("t1", event, "COMPLETE")
-        assert case is None
-        # No case persisted.
-        assert len(case_store.list_by_tenant("t1")) == 0
+        assert case is not None
+        assert case.source == "automated_order"
+        assert len(case_store.list_by_tenant("t1")) == 1
 
     def test_non_clean_automated_opens_case(self):
         event = OrderEvent(

@@ -291,16 +291,19 @@ def _serialise_case(case, tenant_id: str) -> dict:
 async def get_case(
     case_id: str,
     tenant_id: str = Depends(get_tenant_id),
-    user: AuthenticatedUser = Depends(get_current_user),
+    user: AuthenticatedUser = Depends(get_current_user),  # noqa: ARG001
 ) -> dict:
+    # Visibility is tenant-scoped, matching GET /api/v1/exceptions/{id}
+    # (S15a alignment 2026-05-12). The case-list endpoint still
+    # applies `_scope_to_user` as a UX filter — analysts see only
+    # cases tied to their assigned accounts in the queue — but the
+    # per-record detail view inherits visibility from the child
+    # exception: if a user can open the exception (any role in the
+    # tenant), they can open the parent case. Pre-amendment the two
+    # endpoints disagreed, which broke deep-links into cases the
+    # analyst could already see records for.
     case = case_store.get(case_id)
     if case is None or case.tenant_id != tenant_id:
-        raise ASOEError(
-            code="NOT_FOUND",
-            message=f"Case {case_id} not found.",
-            status_code=404,
-        )
-    if not _scope_to_user([case], user):
         raise ASOEError(
             code="NOT_FOUND",
             message=f"Case {case_id} not found.",
@@ -343,16 +346,13 @@ async def list_case_records(
             message=f"Case {case_id} not found.",
             status_code=404,
         )
-    # Scope-check the parent first — same NOT_FOUND response as
-    # /cases/{id} when out of scope, so we don't leak existence to
-    # cross-account callers.
-    if not _scope_to_user([case], user):
-        raise ASOEError(
-            code="NOT_FOUND",
-            message=f"Case {case_id} not found.",
-            status_code=404,
-        )
-
+    # Visibility inherits from the parent case detail
+    # (S15a alignment 2026-05-12). Tenant scope is sufficient — if
+    # the caller can hit /cases/{id} they can enumerate the
+    # attached records. The case-list endpoint is still
+    # `_scope_to_user`-filtered so the queue narrows to a
+    # partner / analyst's assigned scope.
+    _ = user  # kept on the dependency for future per-role hardening
     records = exception_store.list_by_case(tenant_id, case_id)
     # Stable order — most-recently-updated first so the operator's
     # eye lands on the row that just changed.

@@ -14,10 +14,10 @@ This test pins the round-trip end-to-end:
   3. Assert it matches the record's stamped parent_case_id and
      resolves to a real OrderCase in /api/v1/cases.
 
-The asymmetric case (Automated Order, clean COMPLETE → no case)
-is also covered: parent_case_id must be null, not silently
-absent — the UI relies on the explicit null to detect Tier-1
-records and route them differently.
+Per the S15a amendment 2026-05-12, every persisted record now
+materialises a case — including clean-COMPLETE Automated Orders
+that were previously Tier-1 stateless. The post-amendment
+contract: parent_case_id is always set, and always resolves.
 """
 
 from __future__ import annotations
@@ -96,17 +96,22 @@ def test_parent_case_id_present_when_case_materialises(
         )
 
 
-def test_parent_case_id_null_on_tier1_records(
+def test_clean_complete_records_also_materialise_post_s15a(
     client: TestClient, manager_token: str,
 ) -> None:
-    # An Automated Order that reaches a clean COMPLETE (no case
-    # materialisation by policy) must surface parent_case_id=None
-    # explicitly. The asoe-ui exceptionUrl() helper distinguishes
-    # null from undefined — null means "tier-1, route accordingly".
+    # S15a amendment 2026-05-12: every persisted record now
+    # materialises a case, including clean-COMPLETE Automated
+    # Orders. The post-amendment contract: parent_case_id is always
+    # set, and the asoe-ui exceptionUrl() helper can rely on it
+    # being a real, fetchable case_id.
+    #
+    # Pre-amendment this same payload landed parent_case_id=None
+    # (Tier-1 stateless). See `api/case_resolver.py` section header
+    # for the policy history.
     res = client.post(
         "/api/v1/exceptions/resolve",
         json={
-            "order_id": "PO-TIER1-CLEAN",
+            "order_id": "PO-S15A-CLEAN",
             "po_price": 100.0,
             "sap_base_price": 100.0,
             "event_type": "EDI_850_PRICE_MISMATCH",
@@ -122,10 +127,18 @@ def test_parent_case_id_null_on_tier1_records(
     )
     assert detail.status_code == 200, detail.text
     body = detail.json()
-    # The contract is: field present, value null. Not "missing".
-    assert body.get("parent_case_id", "MISSING") is None, (
-        "Tier-1 records must expose parent_case_id=null explicitly "
-        f"(got {body.get('parent_case_id', 'MISSING')!r})."
+    parent_case_id = body.get("parent_case_id")
+    assert parent_case_id is not None, (
+        "Post-S15a, clean-COMPLETE Automated Orders must still "
+        "materialise a case (see ADR-038 §7.2 amendment)."
+    )
+    case_res = client.get(
+        f"/api/v1/cases/{parent_case_id}",
+        headers=_auth(manager_token),
+    )
+    assert case_res.status_code == 200, (
+        f"parent_case_id {parent_case_id!r} on a clean-COMPLETE "
+        f"record must resolve to a real case."
     )
 
 

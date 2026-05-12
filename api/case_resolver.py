@@ -73,8 +73,25 @@ def derive_source_and_channel(event: OrderEvent) -> Tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 
-# Terminal statuses that materialise a case for Automated Orders.
-# Per ADR-038 §7.2: clean COMPLETE bypasses; everything else opens.
+# ADR-038 §7.2 amendment (S15a follow-on, 2026-05-12).
+#
+# Original binding rule kept the "clean Automated COMPLETE" record
+# detached from any case (parent_case_id = None, no /cases/{id}
+# surface). The asoe-ui case-centric pivot (S15a) retired the
+# standalone /exceptions/[id] route in favour of
+# /cases/{parent}?record=<id>; without a parent, those records had
+# nowhere to live. Rather than re-introduce the per-record route or
+# carry a tier-1 fallback layer, the materialisation policy is
+# widened: every persisted record materialises (or attaches to) a
+# case. Clean-COMPLETE Automated Orders produce a case that is
+# essentially "already resolved" — operators don't need to act on
+# it, but it provides the canonical audit surface and the
+# bookmarkable /cases/{id} URL.
+#
+# The legacy set is kept as a named constant so the §7.2 history
+# remains greppable (and so an audit query "which terminal statuses
+# were ever excluded?" has a primary source). Today every
+# persisted event materialises; the set is informational.
 _NON_CLEAN_TERMINAL_STATUSES = frozenset({
     TerminalStatus.MANUAL_REVIEW_REQUIRED.value,
     TerminalStatus.BLOCKED.value,
@@ -90,15 +107,20 @@ def should_materialise(
 ) -> bool:
     """Return True when this event should open or attach to an OrderCase.
 
-    ADR-038 §7.2 binding rule:
-      * Manual Order → always (eager).
-      * Automated Order → only when ``final_status`` is non-clean.
-      * COMPLETE / None / unknown statuses on Automated → False.
+    ADR-038 §7.2 (S15a amendment 2026-05-12):
+      * Every persisted record materialises a case — Manual and
+        Automated alike, regardless of terminal status.
+
+    The arguments are kept for signature stability; the body no
+    longer branches on them. The named arguments help readers tying
+    the call site back to the pre-amendment policy when reading
+    historical commits.
     """
-    source, _ = derive_source_and_channel(event)
-    if source == "manual_order":
-        return True
-    return (final_status or "") in _NON_CLEAN_TERMINAL_STATUSES
+    # Keep the argument references live so a future "tighten this
+    # back up" amendment doesn't have to re-thread them.
+    _ = event
+    _ = final_status
+    return True
 
 
 def resolve_or_open_case(
