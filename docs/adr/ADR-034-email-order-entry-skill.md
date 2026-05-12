@@ -481,6 +481,171 @@ in the same PR.
 
 ---
 
+## 6.2 Amendment (2026-05-12) — `event_type` rename is **transitional**, with a deadline
+
+The 2026-05-09 vocabulary work (commit `dcff7e4`,
+`refactor(intent): rename EMAIL_ORDER_ENTRY → MANUAL_ORDER_INTAKE
+(§3.2)`) renamed the intent value end-to-end. The corresponding
+event-type literal — `event_type="EMAIL_ORDER_ENTRY_REQUEST"` —
+was deliberately **not** renamed in the same sweep because
+upstream producers (the real EDI / email-intake systems and the
+sandbox `StubGateway` emitters) cannot be cut over in a single
+commit. The 2026-05-11 gap analysis flagged this as the
+most-touched stale name in the codebase (gap report row C3); the
+gap-remediation rollout plan deferred the binding decision to
+this S13 amendment.
+
+### Binding decision
+
+`event_type="EMAIL_ORDER_ENTRY_REQUEST"` is **transitional**, not
+permanent. The canonical name post-cutover is
+`event_type="MANUAL_ORDER_INTAKE"` — channel-neutral, in
+line with the rest of the ADR-038 vocabulary work.
+
+Three rules govern the transition:
+
+1. **Dual acceptance** — `api/case_resolver.py::_MANUAL_EVENT_TYPES`,
+   `constraints/fallback_backend.py`, and
+   `agents/harness.py::ROUTABLE_EVENT_TYPES` accept **both**
+   `EMAIL_ORDER_ENTRY_REQUEST` and `MANUAL_ORDER_INTAKE`
+   during the transition window. Routing decisions (case-agent
+   dispatch, fallback intent classification, sandbox stub
+   emission) treat the two as equivalent.
+2. **Producer migration** — every producer (sandbox stub gateway,
+   real EDI ingestion, `email-intelligence-agent` integration when
+   it lands per Phase F) switches to emitting
+   `MANUAL_ORDER_INTAKE` before the deadline. The
+   canonical name on new code paths is the new one; the old name
+   stays as a read-side compatibility shim only.
+3. **Hard cutover deadline — 2026-08-12** (three months from this
+   amendment). On or after that date, an inbound event carrying
+   `event_type="EMAIL_ORDER_ENTRY_REQUEST"` is rejected by the
+   API with a `400 Bad Request` payload citing this section. The
+   deadline gives downstream integrators a full quarter to update
+   their producers; the §28.6 Grafana dashboard tracks the
+   declining-trend metric described below so the deadline is
+   data-driven rather than guesswork.
+
+### Why transitional (not permanent)
+
+The "permanent legacy alias" alternative was considered and
+rejected. Three reasons:
+
+* **Audit-trail clarity.** Hash-chained `policy_audit_log` rows
+  (ADR-023) carry the event_type verbatim. A permanent dual-name
+  state means audit queries `WHERE event_type = 'MANUAL_ORDER_INTAKE'`
+  silently miss half the relevant rows. The right answer is to
+  cut producers over once; the rows written before the cutover
+  are grandfathered (existing rows do not change).
+* **Codebase signal.** The 2026-05-09 intent rename already
+  touched 200+ call sites. Leaving the event_type literal on the
+  pre-rename name is a permanent grep-confusion tax for every
+  future contributor — they encounter `EMAIL_ORDER_ENTRY_REQUEST`
+  next to `MANUAL_ORDER_INTAKE` and have to remember that one is
+  legacy.
+* **Vocabulary discipline.** ADR-038 §3.2 (channel-neutral issue
+  naming) makes channel-specific event names a deprecated pattern.
+  `EMAIL_ORDER_ENTRY_REQUEST` is channel-specific by construction
+  (says "email"). Keeping it forever directly contradicts a
+  binding decision in a more recent ADR.
+
+### What stays from the pre-amendment state
+
+* The pre-rename rows in `policy_audit_log` continue to carry
+  `event_type="EMAIL_ORDER_ENTRY_REQUEST"`. The hash chain
+  (ADR-023) forbids retroactive mutation, and no migration script
+  is invoked to re-label those rows. Audit queries written
+  against the legacy name keep working.
+* The intent itself (`MANUAL_ORDER_INTAKE`) is unchanged. Only
+  the event_type literal moves; the routing target, the recipe
+  (`EmailOrderEntryRecipe.py` → `ManualOrderIntakeRecipe.py`, see
+  §6.3 below), the analysis adapter, and the UI section are all
+  driven by the intent, which is already canonical.
+* Read-side compatibility shims in `_MANUAL_EVENT_TYPES` and the
+  fallback backend stay in place until the deadline, then are
+  removed in the same PR that flips the hard rejection on.
+
+### Observability — deprecation deadline is data-driven
+
+Two Prometheus metrics track the migration:
+
+* `deprecated_event_type_received_total{event_type="EMAIL_ORDER_ENTRY_REQUEST"}` —
+  counter, incremented on every inbound event still carrying the
+  legacy name. Source: `api/case_resolver.py::resolve_or_open_case`.
+  The trend line goes to zero before the deadline; if it does
+  not, the deadline is extended one quarter and this section
+  amended (a "cutover did not complete" signal is preferable to
+  surprising producers on the deadline day).
+* `event_type_received_total{event_type}` — gauge, snapshot of
+  inbound event_type cardinality. Surfaces both names side by
+  side on the §28.6 dashboard so the migration progress is
+  visible to producer teams without needing to query logs.
+
+### Tests guarding this amendment
+
+* `tests/contract/test_event_type_alias_compatibility.py` (S14)
+  — invariant: both `EMAIL_ORDER_ENTRY_REQUEST` and
+  `MANUAL_ORDER_INTAKE` resolve to the same intent /
+  recipe / autonomy levels. Locks the dual-acceptance contract
+  until the deadline.
+* `tests/contract/test_deprecated_event_type_metric.py` (S14)
+  — the deprecation counter increments on legacy name receipt,
+  is not incremented on the canonical name. Forces the metric
+  to stay on the dashboard.
+* When the deadline passes, the dual-acceptance tests flip
+  polarity (legacy name MUST 400) and the deprecation counter
+  test is retired with a note linking to this section.
+
+### Companion S14 work (rollout plan row)
+
+The same gap-remediation rollout that ratified S13 also gates
+S14 on this amendment:
+
+* `recipes/EmailOrderEntryRecipe.py` →
+  `recipes/ManualOrderIntakeRecipe.py` with a back-compat re-export
+  at the old path for one release cycle (post-deadline, the stub
+  is deleted).
+* `contracts/policy.py::EMAIL_ORDER_ENTRY_AUTONOMY_LEVELS` →
+  `MANUAL_ORDER_INTAKE_AUTONOMY_LEVELS` with a deprecation alias
+  on the old name (`AUTONOMY_LEVELS_ALIAS = NEW_NAME`).
+* `tests/test_e2e_email_order_entry.py` →
+  `tests/test_e2e_manual_order_intake.py` (filename + docstring),
+  pytest collection picks up the new name without further
+  configuration.
+* Producer-side updates land in S14b (sandbox stub gateway emits
+  the new event_type by default; legacy emission moves behind a
+  `ASOE_EMIT_LEGACY_EVENT_TYPES=1` env flag for backward-compat
+  testing).
+
+### §6.2 status
+
+* **Status:** Accepted (2026-05-12). Supersedes the implicit
+  "permanent legacy alias" posture that existed by default after
+  commit `dcff7e4`.
+* **Definition of Done for S14:** all three rename pairs landed,
+  both contract tests green, deprecation counter wired,
+  Grafana dashboard tile present. S14 PR body cites this
+  section.
+
+---
+
+## 6.3 Recipe-file rename (S14 — companion to §6.2)
+
+`recipes/EmailOrderEntryRecipe.py` is renamed to
+`recipes/ManualOrderIntakeRecipe.py` in S14. The recipe's
+`__name__`, registry key, and exported symbols are updated. A
+back-compat re-export at `recipes/EmailOrderEntryRecipe.py` keeps
+the old import path resolving for one release cycle; consumers
+import from the new path going forward. The re-export module is
+two lines plus a deprecation comment.
+
+`recipes/registry.py` carries both keys during the transition:
+`{"EmailOrderEntryRecipe.py": ManualOrderIntakeRecipe, "ManualOrderIntakeRecipe.py": ManualOrderIntakeRecipe}`.
+The dual-key map is removed in the same PR that flips the §6.2
+hard rejection on (post-deadline).
+
+---
+
 ## 7. Notes for the next reviewer
 
 * This ADR explicitly carves **out** the extraction pipeline, MCP integration, and

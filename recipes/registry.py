@@ -9,7 +9,7 @@ from recipes.CreditHoldReleaseRecipe import release_credit_hold
 from recipes.DeliveryDelayResolutionRecipe import resolve_delivery_delay
 from recipes.DuplicatePORecipe import detect_duplicate_po
 from recipes.EdiMismatchRecipe import detect_edi_mismatch
-from recipes.EmailOrderEntryRecipe import classify_email_order_entry
+from recipes.ManualOrderIntakeRecipe import classify_manual_order_intake
 from recipes.MOQRoundUpRecipe import round_up_moq
 from recipes.OverMaxTrimRecipe import trim_over_max
 from recipes.PalletAlignmentRecipe import align_pallets
@@ -293,9 +293,14 @@ REGISTRY = {
         allowed_intents=("PALLET_CONFIG",),
         expected_metadata_keys=("pallet_lines",),
     ),
-    "EmailOrderEntryRecipe.py": RecipeSpec(
-        name="EmailOrderEntryRecipe.py",
-        func=classify_email_order_entry,
+    # ADR-034 §6.3 — canonical recipe name. The legacy
+    # "EmailOrderEntryRecipe.py" key is aliased to this RecipeSpec
+    # immediately after the REGISTRY dict closes, for the transitional
+    # window defined in §6.2 (deadline 2026-08-12). Removed in the
+    # same PR that flips the §6.2 hard rejection on.
+    "ManualOrderIntakeRecipe.py": RecipeSpec(
+        name="ManualOrderIntakeRecipe.py",
+        func=classify_manual_order_intake,
         required_params=(
             "order_id", "customer_id", "composite_confidence",
             "validation_failures", "non_disableable_floor",
@@ -398,6 +403,21 @@ REGISTRY = {
         ),
     ),
 }
+
+# ADR-034 §6.3 — legacy recipe-name alias. Audit-log rows written
+# pre-cutover carry `selected_recipe="EmailOrderEntryRecipe.py"`;
+# loaders that re-resolve those rows must still find the recipe.
+# The aliased entry keeps the legacy `name` string verbatim so
+# round-trip identity is preserved (a re-fetched row is byte-equal
+# to the stored row). Same `func` reference — not a copy.
+#
+# Removal: on or after the §6.2 deadline (2026-08-12), in the same
+# PR that flips the hard rejection on the legacy event_type.
+import dataclasses as _dataclasses
+REGISTRY["EmailOrderEntryRecipe.py"] = _dataclasses.replace(
+    REGISTRY["ManualOrderIntakeRecipe.py"],
+    name="EmailOrderEntryRecipe.py",
+)
 
 
 def get_recipe(name: str) -> RecipeSpec:

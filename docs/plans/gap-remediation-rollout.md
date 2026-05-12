@@ -40,8 +40,8 @@ All work stacks on `claude/analyze-asoe-gaps-0LzG5` in each repo (no per-session
 | S10 | P2.3 — mock WS emits `case_*` events | asoe-ui | Mock state mutations fire `case_open`/`case_update`/`case_close` (Tier 1: event log; Tier 2 deferred) | IN_PROGRESS | `4fb4f09` (asoe-ui PR #148) |
 | S11 | P2.4 — dual-mode CI + Prometheus counter | asoe-ui | `vitest.yml` workflow (mock = PR-blocking; stub = informational tier) + JUnit→Prometheus exporter emitting `tests_scenario_failed_total{scenario_id, slo_category, mode}`. Stub-mode formal gating deferred until `slo_category: stub_safe` opt-in. | IN_PROGRESS | `9178412` (asoe-ui PR #152) |
 | S12 | P1.6 — fill scenarios to 12 intents | asoe-ui | Remaining 9 scenarios with curated reason tags | IN_PROGRESS | `7cd23b5` (asoe-ui PR #148) |
-| S13 | ADR-034 §6.2 amendment | asoe2 | Decide `EMAIL_ORDER_ENTRY_REQUEST` permanence; ratify rename scope | PENDING | — |
-| S14 | P3 — vocabulary rename cleanup | asoe2 | `EmailOrderEntryRecipe.py` rename, constant rename, docstring | BLOCKED:S13 | — |
+| S13 | ADR-034 §6.2 amendment | asoe2 | Decided: rename is **transitional** with deadline **2026-08-12**. Dual acceptance via `_MANUAL_EVENT_TYPES`, `ROUTABLE_EVENT_TYPES`, registry alias. Deprecation counter tracks the cutover. | IN_PROGRESS | `501cf6c` + `0fe7d3f` |
+| S14 | P3 — vocabulary rename cleanup | asoe2 | `EmailOrderEntryRecipe.py` → `ManualOrderIntakeRecipe.py` with re-export, `EMAIL_ORDER_ENTRY_AUTONOMY_LEVELS` aliased, test file renamed, 27 new contract tests, deprecation counter wired to §28.6. | IN_PROGRESS | `b9c421f` |
 
 **Status values:** `PENDING`, `IN_PROGRESS`, `BLOCKED:<reason>`, `MERGED`, `SKIPPED:<reason>`.
 

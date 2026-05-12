@@ -534,7 +534,13 @@ def _persist_tool_trace(
 # Event types the harness is wired to handle. Restricted to
 # Manual-Order events for the X.1 / H.5 cutover; Automated-Order
 # events stay on the deterministic graph until later phases.
-ROUTABLE_EVENT_TYPES = frozenset({"EMAIL_ORDER_ENTRY_REQUEST"})
+ROUTABLE_EVENT_TYPES = frozenset({
+    # ADR-034 §6.2 — canonical post-cutover name (intent = event_type
+    # per ADR-038 §10.4 channel-neutral convention).
+    "MANUAL_ORDER_INTAKE",
+    # ADR-034 §6.2 — legacy event_type alias accepted until 2026-08-12.
+    "EMAIL_ORDER_ENTRY_REQUEST",
+})
 
 
 def should_route_to_case_agent(

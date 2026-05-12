@@ -228,7 +228,7 @@ padding). Spec §4 explicitly ties AUTO_CORRECT to confidence ≥ 0.99."""
 # Per ADR-034 §3.5, L4 actions are *demoted to L3 in policy* until the
 # calibration loop (ADR-032) ships graduation signals — so the mapping
 # below contains no L4 entries even though the spec defines an L4 tier.
-EMAIL_ORDER_ENTRY_AUTONOMY_LEVELS: dict[str, str] = {
+MANUAL_ORDER_INTAKE_AUTONOMY_LEVELS: dict[str, str] = {
     "ONE_CLICK_APPROVE":     "L3",
     "STANDARD_REVIEW":       "L2",
     "LOW_CONFIDENCE_FLAG":   "L1",
@@ -240,6 +240,12 @@ EMAIL_ORDER_ENTRY_AUTONOMY_LEVELS: dict[str, str] = {
 """Maps MANUAL_ORDER_INTAKE recommended_action → autonomy level. AUTO_CORRECT
 is intentionally *not* L4 — pending ADR-032 calibration graduation, all
 auto-actions remain at most L3 (act & inform)."""
+
+# Legacy name retained as an alias for the back-compat window
+# defined in ADR-034 §6.2 (transitional until 2026-08-12). New
+# code imports MANUAL_ORDER_INTAKE_AUTONOMY_LEVELS; this binding
+# is removed in the same PR that flips the §6.2 hard rejection on.
+EMAIL_ORDER_ENTRY_AUTONOMY_LEVELS = MANUAL_ORDER_INTAKE_AUTONOMY_LEVELS
 
 # ---------------------------------------------------------------------------
 # LLM provider routing & cost guardrails

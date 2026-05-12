@@ -329,5 +329,13 @@ class TestRoutingPredicate:
 
     def test_routable_set_documents_intent(self):
         # The set is small on purpose — Manual-Order events only
-        # for the Phase H.5 cutover.
-        assert ROUTABLE_EVENT_TYPES == frozenset({"EMAIL_ORDER_ENTRY_REQUEST"})
+        # for the Phase H.5 cutover. ADR-034 §6.2 (2026-05-12)
+        # adds the canonical MANUAL_ORDER_INTAKE alongside the
+        # legacy EMAIL_ORDER_ENTRY_REQUEST during the transition
+        # window (deadline 2026-08-12). After the deadline the
+        # legacy entry is removed in the same PR that flips the
+        # API-level hard rejection on.
+        assert ROUTABLE_EVENT_TYPES == frozenset({
+            "MANUAL_ORDER_INTAKE",
+            "EMAIL_ORDER_ENTRY_REQUEST",
+        })
