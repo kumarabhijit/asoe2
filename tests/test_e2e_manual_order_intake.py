@@ -1,4 +1,4 @@
-"""End-to-end tests for the MANUAL_ORDER_INTAKE use case (ADR-034 Phase B).
+"""End-to-end tests for the MANUAL_ORDER_INTAKE use case (ADR-034 Phases A-B, §6.2-6.3 rename 2026-05-12).
 
 Exercises the full graph: ingest → classify (deterministic fallback)
 → load_skill (email-order-entry) → select_recipe → resolve_dependencies

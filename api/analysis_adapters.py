@@ -74,7 +74,7 @@ from contracts.policy import (
     EDI_MISMATCH_AUTONOMY_LEVELS,
     EMAIL_ORDER_AUTO_APPROVE_CONFIDENCE,
     EMAIL_ORDER_AUTO_CORRECT_CONFIDENCE,
-    EMAIL_ORDER_ENTRY_AUTONOMY_LEVELS,
+    MANUAL_ORDER_INTAKE_AUTONOMY_LEVELS,
     EMAIL_ORDER_REVIEW_BAND_LOW,
     MOQ_SEVERE_SHORTFALL_PCT,
     MOQ_UPLIFT_REVIEW_PCT,
@@ -1381,7 +1381,7 @@ def adapt_email_order_entry(
             composite_confidence=float(metadata.get("composite_confidence") or 0.0),
             validation_failures=[str(f) for f in failures],
             non_disableable_floor=synthetic_floor,
-            autonomy_levels=EMAIL_ORDER_ENTRY_AUTONOMY_LEVELS,
+            autonomy_levels=MANUAL_ORDER_INTAKE_AUTONOMY_LEVELS,
             threshold_auto_approve=EMAIL_ORDER_AUTO_APPROVE_CONFIDENCE,
             threshold_review_band_low=EMAIL_ORDER_REVIEW_BAND_LOW,
             threshold_auto_correct=EMAIL_ORDER_AUTO_CORRECT_CONFIDENCE,
@@ -1466,6 +1466,13 @@ ANALYSIS_ADAPTERS: Dict[
     "DuplicatePORecipe.py": ("duplicate_detection", adapt_duplicate),
     "BackOrderResolutionRecipe.py": ("backorder_analysis", adapt_back_order),
     "PriceAdjustmentRecipe.py": ("price_analysis", adapt_price),
+    # ADR-034 §6.3 — canonical recipe name post-cutover.
+    "ManualOrderIntakeRecipe.py": (
+        "email_order_entry_analysis", adapt_email_order_entry,
+    ),
+    # ADR-034 §6.3 — legacy alias retained until 2026-08-12. Audit-log
+    # rows pre-cutover carry `selected_recipe="EmailOrderEntryRecipe.py"`;
+    # the adapter resolves both names to the same projection.
     "EmailOrderEntryRecipe.py": (
         "email_order_entry_analysis", adapt_email_order_entry,
     ),
@@ -1489,6 +1496,10 @@ SECONDARY_ANALYSIS_ADAPTERS: Dict[
     # primary's attestation target (the operator authorising an email-
     # channel order needs both the agent's recommendation AND the
     # source-of-truth for the order they're acting on).
+    "ManualOrderIntakeRecipe.py": (
+        ("email_source", adapt_email_source),
+    ),
+    # ADR-034 §6.3 — legacy alias retained until 2026-08-12.
     "EmailOrderEntryRecipe.py": (
         ("email_source", adapt_email_source),
     ),
@@ -1510,7 +1521,8 @@ INTENT_TO_RECIPE_NAME: Dict[str, str] = {
     "DUPLICATE_PO": "DuplicatePORecipe.py",
     "BACK_ORDER": "BackOrderResolutionRecipe.py",
     "CONTRACTUAL_CORRECTION": "PriceAdjustmentRecipe.py",
-    "MANUAL_ORDER_INTAKE": "EmailOrderEntryRecipe.py",
+    # ADR-034 §6.3 — canonical recipe-name fallback post-cutover.
+    "MANUAL_ORDER_INTAKE": "ManualOrderIntakeRecipe.py",
 }
 
 

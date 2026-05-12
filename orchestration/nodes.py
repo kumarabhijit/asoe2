@@ -58,7 +58,7 @@ from contracts.policy import (
     EDI_MISMATCH_AUTONOMY_LEVELS,
     EMAIL_ORDER_AUTO_APPROVE_CONFIDENCE,
     EMAIL_ORDER_AUTO_CORRECT_CONFIDENCE,
-    EMAIL_ORDER_ENTRY_AUTONOMY_LEVELS,
+    MANUAL_ORDER_INTAKE_AUTONOMY_LEVELS,
     EMAIL_ORDER_REVIEW_BAND_LOW,
     MAX_DISCOUNT_ALLOWED,
     MOQ_SEVERE_SHORTFALL_PCT,
@@ -847,7 +847,11 @@ def validate_types(state: GraphState) -> GraphState:
                 "broken_layer_fill_pct": PALLET_CONFIG_BROKEN_LAYER_FILL_PCT,
             },
         )
-    elif state.selected_recipe == "EmailOrderEntryRecipe.py":
+    elif state.selected_recipe in (
+        "ManualOrderIntakeRecipe.py",
+        # ADR-034 §6.3 — legacy recipe name retained until 2026-08-12.
+        "EmailOrderEntryRecipe.py",
+    ):
         # ADR-034 Phase B — the email_intake gateway resolves the four
         # non-disable-able floor checks (sender_auth, resolve_customer,
         # duplicate_po_pre_check, credit_check) into enrichment_context
@@ -883,7 +887,7 @@ def validate_types(state: GraphState) -> GraphState:
                 "composite_confidence": float(meta.get("composite_confidence") or 0.0),
                 "validation_failures": failures,
                 "non_disableable_floor": gateway_floor,
-                "autonomy_levels": EMAIL_ORDER_ENTRY_AUTONOMY_LEVELS,
+                "autonomy_levels": MANUAL_ORDER_INTAKE_AUTONOMY_LEVELS,
                 "threshold_auto_approve": EMAIL_ORDER_AUTO_APPROVE_CONFIDENCE,
                 "threshold_review_band_low": EMAIL_ORDER_REVIEW_BAND_LOW,
                 "threshold_auto_correct": EMAIL_ORDER_AUTO_CORRECT_CONFIDENCE,

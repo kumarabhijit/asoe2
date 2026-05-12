@@ -35,10 +35,15 @@ from contracts.models import OrderCase, OrderEvent, TerminalStatus
 # ``edi_x12_850`` which mirrors the V1 traffic shape.
 
 _MANUAL_EVENT_TYPES = frozenset({
-    "EMAIL_ORDER_ENTRY_REQUEST",
+    # ADR-034 §6.2 — canonical post-cutover event_type (intent =
+    # event_type per ADR-038 §10.4 channel-neutral convention).
     "MANUAL_ORDER_INTAKE",
+    # ADR-034 §6.2 — legacy aliases accepted until 2026-08-12.
+    # The duplicate "MANUAL_ORDER_INTAKE" that lived here pre-S14
+    # was a stale forward-compat entry from the §10.4 work; the
+    # canonical entry above subsumes it.
+    "EMAIL_ORDER_ENTRY_REQUEST",
     "EMAIL_ORDER",
-    "MANUAL_ORDER_INTAKE",  # forward-compat alias from ADR-038 §10.4
 })
 
 
@@ -107,6 +112,12 @@ def resolve_or_open_case(
     Caller is responsible for checking ``should_materialise`` first;
     this helper assumes the policy decision has already been made.
     """
+    # ADR-034 §6.2 — observe inbound event_type. The deprecation
+    # counter trends toward zero across the transitional window;
+    # the §28.6 dashboard surfaces both canonical and legacy.
+    from api.metrics import record_event_type_received
+    record_event_type_received(event.event_type)
+
     source, channel = derive_source_and_channel(event)
 
     meta = event.metadata or {}

@@ -100,7 +100,8 @@ class DeterministicFallbackBackend:
             Intent.MIN_ORDER_QTY: "MOQRoundUpRecipe.py",
             Intent.PALLET_CONFIG: "PalletAlignmentRecipe.py",
             Intent.DELIVERY_DELAY: "DeliveryDelayResolutionRecipe.py",
-            Intent.MANUAL_ORDER_INTAKE: "EmailOrderEntryRecipe.py",
+            # ADR-034 §6.3 — canonical recipe name post-cutover.
+            Intent.MANUAL_ORDER_INTAKE: "ManualOrderIntakeRecipe.py",
             Intent.MASS_PRICING_ERROR: None,
         }
         recipe_name = mapping.get(state.intent)

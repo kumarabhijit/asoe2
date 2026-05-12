@@ -334,9 +334,116 @@ def render_cases_returned_metrics() -> str:
     return "\n".join(lines) + "\n"
 
 
+# ---------------------------------------------------------------------------
+# Deprecated event_type observer (ADR-034 §6.2 — transitional cutover SLI)
+# ---------------------------------------------------------------------------
+#
+# Two metric families track the legacy `event_type` rename:
+#
+#   deprecated_event_type_received_total{event_type, deprecated_for}
+#     Counter, incremented on every inbound event whose event_type is
+#     in the §6.2 legacy alias set. `deprecated_for` carries the
+#     ADR-pointer label so the dashboard can group by deadline cohort
+#     when multiple aliases live in parallel.
+#
+#   event_type_received_total{event_type}
+#     Counter, incremented on every inbound event regardless of name.
+#     Surfaces canonical vs legacy side-by-side on the §28.6 dashboard
+#     so producer teams see the trend without log queries.
+#
+# Both counters are per-process-lifetime; restart resets them. The
+# Grafana scrape interval (15s) plus rate() aggregation handles
+# discontinuities — same model the asoe-ui CI Prometheus exporter
+# (`tests_scenario_failed_total`) uses.
+
+from collections import defaultdict as _defaultdict
+from threading import Lock as _EventTypeLock
+
+# `_DEPRECATED_EVENT_TYPES` is the §6.2 alias set with the binding
+# ADR pointer label. Adding a new alias to the codebase MUST add
+# it here too, paired with the ADR § that authorised it.
+_DEPRECATED_EVENT_TYPES: dict[str, str] = {
+    "EMAIL_ORDER_ENTRY_REQUEST": "adr-034-§6.2",
+    "EMAIL_ORDER":               "adr-034-§6.2",
+}
+
+_event_type_lock = _EventTypeLock()
+_event_type_counts: dict[str, int] = _defaultdict(int)
+_deprecated_event_type_counts: dict[str, int] = _defaultdict(int)
+
+
+def record_event_type_received(event_type: str) -> None:
+    """Record one inbound event's `event_type`. Increments the
+    canonical counter, and the deprecation counter when the name
+    is in the §6.2 alias set. Called from
+    `api/case_resolver.py::resolve_or_open_case` (the inbound-event
+    chokepoint for the case-routing path)."""
+    with _event_type_lock:
+        _event_type_counts[event_type] += 1
+        if event_type in _DEPRECATED_EVENT_TYPES:
+            _deprecated_event_type_counts[event_type] += 1
+
+
+def reset_event_type_counters() -> None:
+    """Test-only — clears both counter dicts. Production callers
+    must not invoke this; Prometheus scraping is monotonic."""
+    with _event_type_lock:
+        _event_type_counts.clear()
+        _deprecated_event_type_counts.clear()
+
+
+def event_type_snapshot() -> tuple[dict[str, int], dict[str, int]]:
+    """Return `(event_type_counts, deprecated_event_type_counts)`
+    as copies under the lock. Used by the renderer and by the
+    contract tests."""
+    with _event_type_lock:
+        return dict(_event_type_counts), dict(_deprecated_event_type_counts)
+
+
+def render_event_type_metrics() -> str:
+    """Render `event_type_received_total` and
+    `deprecated_event_type_received_total` in Prometheus text
+    format. Returns the empty string when no events have been
+    observed (avoids zero-cardinality lines on a fresh process)."""
+    canonical, deprecated = event_type_snapshot()
+    if not canonical and not deprecated:
+        return ""
+    out: list[str] = []
+    out.extend(_help_type(
+        "event_type_received_total",
+        "Total inbound events grouped by event_type.",
+        "counter",
+    ))
+    for et, count in sorted(canonical.items()):
+        out.append(_line(
+            "event_type_received_total", count, labels={"event_type": et},
+        ))
+    out.append("")
+
+    if deprecated:
+        out.extend(_help_type(
+            "deprecated_event_type_received_total",
+            "Inbound events carrying a deprecated event_type "
+            "alias. Tracks the ADR-034 §6.2 transitional cutover; "
+            "trend goes to zero before the 2026-08-12 deadline.",
+            "counter",
+        ))
+        for et, count in sorted(deprecated.items()):
+            out.append(_line(
+                "deprecated_event_type_received_total", count,
+                labels={
+                    "event_type": et,
+                    "deprecated_for": _DEPRECATED_EVENT_TYPES[et],
+                },
+            ))
+        out.append("")
+    return "\n".join(out)
+
+
 def render_all() -> str:
     """Convenience entrypoint for the route handler."""
     return (
         render_shadow_llm_metrics(shadow_llm_metrics)
         + render_cases_returned_metrics()
+        + render_event_type_metrics()
     )
