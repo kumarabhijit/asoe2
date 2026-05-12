@@ -38,7 +38,7 @@ All work stacks on `claude/analyze-asoe-gaps-0LzG5` in each repo (no per-session
 | S8 | P2.1 — mock `disposition` validates `reason_tag` (split write/read) | asoe-ui | Two-rule mock validator + parity test | IN_PROGRESS | `fe26506` (asoe-ui PR #148) |
 | S9 | P2.2 — mock lifecycle/SoD/role gating | asoe-ui | Mock enforces terminal-state, initiator SoD, role gates | IN_PROGRESS | `52d10c8` (asoe-ui PR #148) |
 | S10 | P2.3 — mock WS emits `case_*` events | asoe-ui | Mock state mutations fire `case_open`/`case_update`/`case_close` (Tier 1: event log; Tier 2 deferred) | IN_PROGRESS | `4fb4f09` (asoe-ui PR #148) |
-| S11 | P2.4 — dual-mode CI + Prometheus counter | both | Vitest mode switch + `tests_scenario_failed_total` exporter | PENDING | — |
+| S11 | P2.4 — dual-mode CI + Prometheus counter | asoe-ui | `vitest.yml` workflow (mock = PR-blocking; stub = informational tier) + JUnit→Prometheus exporter emitting `tests_scenario_failed_total{scenario_id, slo_category, mode}`. Stub-mode formal gating deferred until `slo_category: stub_safe` opt-in. | IN_PROGRESS | `9178412` (asoe-ui PR #152) |
 | S12 | P1.6 — fill scenarios to 12 intents | asoe-ui | Remaining 9 scenarios with curated reason tags | IN_PROGRESS | `7cd23b5` (asoe-ui PR #148) |
 | S13 | ADR-034 §6.2 amendment | asoe2 | Decide `EMAIL_ORDER_ENTRY_REQUEST` permanence; ratify rename scope | PENDING | — |
 | S14 | P3 — vocabulary rename cleanup | asoe2 | `EmailOrderEntryRecipe.py` rename, constant rename, docstring | BLOCKED:S13 | — |
