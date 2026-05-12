@@ -20,19 +20,50 @@ Endpoints:
     Playwright fixtures to isolate specs. In the DB-backed configuration
     this is a no-op (tests use SQLite :memory: per adapter spin-up, not
     this endpoint).
+
+  POST /api/v1/_sandbox/seed/manual-order-intake
+    Stand-in for the future email-intelligence-agent / EDI ingestion
+    producer. Emits a fully-formed MANUAL_ORDER_INTAKE event through
+    the normal /exceptions/resolve flow so sandbox fixtures (and the
+    §28.6 dashboard's event_type_received_total gauge) observe the
+    canonical post-rename event_type. The ASOE_EMIT_LEGACY_EVENT_TYPES=1
+    env flag flips emission to the transitional
+    EMAIL_ORDER_ENTRY_REQUEST name so the dual-acceptance contract
+    (ADR-034 §6.2) can be exercised end-to-end without re-hardcoding
+    the legacy literal in fixture code. Removed at the §6.2 deadline.
 """
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, ConfigDict
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, ConfigDict, Field
 
 from api.deps import AuthenticatedUser, get_current_user, get_tenant_id, require_role
 from api.store import exception_store
 
 router = APIRouter()
+
+
+# ADR-034 §6.2 — the canonical, post-rename event_type the producer emits
+# by default. The legacy alias is kept for one release cycle behind the
+# ASOE_EMIT_LEGACY_EVENT_TYPES flag so backward-compat suites can drive
+# the dual-acceptance path without re-hardcoding the deprecated literal.
+_CANONICAL_MANUAL_EVENT_TYPE = "MANUAL_ORDER_INTAKE"
+_LEGACY_MANUAL_EVENT_TYPE = "EMAIL_ORDER_ENTRY_REQUEST"
+
+
+def _emit_legacy_event_types() -> bool:
+    """Producer-side legacy-name toggle (ADR-034 §6.2).
+
+    Default off — the canonical name ships unless a backward-compat
+    test opts in. The flag is read at call time so a test can flip it
+    via monkeypatch without re-importing the module.
+    """
+    return os.getenv("ASOE_EMIT_LEGACY_EVENT_TYPES", "").strip().lower() in (
+        "1", "true", "yes",
+    )
 
 
 def _require_sandbox() -> None:
@@ -126,3 +157,135 @@ async def reset_tenant(
         ]
         removed += before - len(exception_store._audit_log)  # type: ignore[attr-defined]
     return {"tenant_id": target, "removed": removed, "ok": True}
+
+
+class SeedManualOrderIntakeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # Defaults are tuned to land a clean GREEN MANUAL_ORDER_INTAKE
+    # event: high composite_confidence + all four non-disableable
+    # floor checks True. Tests that want a specific lifecycle outcome
+    # (REVIEW / FATAL_REJECT) override individual fields.
+    order_id: Optional[str] = None
+    composite_confidence: float = 0.97
+    non_disableable_floor: Optional[dict] = None
+    validation_failures: Optional[list[str]] = None
+    reject_reason_code: Optional[str] = None
+    metadata_extra: Optional[dict] = Field(
+        default=None,
+        description=(
+            "Free-form metadata blob merged into the emitted event's "
+            "metadata dict. The producer never overrides "
+            "composite_confidence / non_disableable_floor with these "
+            "keys — those have dedicated fields above."
+        ),
+    )
+
+
+def _build_manual_intake_event_payload(
+    req: SeedManualOrderIntakeRequest,
+) -> dict[str, Any]:
+    """Construct the inbound /exceptions/resolve payload.
+
+    The event_type is selected at call time so the
+    `ASOE_EMIT_LEGACY_EVENT_TYPES` toggle is exercised live (the test
+    flips the env var between two calls and asserts the
+    `event_type_received_total` cardinality moves accordingly).
+    """
+    event_type = (
+        _LEGACY_MANUAL_EVENT_TYPE
+        if _emit_legacy_event_types()
+        else _CANONICAL_MANUAL_EVENT_TYPE
+    )
+    floor = req.non_disableable_floor or {
+        "sender_authorized": True,
+        "customer_resolved": True,
+        "duplicate_po_clear": True,
+        "credit_clear": True,
+    }
+    metadata: dict[str, Any] = {
+        "composite_confidence": req.composite_confidence,
+        "non_disableable_floor": floor,
+        "validation_failures": req.validation_failures or [],
+    }
+    if req.reject_reason_code is not None:
+        metadata["reject_reason_code"] = req.reject_reason_code
+    if req.metadata_extra:
+        # Producer-side metadata extension. The reserved keys above
+        # cannot be overridden via metadata_extra to preserve the
+        # confidence-band routing contract; sneaking them in would
+        # divorce the ?confidence query from the routed band.
+        for key, value in req.metadata_extra.items():
+            if key in ("composite_confidence", "non_disableable_floor", "validation_failures"):
+                continue
+            metadata[key] = value
+    return {
+        "order_id": req.order_id or "EML-PO-SEED",
+        "line_item": 1,
+        "po_price": 100.0,
+        "sap_base_price": 100.0,
+        "event_type": event_type,
+        "retailer_id": "acct-southeast-distrib",
+        "line_count": 1,
+        "metadata": metadata,
+    }
+
+
+@router.post(
+    "/_sandbox/seed/manual-order-intake",
+    dependencies=[Depends(require_role("analyst", "manager", "admin"))],
+)
+async def seed_manual_order_intake(
+    req: SeedManualOrderIntakeRequest,
+    request: Request,
+    tenant_id: str = Depends(get_tenant_id),
+    user: AuthenticatedUser = Depends(get_current_user),  # noqa: ARG001
+) -> dict:
+    """Producer-side stand-in for the email-intelligence-agent.
+
+    Emits a MANUAL_ORDER_INTAKE event by default and routes it through
+    the normal /exceptions/resolve graph so the dashboard's
+    `event_type_received_total` gauge sees the canonical name.
+    ASOE_EMIT_LEGACY_EVENT_TYPES=1 flips emission to the transitional
+    EMAIL_ORDER_ENTRY_REQUEST literal for dual-acceptance soaks.
+
+    Returns the resulting exception_id, the event_type that was actually
+    emitted, and whether the legacy flag was honoured — the caller's
+    backward-compat suite asserts on all three.
+    """
+    _require_sandbox()
+    # Import locally — these touch the orchestration graph and a
+    # module-level import would pull half the recipe surface into
+    # sandbox.py at app boot.
+    from api.routes.exceptions import (  # noqa: PLC0415
+        _build_order_event,
+        _persist_exception,
+        _publish_task_complete,
+        _resolve_state,
+        _state_to_resolve_response,
+    )
+    from api.schemas import ResolveRequest  # noqa: PLC0415
+    from contracts.models import GraphState  # noqa: PLC0415
+
+    payload = _build_manual_intake_event_payload(req)
+    emitted_event_type = payload["event_type"]
+    emitted_legacy = emitted_event_type == _LEGACY_MANUAL_EVENT_TYPE
+
+    resolve_req = ResolveRequest.model_validate(payload)
+    event = _build_order_event(resolve_req)
+    state = GraphState(event=event, tenant_id=tenant_id)
+    try:
+        final_state = _resolve_state(state, tenant_id)
+    except Exception as exc:  # pragma: no cover - bubble up like /resolve
+        raise HTTPException(status_code=500, detail=f"graph failure: {exc}")
+
+    trace_id = final_state.shadow.trace_id if final_state.shadow else None
+    exception_id = _persist_exception(tenant_id, final_state, trace_id)
+    _publish_task_complete(tenant_id, exception_id, trace_id or "", final_state)
+    response = _state_to_resolve_response(exception_id, final_state)
+    return {
+        "exception_id": exception_id,
+        "event_type": emitted_event_type,
+        "emitted_legacy": emitted_legacy,
+        "final_status": response.final_status,
+        "ok": True,
+    }

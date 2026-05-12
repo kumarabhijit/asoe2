@@ -42,6 +42,8 @@ All work stacks on `claude/analyze-asoe-gaps-0LzG5` in each repo (no per-session
 | S12 | P1.6 — fill scenarios to 12 intents | asoe-ui | Remaining 9 scenarios with curated reason tags | IN_PROGRESS | `7cd23b5` (asoe-ui PR #148) |
 | S13 | ADR-034 §6.2 amendment | asoe2 | Decided: rename is **transitional** with deadline **2026-08-12**. Dual acceptance via `_MANUAL_EVENT_TYPES`, `ROUTABLE_EVENT_TYPES`, registry alias. Deprecation counter tracks the cutover. | IN_PROGRESS | `501cf6c` + `0fe7d3f` |
 | S14 | P3 — vocabulary rename cleanup | asoe2 | `EmailOrderEntryRecipe.py` → `ManualOrderIntakeRecipe.py` with re-export, `EMAIL_ORDER_ENTRY_AUTONOMY_LEVELS` aliased, test file renamed, 27 new contract tests, deprecation counter wired to §28.6. | IN_PROGRESS | `b9c421f` |
+| S14b | P3 follow-on — sandbox-stub producer cutover | asoe2 | New `POST /api/v1/_sandbox/seed/manual-order-intake` emits `MANUAL_ORDER_INTAKE` by default; `ASOE_EMIT_LEGACY_EVENT_TYPES=1` flips to the legacy `EMAIL_ORDER_ENTRY_REQUEST` for dual-acceptance soaks. 14 contract tests lock the toggle. | IN_PROGRESS | _this commit_ |
+| S15a | CSA one-task — `/cases/[id]` HITL ribbon inline | asoe-ui | `CaseDetailPanel` mounts `ExceptionDetailPanel` for the operator-selected record; single-record cases auto-mount; `?record=<id>` URL query keeps selection deep-linkable. `/exceptions/[id]` route deleted. | IN_PROGRESS | `fc7c94c` (asoe-ui PR #153) |
 
 **Status values:** `PENDING`, `IN_PROGRESS`, `BLOCKED:<reason>`, `MERGED`, `SKIPPED:<reason>`.
 

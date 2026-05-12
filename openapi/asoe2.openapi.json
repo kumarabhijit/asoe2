@@ -3946,6 +3946,79 @@
         "title": "SeedFinancialImpactRequest",
         "type": "object"
       },
+      "SeedManualOrderIntakeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "composite_confidence": {
+            "default": 0.97,
+            "title": "Composite Confidence",
+            "type": "number"
+          },
+          "metadata_extra": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Free-form metadata blob merged into the emitted event's metadata dict. The producer never overrides composite_confidence / non_disableable_floor with these keys \u2014 those have dedicated fields above.",
+            "title": "Metadata Extra"
+          },
+          "non_disableable_floor": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Non Disableable Floor"
+          },
+          "order_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order Id"
+          },
+          "reject_reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reject Reason Code"
+          },
+          "validation_failures": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Failures"
+          }
+        },
+        "title": "SeedManualOrderIntakeRequest",
+        "type": "object"
+      },
       "StatsResponse": {
         "description": "GET /api/v1/exceptions/stats \u2014 dashboard metrics.",
         "properties": {
@@ -4927,6 +5000,68 @@
           }
         },
         "summary": "Seed Financial Impact",
+        "tags": [
+          "sandbox"
+        ]
+      }
+    },
+    "/api/v1/_sandbox/seed/manual-order-intake": {
+      "post": {
+        "description": "Producer-side stand-in for the email-intelligence-agent.\n\nEmits a MANUAL_ORDER_INTAKE event by default and routes it through\nthe normal /exceptions/resolve graph so the dashboard's\n`event_type_received_total` gauge sees the canonical name.\nASOE_EMIT_LEGACY_EVENT_TYPES=1 flips emission to the transitional\nEMAIL_ORDER_ENTRY_REQUEST literal for dual-acceptance soaks.\n\nReturns the resulting exception_id, the event_type that was actually\nemitted, and whether the legacy flag was honoured \u2014 the caller's\nbackward-compat suite asserts on all three.",
+        "operationId": "seed_manual_order_intake_api_v1__sandbox_seed_manual_order_intake_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeedManualOrderIntakeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Seed Manual Order Intake Api V1  Sandbox Seed Manual Order Intake Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Seed Manual Order Intake",
         "tags": [
           "sandbox"
         ]
