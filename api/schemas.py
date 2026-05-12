@@ -268,6 +268,15 @@ class ExceptionDetailResponse(BaseModel):
     account_id: Optional[str] = None
     account_name: Optional[str] = None
     trace_id: Optional[str] = None
+    # ADR-038 Phase H.3 / S15a — parent case for this record.
+    # Populated by `materialise_for_event` at persist time. The UI uses
+    # this to compute /cases/{parent}?record=<id> deep-links from a
+    # per-record handle (the standalone /exceptions/[id] route was
+    # retired alongside the case-centric pivot). None on Tier-1
+    # stateless records and pre-Phase-H.3 legacy rows; both are
+    # exceptional and the UI throws loudly rather than silently
+    # routing to a phantom page.
+    parent_case_id: Optional[str] = None
     resolution_data: Dict[str, Any] = Field(default_factory=dict)
     resolved_by: Optional[str] = None
     resolved_action: Optional[str] = None
