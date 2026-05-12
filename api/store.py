@@ -124,6 +124,7 @@ class ExceptionRecord:
             account_id=self.account_id,
             account_name=self.account_name,
             trace_id=self.trace_id,
+            parent_case_id=self.parent_case_id,
             resolution_data=self.resolution_data,
             resolved_by=self.resolved_by,
             resolved_action=self.resolved_action,

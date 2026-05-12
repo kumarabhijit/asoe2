@@ -1822,6 +1822,17 @@
             "title": "Order Id",
             "type": "string"
           },
+          "parent_case_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Case Id"
+          },
           "reanalysis_history": {
             "items": {
               "additionalProperties": true,
