@@ -123,18 +123,24 @@ class TestCaseOpenEmission:
         # Exactly ONE — the second materialise should NOT re-emit.
         assert len(case_opens) == 1
 
-    def test_automated_clean_terminal_does_not_emit(self):
+    def test_automated_clean_terminal_emits_post_s15a(self):
+        # S15a amendment 2026-05-12 — every persisted record now
+        # materialises a case (see api/case_resolver.py section
+        # header). Clean Automated COMPLETE used to bypass case
+        # open; post-amendment it opens a case and fires the
+        # case_open event exactly like the non-clean terminal paths.
         event = OrderEvent(
             order_id="PO-CO-3",
             event_type="EDI_X12_850",
             po_price=100.0, sap_base_price=100.0,
         )
-        # Clean COMPLETE on automated → no case opens.
         case = materialise_for_event(
             "tenant-a", event, final_status="COMPLETE",
         )
-        assert case is None
-        assert _recent("tenant-a") == []
+        assert case is not None
+        case_opens = [e for e in _recent("tenant-a") if e["type"] == "case_open"]
+        assert len(case_opens) == 1
+        assert case_opens[0]["case_id"] == case.case_id
 
 
 # ---------------------------------------------------------------------------
