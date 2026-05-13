@@ -413,3 +413,78 @@ class TestScoping:
         )
         assert r.status_code == 200, r.text
         assert r.json()["case_id"] == case.case_id
+
+
+# ---------------------------------------------------------------------------
+# Detail-path visibility invariant (S15a follow-on)
+# ---------------------------------------------------------------------------
+
+class TestDetailVisibilityInvariant:
+    """`visible(exception) → visible(parent_case)` on the detail path.
+
+    The S15a pivot makes `/cases/{id}?record=<id>` the canonical action
+    surface. An operator who can read a child record via
+    `GET /api/v1/exceptions/{id}` must also be able to read its parent
+    case — otherwise a notification or deep-link to an exception lands
+    on a parent that 404s, leaving the operator unable to access the
+    HITL ribbon.
+
+    The invariant tests the asymmetry that #152 fixed: if either
+    endpoint regrows a scope filter (e.g. `_scope_to_user` creeps back
+    onto `/cases/{id}`), this test fails on the role/scope combination
+    where divergence appears.
+    """
+
+    @pytest.fixture()
+    def seeded_universe(self, client):
+        """Mix of cases × child records that span the scope axes we
+        care about: account_id assigned vs not; retailer_id matching
+        vs not; case-derived `customer_id` scope vs child-derived."""
+        # Account "acc-001" — in the assigned analyst's allowlist.
+        case_in = _open_case(customer_po_number="PO-IN", customer_id="acc-001")
+        rec_in = _attach_child(
+            order_id="WALMART-IN", parent_case_id=case_in.case_id,
+            account_id="acc-001",
+        )
+        # Account "acc-999" — out of allowlist; retailer matches partner.
+        case_out = _open_case(customer_po_number="PO-OUT", customer_id="acc-999")
+        rec_out = _attach_child(
+            order_id="WALMART-OUT", parent_case_id=case_out.case_id,
+            account_id="acc-999",
+        )
+        # Case with no customer_id; child carries no account either —
+        # purely tenant-scoped, no further constraints.
+        case_bare = _open_case(customer_po_number="PO-BARE")
+        rec_bare = _attach_child(
+            order_id="TARGET-BARE", parent_case_id=case_bare.case_id,
+        )
+        return [
+            (case_in, rec_in),
+            (case_out, rec_out),
+            (case_bare, rec_bare),
+        ]
+
+    @pytest.mark.parametrize("token_fixture", [
+        "analyst_token", "manager_token", "viewer_token",
+        "assigned_token", "partner_token",
+    ])
+    def test_visible_exception_implies_visible_case(
+        self, client, seeded_universe, token_fixture, request,
+    ):
+        token = request.getfixturevalue(token_fixture)
+        for case, record in seeded_universe:
+            exc_resp = client.get(
+                f"/api/v1/exceptions/{record.id}", headers=_auth(token),
+            )
+            if exc_resp.status_code != 200:
+                continue
+            case_resp = client.get(
+                f"/api/v1/cases/{case.case_id}", headers=_auth(token),
+            )
+            assert case_resp.status_code == 200, (
+                f"detail-path asymmetry under {token_fixture}: "
+                f"exception {record.id} visible but parent case "
+                f"{case.case_id} returned {case_resp.status_code} — "
+                f"a `_scope_to_user`-shaped filter has regressed onto "
+                f"/api/v1/cases/{{id}}."
+            )
