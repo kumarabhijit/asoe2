@@ -1,0 +1,225 @@
+# Azure Container Apps deploy — ADR-041 P6.
+#
+# Triggers:
+#   * push to main, gated on the `tests` workflow being green for the
+#     same SHA (concurrency lock prevents two deploys racing).
+#   * workflow_dispatch for manual deploys (re-run a specific SHA,
+#     test the workflow itself, or recover from a failed prior
+#     deploy without pushing a no-op commit).
+#
+# Guarantees:
+#   * The bicep-based `scripts/deploy-azure.sh` does the actual
+#     work (idempotent, multi-stage, handles re-deploys cleanly).
+#   * Post-deploy `/health` poll asserts the new revision is
+#     answering before the workflow reports success.
+#   * On health-check failure: deactivate the new ACA revision via
+#         `az containerapp revision deactivate`
+#     ACA keeps the previous revision active by default, so this
+#     IS the rollback (no separate rollback path needed).
+#   * Deploy SHA + revision name + health-check verdict get written
+#     to the GitHub deployment summary so PR / commit reviewers can
+#     reconstruct what landed without spelunking through Azure
+#     portal.
+#
+# Auth: Azure OIDC federated identity. Workflow assumes the
+# subscription has a federated credential bound to
+# `repo:kumarabhijit/asoe2:ref:refs/heads/main` for the role
+# `AZURE_CLIENT_ID` ↔ `AZURE_TENANT_ID` ↔ `AZURE_SUBSCRIPTION_ID`.
+# No long-lived `AZURE_CREDENTIALS` JSON; rotation is automatic.
+
+name: Deploy (Azure Container Apps)
+
+on:
+  push:
+    branches: [main]
+    # Don't redeploy on doc-only or workflow-only changes — the
+    # `tests` workflow won't run for those either, so a deploy would
+    # block on a gate that never publishes.
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '.github/workflows/openapi-drift.yml'
+      - '.github/workflows/smoke-e2e.yml'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to deploy (default: main HEAD)'
+        required: false
+        default: 'main'
+      deploy_ui:
+        description: 'Also deploy asoe-ui container (DEPLOY_UI=1)'
+        type: boolean
+        default: false
+
+# Only one deploy in flight at a time. New pushes cancel an
+# in-progress deploy *before* it reaches az calls — once `Deploy`
+# starts, `cancel-in-progress: false` would leave Azure mid-update.
+concurrency:
+  group: deploy-azure
+  cancel-in-progress: false
+
+permissions:
+  id-token: write   # OIDC federated login
+  contents: read
+
+jobs:
+  # ── 1. Wait for the same-SHA test gate before shipping ────────────
+  await-tests:
+    name: Wait for tests to pass
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - name: Wait for "pytest tests/" check on this SHA
+        uses: lewagon/wait-on-check-action@v1.4.0
+        with:
+          ref: ${{ github.sha }}
+          check-name: 'pytest tests/'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 15
+          allowed-conclusions: success
+
+  deploy:
+    name: Deploy to Azure
+    runs-on: ubuntu-latest
+    # On workflow_dispatch `await-tests` is skipped (its `if:` gates
+    # on `push`). The `if:` below treats `skipped` as "no gate" so the
+    # manual path still runs; on `push` the gate must end in `success`.
+    needs: [await-tests]
+    if: |
+      always() &&
+      (
+        (github.event_name == 'workflow_dispatch' && needs.await-tests.result == 'skipped') ||
+        (github.event_name == 'push' && needs.await-tests.result == 'success')
+      )
+    environment: production
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.sha }}
+
+      # OIDC federated login — no AZURE_CREDENTIALS secret needed.
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Capture pre-deploy revision (for rollback)
+        id: pre
+        run: |
+          set -euo pipefail
+          # The current "active" revision is the one ACA returns under
+          # `properties.latestRevisionName` — that's what we revert
+          # to if the new one fails its health probe. Empty on first
+          # deploy (the container app doesn't exist yet); the post-
+          # deploy step gracefully skips deactivation in that case.
+          PRE=$(az containerapp show \
+            --name "${APP_NAME}" \
+            --resource-group "${RG}" \
+            --query 'properties.latestRevisionName' -o tsv 2>/dev/null \
+            || echo "")
+          echo "name=${PRE}" >> "$GITHUB_OUTPUT"
+          echo "Pre-deploy revision: ${PRE:-<none>}"
+        env:
+          # These two echo the defaults baked into scripts/deploy-azure.sh
+          # so a future rename only needs to update the script's defaults.
+          RG: ${{ vars.AZURE_RESOURCE_GROUP }}
+          APP_NAME: ${{ vars.AZURE_APP_NAME }}
+
+      - name: Deploy
+        id: deploy
+        run: bash scripts/deploy-azure.sh
+        env:
+          SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          RG: ${{ vars.AZURE_RESOURCE_GROUP }}
+          LOCATION: ${{ vars.AZURE_LOCATION }}
+          ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
+          APP_NAME: ${{ vars.AZURE_APP_NAME }}
+          IMAGE_TAG: ${{ github.sha }}
+          PG_ADMIN_PASSWORD: ${{ secrets.PG_ADMIN_PASSWORD }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ASOE_JWT_SECRET: ${{ secrets.ASOE_JWT_SECRET }}
+          DEPLOY_UI: ${{ github.event.inputs.deploy_ui == 'true' && '1' || '0' }}
+
+      - name: Resolve new revision + FQDN
+        id: post
+        run: |
+          set -euo pipefail
+          FQDN=$(az containerapp show \
+            --name "${APP_NAME}" \
+            --resource-group "${RG}" \
+            --query 'properties.configuration.ingress.fqdn' -o tsv)
+          NEW=$(az containerapp show \
+            --name "${APP_NAME}" \
+            --resource-group "${RG}" \
+            --query 'properties.latestRevisionName' -o tsv)
+          echo "fqdn=${FQDN}" >> "$GITHUB_OUTPUT"
+          echo "new=${NEW}" >> "$GITHUB_OUTPUT"
+          echo "## Deploy summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| SHA | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Pre revision | \`${{ steps.pre.outputs.name }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| New revision | \`${NEW}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| FQDN | https://${FQDN} |" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          RG: ${{ vars.AZURE_RESOURCE_GROUP }}
+          APP_NAME: ${{ vars.AZURE_APP_NAME }}
+
+      - name: Health check (poll /health for 60s)
+        id: health
+        run: |
+          set -euo pipefail
+          URL="https://${FQDN}/api/v1/health"
+          echo "Polling ${URL}"
+          # 12 × 5s = 60s window. ACA cold-start on first revision can
+          # legitimately take that long; subsequent revisions hot-spin.
+          for i in $(seq 1 12); do
+            HTTP=$(curl -sS -o /tmp/health.body -w "%{http_code}" "${URL}" || echo "000")
+            if [[ "${HTTP}" == "200" ]]; then
+              echo "Healthy on attempt ${i} (HTTP 200)."
+              cat /tmp/health.body
+              exit 0
+            fi
+            echo "attempt ${i}: HTTP ${HTTP} (body below, trimmed)"
+            head -c 400 /tmp/health.body 2>/dev/null || true
+            echo
+            sleep 5
+          done
+          echo "Health check FAILED — see rollback step." >&2
+          exit 1
+        env:
+          FQDN: ${{ steps.post.outputs.fqdn }}
+
+      - name: Rollback on health-check failure
+        if: failure() && steps.health.outcome == 'failure'
+        run: |
+          set -euo pipefail
+          if [[ -z "${PRE_REV}" ]]; then
+            echo "No prior revision to revert to (this was the first deploy)."
+            echo "Manual investigation required — leaving the failed " \
+                 "revision active for log capture."
+            exit 1
+          fi
+          echo "Deactivating failed revision ${NEW_REV}; ACA will " \
+               "resume routing to ${PRE_REV}."
+          az containerapp revision deactivate \
+            --name "${APP_NAME}" \
+            --resource-group "${RG}" \
+            --revision "${NEW_REV}"
+          echo "## Rollback executed" >> "$GITHUB_STEP_SUMMARY"
+          echo "Failed revision: \`${NEW_REV}\` (deactivated)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Active revision: \`${PRE_REV}\`" >> "$GITHUB_STEP_SUMMARY"
+          # Exit non-zero so the workflow run is marked as failed —
+          # the rollback succeeded but the deploy did not.
+          exit 1
+        env:
+          RG: ${{ vars.AZURE_RESOURCE_GROUP }}
+          APP_NAME: ${{ vars.AZURE_APP_NAME }}
+          PRE_REV: ${{ steps.pre.outputs.name }}
+          NEW_REV: ${{ steps.post.outputs.new }}
