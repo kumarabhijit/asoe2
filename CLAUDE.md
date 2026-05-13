@@ -217,6 +217,35 @@ For new capabilities, prefer this order:
 If architectural intent is unclear,
 **stop and ask for architectural clarification**.
 ---
+## Test strategy
+
+Required gates on every PR:
+
+  * **Bug-fix PRs MUST include a regression test that fails on the
+    parent commit.** Verify by:
+
+    ```
+    git stash
+    git checkout HEAD~1 -- <fixed-file>
+    python -m pytest <new-test>
+    ```
+
+    The test must fail. Restore the fix and verify it now passes.
+    Paste both verifications into the PR description.
+
+  * **New Pydantic `model_validator` decorators** on
+    `contracts/models.py` (or equivalents in `api/store.py`,
+    `api/schemas.py`) require: (1) a focused unit test for each
+    invariant the validator encodes, and (2) coordination with the
+    matching asoe-ui mock-data lock (see
+    `asoe-ui/tests/architectural/case_pivot_mock_wiring.test.ts`)
+    so the UI mock layer doesn't drift.
+
+  * **New recipes / orchestration nodes** require a deterministic
+    test path (no LLM call) plus a constrained-generation lock
+    where applicable. See `tests/test_constraints.py` for the
+    reference style.
+
 ## Definition of Done
 A task is done only if:
 - code is readable
@@ -228,3 +257,4 @@ A task is done only if:
 - compliance routing remains intact
 - constrained generation protects machine-consumed outputs
 - recipe logic has not leaked into orchestration
+- bug-fix PRs include a regression test that fails on the parent commit (see Test strategy above)
