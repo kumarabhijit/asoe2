@@ -682,3 +682,74 @@ That's a 10-minute change; doing it later does not require re-deploying.
 See `infra/README.md` — total ~$50/mo with one replica idle, scales with load.
 Container Apps consumption profile bills per vCPU-second, so quiet weekends
 are nearly free.
+
+## Automated CI deploy (ADR-041 P6)
+
+`.github/workflows/deploy-azure.yml` runs `scripts/deploy-azure.sh`
+automatically on every push to `main` after the `tests` workflow is
+green for the same SHA. Health-checks the new revision and rolls back
+via `az containerapp revision deactivate` if `/api/v1/health` doesn't
+return 200 within 60 seconds.
+
+### Required GitHub configuration
+
+**Repository secrets** (Settings → Secrets and variables → Actions):
+
+| Secret | Source |
+|---|---|
+| `AZURE_CLIENT_ID` | The federated identity's app registration client ID. |
+| `AZURE_TENANT_ID` | The Azure AD tenant ID. |
+| `AZURE_SUBSCRIPTION_ID` | The subscription owning `asoepreprod`. |
+| `PG_ADMIN_PASSWORD` | Postgres admin password (same value used in manual deploys). |
+| `ANTHROPIC_API_KEY` | Required on the first automated deploy; preserved on re-runs. |
+| `ASOE_JWT_SECRET` | Set to `auto` for first deploy; preserved thereafter. |
+
+**Repository variables** (Settings → Secrets and variables → Variables):
+
+| Variable | Default value | Notes |
+|---|---|---|
+| `AZURE_RESOURCE_GROUP` | `asoepreprod` | Resource group name. |
+| `AZURE_LOCATION` | `centralus` | Region. |
+| `AZURE_ACR_NAME` | _your ACR name_ | Set to the prefix only, no `.azurecr.io`. |
+| `AZURE_APP_NAME` | _your API app name_ | Container App resource name. |
+
+### Federated credential setup (one-time)
+
+Azure → App registrations → your-app → Certificates & secrets →
+Federated credentials → Add credential.
+
+  * **Federated credential scenario:** GitHub Actions deploying Azure resources.
+  * **Organization:** `kumarabhijit` (or your org).
+  * **Repository:** `asoe2`.
+  * **Entity type:** Branch.
+  * **Branch name:** `main`.
+
+Repeat with **Entity type: Environment** + **Environment name: production**
+to allow `workflow_dispatch` runs from non-main refs.
+
+### Manual override
+
+The workflow also accepts `workflow_dispatch` with an optional `ref`
+input and a `deploy_ui` toggle. Use this to re-deploy a specific SHA
+without pushing a no-op commit, or to test the workflow itself.
+
+### Rollback semantics
+
+ACA keeps the previous revision running until the new one is healthy.
+If the health-check step times out (12 × 5s = 60s), the workflow runs
+`az containerapp revision deactivate` on the new revision — ACA
+immediately resumes routing 100% traffic to the previous revision.
+The workflow exits non-zero so the run is marked failed in the UI;
+the deploy summary records both the failed revision name and the
+active (rolled-back) revision name for forensics.
+
+### What's not yet automated
+
+  * **Bicep template changes** still require a manual review-and-deploy
+    cycle (the workflow rebuilds the image and re-runs the same script,
+    but bicep diffs that change infra topology should be eyeballed
+    before they ship — see `infra/README.md`).
+  * **asoe-ui deploy** stays on Vercel (preview-per-PR + auto-promote
+    on merge) — two-cloud is intentional. The DevOps panel reviewed
+    moving asoe-ui to Azure and rejected it (Vercel's preview workflow
+    is genuinely better than ASA for this surface).
