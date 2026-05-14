@@ -751,15 +751,40 @@ have the contract in writing.
 | Field | Audit relevance |
 |---|---|
 | `case_id` | Stable identifier for every materialised case. Surfaces in trace logs and any case-detail UI link. Backfill (V011) derives a deterministic id (`sha256(tenant ‖ order_id)[:16]`) so re-running the migration is idempotent. |
-| `source` | `manual_order` (email / phone / fax — eager case open) vs `automated_order` (EDI / portal / B2B API — lazy case open on first non-clean event). Set at case-open and **immutable**. |
+| `source` | `manual_order` (email / phone / fax — eager case open) vs `automated_order` (EDI / portal / B2B API — lazy case open on first non-clean event). Set at case-open and **immutable**. Answers "how did the order originate?". |
+| `case_type` (ADR-041) | `EMAIL_ENTRY` (customer email arrived) vs `BLOCK` (SAP order carried a block reason). **Orthogonal to `source`** per the domain modeller's panel review — a manual_order arriving by phone is NOT EMAIL_ENTRY; an automated_order (EDI 850) that gets SAP-blocked IS BLOCK. Set at case-open and immutable. Defaults from `source` via `contracts/models.py::infer_case_type` for back-compat with pre-ADR-041 call sites. |
+| `email_classification` (ADR-041) | One of `NEW_ORDER` / `ORDER_CHANGE` / `INQUIRY` / `COMPLAINT` / `OTHER`. **Required** when `case_type == "EMAIL_ENTRY"` (defaults to `OTHER`); **must be None** when `case_type == "BLOCK"`. Enforced at construction by `OrderCase._check_case_type_invariants` (Pydantic `mode="after"` validator). 1:1 with the intake email. |
 | `source_channel` | Channel sub-classification (`edi_x12_850`, `email`, `portal`, `phone`, …). Case-level metadata; does **not** alter intent or recipe selection. |
-| `customer_po_number` / `sales_order_id` / `edi_transaction_id` / `source_email_id` | Correlation keys. The lookup-or-create policy (`api/store.py::CaseStore.lookup_or_create`) checks these in **SO → PO → EDI → email** priority. Emitting two records with the same SO opens **one** case, never two. |
+| `customer_po_number` / `sales_order_id` / `edi_transaction_id` / `source_email_id` | Correlation keys. The lookup-or-create policy (`api/store.py::CaseStore.lookup_or_create`) checks these in **SO → PO → EDI → email** priority. Emitting two records with the same SO opens **one** case, never two. The hard invariants "EMAIL_ENTRY ⇒ source_email_id required" + "BLOCK ⇒ sales_order_id required" are deferred per ADR-041 §5 — soft today, hard once the ingestion-path audit lands. |
 | `tier` | `1` = stateless / `2` = stateful (default for non-clean events) / `3` = compacted. Tier graduation is monotonic — a case never downgrades. |
 | `bundle_version_at_open` | The L0 bundle version stamp at case-open. Backfilled cases carry the sentinel `legacy-pre-h2`. |
 | `sla_deadline` | ISO timestamp computed via `agents/sla.py::stamp_sla_deadline()` from `knowledge/policy/sla_per_customer_tier.yaml`. Defaults to 48h when the customer's tier isn't in the table. |
 
-The `parent_case_id` column on `ExceptionRecord` (V009) is nullable;
-existing legacy records remain `NULL` until the V011 backfill runs.
+The `parent_case_id` column on `ExceptionRecord` (V009) is nullable
+in the persistence model, but ADR-041 §2.2 makes `should_materialise()
+-> True` unconditional — every newly-persisted record gets a parent
+case. Existing legacy records remain `NULL` until the V011 backfill
+runs.
+
+**ExceptionRecord audit-bearing field added by ADR-041:**
+
+| Field | Audit relevance |
+|---|---|
+| `sap_block_code` | Raw SAP block reason code on records whose parent case is `case_type == "BLOCK"` (1:N — one SAP order can carry multiple simultaneous codes). Distinct from `intent` (the classified business-intent vocabulary recipes dispatch on). `None` on EMAIL_ENTRY-parented records. Surfaces in trace logs and the inline `ExceptionDetailPanel` evidence rows. |
+
+**Detail-path visibility symmetry (ADR-041 §2.2):** `GET /api/v1/cases/{id}`
+and `GET /api/v1/cases/{id}/records` are **tenant-scoped only** on the
+detail path — no `_scope_to_user` (assigned-accounts) filter. Pre-
+ADR-041 the case-detail endpoint applied account scoping while the
+sibling `GET /api/v1/exceptions/{id}` was tenant-only; an analyst
+could read a child record but get 404 on the parent case, breaking
+deep-link audit trails. Symmetry restored; locked at
+`tests/test_routes_cases.py::TestDetailVisibilityInvariant`
+(parametrized across analyst / manager / viewer / assigned-analyst /
+partner — every exception visible to a user implies the parent case
+is too). The list endpoint (`GET /api/v1/cases`) retains the
+account-scope filter as a UX queue-curation aid; only the detail
+path is tenant-only.
 
 ### 19.2 Correlation table (V010)
 
@@ -844,18 +869,30 @@ relied upon for audit evidence yet:
 * The Case Agent itself runs only in unit tests. Production traffic
   continues on the deterministic graph; `parent_case_id` is set but
   the agent does not yet act on cases.
-* The `/api/v1/cases/*` HTTP route does not exist. Case data is in
-  the database but the asoe-ui case surface ships in mock mode only.
+* ~~The `/api/v1/cases/*` HTTP route does not exist.~~ **Shipped.**
+  `api/routes/cases.py` exposes `GET /api/v1/cases` (list, with cursor
+  pagination — ADR-038 §D7), `GET /api/v1/cases/{id}` (detail —
+  tenant-scoped only per ADR-041 §2.2), and
+  `GET /api/v1/cases/{id}/records` (attached records, with aggregated
+  policy hits). The asoe-ui `/cases` workspace consumes these
+  directly when `NEXT_PUBLIC_USE_REAL_API=1`.
 * L4 harness extensions (case-aware concurrency lock, tool-call
   replay log, tier graduation hook) are not yet visible in the
   codebase.
 * Four-eyes / cosign / override flows still operate on the
   exception lifecycle (ADR-029); migration to the case lifecycle
-  is part of Phase H.7 closeout.
+  is part of Phase H.7 closeout. ADR-040 (case-level cosign) has
+  the X.0 code path in place behind `ASOE_CASE_COSIGN_ENABLED`.
 * ADR-039 (LLM Compliance Shadow second opinion) — X.1 primitive
   has shipped (observe-only); X.2 → X.3 promotion gated on the
   live 1-week soak + Compliance ratification workshop. See §20
   for the audit-bearing surface that the primitive emits today.
+* ADR-041 (case-type axis + workspace consolidation) — **Accepted
+  2026-05-13.** `case_type` + `email_classification` on OrderCase;
+  `sap_block_code` on ExceptionRecord; `/exceptions` UI route
+  retired in favour of single `/cases` workspace; automated Azure
+  deploy from CI with health-check rollback. See §19.1 (audit-
+  bearing fields) and ADR-041 for the full record.
 
 ---
 
