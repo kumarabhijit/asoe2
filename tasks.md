@@ -2590,6 +2590,20 @@ Done). Cross-repo counterpart: `asoe-ui/tasks.md` Phase 15.
 - [x] `CLAUDE.md` Test strategy section + Definition-of-Done
       addition — the regression-test rule becomes a required gate
       on every PR.
+- [x] `docs/test-strategy/ux-api-contract.md` +
+      `tests/contract/test_error_envelope_ux_contract.py`
+      (companion to asoe-ui PR #163's UX/A11y bundle). The UI
+      binds `error.message` directly into the
+      `StatusAnnouncer` aria-live region and the Toast, so the
+      error-message contract is a UX/a11y concern enforced
+      backend-side. AST walk over every `raise ASOEError(...)`
+      site in `api/` asserts: `code=` + `message=` kwargs
+      present at every site; string-literal messages are
+      non-empty and end with terminal punctuation (`.`, `?`,
+      `!`) — with f-string trailing-`Constant` handled and
+      trailing `FormattedValue` exempted; literal messages do
+      not echo the `code=` verbatim (avoids screen-reader
+      stutter). 5 tests, all passing.
 
 ### 29.5 ADR + architecture spec updates
 - [x] `docs/adr/ADR-041-case-type-and-workspace-consolidation.md`
