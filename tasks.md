@@ -2506,3 +2506,121 @@ session.
 *Phase 28 authored 2026-05-09 as the Round 4 closeout doc.
 Re-read before the next session to skip the autobiographical
 re-discovery work.*
+
+---
+
+## PHASE 29 — ADR-041: case-type axis + workspace consolidation + Azure deploy automation (CLOSED 2026-05-13)
+
+ADR-041 ratification doc:
+`docs/adr/ADR-041-case-type-and-workspace-consolidation.md`.
+Architecture spec amendments: `architecture_v5.md` §2.0 (case-typing
+axes), §7 (UI surface — rewritten end-to-end), §8 (persistence
+delta), §9 (versioning + ratification state), §10 (Definition of
+Done). Cross-repo counterpart: `asoe-ui/tasks.md` Phase 15.
+
+### 29.1 Domain typing — `case_type` + `email_classification` + `sap_block_code`
+- [x] `contracts/models.py::CaseType = Literal["EMAIL_ENTRY", "BLOCK"]`
+      added — orthogonal to `CaseSource` per the domain modeller's
+      pushback ("source = how the order originated; case_type = why
+      ASOE materialised this case").
+- [x] `contracts/models.py::EmailClassification = Literal["NEW_ORDER",
+      "ORDER_CHANGE", "INQUIRY", "COMPLAINT", "OTHER"]` added — 1:1
+      with the intake email.
+- [x] `OrderCase.case_type` / `OrderCase.email_classification` fields
+      with `mode="before"` Pydantic validator
+      (`_default_case_type_from_source`) for back-compat defaulting
+      from `source`, and `mode="after"` validator
+      (`_check_case_type_invariants`) enforcing: EMAIL_ENTRY ⇒
+      `email_classification` non-None; BLOCK ⇒ `email_classification`
+      is None. Soft invariants ("source_email_id required on
+      EMAIL_ENTRY"; "sales_order_id required on BLOCK") explicitly
+      deferred per ADR-041 §5.
+- [x] `api/store.py::ExceptionRecord.sap_block_code: Optional[str]`
+      added — raw SAP block reason code on BLOCK-parented records
+      (1:N — one SAP order can carry multiple simultaneous codes).
+- [x] `api/store.py::CaseStore.lookup_or_create` accepts optional
+      `case_type` / `email_classification` kwargs; defaults via
+      `infer_case_type(source, source_channel)`.
+- [x] **15 new unit invariants** in
+      `tests/test_case_type_invariants.py`.
+- [x] Pairs with `asoe-ui` PR #156 mirroring the UI types.
+      Cross-repo paired-lock at
+      `asoe-ui/tests/architectural/case_pivot_mock_wiring.test.ts`.
+
+### 29.2 Detail-path visibility symmetry
+- [x] `GET /api/v1/cases/{id}` + `GET /api/v1/cases/{id}/records`
+      no longer apply `_scope_to_user` on the detail path — tenant-
+      scoped only (the list endpoint retains the account-scope
+      filter as a UX queue-curation aid).
+- [x] `api/case_resolver.py::should_materialise() -> True` paired —
+      every persisted record gets a parent case unconditionally.
+- [x] **Invariant lock** at
+      `tests/test_routes_cases.py::TestDetailVisibilityInvariant` —
+      5 parametrized roles × 3 seeded cases; locks
+      `visible(exception) → visible(parent_case)` across the role ×
+      scope matrix.
+
+### 29.3 Azure deploy automation (P6)
+- [x] `.github/workflows/deploy-azure.yml` wraps
+      `scripts/deploy-azure.sh`. Triggers on push to `main` after
+      the `pytest tests/` workflow is green for the same SHA (via
+      `lewagon/wait-on-check-action`). `workflow_dispatch` for
+      manual re-runs of a specific SHA.
+- [x] **OIDC federated identity** (`azure/login@v2`) — no long-lived
+      `AZURE_CREDENTIALS` JSON; rotation automatic. Required GitHub
+      secrets (6) + variables (4) documented in
+      `docs/deploy-azure-container-apps.md` "Automated CI deploy"
+      section.
+- [x] Health-check polls `/api/v1/health` for 60s after deploy.
+      Rollback via `az containerapp revision deactivate` on
+      failure — ACA's blue-green default IS the rollback path.
+- [x] **asoe-ui stays on Vercel.** DevOps panel reviewed and
+      rejected migrating the frontend to Azure. Two-cloud is
+      intentional.
+
+### 29.4 Test-strategy gates
+- [x] `docs/test-strategy/README.md` codifies the 6-layer test
+      pyramid (L0 Pydantic locks → L5 cross-repo browser e2e),
+      three required gates (per-bug regression test with
+      verify-failure procedure; new `@model_validator` requires
+      focused unit test class; new recipes require deterministic
+      test path + registry-coverage check), gap-closure patterns
+      (validator lock, graph state-transition lock, sandbox WS
+      round-trip).
+- [x] `CLAUDE.md` Test strategy section + Definition-of-Done
+      addition — the regression-test rule becomes a required gate
+      on every PR.
+
+### 29.5 ADR + architecture spec updates
+- [x] `docs/adr/ADR-041-case-type-and-workspace-consolidation.md`
+      created — full ratification record. Status: **Accepted
+      2026-05-13**.
+- [x] `architecture_v5.md` amended — status banner notes ADR-040 +
+      ADR-041 independently Accepted; v5 stays Proposed pending
+      ADR-038 + ADR-039 Compliance ratifications. Lineage section
+      gains ADR-041 bullet; §2.0 "Case-typing axes" sub-section
+      added; §7 (UI surface) rewritten end-to-end; §8 / §9 / §10
+      absorb the cumulative-ADR / ratification-state / DoD updates.
+- [x] `README.md` reference-documents table gains ADR-040, ADR-041,
+      and `docs/test-strategy/README.md` rows. `OrderCase` line in
+      the directory listing mentions the `case_type` /
+      `email_classification` axes. ADR badge updated to "ADR-021..041".
+- [x] `docs/AUDITOR_GUIDE.md` §19.1 OrderCase audit table adds rows
+      for `case_type`, `email_classification`, `sap_block_code`,
+      plus the detail-path visibility symmetry callout
+      (`TestDetailVisibilityInvariant`). §19 status callouts flip
+      "`/api/v1/cases/*` does not exist" → shipped; add ADR-040 +
+      ADR-041 status rows.
+
+### 29.6 Things explicitly NOT in scope (queued follow-ups)
+- [ ] Hard `source_email_id` (EMAIL_ENTRY) / `sales_order_id` (BLOCK)
+      invariants — soft today; turn hard after the ADR-041 §5
+      ingestion-path audit.
+- [ ] DB-side migrations for the `case_type` / `email_classification`
+      / `sap_block_code` columns — in-memory `OrderCase` validator
+      enforces today; DatabaseBackedStore extension is a separate
+      migration round.
+- [ ] asoe-ui three-pane workspace + responsive collapse rules
+      (P3d-remaining) — two-pane shipped; three-pane stays queued.
+- [ ] asoe-ui visual regression baseline (Playwright screenshots) —
+      documented as test-strategy Gap 5.

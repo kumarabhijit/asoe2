@@ -1022,7 +1022,7 @@ See `architecture_v3.md` §4 for the full Azure infrastructure stack.
 ## Directory structure
 
 ```
-contracts/          Typed Pydantic models — OrderEvent, GraphState, ExecutionLog, OrderCase, …
+contracts/          Typed Pydantic models — OrderEvent, GraphState, ExecutionLog, OrderCase (with ADR-041 `case_type` / `email_classification` axes), …
   policy.py         Centralised business thresholds (discount limits, circuit breaker bounds, autonomy levels, etc.)
 skills/             Legacy skill loader (the bundles themselves live under knowledge/skills/<name>/ — see below)
   loader.py         Bundle-first resolution with one-release legacy fallback (ADR-038 Phase H.1)
@@ -1079,7 +1079,7 @@ db/                 Database layer (architecture_v3.md §9)
   connection.py     SQLiteAdapter / PostgresAdapter + _QmarkCursorWrapper (?→%s), create_adapter() factory
   repository.py     ExceptionRepository, TraceRepository, PolicyRepository
   migrations/       V001__initial_schema.sql (5 tables, RLS, SOX trigger, pgvector); V002__reanalyze_columns.sql (original_event + reanalysis_history); V003__audit_hash_chain.sql (prev_hash/event_hash + append-only triggers); V004__enrichment_context.sql (Pillar 1 audit-evidence column); V009__order_case.sql (OrderCase parent entity); V010__case_correlation_keys.sql (lookup-or-create correlation table); V011__backfill_orphan_cases.sql (Phase H.7 orphan-case backfill)
-docs/               AUDITOR_GUIDE.md, ADR-021..039 (case-centric pair: ADR-038 / ADR-039 — Proposed)
+docs/               AUDITOR_GUIDE.md, ADR-021..041 (case-centric trio: ADR-038 / ADR-039 / ADR-040 — Proposed; ADR-040 + ADR-041 Accepted 2026-05-13)
   adr/              Architecture decision records (numbered chronologically)
   plans/            Operational rollout plans (case-centric-rollout.md tracks ADR-038 phase H.1 → H.7 status)
   specs/            Product-owner reference specs (not runtime code)
@@ -1137,7 +1137,10 @@ k8s/                Kubernetes manifests for AKS production deployment
 | `docs/adr/ADR-023-disposition-and-hash-chained-audit.md` | Unified `/disposition` primitive + hash-chained append-only audit log (Phases 1–4 of the Override Action overhaul) |
 | `docs/adr/ADR-038-case-centric-order-intake.md` | **Proposed.** Five-layer agentic architecture (L0 Knowledge / L1 Deterministic / L2 Bounded LLM / L3 Case Agent / L4 Harness). Manual / Automated Order vocabulary, OrderCase parent entity, T1/T2/T3 case materialisation, ~18-tool agent surface, deterministic compaction, per-tier cost & latency budgets. Phase H.1 → H.7 primitives shipped on main; integration + Compliance ratification pending |
 | `docs/adr/ADR-039-llm-compliance-shadow-second-opinion.md` | **Proposed.** Constrained-output L2 LLM Shadow alongside the existing deterministic Shadow. Asymmetric combination rule (LLM may DOWNGRADE GREEN → YELLOW but never UPGRADE). Phased rollout X.1 (observe-only) → X.4 (extended cross-check). 0% shipped beyond document |
+| `docs/adr/ADR-040-cosign-on-case-lifecycle.md` | **Accepted (X.0 code path landed, ratification config flip pending).** Four-eyes / cosign control promoted from the exception lifecycle to the case lifecycle. One cosign call approves the override across every child exception; per-exception flow preserved unchanged |
+| `docs/adr/ADR-041-case-type-and-workspace-consolidation.md` | **Accepted 2026-05-13.** `case_type` (EMAIL_ENTRY \| BLOCK) + `email_classification` on OrderCase; `sap_block_code` on ExceptionRecord. Detail-path visibility symmetry (`GET /api/v1/cases/{id}` tenant-only — locked at `tests/test_routes_cases.py::TestDetailVisibilityInvariant`). `/exceptions` UI route retired in favour of single `/cases` two-pane workspace (asoe-ui side). Automated Azure deploy from CI (OIDC + health-check + revision-deactivate rollback). Test-strategy gates codified in CLAUDE.md + `docs/test-strategy/README.md` |
 | `docs/plans/case-centric-rollout.md` | Per-phase status board for ADR-038 H.1 → H.7 with operational sequencing, owner mapping, acceptance criteria, and §3.4 in-flight branch adaptation closeout |
+| `docs/test-strategy/README.md` | Test pyramid (L0 Pydantic locks → L5 cross-repo browser e2e), gap-closure patterns (validator lock, graph state-transition lock, sandbox WS round-trip), three required gates: per-bug regression test, `@model_validator` invariant unit tests, deterministic recipe test path. Companion to asoe-ui's matching doc. ADR-041 §2.6 ratification artefact |
 | `prompts/po-spec-to-asoe.md` | Step-by-step prompt for converting a Product Owner specification into ASOE Skill–Shadow–Recipe components |
 | `prompts/triple_check_review_board.md` | Reusable review prompt — three-persona architecture, security, and test coverage assessment |
 | `prompts/phase_10_langfuse.md` | LangFuse integration prompt — sink design, trace mapping, self-hosted setup, SDK compatibility, test plan |
