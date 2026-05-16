@@ -17,11 +17,23 @@ This module is a pure routing helper: no I/O beyond the in-memory
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Optional, Tuple
 
-from api.case_events import publish_case_open
-from api.store import case_store
-from contracts.models import OrderCase, OrderEvent, TerminalStatus
+from api.case_events import (
+    TERMINAL_CASE_STATUSES,
+    is_terminal_status,
+    publish_case_close,
+    publish_case_open,
+    publish_case_update,
+)
+from api.store import case_store, exception_store
+from contracts.models import (
+    STATUS_TO_LIFECYCLE,
+    OrderCase,
+    OrderEvent,
+    TerminalStatus,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +176,124 @@ def resolve_or_open_case(
     )
 
 
+# ---------------------------------------------------------------------------
+# Case-status aggregation (ADR-038 §6.1)
+# ---------------------------------------------------------------------------
+#
+# `OrderCase.status` is a roll-up of the case's child records: the
+# case sits at the status of its *least-settled* child. A case with
+# one resolved record and one record still awaiting a human is
+# OPEN_AWAITING_HUMAN, not RESOLVED — the operator still owes a
+# decision. This mirrors the asoe-ui `aggregateCaseStatus` /
+# `caseFromMockException` derivation 1:1 so the mock preview layer
+# and the live backend agree.
+#
+# Dominance order (highest wins): OPEN_AWAITING_HUMAN > BLOCKED >
+# FAILED > RESOLVED. A case only reaches a terminal status once every
+# child has terminal-closed.
+#
+# Scope note: this projection produces the four child-derivable
+# statuses only. OPEN_AGENT_PROCESSING (the OrderCase default) and
+# OPEN_AWAITING_BUYER / OPEN_AWAITING_ERP are set by other flows
+# (just-opened pre-record, REQUEST_CLARIFICATION, ERP submit) and are
+# not reachable from a persisted record's lifecycle. Cosign-parked
+# cases (`pending_override` set) are owned by the cosign flow and are
+# skipped entirely — see `recompute_case_status`.
+
+_CASE_STATUS_RANK = {
+    "OPEN_AWAITING_HUMAN": 3,
+    "BLOCKED": 2,
+    "FAILED": 1,
+    "RESOLVED": 0,
+}
+
+
+def _case_status_from_lifecycle(lifecycle_state: Optional[str]) -> str:
+    """Project one child record's ``lifecycle_state`` onto a candidate
+    ``CaseStatus``. Mirrors the asoe-ui `caseFromMockException` switch
+    exactly so backend and mock-preview agree.
+    """
+    if lifecycle_state in ("RESOLVED", "CLOSED"):
+        return "RESOLVED"
+    if lifecycle_state == "BLOCKED":
+        return "BLOCKED"
+    if lifecycle_state == "FAILED":
+        return "FAILED"
+    # PENDING_REVIEW / ESCALATED / PENDING_ADMIN_REVIEW / PENDING_COSIGN
+    # / REJECTED / INGESTED / CLASSIFYING / AUDITING — a human (or the
+    # agent) still owes forward progress on this child.
+    return "OPEN_AWAITING_HUMAN"
+
+
+def _aggregate_case_status(
+    tenant_id: str,
+    case_id: str,
+    incoming_final_status: Optional[str],
+) -> str:
+    """Return the ``CaseStatus`` aggregated from every record attached
+    to ``case_id`` PLUS the not-yet-persisted incoming record (whose
+    ``final_status`` the caller passes — at materialise time the record
+    is created immediately after this call and isn't in the store yet).
+
+    The incoming record's lifecycle is derived from its terminal status
+    via ``STATUS_TO_LIFECYCLE`` — the same map ``exception_store.create``
+    applies — so the projection is identical whether the record is
+    already persisted or still incoming.
+    """
+    candidates = [
+        _case_status_from_lifecycle(r.lifecycle_state)
+        for r in exception_store.list_by_case(tenant_id, case_id)
+    ]
+    incoming_lifecycle = STATUS_TO_LIFECYCLE.get(
+        incoming_final_status or "", "INGESTED",
+    )
+    candidates.append(_case_status_from_lifecycle(incoming_lifecycle))
+    return max(candidates, key=lambda s: _CASE_STATUS_RANK[s])
+
+
+def recompute_case_status(
+    tenant_id: str,
+    case_id: str,
+    incoming_final_status: Optional[str],
+) -> Tuple[Optional[OrderCase], bool]:
+    """Recompute and persist ``OrderCase.status`` from the case's child
+    records plus the incoming event's ``final_status``.
+
+    Returns ``(case, changed)``. ``changed`` is True only when the
+    aggregated status differs from the stored one. Cosign-parked cases
+    (``pending_override`` set) are returned untouched — the cosign flow
+    owns the status while an override is staged.
+
+    ``closed_at`` tracks the terminal status: a terminal aggregate
+    (RESOLVED / FAILED / BLOCKED) stamps it when unset; a non-terminal
+    aggregate clears it. The clear path matters for multi-issue cases
+    — a case that auto-blocked on its first record and then takes a
+    sibling needing review rolls back to OPEN_AWAITING_HUMAN, and a
+    reopened case must not carry a stale close timestamp.
+
+    WS emission is left to the caller so it can pick ``case_open`` vs
+    ``case_update`` vs ``case_close``.
+    """
+    case = case_store.get(case_id)
+    if case is None:
+        return None, False
+    if case.pending_override is not None:
+        return case, False
+    new_status = _aggregate_case_status(
+        tenant_id, case_id, incoming_final_status,
+    )
+    if new_status == case.status:
+        return case, False
+    fields: dict[str, Any] = {"status": new_status}
+    if new_status in TERMINAL_CASE_STATUSES:
+        if case.closed_at is None:
+            fields["closed_at"] = datetime.now(timezone.utc).isoformat()
+    elif case.closed_at is not None:
+        # Reopened — drop the stale close timestamp.
+        fields["closed_at"] = None
+    return case_store.update(case_id, **fields), True
+
+
 def materialise_for_event(
     tenant_id: str,
     event: OrderEvent,
@@ -182,11 +312,28 @@ def materialise_for_event(
     case, opened_now = resolve_or_open_case(
         tenant_id, event, bundle_version_at_open=bundle_version_at_open,
     )
-    # ADR-038 §H.6 / Phase 28.5 — emit `case_open` once per materialisation
-    # so the UI's `useCases` hook can refetch and the listening client
-    # sees the new case without polling. We emit only on `opened_now`;
-    # subsequent events attaching to the same case are routed through
-    # the per-exception telemetry already in place.
+    # ADR-038 §6.1 — roll the case status up from its child records.
+    # This event's record persists immediately after this call, so its
+    # `final_status` is folded in explicitly (it isn't in the store
+    # yet). On the attach path this is how a sibling record flips the
+    # parent case from RESOLVED back to OPEN_AWAITING_HUMAN.
+    recomputed, status_changed = recompute_case_status(
+        tenant_id, case.case_id, final_status,
+    )
+    if recomputed is not None:
+        case = recomputed
+    # ADR-038 §H.6 / Phase 28.5 — emit a case WSEvent so the UI's
+    # `useCases` hook refetches without polling. A freshly-opened case
+    # emits `case_open` (carrying the already-recomputed status); an
+    # existing case whose status changed emits `case_close` (terminal
+    # aggregate) or `case_update` (non-terminal). An attach that
+    # doesn't move the status emits nothing — the per-exception
+    # telemetry already covers it.
     if opened_now:
         publish_case_open(case)
+    elif status_changed:
+        if is_terminal_status(case.status):
+            publish_case_close(case)
+        else:
+            publish_case_update(case, updated_fields=["status"])
     return case
