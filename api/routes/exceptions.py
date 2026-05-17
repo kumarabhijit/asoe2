@@ -123,6 +123,22 @@ def _get_or_404(exception_id: str, tenant_id: str):
     return record
 
 
+def _reaggregate_parent_case(tenant_id: str, record) -> None:
+    """ADR-038 §6.1 — re-aggregate the parent case after a HITL action
+    changed a record's lifecycle (disposition / cosign / escalate /
+    reanalyze / challenge / admin-release), so the case status does
+    not sit stale until the next event materialises.
+
+    No-op when the record has no parent case (the Tier-1 stateless
+    path persists with `parent_case_id = None`); cosign-parked cases
+    are skipped, and a real status change emits the matching case
+    WSEvent — both handled inside `recompute_case_status`.
+    """
+    if record is not None and record.parent_case_id:
+        from api.case_resolver import recompute_case_status
+        recompute_case_status(tenant_id, record.parent_case_id)
+
+
 def _record_reviewer_override_of_llm_downgrade(exception_id: str) -> None:
     """Increment the ADR-039 §6.3 X.2→X.3 ratification-gate counter
     when an operator overrides an exception whose L2 LLM Shadow had
@@ -1007,6 +1023,10 @@ async def cosign_override(
             change_reason=req.notes,
         )
 
+    # ADR-038 §6.1 — cosign approve resolves the record, reject
+    # restores its prior lifecycle; either way re-aggregate the case.
+    _reaggregate_parent_case(tenant_id, updated)
+
     response = updated.to_detail()
     if key is not None:
         _idempotency_store(
@@ -1261,15 +1281,10 @@ async def disposition_exception(
     if sub_type == "OVERRIDE":
         _record_reviewer_override_of_llm_downgrade(exception_id)
 
-    # ADR-038 §6.1 — the disposition just moved this record to a new
+    # ADR-038 §6.1 — the disposition moved this record to a new
     # terminal lifecycle (RESOLVED / REJECTED); re-aggregate the parent
-    # case so its status reflects the new child state. The record is
-    # already persisted with its new lifecycle, so no incoming status
-    # is folded in. Cosign-parked cases are skipped inside the helper,
-    # and a real status change emits the matching case WSEvent.
-    if updated.parent_case_id:
-        from api.case_resolver import recompute_case_status
-        recompute_case_status(tenant_id, updated.parent_case_id)
+    # case so its status reflects the new child state.
+    _reaggregate_parent_case(tenant_id, updated)
 
     response = updated.to_detail()
     if key is not None:
@@ -1361,6 +1376,10 @@ async def escalate_exception(
         changed_by=user.sub,
         change_reason=req.reason,
     )
+
+    # ADR-038 §6.1 — the record moved to ESCALATED; re-aggregate the
+    # parent case (an escalated child holds it at OPEN_AWAITING_HUMAN).
+    _reaggregate_parent_case(tenant_id, updated)
 
     response = updated.to_detail()
     if key is not None:
@@ -1631,6 +1650,10 @@ async def reanalyze_exception(
     # Publish task_complete over pub/sub so subscribed clients refresh.
     _publish_task_complete(tenant_id, exception_id, new_trace_id, final_state)
 
+    # ADR-038 §6.1 — reanalysis gave the record a new final_status /
+    # lifecycle; re-aggregate the parent case.
+    _reaggregate_parent_case(tenant_id, updated)
+
     return updated.to_detail()
 
 
@@ -1685,6 +1708,10 @@ async def challenge_exception(
         changed_by=user.sub,
         change_reason=req.challenge_reason,
     )
+
+    # ADR-038 §6.1 — a challenged record reopens to ESCALATED;
+    # re-aggregate the parent case off RESOLVED.
+    _reaggregate_parent_case(tenant_id, updated)
 
     return updated.to_detail()
 
@@ -1742,6 +1769,10 @@ async def admin_release_exception(
         changed_by=user.sub,
         change_reason=req.release_reason,
     )
+
+    # ADR-038 §6.1 — the record moved BLOCKED → PENDING_ADMIN_REVIEW;
+    # re-aggregate the parent case off the terminal BLOCKED status.
+    _reaggregate_parent_case(tenant_id, updated)
 
     return updated.to_detail()
 

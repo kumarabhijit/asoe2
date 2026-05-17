@@ -272,6 +272,44 @@ class TestMultiIssueCase:
         assert final["status"] == "RESOLVED"
         assert final["closed_at"] is not None
 
+    def test_escalate_reopens_a_resolved_case(self, client, analyst_token):
+        """A second HITL endpoint (`/escalate`) re-aggregates too:
+        escalating the only child of a BLOCKED case reopens it to
+        OPEN_AWAITING_HUMAN and clears the stale closed_at."""
+        exc = _resolve(
+            client, analyst_token,
+            _dup_po_event("SO-ESC-1", high_confidence=True),
+        )
+        assert exc["final_status"] == "BLOCKED"
+        detail = client.get(
+            f"/api/v1/exceptions/{exc['exception_id']}",
+            headers=_auth(analyst_token),
+        ).json()
+        case_id = detail["parent_case_id"]
+
+        before = client.get(
+            f"/api/v1/cases/{case_id}", headers=_auth(analyst_token),
+        ).json()
+        assert before["status"] == "BLOCKED"
+        assert before["closed_at"] is not None
+
+        # Escalate the blocked child — it moves to ESCALATED.
+        esc = client.post(
+            f"/api/v1/exceptions/{exc['exception_id']}/escalate",
+            json={"reason": "Manual review of the duplicate block.",
+                  "to_role": "manager"},
+            headers=_auth(analyst_token),
+        )
+        assert esc.status_code == 200, esc.text
+        assert esc.json()["lifecycle_state"] == "ESCALATED"
+
+        after = client.get(
+            f"/api/v1/cases/{case_id}", headers=_auth(analyst_token),
+        ).json()
+        # The case reopened — no longer terminal, closed_at dropped.
+        assert after["status"] == "OPEN_AWAITING_HUMAN"
+        assert after["closed_at"] is None
+
     def test_all_blocked_children_aggregate_to_blocked(
         self, client, analyst_token,
     ):
