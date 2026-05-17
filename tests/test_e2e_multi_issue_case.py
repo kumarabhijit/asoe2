@@ -54,6 +54,11 @@ def analyst_token():
     return create_test_token(roles=["analyst"], org="tenant-a")
 
 
+@pytest.fixture()
+def manager_token():
+    return create_test_token(roles=["manager"], org="tenant-a")
+
+
 def _auth(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
@@ -195,6 +200,77 @@ class TestMultiIssueCase:
         assert case["status"] == "OPEN_AWAITING_HUMAN"
         # Non-terminal aggregate — the case is not closed.
         assert case["closed_at"] is None
+
+    def test_disposition_re_aggregates_parent_case(
+        self, client, analyst_token, manager_token,
+    ):
+        """A disposition that resolves one child re-aggregates the
+        parent case — and once every child is resolved the case
+        rolls up to RESOLVED (ADR-038 §6.1 / tasks.md 29.7)."""
+        po = "PO-MI-DISPOSITION"
+        # Two YELLOW price-mismatch events for one PO, resolved in
+        # explain mode → both route to MANUAL_REVIEW_REQUIRED, so the
+        # case sits at OPEN_AWAITING_HUMAN.
+        exc_ids = []
+        for i in range(2):
+            r = client.post(
+                "/api/v1/exceptions/resolve/explain",
+                json={
+                    "order_id": f"SO-MI-DISP-{i}",
+                    "po_price": 100.0,
+                    "sap_base_price": 120.0,
+                    "event_type": "EDI_850_PRICE_MISMATCH",
+                    "metadata": {"customer_po_number": po},
+                },
+                headers=_auth(analyst_token),
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["final_status"] == "MANUAL_REVIEW_REQUIRED"
+            exc_ids.append(r.json()["exception_id"])
+
+        detail = client.get(
+            f"/api/v1/exceptions/{exc_ids[0]}", headers=_auth(analyst_token),
+        ).json()
+        case_id = detail["parent_case_id"]
+        assert case_id
+
+        def _case_status() -> dict:
+            return client.get(
+                f"/api/v1/cases/{case_id}", headers=_auth(analyst_token),
+            ).json()
+
+        assert _case_status()["status"] == "OPEN_AWAITING_HUMAN"
+
+        # Disposition the first record → RESOLVED. One sibling is still
+        # awaiting review, so the case stays at OPEN_AWAITING_HUMAN.
+        d1 = client.patch(
+            f"/api/v1/exceptions/{exc_ids[0]}/disposition",
+            json={
+                "action": "ALLOW_BOTH",
+                "notes": "Reviewed — price variance approved.",
+                "reason_tag": "OTHER",
+            },
+            headers=_auth(manager_token),
+        )
+        assert d1.status_code == 200, d1.text
+        assert d1.json()["lifecycle_state"] == "RESOLVED"
+        assert _case_status()["status"] == "OPEN_AWAITING_HUMAN"
+
+        # Disposition the second record → every child is now resolved,
+        # so the case rolls up to RESOLVED and stamps closed_at.
+        d2 = client.patch(
+            f"/api/v1/exceptions/{exc_ids[1]}/disposition",
+            json={
+                "action": "ALLOW_BOTH",
+                "notes": "Reviewed — price variance approved.",
+                "reason_tag": "OTHER",
+            },
+            headers=_auth(manager_token),
+        )
+        assert d2.status_code == 200, d2.text
+        final = _case_status()
+        assert final["status"] == "RESOLVED"
+        assert final["closed_at"] is not None
 
     def test_all_blocked_children_aggregate_to_blocked(
         self, client, analyst_token,

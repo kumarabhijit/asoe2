@@ -1261,6 +1261,16 @@ async def disposition_exception(
     if sub_type == "OVERRIDE":
         _record_reviewer_override_of_llm_downgrade(exception_id)
 
+    # ADR-038 §6.1 — the disposition just moved this record to a new
+    # terminal lifecycle (RESOLVED / REJECTED); re-aggregate the parent
+    # case so its status reflects the new child state. The record is
+    # already persisted with its new lifecycle, so no incoming status
+    # is folded in. Cosign-parked cases are skipped inside the helper,
+    # and a real status change emits the matching case WSEvent.
+    if updated.parent_case_id:
+        from api.case_resolver import recompute_case_status
+        recompute_case_status(tenant_id, updated.parent_case_id)
+
     response = updated.to_detail()
     if key is not None:
         _idempotency_store(

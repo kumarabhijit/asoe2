@@ -167,6 +167,36 @@ class TestAggregateCaseStatus:
         )
 
 
+class TestAggregateNoIncoming:
+    """`_aggregate_case_status` with no incoming record — the
+    disposition path re-aggregates already-persisted children only."""
+
+    def test_no_children_no_incoming_returns_none(self):
+        case = _open_case()
+        # Nothing to aggregate — the case keeps its current status.
+        assert _aggregate_case_status("t1", case.case_id) is None
+
+    def test_persisted_children_only(self):
+        case = _open_case()
+        _attach_record("t1", case.case_id, "SO-1", "COMPLETE")
+        _attach_record("t1", case.case_id, "SO-2", "MANUAL_REVIEW_REQUIRED")
+        # No incoming folded in — pure roll-up of the two persisted rows.
+        assert (
+            _aggregate_case_status("t1", case.case_id) == "OPEN_AWAITING_HUMAN"
+        )
+
+    def test_no_incoming_differs_from_explicit_none_incoming(self):
+        # A bare case: with no incoming there is nothing to aggregate;
+        # with an explicit incoming whose final_status is None the
+        # incoming record still counts (lifecycle INGESTED).
+        case = _open_case()
+        assert _aggregate_case_status("t1", case.case_id) is None
+        assert (
+            _aggregate_case_status("t1", case.case_id, None)
+            == "OPEN_AWAITING_HUMAN"
+        )
+
+
 # ---------------------------------------------------------------------------
 # recompute_case_status — persist + closed_at + cosign skip
 # ---------------------------------------------------------------------------
@@ -199,6 +229,23 @@ class TestRecomputeCaseStatus:
         )
         assert changed is False
         assert updated.status == "OPEN_AWAITING_HUMAN"
+
+    def test_no_incoming_re_aggregates_persisted_children(self):
+        # The disposition path: children are already persisted with
+        # their new lifecycle; recompute folds in no incoming record.
+        case = _open_case()
+        _attach_record("t1", case.case_id, "SO-1", "COMPLETE")
+        _attach_record("t1", case.case_id, "SO-2", "COMPLETE")
+        updated, changed = recompute_case_status("t1", case.case_id)
+        assert changed is True
+        assert updated.status == "RESOLVED"
+        assert updated.closed_at is not None
+
+    def test_no_incoming_empty_case_is_noop(self):
+        case = _open_case()
+        result, changed = recompute_case_status("t1", case.case_id)
+        assert changed is False
+        assert result.status == "OPEN_AGENT_PROCESSING"
 
     def test_terminal_aggregate_stamps_closed_at(self):
         case = _open_case()
