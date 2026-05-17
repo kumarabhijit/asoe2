@@ -2634,7 +2634,46 @@ Done). Cross-repo counterpart: `asoe-ui/tasks.md` Phase 15.
       / `sap_block_code` columns — in-memory `OrderCase` validator
       enforces today; DatabaseBackedStore extension is a separate
       migration round.
-- [ ] asoe-ui three-pane workspace + responsive collapse rules
-      (P3d-remaining) — two-pane shipped; three-pane stays queued.
+- [x] asoe-ui three-pane workspace + responsive collapse rules
+      (P3d-remaining + P3e) — shipped (asoe-ui PRs #165 / #168 / #169).
 - [ ] asoe-ui visual regression baseline (Playwright screenshots) —
       documented as test-strategy Gap 5.
+
+### 29.7 Case-status aggregation (ADR-038 §6.1)
+ADR-038 §6.1 defines `OrderCase.status` as a roll-up of the case's
+child records, but nothing implemented it — the field sat at the
+`OPEN_AGENT_PROCESSING` default forever unless a case-level cosign
+flow ran. The L3 Case Agent that ADR-038 §6 earmarks for
+case-lifecycle judgment is still dormant. This phase wires a
+deterministic materialise-time aggregation as the interim
+implementation.
+- [x] `api/case_resolver.py::_case_status_from_lifecycle` — projects
+      one child record's `lifecycle_state` onto a candidate
+      `CaseStatus`.
+- [x] `api/case_resolver.py::_aggregate_case_status` — folds every
+      attached record plus the incoming (not-yet-persisted) event
+      into one status by the dominance order
+      `OPEN_AWAITING_HUMAN > BLOCKED > FAILED > RESOLVED`. The case
+      sits at the status of its least-settled child.
+- [x] `api/case_resolver.py::recompute_case_status` — recomputes +
+      persists, stamps `closed_at` on a terminal aggregate, clears
+      it on reopen, skips cosign-parked cases (`pending_override`
+      owns the status while staged).
+- [x] `materialise_for_event` calls `recompute_case_status` after
+      `resolve_or_open_case` and emits the matching WSEvent
+      (`case_open` for a fresh case; `case_close` / `case_update`
+      for an attach that moves the status).
+- [x] The projection mirrors the asoe-ui `caseFromMockException` /
+      `aggregateCaseStatus` mock derivation 1:1 — mock preview and
+      the live backend now agree on case status.
+- [x] **34 unit + integration invariants** in
+      `tests/test_case_status_aggregation.py` plus an in-process
+      `TestClient` e2e in `tests/test_e2e_multi_issue_case.py`
+      (N events sharing one customer PO → one case → N attached
+      records → aggregated status). Pairs with the asoe-ui
+      multi-issue mock work (PR #165).
+- [ ] Disposition-triggered re-aggregation — an operator
+      approving / rejecting a record changes its lifecycle but the
+      parent case is not re-aggregated until the next event
+      materialises. `recompute_case_status` is written to be wired
+      into the disposition handler in a follow-on.
