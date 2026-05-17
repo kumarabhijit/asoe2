@@ -225,39 +225,57 @@ def _case_status_from_lifecycle(lifecycle_state: Optional[str]) -> str:
     return "OPEN_AWAITING_HUMAN"
 
 
+# Sentinel — distinguishes "no incoming record" (re-aggregate the
+# already-persisted children only, e.g. the disposition path) from
+# "incoming record whose final_status happens to be None" (the
+# materialise path always has an incoming record).
+_NO_INCOMING: Any = object()
+
+
 def _aggregate_case_status(
     tenant_id: str,
     case_id: str,
-    incoming_final_status: Optional[str],
-) -> str:
+    incoming_final_status: Any = _NO_INCOMING,
+) -> Optional[str]:
     """Return the ``CaseStatus`` aggregated from every record attached
-    to ``case_id`` PLUS the not-yet-persisted incoming record (whose
-    ``final_status`` the caller passes — at materialise time the record
-    is created immediately after this call and isn't in the store yet).
+    to ``case_id``, optionally folding in a not-yet-persisted incoming
+    record.
 
-    The incoming record's lifecycle is derived from its terminal status
-    via ``STATUS_TO_LIFECYCLE`` — the same map ``exception_store.create``
-    applies — so the projection is identical whether the record is
-    already persisted or still incoming.
+    ``incoming_final_status`` is passed by the materialise path, where
+    the event's record is created immediately *after* this call and so
+    isn't in the store yet; its lifecycle is derived from the terminal
+    status via ``STATUS_TO_LIFECYCLE`` — the same map
+    ``exception_store.create`` applies — so the projection is identical
+    whether the record is already persisted or still incoming. Callers
+    re-aggregating already-persisted children (the disposition path)
+    omit it.
+
+    Returns None when the case has no children and no incoming record
+    — there is nothing to aggregate.
     """
     candidates = [
         _case_status_from_lifecycle(r.lifecycle_state)
         for r in exception_store.list_by_case(tenant_id, case_id)
     ]
-    incoming_lifecycle = STATUS_TO_LIFECYCLE.get(
-        incoming_final_status or "", "INGESTED",
-    )
-    candidates.append(_case_status_from_lifecycle(incoming_lifecycle))
+    if incoming_final_status is not _NO_INCOMING:
+        incoming_lifecycle = STATUS_TO_LIFECYCLE.get(
+            incoming_final_status or "", "INGESTED",
+        )
+        candidates.append(_case_status_from_lifecycle(incoming_lifecycle))
+    if not candidates:
+        return None
     return max(candidates, key=lambda s: _CASE_STATUS_RANK[s])
 
 
 def recompute_case_status(
     tenant_id: str,
     case_id: str,
-    incoming_final_status: Optional[str],
+    incoming_final_status: Any = _NO_INCOMING,
+    *,
+    emit: bool = True,
 ) -> Tuple[Optional[OrderCase], bool]:
     """Recompute and persist ``OrderCase.status`` from the case's child
-    records plus the incoming event's ``final_status``.
+    records, optionally folding in an incoming event's ``final_status``.
 
     Returns ``(case, changed)``. ``changed`` is True only when the
     aggregated status differs from the stored one. Cosign-parked cases
@@ -271,8 +289,11 @@ def recompute_case_status(
     sibling needing review rolls back to OPEN_AWAITING_HUMAN, and a
     reopened case must not carry a stale close timestamp.
 
-    WS emission is left to the caller so it can pick ``case_open`` vs
-    ``case_update`` vs ``case_close``.
+    When ``emit`` is True (the default) a real status change publishes
+    the matching WSEvent — ``case_close`` for a terminal aggregate,
+    ``case_update`` otherwise. Callers that emit their own opening
+    signal (``materialise_for_event`` on a freshly-opened case) pass
+    ``emit=False`` to avoid a duplicate event.
     """
     case = case_store.get(case_id)
     if case is None:
@@ -282,7 +303,7 @@ def recompute_case_status(
     new_status = _aggregate_case_status(
         tenant_id, case_id, incoming_final_status,
     )
-    if new_status == case.status:
+    if new_status is None or new_status == case.status:
         return case, False
     fields: dict[str, Any] = {"status": new_status}
     if new_status in TERMINAL_CASE_STATUSES:
@@ -291,7 +312,13 @@ def recompute_case_status(
     elif case.closed_at is not None:
         # Reopened — drop the stale close timestamp.
         fields["closed_at"] = None
-    return case_store.update(case_id, **fields), True
+    updated = case_store.update(case_id, **fields)
+    if emit:
+        if is_terminal_status(new_status):
+            publish_case_close(updated)
+        else:
+            publish_case_update(updated, updated_fields=["status"])
+    return updated, True
 
 
 def materialise_for_event(
@@ -317,23 +344,18 @@ def materialise_for_event(
     # `final_status` is folded in explicitly (it isn't in the store
     # yet). On the attach path this is how a sibling record flips the
     # parent case from RESOLVED back to OPEN_AWAITING_HUMAN.
-    recomputed, status_changed = recompute_case_status(
-        tenant_id, case.case_id, final_status,
+    #
+    # ADR-038 §H.6 / Phase 28.5 — a freshly-opened case emits its own
+    # `case_open` below (carrying the already-recomputed status), so
+    # `recompute_case_status` is told not to also emit. An attach that
+    # moves the status emits `case_close` / `case_update` from inside
+    # `recompute_case_status`; one that doesn't emits nothing — the
+    # per-exception telemetry already covers it.
+    recomputed, _changed = recompute_case_status(
+        tenant_id, case.case_id, final_status, emit=not opened_now,
     )
     if recomputed is not None:
         case = recomputed
-    # ADR-038 §H.6 / Phase 28.5 — emit a case WSEvent so the UI's
-    # `useCases` hook refetches without polling. A freshly-opened case
-    # emits `case_open` (carrying the already-recomputed status); an
-    # existing case whose status changed emits `case_close` (terminal
-    # aggregate) or `case_update` (non-terminal). An attach that
-    # doesn't move the status emits nothing — the per-exception
-    # telemetry already covers it.
     if opened_now:
         publish_case_open(case)
-    elif status_changed:
-        if is_terminal_status(case.status):
-            publish_case_close(case)
-        else:
-            publish_case_update(case, updated_fields=["status"])
     return case

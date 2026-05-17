@@ -2672,8 +2672,14 @@ implementation.
       (N events sharing one customer PO → one case → N attached
       records → aggregated status). Pairs with the asoe-ui
       multi-issue mock work (PR #165).
-- [ ] Disposition-triggered re-aggregation — an operator
-      approving / rejecting a record changes its lifecycle but the
-      parent case is not re-aggregated until the next event
-      materialises. `recompute_case_status` is written to be wired
-      into the disposition handler in a follow-on.
+- [x] Disposition-triggered re-aggregation — `recompute_case_status`
+      gained an optional-incoming form (`_NO_INCOMING` sentinel) and
+      an `emit` flag; `PATCH /api/v1/exceptions/{id}/disposition`
+      now re-aggregates the parent case after a record moves to
+      RESOLVED / REJECTED, so the case status no longer waits for
+      the next event to materialise. Covered by
+      `test_e2e_multi_issue_case.py::test_disposition_re_aggregates_parent_case`.
+- [ ] `POST /escalate` + legacy `POST /override` re-aggregation —
+      these also move a record's lifecycle but do not yet call
+      `recompute_case_status`; a small follow-on (the helper is
+      already incoming-optional).
