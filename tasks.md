@@ -2689,3 +2689,7 @@ implementation.
       was consolidated into `/disposition`.) Escalate's
       terminal→reopen path is covered by
       `test_e2e_multi_issue_case.py::test_escalate_reopens_a_resolved_case`.
+- [x] `docs/AUDITOR_GUIDE.md` §19.7 "Case-status aggregation
+      (ADR-038 §6.1)" added — projection table, dominance order,
+      `closed_at` semantics, cosign-parked skip, and the HITL
+      endpoint → case-effect table. Prior §19.7 renumbered to §19.8.

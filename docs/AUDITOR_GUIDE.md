@@ -861,7 +861,69 @@ For deployments that already have legacy `ExceptionRecord` rows with
 Pass 1 is safe to run unattended; Pass 2 requires Compliance sign-off
 because it changes case references and downstream UI URLs.
 
-### 19.7 What is **not yet** in scope for the auditor
+### 19.7 Case-status aggregation (ADR-038 §6.1)
+
+`OrderCase.status` is **not written directly by any single flow** — it
+is a deterministic roll-up of the case's child `ExceptionRecord`s.
+ADR-038 §6.1 defines the case as sitting at the status of its
+*least-settled* child. The roll-up lives in
+`api/case_resolver.py::recompute_case_status` and mirrors the asoe-ui
+`aggregateCaseStatus` / `caseFromMockException` mock derivation 1:1,
+so the mock-preview layer and the live backend agree.
+
+**Projection** — each child's `lifecycle_state` maps to a candidate
+`CaseStatus`:
+
+| Child `lifecycle_state` | Candidate `CaseStatus` |
+|---|---|
+| `RESOLVED` / `CLOSED` | `RESOLVED` |
+| `BLOCKED` | `BLOCKED` |
+| `FAILED` | `FAILED` |
+| `PENDING_REVIEW` / `ESCALATED` / `PENDING_ADMIN_REVIEW` / `PENDING_COSIGN` / `REJECTED` / `INGESTED` / `CLASSIFYING` / `AUDITING` | `OPEN_AWAITING_HUMAN` |
+
+**Dominance order** (highest wins): `OPEN_AWAITING_HUMAN > BLOCKED >
+FAILED > RESOLVED`. A case only reaches a terminal status once **every**
+child has terminal-closed; one child still awaiting a human holds the
+whole case at `OPEN_AWAITING_HUMAN`.
+
+**`closed_at`** is stamped when the aggregate becomes terminal
+(`RESOLVED` / `FAILED` / `BLOCKED`) and **cleared** when a case reopens
+(a terminal case that takes a new non-terminal child). An auditor
+reading a case with a non-terminal status will never see a stale
+`closed_at`.
+
+**Cosign-parked cases are skipped** — when `OrderCase.pending_override`
+is set (ADR-040 case-level cosign staged), the cosign flow owns the
+status and aggregation does not run.
+
+**When the case is re-aggregated** — `recompute_case_status` runs:
+
+1. At **materialise time** — `materialise_for_event` folds the incoming
+   event's `final_status` into the roll-up as the record persists.
+2. After **every HITL action that changes a child's lifecycle** — a
+   shared `_reaggregate_parent_case` helper in
+   `api/routes/exceptions.py` fires after the record update:
+
+| Endpoint | Record transition | Effect on the parent case |
+|---|---|---|
+| `PATCH /exceptions/{id}/disposition` | → `RESOLVED` / `REJECTED` | Resolving the last open child rolls the case up to `RESOLVED` |
+| `POST /exceptions/{id}/override/cosign` | approve → `RESOLVED`; reject → prior lifecycle | Re-aggregated on either outcome |
+| `POST /exceptions/{id}/escalate` | → `ESCALATED` | Case reopens to `OPEN_AWAITING_HUMAN` |
+| `POST /exceptions/{id}/reanalyze` | → new `final_status` / lifecycle | Case follows the re-analysed outcome |
+| `POST /exceptions/{id}/challenge` | `RESOLVED` → `ESCALATED` | Case reopens to `OPEN_AWAITING_HUMAN` |
+| `POST /exceptions/{id}/admin-release` | `BLOCKED` → `PENDING_ADMIN_REVIEW` | Case reopens off the terminal `BLOCKED` status |
+
+A re-aggregation that actually changes the status emits the matching
+case WSEvent (`case_close` for a terminal aggregate, `case_update`
+otherwise) so the operator UI refreshes without polling. The helper is
+a no-op for Tier-1 stateless records (`parent_case_id` is `NULL`).
+
+**Interim scope** — this deterministic projection stands in for the
+(still-dormant) L3 Case Agent's case-lifecycle judgment. Regression
+coverage: `tests/test_case_status_aggregation.py` (unit) and
+`tests/test_e2e_multi_issue_case.py` (in-process API e2e).
+
+### 19.8 What is **not yet** in scope for the auditor
 
 The following ADR-038 items are still pending and should not be
 relied upon for audit evidence yet:
