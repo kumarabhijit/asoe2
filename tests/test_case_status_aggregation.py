@@ -89,15 +89,21 @@ class TestCaseStatusFromLifecycle:
     def test_failed_projects_to_failed(self):
         assert _case_status_from_lifecycle("FAILED") == "FAILED"
 
+    def test_rejected_projects_to_resolved(self):
+        # REJECTED is a settled child — the operator dispositioned it
+        # with NO_ACTION (resolved_by stamped, EXCEPTION_RESOLVED
+        # audited). It is terminal-closed for the case roll-up.
+        assert _case_status_from_lifecycle("REJECTED") == "RESOLVED"
+
     @pytest.mark.parametrize(
         "lifecycle",
         ["PENDING_REVIEW", "ESCALATED", "PENDING_ADMIN_REVIEW",
-         "PENDING_COSIGN", "REJECTED", "INGESTED", "CLASSIFYING", "AUDITING"],
+         "PENDING_COSIGN", "INGESTED", "CLASSIFYING", "AUDITING"],
     )
     def test_unsettled_lifecycles_project_to_awaiting_human(self, lifecycle):
-        # Every non-terminal (and the human-rejected) lifecycle means
-        # someone still owes forward progress — mirrors the asoe-ui
-        # `caseFromMockException` default branch.
+        # Every non-terminal lifecycle means someone still owes forward
+        # progress — mirrors the asoe-ui `caseFromMockException`
+        # default branch.
         assert _case_status_from_lifecycle(lifecycle) == "OPEN_AWAITING_HUMAN"
 
 
@@ -157,13 +163,23 @@ class TestAggregateCaseStatus:
             == "FAILED"
         )
 
-    def test_rejected_incoming_projects_to_awaiting_human(self):
-        # REJECTED → lifecycle REJECTED → OPEN_AWAITING_HUMAN, parity
-        # with the asoe-ui `caseFromMockException` default branch.
+    def test_rejected_incoming_counts_as_settled(self):
+        # REJECTED → lifecycle REJECTED → RESOLVED candidate: a
+        # NO_ACTION disposition is a completed human decision, so a
+        # case whose only child is rejected rolls up to RESOLVED.
         case = _open_case()
         assert (
-            _aggregate_case_status("t1", case.case_id, "REJECTED")
-            == "OPEN_AWAITING_HUMAN"
+            _aggregate_case_status("t1", case.case_id, "REJECTED") == "RESOLVED"
+        )
+
+    def test_rejected_sibling_does_not_hold_case_open(self):
+        # A rejected child must not keep an otherwise-resolved case in
+        # the operator queue.
+        case = _open_case()
+        _attach_record("t1", case.case_id, "SO-1", "REJECTED")
+        _attach_record("t1", case.case_id, "SO-2", "COMPLETE")
+        assert (
+            _aggregate_case_status("t1", case.case_id, "COMPLETE") == "RESOLVED"
         )
 
 

@@ -876,10 +876,16 @@ so the mock-preview layer and the live backend agree.
 
 | Child `lifecycle_state` | Candidate `CaseStatus` |
 |---|---|
-| `RESOLVED` / `CLOSED` | `RESOLVED` |
+| `RESOLVED` / `CLOSED` / `REJECTED` | `RESOLVED` |
 | `BLOCKED` | `BLOCKED` |
 | `FAILED` | `FAILED` |
-| `PENDING_REVIEW` / `ESCALATED` / `PENDING_ADMIN_REVIEW` / `PENDING_COSIGN` / `REJECTED` / `INGESTED` / `CLASSIFYING` / `AUDITING` | `OPEN_AWAITING_HUMAN` |
+| `PENDING_REVIEW` / `ESCALATED` / `PENDING_ADMIN_REVIEW` / `PENDING_COSIGN` / `INGESTED` / `CLASSIFYING` / `AUDITING` | `OPEN_AWAITING_HUMAN` |
+
+`REJECTED` is a **settled** child — a `NO_ACTION` disposition is a
+completed human decision (`resolved_by` stamped, audited as
+`EXCEPTION_RESOLVED`), so it counts as terminal-closed for the
+roll-up. A case whose children are all resolved and/or rejected
+closes; a rejected child never holds a case open in the queue.
 
 **Dominance order** (highest wins): `OPEN_AWAITING_HUMAN > BLOCKED >
 FAILED > RESOLVED`. A case only reaches a terminal status once **every**
