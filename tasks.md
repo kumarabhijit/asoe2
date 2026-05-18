@@ -2679,7 +2679,17 @@ implementation.
       RESOLVED / REJECTED, so the case status no longer waits for
       the next event to materialise. Covered by
       `test_e2e_multi_issue_case.py::test_disposition_re_aggregates_parent_case`.
-- [ ] `POST /escalate` + legacy `POST /override` re-aggregation —
-      these also move a record's lifecycle but do not yet call
-      `recompute_case_status`; a small follow-on (the helper is
-      already incoming-optional).
+- [x] Full HITL re-aggregation coverage — a shared
+      `_reaggregate_parent_case` helper in `api/routes/exceptions.py`
+      now fires after **every** endpoint that mutates a record's
+      lifecycle: `/disposition`, `/cosign`, `/escalate`,
+      `/reanalyze`, `/challenge` and `/admin-release`. The parent
+      case status never sits stale behind a record state change.
+      (There is no separate legacy `/override` endpoint — override
+      was consolidated into `/disposition`.) Escalate's
+      terminal→reopen path is covered by
+      `test_e2e_multi_issue_case.py::test_escalate_reopens_a_resolved_case`.
+- [x] `docs/AUDITOR_GUIDE.md` §19.7 "Case-status aggregation
+      (ADR-038 §6.1)" added — projection table, dominance order,
+      `closed_at` semantics, cosign-parked skip, and the HITL
+      endpoint → case-effect table. Prior §19.7 renumbered to §19.8.

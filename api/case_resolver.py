@@ -213,15 +213,19 @@ def _case_status_from_lifecycle(lifecycle_state: Optional[str]) -> str:
     ``CaseStatus``. Mirrors the asoe-ui `caseFromMockException` switch
     exactly so backend and mock-preview agree.
     """
-    if lifecycle_state in ("RESOLVED", "CLOSED"):
+    if lifecycle_state in ("RESOLVED", "CLOSED", "REJECTED"):
+        # REJECTED is a *settled* child: the operator dispositioned it
+        # with NO_ACTION (`resolved_by` is stamped and the action is
+        # audited as EXCEPTION_RESOLVED). It is terminal-closed for the
+        # case roll-up — not a child that still owes a human decision.
         return "RESOLVED"
     if lifecycle_state == "BLOCKED":
         return "BLOCKED"
     if lifecycle_state == "FAILED":
         return "FAILED"
     # PENDING_REVIEW / ESCALATED / PENDING_ADMIN_REVIEW / PENDING_COSIGN
-    # / REJECTED / INGESTED / CLASSIFYING / AUDITING — a human (or the
-    # agent) still owes forward progress on this child.
+    # / INGESTED / CLASSIFYING / AUDITING — a human (or the agent) still
+    # owes forward progress on this child.
     return "OPEN_AWAITING_HUMAN"
 
 

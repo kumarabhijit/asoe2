@@ -272,6 +272,94 @@ class TestMultiIssueCase:
         assert final["status"] == "RESOLVED"
         assert final["closed_at"] is not None
 
+    def test_rejected_child_closes_the_case(
+        self, client, analyst_token, manager_token,
+    ):
+        """A NO_ACTION disposition (REJECT) is a completed human
+        decision — the record goes REJECTED and the parent case rolls
+        up to RESOLVED, not stuck OPEN_AWAITING_HUMAN."""
+        r = client.post(
+            "/api/v1/exceptions/resolve/explain",
+            json={
+                "order_id": "SO-REJECT-1",
+                "po_price": 100.0,
+                "sap_base_price": 120.0,
+                "event_type": "EDI_850_PRICE_MISMATCH",
+                "metadata": {"customer_po_number": "PO-REJECT-CASE"},
+            },
+            headers=_auth(analyst_token),
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["final_status"] == "MANUAL_REVIEW_REQUIRED"
+        exc_id = r.json()["exception_id"]
+
+        detail = client.get(
+            f"/api/v1/exceptions/{exc_id}", headers=_auth(analyst_token),
+        ).json()
+        case_id = detail["parent_case_id"]
+        before = client.get(
+            f"/api/v1/cases/{case_id}", headers=_auth(analyst_token),
+        ).json()
+        assert before["status"] == "OPEN_AWAITING_HUMAN"
+
+        # Reject the exception — action NO_ACTION → sub_type REJECT.
+        d = client.patch(
+            f"/api/v1/exceptions/{exc_id}/disposition",
+            json={
+                "action": "NO_ACTION",
+                "notes": "Reviewed — price variance within tolerance, no action.",
+                "reason_tag": "OTHER",
+            },
+            headers=_auth(manager_token),
+        )
+        assert d.status_code == 200, d.text
+        assert d.json()["lifecycle_state"] == "REJECTED"
+
+        after = client.get(
+            f"/api/v1/cases/{case_id}", headers=_auth(analyst_token),
+        ).json()
+        # The rejected child is settled — the case closes.
+        assert after["status"] == "RESOLVED"
+        assert after["closed_at"] is not None
+
+    def test_escalate_reopens_a_resolved_case(self, client, analyst_token):
+        """A second HITL endpoint (`/escalate`) re-aggregates too:
+        escalating the only child of a BLOCKED case reopens it to
+        OPEN_AWAITING_HUMAN and clears the stale closed_at."""
+        exc = _resolve(
+            client, analyst_token,
+            _dup_po_event("SO-ESC-1", high_confidence=True),
+        )
+        assert exc["final_status"] == "BLOCKED"
+        detail = client.get(
+            f"/api/v1/exceptions/{exc['exception_id']}",
+            headers=_auth(analyst_token),
+        ).json()
+        case_id = detail["parent_case_id"]
+
+        before = client.get(
+            f"/api/v1/cases/{case_id}", headers=_auth(analyst_token),
+        ).json()
+        assert before["status"] == "BLOCKED"
+        assert before["closed_at"] is not None
+
+        # Escalate the blocked child — it moves to ESCALATED.
+        esc = client.post(
+            f"/api/v1/exceptions/{exc['exception_id']}/escalate",
+            json={"reason": "Manual review of the duplicate block.",
+                  "to_role": "manager"},
+            headers=_auth(analyst_token),
+        )
+        assert esc.status_code == 200, esc.text
+        assert esc.json()["lifecycle_state"] == "ESCALATED"
+
+        after = client.get(
+            f"/api/v1/cases/{case_id}", headers=_auth(analyst_token),
+        ).json()
+        # The case reopened — no longer terminal, closed_at dropped.
+        assert after["status"] == "OPEN_AWAITING_HUMAN"
+        assert after["closed_at"] is None
+
     def test_all_blocked_children_aggregate_to_blocked(
         self, client, analyst_token,
     ):
