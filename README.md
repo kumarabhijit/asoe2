@@ -1131,6 +1131,7 @@ k8s/                Kubernetes manifests for AKS production deployment
 | `architecture_v3.md` | Architecture patterns and principles: Skill–Recipe decoupling, Hexagonal Gateways, Saga workflows, execution invariants |
 | `DESIGN.md` | Implementation reference: module map, class/function names, graph node wiring, env vars, container layout |
 | `docs/AUDITOR_GUIDE.md` | Audit controls: constrained-generation boundaries, kill switch, explain mode, 10 execution invariants |
+| `docs/STATUS_MODEL.md` | The seven status/state surfaces (Intent, Shadow verdict, `final_status`, `lifecycle_state`, disposition sub-type, `OrderCase.status`, workflow result) — allowed values, the causal chain, and the deterministic derivation maps between them |
 | `contracts/policy.py` | Centralised business thresholds — discount limits, circuit breaker bounds, credit exposure tolerance |
 | `docs/adr/ADR-021-core-deployment-model.md` | Library vs. service deployment decision, staged evolution triggers |
 | `docs/adr/ADR-022-database-access-pattern.md` | Raw SQL vs. ORM decision, migration triggers, expert perspectives |

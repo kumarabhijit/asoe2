@@ -641,6 +641,8 @@ The following are defined in architecture_v3.md and will be implemented as the F
 
 > **Current V1 behavior:** The graph terminates on YELLOW verdict (`final_status = MANUAL_REVIEW_REQUIRED`). The full interrupt/checkpoint/resume mechanism is a V1.1 target.
 
+> **Status surfaces:** for the full set of status/state fields — Intent, Shadow verdict, `final_status` (`TerminalStatus`), the 12-state `lifecycle_state`, disposition sub-type, and `OrderCase.status` — plus the deterministic derivation maps between them, see `docs/STATUS_MODEL.md`.
+
 ---
 
 ## 15. API Layer (FastAPI)

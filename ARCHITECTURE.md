@@ -95,6 +95,8 @@ Full REST + WebSocket endpoint specification.
 ## 7. Data Architecture
 Persistence is handled by PostgreSQL, utilizing a tenant-isolated schema design.
 ### 7.1 Exception Lifecycle (8 States)
+> **Authoritative detail:** this section is an abstracted summary. For the code-accurate model — the 12-state `LIFECYCLE_STATES`, the `final_status` / Shadow-verdict / `OrderCase.status` surfaces, and the deterministic maps between them — see `docs/STATUS_MODEL.md`.
+
 The lifecycle follows the order of pipeline execution. The `shadow_audit` node (AUDITING) runs before any human decision point; its verdict determines whether the PENDING_APPROVAL state is entered.
 
  1. DETECTED → 2. ANALYZING → 3. AUDITING (Shadow Audit) → 4. PENDING_APPROVAL (HITL Wait State, YELLOW path only) → 5. EXECUTING → 6. RESOLVED (Terminal Success) → 7. FAILED (Terminal Error) → 8. ARCHIVED
