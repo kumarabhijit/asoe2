@@ -1815,8 +1815,7 @@
             "title": "Intent"
           },
           "lifecycle_state": {
-            "title": "Lifecycle State",
-            "type": "string"
+            "$ref": "#/components/schemas/LifecycleState"
           },
           "order_id": {
             "title": "Order Id",
@@ -2026,8 +2025,7 @@
             "title": "Intent"
           },
           "lifecycle_state": {
-            "title": "Lifecycle State",
-            "type": "string"
+            "$ref": "#/components/schemas/LifecycleState"
           },
           "order_id": {
             "title": "Order Id",
@@ -2304,7 +2302,7 @@
           },
           "lifecycle_states": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/LifecycleState"
             },
             "title": "Lifecycle States",
             "type": "array"
@@ -2497,6 +2495,25 @@
         ],
         "title": "InboundOrder",
         "type": "object"
+      },
+      "LifecycleState": {
+        "description": "The 12-state per-exception lifecycle (architecture_v3.md \u00a79.1).\n\nA ``str`` enum, so existing string comparisons keep working \u2014 this\ntype simply gives the lifecycle vocabulary the same compile-time\nfooting as ``TerminalStatus`` / ``Intent`` / ``ShadowStatus``. See\n``docs/STATUS_MODEL.md`` for how it relates to ``final_status``\n(``TerminalStatus``) and the case-level ``CaseStatus``.",
+        "enum": [
+          "INGESTED",
+          "CLASSIFYING",
+          "AUDITING",
+          "PENDING_REVIEW",
+          "ESCALATED",
+          "PENDING_ADMIN_REVIEW",
+          "PENDING_COSIGN",
+          "RESOLVED",
+          "FAILED",
+          "BLOCKED",
+          "REJECTED",
+          "CLOSED"
+        ],
+        "title": "LifecycleState",
+        "type": "string"
       },
       "LineAnalysis": {
         "description": "Analysis details for a single line item.",

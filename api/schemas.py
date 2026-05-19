@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from contracts.models import ExecutedNode, GatewayCallSpan, OrderEvent
+from contracts.models import ExecutedNode, GatewayCallSpan, LifecycleState, OrderEvent
 
 # Re-exported so OpenAPI consumers see ExecutedNode / GatewayCallSpan
 # under api.schemas. The domain definitions live in contracts/models.py
@@ -186,7 +186,7 @@ class HealthResponse(BaseModel):
     kill_switch: bool
     explain_mode: bool
     allowed_intents: List[str]
-    lifecycle_states: List[str]
+    lifecycle_states: List[LifecycleState]
     allowed_recipes: List[str]
     allowed_resolution_actions: List[str]
     allowed_override_reason_tags: List[str]
@@ -230,7 +230,7 @@ class ExceptionSummary(BaseModel):
     order_id: str
     event_type: str
     intent: Optional[str] = None
-    lifecycle_state: str
+    lifecycle_state: LifecycleState
     shadow_verdict: Optional[str] = None
     selected_recipe: Optional[str] = None
     final_status: Optional[str] = None
@@ -261,7 +261,7 @@ class ExceptionDetailResponse(BaseModel):
     order_id: str
     event_type: str
     intent: Optional[str] = None
-    lifecycle_state: str
+    lifecycle_state: LifecycleState
     shadow_verdict: Optional[str] = None
     selected_recipe: Optional[str] = None
     final_status: Optional[str] = None
@@ -456,11 +456,11 @@ class ReanalysisHistoryEntry(BaseModel):
     prior_trace_id: str
     prior_shadow_verdict: Optional[str] = None
     prior_final_status: Optional[str] = None
-    prior_lifecycle_state: str
+    prior_lifecycle_state: LifecycleState
     new_trace_id: str
     new_shadow_verdict: Optional[str] = None
     new_final_status: Optional[str] = None
-    new_lifecycle_state: str
+    new_lifecycle_state: LifecycleState
     executed_nodes: List[ExecutedNode] = Field(default_factory=list)
 
 
