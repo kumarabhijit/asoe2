@@ -8,6 +8,7 @@ Also read each document you are about to update so you understand its current st
 Target documents (update only the ones relevant to what has changed):
 - README.md              — engineer cookbook; audience: novice engineers onboarding to the project
 - docs/AUDITOR_GUIDE.md  — audit controls reference; audience: auditors and operators
+- docs/STATUS_MODEL.md   — status/state surface reference; audience: engineers and auditors. Update when an Intent / ShadowStatus / TerminalStatus / CaseStatus / LIFECYCLE_STATES value changes, when STATUS_TO_LIFECYCLE or _case_status_from_lifecycle changes a mapping, when the _aggregate_case_status dominance order changes, or when a HITL endpoint's lifecycle transition changes (see its own §7).
 - docs/adr/*.md          — architecture decision records; audience: architects and senior engineers
 - tasks.md               — phase checklist; mark completed items with [x]
 - prompts/phase_*.md     — phase-specific build prompts; add new phases as needed
