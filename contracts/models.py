@@ -47,26 +47,46 @@ class TerminalStatus(str, Enum):
     AUDIT_CONTEXT_MISSING = "AUDIT_CONTEXT_MISSING"
 
 
+class LifecycleState(str, Enum):
+    """The 12-state per-exception lifecycle (architecture_v3.md §9.1).
+
+    A ``str`` enum, so existing string comparisons keep working — this
+    type simply gives the lifecycle vocabulary the same compile-time
+    footing as ``TerminalStatus`` / ``Intent`` / ``ShadowStatus``. See
+    ``docs/STATUS_MODEL.md`` for how it relates to ``final_status``
+    (``TerminalStatus``) and the case-level ``CaseStatus``.
+    """
+    INGESTED = "INGESTED"
+    CLASSIFYING = "CLASSIFYING"
+    AUDITING = "AUDITING"
+    PENDING_REVIEW = "PENDING_REVIEW"
+    ESCALATED = "ESCALATED"
+    PENDING_ADMIN_REVIEW = "PENDING_ADMIN_REVIEW"
+    PENDING_COSIGN = "PENDING_COSIGN"
+    RESOLVED = "RESOLVED"
+    FAILED = "FAILED"
+    BLOCKED = "BLOCKED"
+    REJECTED = "REJECTED"
+    CLOSED = "CLOSED"
+
+
 # Single source of truth: maps TerminalStatus to exception lifecycle state.
 # Consumed by api/store.py (in-memory) and db/repository.py (database).
 STATUS_TO_LIFECYCLE: Dict[str, str] = {
-    "COMPLETE": "RESOLVED",
-    "FAIL_TO_HUMAN": "FAILED",
-    "MANUAL_REVIEW_REQUIRED": "PENDING_REVIEW",
-    "BLOCKED": "BLOCKED",
-    "REJECTED": "REJECTED",
-    "COMPLETE_WITH_CHILDREN": "RESOLVED",
-    "AUDIT_CONTEXT_MISSING": "FAILED",
+    TerminalStatus.COMPLETE.value: LifecycleState.RESOLVED.value,
+    TerminalStatus.FAIL_TO_HUMAN.value: LifecycleState.FAILED.value,
+    TerminalStatus.MANUAL_REVIEW_REQUIRED.value: LifecycleState.PENDING_REVIEW.value,
+    TerminalStatus.BLOCKED.value: LifecycleState.BLOCKED.value,
+    TerminalStatus.REJECTED.value: LifecycleState.REJECTED.value,
+    TerminalStatus.COMPLETE_WITH_CHILDREN.value: LifecycleState.RESOLVED.value,
+    TerminalStatus.AUDIT_CONTEXT_MISSING.value: LifecycleState.FAILED.value,
 }
 
-# 12-state exception lifecycle (architecture_v3.md §9.1).
-# Consumed by api/routes/health.py and stats queries.
-# PENDING_ADMIN_REVIEW: RED-verdict admin release (three-tier HITL model).
-LIFECYCLE_STATES: List[str] = [
-    "INGESTED", "CLASSIFYING", "AUDITING", "PENDING_REVIEW", "ESCALATED",
-    "PENDING_ADMIN_REVIEW", "PENDING_COSIGN", "RESOLVED",
-    "FAILED", "BLOCKED", "REJECTED", "CLOSED",
-]
+# Ordered list form of `LifecycleState` — single-sourced from the enum
+# so the two never drift. Consumed by api/routes/health.py and stats
+# queries. PENDING_ADMIN_REVIEW: RED-verdict admin release (three-tier
+# HITL model).
+LIFECYCLE_STATES: List[str] = [s.value for s in LifecycleState]
 
 # Valid source states for each HITL action.
 # Consumed by api/routes/exceptions.py for state-machine enforcement.

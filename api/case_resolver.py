@@ -30,6 +30,7 @@ from api.case_events import (
 from api.store import case_store, exception_store
 from contracts.models import (
     STATUS_TO_LIFECYCLE,
+    CaseStatus,
     OrderCase,
     OrderEvent,
     TerminalStatus,
@@ -208,7 +209,7 @@ _CASE_STATUS_RANK = {
 }
 
 
-def _case_status_from_lifecycle(lifecycle_state: Optional[str]) -> str:
+def _case_status_from_lifecycle(lifecycle_state: Optional[str]) -> CaseStatus:
     """Project one child record's ``lifecycle_state`` onto a candidate
     ``CaseStatus``. Mirrors the asoe-ui `caseFromMockException` switch
     exactly so backend and mock-preview agree.
@@ -240,7 +241,7 @@ def _aggregate_case_status(
     tenant_id: str,
     case_id: str,
     incoming_final_status: Any = _NO_INCOMING,
-) -> Optional[str]:
+) -> Optional[CaseStatus]:
     """Return the ``CaseStatus`` aggregated from every record attached
     to ``case_id``, optionally folding in a not-yet-persisted incoming
     record.

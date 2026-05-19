@@ -635,7 +635,7 @@ Production: Kubernetes manifests in `k8s/` (namespace, deployments, services, se
 
 The following are defined in architecture_v3.md and will be implemented as the FastAPI layer is built:
 
-- **11-state exception lifecycle** (INGESTED → CLOSED, including ESCALATED) — architecture_v3.md §9.1
+- **12-state exception lifecycle** — the `LifecycleState` enum (`contracts/models.py`), `INGESTED → CLOSED`; architecture_v3.md §9.1. Full surface map: `docs/STATUS_MODEL.md`
 - **HITL pause/resume** via LangGraph `interrupt()` + `PostgresSaver` checkpoints — architecture_v3.md §5.9
 - **Two-tier timeout escalation** (48h default + 24h escalation window) — architecture_v3.md §5.9
 

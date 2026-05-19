@@ -21,7 +21,7 @@ into one another.
 | 1 | **Intent** | `Intent` enum | per-record | `classify` node (constrained LLM) |
 | 2 | **Shadow verdict** | `ShadowStatus` enum | per-record | `shadow_audit` node (Compliance Shadow) |
 | 3 | **Resolution status** | `final_status` (`TerminalStatus`) | per-record | pipeline terminal (`build_analysis`); `REJECTED` only via HITL |
-| 4 | **Lifecycle state** | `lifecycle_state` (`LIFECYCLE_STATES`) | per-record | derived from `final_status` at persist, then mutated by HITL endpoints |
+| 4 | **Lifecycle state** | `lifecycle_state` (`LifecycleState` enum) | per-record | derived from `final_status` at persist, then mutated by HITL endpoints |
 | 5 | **Disposition sub-type** | `sub_type` (derived, not persisted) | per HITL `/disposition` call | `disposition_exception` handler |
 | 6 | **Case status** | `OrderCase.status` (`CaseStatus`) | per-case (roll-up of children) | `recompute_case_status` (`api/case_resolver.py`) |
 | 7 | **Workflow result** | saga result status | per multi-step workflow | saga executor (`orchestration/`) |
@@ -183,8 +183,8 @@ action vs recommended action`. See `docs/AUDITOR_GUIDE.md` §10 / §18.
 
 | Surface / map | Defined in |
 |---|---|
-| `Intent`, `ShadowStatus`, `TerminalStatus` enums | `contracts/models.py` |
-| `LIFECYCLE_STATES`, `STATUS_TO_LIFECYCLE` | `contracts/models.py` |
+| `Intent`, `ShadowStatus`, `TerminalStatus`, `LifecycleState` enums | `contracts/models.py` |
+| `LIFECYCLE_STATES` (single-sourced from `LifecycleState`), `STATUS_TO_LIFECYCLE` | `contracts/models.py` |
 | `CaseStatus`, `OrderCase` | `contracts/models.py` |
 | `_case_status_from_lifecycle`, `_aggregate_case_status`, `recompute_case_status` | `api/case_resolver.py` |
 | Disposition `sub_type` derivation, `_reaggregate_parent_case` | `api/routes/exceptions.py` |

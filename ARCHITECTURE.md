@@ -9,7 +9,7 @@ The Agentic Supply-Chain Operations Engine (ASOE) is an enterprise-grade orchest
  * **System-First, Human-in-the-Loop:** The UI is not a dashboard; it is a control tower. The system acts autonomously up to the limit of its confidence and compliance thresholds, prompting humans only for high-leverage approvals.
  * **Decoupled Reasoning & Execution:** AI is restricted to the "Skill" layer (classification and reasoning). Execution is strictly delegated to immutable, code-bound "Recipes."
  * **Verifiable Determinism:** LLM outputs are constrained, and every action is audited by a deterministic Policy Shadow before execution.
-**V1 Scope:** Focuses primarily on Pricing & Promotional Exceptions with a defined 11-node execution pipeline and 8-state exception lifecycle.
+**V1 Scope:** Focuses primarily on Pricing & Promotional Exceptions with a defined 11-node execution pipeline and 12-state exception lifecycle (see §7.1 / `docs/STATUS_MODEL.md`).
 ## 2. System Context
 ASOE operates as a highly secure bridge and cognitive layer between upstream signal generators and downstream systems of record.
  * **Upstream (OMS/B2B Portals):** Systems generating the raw order telemetry and identifying initial deviations.
@@ -94,17 +94,23 @@ Full REST + WebSocket endpoint specification.
 ```
 ## 7. Data Architecture
 Persistence is handled by PostgreSQL, utilizing a tenant-isolated schema design.
-### 7.1 Exception Lifecycle (8 States)
-> **Authoritative detail:** this section is an abstracted summary. For the code-accurate model — the 12-state `LIFECYCLE_STATES`, the `final_status` / Shadow-verdict / `OrderCase.status` surfaces, and the deterministic maps between them — see `docs/STATUS_MODEL.md`.
+### 7.1 Exception Lifecycle (12 States)
+> **Authoritative detail:** `docs/STATUS_MODEL.md` is the code-accurate reference for every status surface (lifecycle, `final_status`, Shadow verdict, `OrderCase.status`) and the maps between them. This section summarises the per-exception lifecycle only.
 
-The lifecycle follows the order of pipeline execution. The `shadow_audit` node (AUDITING) runs before any human decision point; its verdict determines whether the PENDING_APPROVAL state is entered.
+The per-exception lifecycle is the 12-state `LifecycleState` enum (`contracts/models.py`), single-sourced into the `LIFECYCLE_STATES` list the `/health` endpoint exposes:
 
- 1. DETECTED → 2. ANALYZING → 3. AUDITING (Shadow Audit) → 4. PENDING_APPROVAL (HITL Wait State, YELLOW path only) → 5. EXECUTING → 6. RESOLVED (Terminal Success) → 7. FAILED (Terminal Error) → 8. ARCHIVED
+| Group | States |
+|---|---|
+| In-pipeline (transient) | `INGESTED`, `CLASSIFYING`, `AUDITING` |
+| Awaiting a human | `PENDING_REVIEW`, `ESCALATED`, `PENDING_ADMIN_REVIEW`, `PENDING_COSIGN` |
+| Terminal | `RESOLVED`, `FAILED`, `BLOCKED`, `REJECTED`, `CLOSED` |
 
-**Path variants by shadow_verdict:**
- * **GREEN:** DETECTED → ANALYZING → AUDITING → EXECUTING → RESOLVED (PENDING_APPROVAL is skipped entirely)
- * **YELLOW:** DETECTED → ANALYZING → AUDITING → PENDING_APPROVAL → EXECUTING → RESOLVED
- * **RED:** DETECTED → ANALYZING → AUDITING → FAILED (PENDING_APPROVAL and EXECUTING are never entered)
+The `shadow_audit` node (AUDITING) runs before any human decision point; its verdict determines the state the record lands in:
+ * **GREEN** → `RESOLVED` (auto-resolved; no human step)
+ * **YELLOW** → `PENDING_REVIEW` (a human must disposition the record)
+ * **RED** → `BLOCKED`
+
+HITL actions then move the record between the awaiting-a-human and terminal groups. See `docs/STATUS_MODEL.md` §4 for the full transition table and how `final_status` (`TerminalStatus`) maps onto these states.
 
 ### 7.2 Database Schema Highlights
  * **Exceptions Table:** Stores current state, tenant_id, and recipe_id.
