@@ -33,7 +33,12 @@ from api.case_resolver import (
     recompute_case_status,
 )
 from api.store import case_store, exception_store
-from contracts.models import CasePendingOverride, OrderEvent
+from contracts.models import (
+    LIFECYCLE_STATES,
+    CasePendingOverride,
+    LifecycleState,
+    OrderEvent,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -71,6 +76,30 @@ def _attach_record(tenant_id: str, case_id: str, order_id: str, final_status: st
         final_status=final_status,
         parent_case_id=case_id,
     )
+
+
+# ---------------------------------------------------------------------------
+# LifecycleState — typed canonical vocabulary (STATUS_MODEL.md S1)
+# ---------------------------------------------------------------------------
+
+
+class TestLifecycleStateEnum:
+    """`LifecycleState` is the typed canonical lifecycle vocabulary;
+    `LIFECYCLE_STATES` is single-sourced from it so the two never
+    drift."""
+
+    def test_lifecycle_states_single_sourced_from_enum(self):
+        assert LIFECYCLE_STATES == [s.value for s in LifecycleState]
+
+    def test_twelve_states(self):
+        assert len(LifecycleState) == 12
+
+    def test_str_enum_compares_equal_to_plain_string(self):
+        # `str, Enum` — existing `== "RESOLVED"` comparisons and the
+        # projection's tuple membership checks keep working unchanged.
+        assert LifecycleState.RESOLVED == "RESOLVED"
+        assert _case_status_from_lifecycle(LifecycleState.REJECTED) == "RESOLVED"
+        assert _case_status_from_lifecycle(LifecycleState.BLOCKED) == "BLOCKED"
 
 
 # ---------------------------------------------------------------------------
