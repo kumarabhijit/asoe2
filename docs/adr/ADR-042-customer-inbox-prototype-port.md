@@ -82,7 +82,7 @@ becomes a Pydantic-typed analysis section assembled by
 | AI Analysis / Entities / SAP Data tabs | `build_analysis` node + `api/analysis_composer.py` projecting gateway reads (ADR-025 gateway-before-shadow) | Composer ✅; new sections ⛔ |
 | Order Entry (extract→form→validate→submit) | Extraction **gateway** (constrained LLM) + `EMAIL_ORDER_ENTRY` **recipe** + master-data **constraints** + ERP-submit recipe (Shadow-gated); corrections logged to audit | Skill ✅ (ADR-034); full path ⛔ |
 | EDI 850 Audit | Deterministic server builder (port client `buildEDI850`) as a gateway/recipe; read endpoint | ⛔ |
-| Change Analysis (10 constraints / 7 agents / scenarios / decision / financials) | `constraints/` evaluations + `agents/harness.py` multi-agent run + Compliance Shadow + composer | Harness ✅; mapping ⛔ |
+| Change Analysis (constraints / scenarios / decision / financials) | **Recipe** evaluations (deterministic, thresholds from `contracts/policy.py`) + Compliance Shadow + composer. NOT `constraints/` (that is the constrained-LLM-generation router) and NOT `agents/harness.py` (a gated-off single-case sequential loop, not a parallel fan-out). Render **variable cardinality** (N constraints / M scenarios), not the prototype's fixed 10/7/3; agent timings are cosmetic, not audit-bearing. | recipe home ⛔ |
 | Constraint Graph | `orchestration/graph.py::get_pipeline_topology` + per-record `/exceptions/{id}/trace` (ADR-027) | Topology ✅; per-case projection ⛔ |
 | Knowledge Graph | `knowledge/` subsystem → entity-relationship payload section | Partial ⛔ |
 | AI Draft Reply (gen/edit/approve/send) | Reply-draft recipe action (`REQUEST_CLARIFICATION` / `REQUEST_BUYER_CONFIRMATION`, already in UI `ACTION_LABELS`) + email gateway send, Shadow + cosign | Action vocab ✅; send path ⛔ |
@@ -106,29 +106,68 @@ becomes a Pydantic-typed analysis section assembled by
    generation, Guidance/Outlines; usage metered to `api/metrics.py`);
    EDI-850 deterministic builder (pure, fully unit-testable);
    email-send gateway for replies.
-3. **Recipes** (`recipes/`): `EMAIL_ORDER_ENTRY` submit-to-ERP
-   (BAPI / EDI 850), draft-reply action. Recipes return dicts; the
-   composer projects them — no "ready-to-render" composition inside
-   recipes (Guardrail #6).
-4. **Constraints** (`constraints/`): map the prototype's 10 checks
-   (Inventory ATP, Production, Transport, Warehouse, Order
-   Lifecycle, SLA, Financial, Dependencies, Network, Priority) onto
-   the constraints subsystem; financial >$10k stays the cosign
-   threshold (ADR-040). Multi-agent timings via `agents/harness.py`.
-5. **Orchestration & composer:** extend `build_analysis`
-   (`orchestration/nodes.py`) — the **sole** assembler — to populate
-   the new sections through `api/analysis_composer.py` /
-   `analysis_adapters.py`. Ensure `orchestration/graph.py` topology
-   covers the order-entry path.
+3. **Recipes** (`recipes/`): target the **canonical
+   `MANUAL_ORDER_INTAKE`** recipe path (the `EMAIL_ORDER_ENTRY`
+   binding is a legacy alias / stub, sunset 2026-08-12 — Architect
+   correction). Submit-to-ERP (BAPI / EDI 850), draft-reply action,
+   constraint evaluation. Recipes return dicts; the composer
+   projects them — no "ready-to-render" composition inside recipes
+   (Guardrail #6).
+4. **Constraint evaluation lives in recipes, not `constraints/`.**
+   Panel correction (Architect): `constraints/` is the
+   constrained-LLM-generation backend router (Guidance/Outlines),
+   **not** a business-rule evaluator, and `agents/harness.py` is a
+   per-`(tenant,case_id)`-mutexed single-case loop currently gated
+   off (`should_route_to_case_agent → False`), **not** a 7-agent
+   parallel fan-out. The prototype's checks (Inventory ATP,
+   Production, Transport, Warehouse, Order Lifecycle, SLA,
+   Financial, Dependencies, Network, Priority) are **deterministic
+   recipe logic** reading thresholds from `contracts/policy.py`
+   (financial >$10k = the ADR-040 cosign threshold). They emit a
+   **variable-length** list the composer projects; the UI renders N
+   constraints / M scenarios. Putting evaluation in the harness
+   would violate Guardrail #1 (execution outside recipes) and
+   depend on an unshipped loop.
+5. **Orchestration & composer (lazy, not eager).** The composer
+   (`api/analysis_composer.py`) remains the **sole** assembler
+   (Guardrail #6), projecting already-resolved
+   `state.enrichment_context`. But `build_analysis`
+   (`orchestration/nodes.py`) is a synchronous graph node under the
+   per-call budgets in `policy.py`; loading EDI-850, knowledge
+   graph, the full constraint evaluation, and SAP reads inline risks
+   the SLA. Heavy sections are fetched via **lazy per-section read
+   endpoints** (`GET /cases/{id}/edi-850`, `/knowledge-graph`,
+   `/change-analysis`); only light evidence is eager in
+   `build_analysis`. Ensure `orchestration/graph.py` topology covers
+   the order-entry path.
 6. **API routes** (extend, don't fork — mirror the RBAC + tenant +
    `_scope_to_user` shape in `api/routes/cases.py`):
    * `GET /cases?case_type=EMAIL_ENTRY` filter (list lens).
    * `POST /cases/{id}/order-entry/extract`
-   * `PATCH /cases/{id}/order-entry` (operator corrections → audit/retraining)
-   * `POST /cases/{id}/order-entry/submit` (Shadow-gated)
-   * `POST /cases/{id}/reply/draft`, `POST /cases/{id}/reply/send` (Shadow + cosign)
-   * `GET /cases/{id}/edi-850`, `GET /cases/{id}/knowledge-graph`
-   * `POST /api/v1/sandbox/simulate-inbound` (sandbox only).
+   * `PATCH /cases/{id}/order-entry` — operator corrections.
+     **Compliance correction:** the before/after + actor + timestamp
+     of each corrected field MUST land in the hash-chained audit log
+     (ADR-023), system-derived identity. "Logged for retraining" is
+     a **separate, gated, consented, de-identified** export — not
+     the same sink as the immutable audit capture, and subject to a
+     documented lawful-basis + retention control.
+   * `POST /cases/{id}/order-entry/submit` — **Shadow + cosign(>$10k)
+     (ADR-040)**, explicitly: this is the financially-binding ERP
+     write and inherits the case-level four-eyes gate.
+   * `POST /cases/{id}/reply/draft`, `POST /cases/{id}/reply/send`
+     — Shadow + cosign(>$10k). Audit MUST persist `body_hash` +
+     content + actor + verdict before send (outbound customer
+     commitment, analogous to `EmailSourceData.body_hash`). The
+     email **body is human-facing** prose → constrained generation
+     (Guardrail #3) is NOT required for it; any **machine-consumed
+     control field** (action enum, recipient, send-decision) MUST be
+     constrained.
+   * `GET /cases/{id}/edi-850`, `GET /cases/{id}/knowledge-graph`,
+     `GET /cases/{id}/change-analysis` (lazy per-section reads).
+   * `POST /api/v1/sandbox/simulate-inbound` (sandbox only) —
+     **must** carry a non-prod `tenant_id` and be excluded from the
+     prod hash chain; a test asserts sandbox-injected records cannot
+     acquire a prod tenant or append to the prod `audit_trail`.
    Emit `case_update` / `case_close` + pipeline-step events via
    `api/case_events.py` / `api/routes/ws.py`.
 7. **OpenAPI:** regenerate `openapi/asoe2.openapi.json`; the UI's
@@ -151,17 +190,21 @@ component list, and test gates live in
 
 Each phase is one PR pair (asoe2 + asoe-ui), draft, with the
 regression / architectural locks both `CLAUDE.md` files mandate.
+Re-prioritised per the Domain/PO panel: **the minimum lovable slice
+is Phases 0–3** (lens + AI analysis + order entry — the actual
+order-to-cash throughput win). Draft Reply (high value) is pulled
+ahead of the graphs (evidence-richness, deferrable).
 
 | Phase | Scope | Gated by |
 |---|---|---|
-| 0 | Contracts + schemas + OpenAPI regen + UI type-gen; `EMAIL_ENTRY` list filter | type round-trip green |
+| 0 | Contracts + schemas (+ `autonomy_vocab_version`) + OpenAPI regen + UI type-gen; `EMAIL_ENTRY` filter; resolve the `exceptions.ts` (L1–L3) vs `generated.ts` (L1–L4) type drift; add health fields for autonomy ordering / `email_classification` / constraint statuses | type round-trip green; **vocab-version hard-gate test** |
 | 1 | Inbox lens on `/cases` (filter chip, master-detail) | browser e2e |
 | 2 | AI Analysis / Entities / SAP Data sections | composer + section locks |
-| 3 | Order Entry (extract gateway + recipe + constraints + corrections + ERP submit) | deterministic recipe test + Shadow |
-| 4 | EDI 850 builder + section | pure-function unit tests |
-| 5 | Change Analysis + Constraint Graph | constraints + topology |
-| 6 | Knowledge Graph | knowledge payload |
-| 7 | Draft Reply + Simulate Inbound + live pipeline (WS) | Shadow + cosign; sandbox flag |
+| 3 | Order Entry (extract gateway + recipe + corrections + ERP submit) — **MLS completes here** | deterministic recipe test + Shadow + cosign(>$10k) |
+| 4 | Draft Reply + Simulate Inbound + live pipeline (WS) | Shadow + cosign; sandbox-isolation test |
+| 5 | EDI 850 builder + section | pure-function unit tests |
+| 6 | Change Analysis (variable-cardinality constraints, recipe-homed) | deterministic recipe test + composer |
+| 7 | Constraint Graph + Knowledge Graph (deferrable behind demand) | graph render |
 | 8 | Hardening — full test pyramid, axe, contract snapshots, docs/ADR status → Accepted | all gates |
 
 ## 4. Why not revive the standalone `/inbox` screen?
@@ -181,14 +224,51 @@ A faithful 1:1 standalone port and a hybrid shell were both
 considered and rejected for the same reason; integration into the
 case workspace was selected.
 
-## 5. Edge cases / open questions
+## 5. Decision: autonomy L1–L4 ordering (Product directive, 2026-05-23)
 
-* **Autonomy semantics conflict (must resolve in Phase 0).** The
-  prototype's L1–L4 runs auto → human; the backend's
-  `contracts/policy.py` / `src/lib/cases.ts::autonomyLevelLabel`
-  runs block → fully-automated (inverted). One source of truth wins
-  (`contracts/policy.py`); the prototype labels are discarded. This
-  is a silent-bug magnet — flagged explicitly.
+**Verified facts** (read from code, not the prototype):
+* `contracts/policy.py:46,226` — backend canonical: **L4 = full
+  autonomy (auto-execute), L3 = act & inform, L2 = recommend, L1 =
+  observe only**. So L1 = *lowest* autonomy, L4 = *highest*.
+* `asoe-ui/src/lib/cases.ts::AUTONOMY_LEVEL_DESCRIPTIONS` — L1
+  "Block automatically" … L4 "Fully automated". **The UI already
+  matches the backend** (L1 low → L4 high); it is *not* the inverted
+  artifact.
+* Prototype (`MB_AUTON` / AI-analysis descriptions) — **L1 = fully
+  autonomous auto-reply … L4 = escalate to human**. The prototype is
+  the inverted ladder (L1 = highest autonomy).
+
+**Product decision:** adopt the **prototype's L1–L4 ordering**
+(L1 = most autonomous → L4 = human) as the operator-facing semantics.
+
+**Why this is not a trivial relabel — and how it is done safely.**
+`autonomy_level` is **audit-bearing** (`audit_bearing_registry.yaml`;
+SOX §404 narratives cite the L-tiers) and **load-bearing** across
+`DUPLICATE_PO_AUTONOMY_LEVELS`, `EDI_MISMATCH_AUTONOMY_LEVELS`,
+`MANUAL_ORDER_INTAKE_AUTONOMY_LEVELS`, and the ADR-034 L4→L3
+demotion. The Compliance + Architect panel verdict: **inverting the
+canonical numbers in place would silently flip the meaning of every
+historical "L1"/"L4" attestation — an audit-integrity catastrophe.**
+Therefore the directive is implemented as a **versioned vocabulary**,
+not an in-place mutation:
+
+1. Introduce `autonomy_vocab_version`. The new prototype ordering is
+   **v2**; existing records keep resolving under **v1** — the
+   append-only audit chain is **never** rewritten.
+2. The ordering, labels, and a numeric `rank` are served from the
+   **health payload** (`allowed_autonomy_levels: {level, label,
+   rank}[]`). The UI sorts/render by `rank` (no hardcoded map →
+   Guardrail #1 satisfied); `cases.ts` keeps only a transition
+   fallback.
+3. The numeric→behaviour gating that recipes dispatch on is migrated
+   coherently with v2 so "L1" the operator sees and "L1" the engine
+   gates agree under one version.
+4. **Gates:** explicit Compliance sign-off + dual-control on the
+   policy change, and a Phase-0 hard-gate test asserting
+   version-correct resolution of historical vs new records. Until
+   those clear, this remains *Proposed*, not ratified.
+
+## 5b. Other edge cases / open questions
 * **Real constraint data coverage.** The 10 checks depend on
   `constraints/`, `knowledge/`, and gateway coverage that may not
   all exist. Missing audit-bearing fields are registered under
@@ -197,23 +277,68 @@ case workspace was selected.
   "EMAIL_ENTRY ⇒ source_email_id required" invariant; the
   production ingestion path (Phase 1) must populate it before that
   rule can turn on.
+* **`invoice_query` has no `email_classification` target** (Domain
+  correction). ADR-041's set is `{NEW_ORDER, ORDER_CHANGE, INQUIRY,
+  COMPLAINT, OTHER}`; the prototype's `invoice_query` (an AR /
+  billing dispute) would silently collapse into `OTHER`. Decide in
+  Phase 0: add `INVOICE_QUERY` (preferred — distinct AR workstream)
+  or document the `OTHER` mapping in ADR-041 §2 so triage routing
+  isn't surprised.
+* **Graphs may be low-value.** `ConstraintGraph` / `KnowledgeGraph`
+  partly duplicate the existing `/exceptions/{id}/trace` + pipeline
+  topology (ADR-027). Treated as evidence-richness; deferrable
+  behind real demand (see §3 re-prioritisation).
 * **Demo-only niceties** (open-in-new-tab, right-click context menu,
   copy-sender) are low-value; proposed for drop/defer.
 * **Scope boundary.** Quota Mgmt, Performance, Admin, CSR Chat
   (gap-analysis §5/§6) are out of scope for this ADR.
 
+## 5c. Panel review (2026-05-23)
+
+Four-lens independent review (Architect, Compliance, Frontend,
+Domain) of the draft. Adopted corrections, all folded in above:
+
+* **Architect:** Change Analysis was mis-homed — `constraints/` is
+  the constrained-generation router and `agents/harness.py` is a
+  gated single-case loop; constraint evaluation moved into
+  **recipes** (§2.2.4). Composer stays sole assembler but heavy
+  sections become **lazy per-section reads** (§2.2.5). Target the
+  canonical `MANUAL_ORDER_INTAKE` recipe, not the legacy stub.
+* **Compliance (veto holder):** order-entry submit made
+  Shadow+cosign explicit; corrections split into immutable audit vs
+  consented retraining; draft-reply `body_hash` persisted; sandbox
+  isolation test required; each grandfather clause needs an id +
+  deadline. Autonomy: **endorsed only as a versioned vocabulary** —
+  no historical mutation, compliance sign-off + dual control (§5).
+* **Frontend:** sections mount inside `ExceptionDetailPanel`'s
+  data-presence list (lazy), not the case header;
+  `ChangeAnalysisSection` must be split; autonomy ordering served
+  from `health.allowed_autonomy_levels` (rank-sorted), not a
+  hardcoded UI map; dagre for the constraint graph but radial/SVG
+  for the knowledge graph; resolve L3-vs-L4 type drift in Phase 0.
+  (Detail in the paired asoe-ui plan §8.)
+* **Domain/PO:** `invoice_query` classification gap (§5b);
+  render variable-cardinality constraints, drop agent timings as
+  evidence; MLS = Phases 0–3; Draft Reply pulled ahead of graphs
+  (§3).
+
 ## 6. Definition of Done
 
 ADR-042 moves to **Accepted** when:
-* All section schemas exist with audit-registry entries + validator
-  tests; OpenAPI round-trips and `verify-types` is green.
-* The `EMAIL_ENTRY` lens + all seven detail sections render from
-  live backend data on `/cases`, no client-side business logic.
+* All section schemas exist with audit-registry entries (each
+  grandfather clause carrying an id + compliance-approved deadline)
+  + validator tests; OpenAPI round-trips and `verify-types` is green.
+* The `EMAIL_ENTRY` lens + detail sections render from live backend
+  data on `/cases`, no client-side business logic.
 * Order-entry extraction, EDI 850, constraint evaluation, draft
   reply all execute server-side, Shadow-gated, with deterministic
   recipe test paths and constrained-generation locks.
-* Compliance Shadow + cosign enforced on every write; RBAC + tenant
-  scoping on every new route.
+* Compliance Shadow + **cosign(>$10k) enforced on every financially
+  binding write** (order-entry submit, draft-reply send); RBAC +
+  tenant scoping on every new route.
+* Autonomy v2 vocabulary shipped with `autonomy_vocab_version`,
+  compliance sign-off + dual-control, and a version-resolution
+  hard-gate test; **no historical audit record rewritten**.
 * Full test pyramid per both `CLAUDE.md` test-strategy gates
   (unit + architectural locks + browser operator journeys + axe).
 * Docs updated (`ARCHITECTURE.md`, `prototype_gap_analysis.md`
