@@ -187,10 +187,46 @@ The 8-section OpenAPI contract gate (`test_inbox_gate_openapi_contract.py`) now
 has 2 of 8 schemas (`OrderEntryExtraction`, `Edi850Document`); stays xfail until
 Phases 6–7 add the remaining 6.
 
+## Phase-6 completion audit (2026-05-24)
+Audited against ADR-042 §6 / scorecard (Phase 6 = Change Analysis,
+variable-cardinality constraints, recipe-homed; gated by deterministic recipe
+test + composer) — **met**:
+- ✓ **Recipe-homed evaluator** — `recipes/ChangeAnalysisRecipe.evaluate_change`
+  is pure + deterministic, scoring a requested order change against the
+  constraint catalogue (Inventory/Production/Transport/Warehouse/Order Status/
+  SLA/Financial/Dependencies/Network/Priority). **Variable cardinality** — only
+  constraints whose backing signal is present evaluate (Financial always runs);
+  N checks, not the prototype's fixed 10. NOT in `constraints/`, NOT in
+  `agents/harness.py` (ADR §6 Architect correction). 10 deterministic unit tests.
+- ✓ **Thresholds injected, not imported** — the four-eyes materiality threshold
+  arrives as a `cosign_threshold_usd` param (caller reads
+  `policy.HIGH_VALUE_OVERRIDE_THRESHOLD_USD`); the recipe stays policy-free
+  (Invariant #11 — the recipe-policy-decoupling guardrails pass).
+- ✓ **Scenarios + decision** — M scenarios (as-requested / partial / expedite /
+  reject) derived deterministically; decision panel surfaces confidence,
+  recommended action, revenue impact, SAP actions, and `requires_cosign` (gated
+  on the injected threshold).
+- ✓ **Schemas** — `ConstraintCheck` / `ConstraintEvaluation` / `ScenarioOption`
+  / `ChangeDecision` (+ `ChangeItem` / `ChangeAnalysis` wrapper) on
+  `AnalysisResponse.change_analysis`; surfaced into OpenAPI.
+- ✓ **Composer + producer** — `compose_change_analysis` projects
+  `enrichment_context["change_analysis"]` (None when absent/malformed,
+  Guardrail #6); `change_analysis`/`evaluate` read producer on
+  ManualOrderIntakeRecipe + sandbox/conftest stubs activate the tab end-to-end.
+- ✓ **UI section** — `ChangeAnalysisSection` (dumb projector) renders the
+  variable-cardinality constraints + scenarios + Layer-1 decision panel +
+  lifecycle bar + change grid; mounts behind the `change_analysis` guard; types
+  mirrored; deliverable lock + component test.
+Full asoe2 suite green (3068 passed / 1 xfailed); asoe-ui tsc + 1199 vitest +
+build green. **Phase 6 complete.**
+
+The 8-section OpenAPI contract gate now has **6 of 8** schemas (adds the 4
+Change-Analysis names); still xfail until `KnowledgeGraphPayload` (Phase 7) and
+`DraftReply` land (the latter a Phase-4 carry-over — reply drafting shipped via
+`resolution_data`, no `DraftReply` analysis schema yet).
+
 ## PENDING
 ### Later phases
-- **Phase 6:** Change Analysis (`ConstraintEvaluation` / `ConstraintCheck` /
-  `ScenarioOption` / `ChangeDecision`; recipe-homed, variable cardinality).
 - **Phase 7:** Constraint Graph + Knowledge Graph (`KnowledgeGraphPayload`;
   deferrable) + sandbox `/sandbox/simulate-inbound` injector isolation sentinel
   (re-homed gate #8).
@@ -199,8 +235,9 @@ Phases 6–7 add the remaining 6.
 
 ### Gates still RED / not yet written
 - `tests/test_inbox_gate_openapi_contract.py` (xfail) flips green only when all
-  8 section schemas exist (have `OrderEntryExtraction` + `Edi850Document`; need
-  the other 6 across Phases 6–7).
+  8 section schemas exist (have `OrderEntryExtraction` + `Edi850Document` +
+  Change-Analysis 4 = 6 of 8; need `KnowledgeGraphPayload` (Phase 7) +
+  `DraftReply` (Phase-4 carry-over)).
 - DoR safety gates (strategy doc §6) — only **sanitizer** + **autonomy** are
   implemented; the rest are documented-but-unwritten and land in their phases:
   injected-GREEN → `MANUAL_REVIEW` (#2), cosign threshold from SAP master-data
@@ -254,13 +291,16 @@ Phases 6–7 add the remaining 6.
 > Continue the ASOE Customer-Inbox port on branch `claude/gifted-darwin-NbqQo`
 > (asoe2 PR #166, asoe-ui PR #185). Read `asoe2/HANDOFF.md`, then
 > `asoe2/docs/adr/ADR-042-customer-inbox-prototype-port.md` and both
-> `docs/test-strategy/customer-inbox-tdd-strategy.md`. Phases 0–5 are **done**
-> (MLS + Draft Reply + live WS events + EDI 850 builder/section). Resume
-> **Phase 6 = Change Analysis** — deterministic recipe evaluations
-> (`ConstraintEvaluation` / `ConstraintCheck` / `ScenarioOption` /
-> `ChangeDecision`; thresholds from `contracts/policy.py`, NOT `constraints/`)
-> + Compliance Shadow + composer, rendering **variable cardinality** (N
-> constraints / M scenarios — not the prototype's fixed 10/7/3). Pre-prod:
-> compliance sign-off waived, keep in-code Shadow/audit intact. Discipline: TDD,
-> run tsc/tests before push, wait for CI green (10-min fallback) between tasks,
+> `docs/test-strategy/customer-inbox-tdd-strategy.md`. Phases 0–6 are **done**
+> (MLS + Draft Reply + live WS events + EDI 850 + Change Analysis). Resume
+> **Phase 7 = Constraint Graph + Knowledge Graph** — reuse
+> `orchestration/graph.py::get_pipeline_topology` + per-record
+> `/exceptions/{id}/trace` for the constraint graph (do NOT build a new
+> surface); the Knowledge Graph is a net-new derived projection
+> (`KnowledgeGraphPayload`) over `OrderCase`/`ExceptionRecord` entities, and is
+> **deferrable** (no KG data source today). Also lands the
+> `/sandbox/simulate-inbound` injector **isolation sentinel** (re-homed gate #8)
+> and the Phase-4 `DraftReply` analysis-schema carry-over. Pre-prod: compliance
+> sign-off waived, keep in-code Shadow/audit intact. Discipline: TDD, run
+> tsc/tests before push, wait for CI green (10-min fallback) between tasks,
 > audit each phase against the plan before declaring complete.
