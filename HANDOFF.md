@@ -82,39 +82,47 @@ _Last updated: 2026-05-24._
   `recipes/SubmitToErpRecipe.build_erp_submission` builds the SAP
   sales-order-create payload from the reviewed order, applies operator
   corrections with a before/after audit, validates submittability (pure;
-  REJECTED on empty/invalid). **Not yet registered/graph-wired** — see PENDING.
+  REJECTED on empty/invalid).
+- **Phase 3 — ERP submit executes on the deterministic graph path** ✓ —
+  directed graph re-entry (`GraphState.directed_recipe` / `directed_corrections`;
+  `select_recipe` honours it; `validate_types` builds the submit invocation from
+  the reviewed extraction + corrections). SubmitToErpRecipe registered
+  (`AllowedRecipeName` + `REGISTRY`) with an `erp`/`create_sales_order` gateway
+  effect (stub in sandbox + conftest). `GatewayEffect.only_on_recipe_status`
+  gates the write to a SUCCESS submit; DoR #2 guard exempts the authorised
+  submit (keys on the classifier recipe).
+- **Phase 3 — SUBMIT_TO_ERP disposition trigger + four-eyes** ✓ — explicit
+  `SUBMIT_TO_ERP` resolution action (health-surfaced; UI label + types mirrored).
+  Sub-$10k submits run immediately → RESOLVED + `resolution_data.erp_submission`
+  (ERP doc + corrections audit); ≥$10k stage `PENDING_COSIGN` and run on
+  `/override/cosign` approve (SoD enforced); REJECTED submits write nothing and
+  stay in review. Corrections ride as a disposition param → before/after into
+  the audit trail.
+
+## Phase-3 completion audit (2026-05-24)
+Audited against ADR-042 §3 (Phase 3 = Order Entry: extract gateway + recipe +
+corrections + ERP submit; gated by deterministic recipe test + Shadow +
+cosign>$10k) — **all met**:
+- ✓ Extraction gateway (constrained-gen contract) + RecordedGatewayBackend
+  replay; red-green never hits a live model.
+- ✓ Tabs activate from `enrichment_context` (order_entry_extraction /
+  inbox_entities / sap_data) via the wired producers.
+- ✓ ERP-submit recipe (deterministic, pure) with a deterministic test path +
+  graph re-entry test; **Shadow-gated** (re-entry runs shadow_audit before
+  execute); **cosign>$10k** from the SAP re-price (DoR #3).
+- ✓ Corrections carried as disposition params → recipe before/after audit.
+- ✓ DoR #1 (sanitizer in the gateway), #2 (no auto-execute), #3 (re-price
+  materiality) all green.
+- ✓ health-autonomy gate green (both repos); autonomy v2 hard gate intact.
+Full asoe2 suite green (3009 passed / 1 xfailed = the deferred 8-section OpenAPI
+contract); asoe-ui tsc + 1183 vitest + build green. **Phase 3 (MLS) complete.**
+
+Deferred to **Phase 8 hardening** (strategy §6 DoR table — "land in their
+phases", not Phase-3 blockers for the MLS): #5 delivery idempotency +
+correlation_id, #6 outbox/compensation, #8 gateway circuit breaker, #9
+business/disposition hash chain, #10 XSS/CSP + SSRF.
 
 ## PENDING
-### Phase 3 (resume here) — ERP-submit execution wiring (graph re-entry)
-Owner chose **graph re-entry** for the financial write (not inline-in-handler).
-Remaining, in order:
-1. **Register + wire SubmitToErpRecipe**: add `"SubmitToErpRecipe.py"` to
-   `constraints/specs.py::AllowedRecipeName` + `recipes/registry.py::REGISTRY`
-   (allowed_intents `MANUAL_ORDER_INTAKE`; declare an **ERP gateway effect** —
-   e.g. `erp`/`create_sales_order`); register the `erp` StubGateway in
-   `api/sandbox_gateways.py` + `tests/conftest.py` (the
-   `test_gateway_registry_coverage` gate enforces both sites); update
-   `test_registry.py` len/▷recipe-count assertions.
-2. **Directed graph re-entry**: add a `directed_recipe` (and corrections-carrying)
-   field to `GraphState`; `select_recipe` uses it when set (bypass
-   `propose_recipe`); `validate_types` builds the `SubmitToErpRecipe` invocation
-   from `enrichment_context["order_entry_extraction"]` + operator corrections.
-3. **DoR #2 guard exemption**: the `execute_recipe` COMPLETE→MANUAL_REVIEW guard
-   must key on the **classifier** recipe (`selected_recipe ==
-   "ManualOrderIntakeRecipe.py"`), so the operator-authorised
-   `SubmitToErpRecipe` is allowed to reach COMPLETE.
-4. **Disposition trigger + cosign-on-approve**: on operator APPROVE of an intake
-   record, the disposition handler re-enters the graph with
-   `directed_recipe=SubmitToErpRecipe` (Shadow → execute → apply_effects = ERP
-   write). When `_cosign_materiality_usd >= $10k`, stage `PENDING_COSIGN` first;
-   the submit runs on cosign-approve. Corrections ride as disposition params →
-   before/after + actor + timestamp into the hash-chained audit (ADR-023);
-   retraining export stays a separate, gated sink.
-5. **Phase-3 completion audit** against ADR-042 §3 + this handoff.
-
-### Later phases
-- (unchanged — Phases 4–8 below.)
-
 ### Later phases
 - **Phase 4:** Draft Reply + Simulate Inbound + live pipeline. WS new event
   types (`pipeline_step` / `reply_drafted` / `reply_sent`) through
