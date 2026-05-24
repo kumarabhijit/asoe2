@@ -190,3 +190,33 @@ def render_untrusted_block(metadata: Mapping[str, Any]) -> str:
         lines.append(f"  {key}: {metadata[key]!r}")
     lines.append("</untrusted_metadata>")
     return "\n".join(lines)
+
+
+_MAX_EMAIL_TEXT_LENGTH: int = 100_000
+"""Cap on untrusted email body + attachment text fed to the extraction LLM."""
+
+
+def sanitize_email_text_for_llm(
+    body: str,
+    *,
+    attachment_text: str = "",
+    max_length: int = _MAX_EMAIL_TEXT_LENGTH,
+) -> str:
+    """Fence attacker-controlled email body + attachment text for the
+    extraction / classification LLM (ADR-042 DoR #1).
+
+    `sanitize_metadata_for_llm` covers `OrderEvent.metadata`; this covers the
+    free-text the model actually reads — the real prompt-injection surface.
+    The text is control-char scrubbed + length-capped (`_scrub_string`) and
+    wrapped in the untrusted-data preamble + an explicit delimiter so any
+    embedded directives ("ignore prior instructions …") render as quoted DATA,
+    never as a leading instruction the model could obey.
+    """
+    raw = body if not attachment_text else f"{body}\n\n{attachment_text}"
+    scrubbed = _scrub_string(raw, max_length=max_length)
+    return (
+        f"{UNTRUSTED_DATA_PREAMBLE}\n"
+        "<untrusted_email>\n"
+        f"{scrubbed}\n"
+        "</untrusted_email>"
+    )
