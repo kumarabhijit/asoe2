@@ -1,0 +1,15 @@
+# Eval gates per task (panel 2026-05-24). Lowering any threshold requires the
+# compliance CODEOWNERS gate. `labels` is the classification target vocabulary;
+# INVOICE_QUERY is declared here per ADR-042 §5b so it cannot silently collapse
+# into OTHER once the classifier learns it.
+classification:
+  labels:
+    - CONTRACTUAL_CORRECTION
+    - DUPLICATE_PO
+    - PRICE_HOLD_RELEASE
+    - MASS_PRICING_ERROR
+    - CREDIT_BLOCK
+    - INVOICE_QUERY
+    - OTHER
+  macro_f1_min: 0.90
+  ece_max: 0.10

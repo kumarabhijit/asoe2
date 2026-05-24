@@ -45,7 +45,6 @@ def test_classification_dataset_dir_exists() -> None:
 
 
 @pytest.mark.replay
-@pytest.mark.xfail(reason=_GATE, strict=True)
 def test_harness_loads_dataset_and_thresholds() -> None:
     assert _IMPLEMENTED, _GATE
     thresholds = load_thresholds()
@@ -55,7 +54,6 @@ def test_harness_loads_dataset_and_thresholds() -> None:
 
 
 @pytest.mark.replay
-@pytest.mark.xfail(reason=_GATE, strict=True)
 def test_classification_scorer_emits_required_metrics() -> None:
     """The scorer must report confusion, macro-F1, and ECE (calibration)."""
     assert _IMPLEMENTED, _GATE
@@ -67,7 +65,6 @@ def test_classification_scorer_emits_required_metrics() -> None:
 
 
 @pytest.mark.replay
-@pytest.mark.xfail(reason=_GATE, strict=True)
 def test_invoice_query_is_a_classification_label() -> None:
     """ADR-042 §5b: invoice_query must not silently collapse into OTHER."""
     assert _IMPLEMENTED, _GATE
