@@ -1412,6 +1412,111 @@ class OrderEntryExtraction(BaseModel):
     validation_flags: List[OrderEntryValidationFlag] = Field(default_factory=list)
 
 
+class Edi850Segment(BaseModel):
+    """One ANSI X12 segment of the built 850. `seg_id` is the segment tag
+    (ISA/BEG/PO1/…); `elements` are its ordered data elements (excluding the
+    tag); `raw` is the assembled X12 line (element-separated, segment-
+    terminated); `meaning` is the human-readable decode (Segment Map view);
+    `group` buckets the segment for the viewer's colour legend ∈
+    envelope | header | dates | party | line | trailer."""
+
+    seg_id: str
+    elements: List[str] = Field(default_factory=list)
+    raw: str
+    meaning: str
+    group: str
+
+
+class Edi850Envelope(BaseModel):
+    """ISA/GS/ST interchange + functional-group identifiers (Decoded view's
+    Interchange Envelope card)."""
+
+    sender_id: str
+    receiver_id: str
+    interchange_control_number: str
+    group_control_number: str
+    transaction_set_control_number: str
+    usage_indicator: str
+    x12_version: str
+
+
+class Edi850Header(BaseModel):
+    """BEG/CUR/DTM purchase-order header (Decoded view's PO Header card).
+    `purpose_code` is BEG01 (e.g. ``00`` = original); `po_type` is BEG02
+    (e.g. ``SA`` = stand-alone)."""
+
+    purpose_code: str
+    po_type: str
+    po_number: str
+    po_date: Optional[str] = None
+    currency: Optional[str] = None
+    requested_delivery_date: Optional[str] = None
+
+
+class Edi850Party(BaseModel):
+    """An N1/N3/N4 party loop (Decoded view's Party Information card).
+    `entity_code` is the N101 qualifier (``BY`` buyer / ``SE`` seller /
+    ``ST`` ship-to); `role` is its decoded label."""
+
+    entity_code: str
+    role: str
+    name: str
+    id_qualifier: Optional[str] = None
+    id_value: Optional[str] = None
+    address: Optional[str] = None
+    city_state_zip: Optional[str] = None
+
+
+class Edi850LineItem(BaseModel):
+    """A PO1 baseline-item line (Decoded view's Line Items table).
+    `product_qualifier` is the PO1 product/service-ID qualifier (e.g. ``VP``
+    vendor part / ``IN`` buyer item); `extended_amount` = quantity ×
+    unit_price (deterministic)."""
+
+    line_num: str
+    quantity: float
+    uom: str
+    unit_price: Optional[float] = None
+    product_qualifier: Optional[str] = None
+    product_id: Optional[str] = None
+    description: Optional[str] = None
+    extended_amount: Optional[float] = None
+
+
+class Edi850Totals(BaseModel):
+    """CTT transaction totals. `total_line_items` = CTT01 (PO1 count);
+    `total_quantity` = CTT02 (hash total of quantities); `total_amount` =
+    Σ extended_amount (deterministic, may be None when no line carries a
+    price)."""
+
+    total_line_items: int
+    total_quantity: float
+    total_amount: Optional[float] = None
+
+
+class Edi850Document(BaseModel):
+    """EDI 850 Audit tab (ADR-042 Phase 5). The ANSI X12 5010 purchase-order
+    transaction set the system reconstructs from the reviewed order, built
+    deterministically by the `edi_850` builder (`gateways/edi850.py`) — a pure,
+    fully unit-testable port of the prototype's client-side `buildEDI850`. It is
+    the audit evidence an operator inspects before the order is transmitted to
+    the seller's ERP. Projected by the composer from the builder's
+    `enrichment_context["edi_850"]` read; preview-only until that producer is
+    wired. The three prototype sub-views map onto this contract: Decoded
+    (`envelope` / `header` / `parties` / `line_items` / `totals`), Raw X12
+    (`raw_x12`), and Segment Map (`segments`)."""
+
+    standard: str = "ANSI X12 5010"
+    transaction_set: str = "850"
+    envelope: Edi850Envelope
+    header: Edi850Header
+    parties: List[Edi850Party] = Field(default_factory=list)
+    line_items: List[Edi850LineItem] = Field(default_factory=list)
+    totals: Edi850Totals
+    segments: List[Edi850Segment] = Field(default_factory=list)
+    raw_x12: str
+
+
 class AnalysisResponse(BaseModel):
     """GET /api/v1/exceptions/{id}/analysis"""
 
@@ -1473,6 +1578,9 @@ class AnalysisResponse(BaseModel):
     # ADR-042 Phase 3 — Order Entry tab (extracted order form). Preview-only
     # until the extraction-gateway composer adapter lands.
     order_entry_extraction: Optional[OrderEntryExtraction] = None
+    # ADR-042 Phase 5 — EDI 850 Audit tab (deterministic X12 850 reconstruction).
+    # Preview-only until the edi_850 builder producer populates enrichment_context.
+    edi_850_audit: Optional[Edi850Document] = None
 
 
 # ---------------------------------------------------------------------------

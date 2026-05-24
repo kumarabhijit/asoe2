@@ -219,6 +219,16 @@
               }
             ]
           },
+          "edi_850_audit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Edi850Document"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "edi_mismatch_analysis": {
             "anyOf": [
               {
@@ -1462,6 +1472,377 @@
           "updated_at"
         ],
         "title": "DuplicatePOEnvelope",
+        "type": "object"
+      },
+      "Edi850Document": {
+        "description": "EDI 850 Audit tab (ADR-042 Phase 5). The ANSI X12 5010 purchase-order\ntransaction set the system reconstructs from the reviewed order, built\ndeterministically by the `edi_850` builder (`gateways/edi850.py`) \u2014 a pure,\nfully unit-testable port of the prototype's client-side `buildEDI850`. It is\nthe audit evidence an operator inspects before the order is transmitted to\nthe seller's ERP. Projected by the composer from the builder's\n`enrichment_context[\"edi_850\"]` read; preview-only until that producer is\nwired. The three prototype sub-views map onto this contract: Decoded\n(`envelope` / `header` / `parties` / `line_items` / `totals`), Raw X12\n(`raw_x12`), and Segment Map (`segments`).",
+        "properties": {
+          "envelope": {
+            "$ref": "#/components/schemas/Edi850Envelope"
+          },
+          "header": {
+            "$ref": "#/components/schemas/Edi850Header"
+          },
+          "line_items": {
+            "items": {
+              "$ref": "#/components/schemas/Edi850LineItem"
+            },
+            "title": "Line Items",
+            "type": "array"
+          },
+          "parties": {
+            "items": {
+              "$ref": "#/components/schemas/Edi850Party"
+            },
+            "title": "Parties",
+            "type": "array"
+          },
+          "raw_x12": {
+            "title": "Raw X12",
+            "type": "string"
+          },
+          "segments": {
+            "items": {
+              "$ref": "#/components/schemas/Edi850Segment"
+            },
+            "title": "Segments",
+            "type": "array"
+          },
+          "standard": {
+            "default": "ANSI X12 5010",
+            "title": "Standard",
+            "type": "string"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/Edi850Totals"
+          },
+          "transaction_set": {
+            "default": "850",
+            "title": "Transaction Set",
+            "type": "string"
+          }
+        },
+        "required": [
+          "envelope",
+          "header",
+          "totals",
+          "raw_x12"
+        ],
+        "title": "Edi850Document",
+        "type": "object"
+      },
+      "Edi850Envelope": {
+        "description": "ISA/GS/ST interchange + functional-group identifiers (Decoded view's\nInterchange Envelope card).",
+        "properties": {
+          "group_control_number": {
+            "title": "Group Control Number",
+            "type": "string"
+          },
+          "interchange_control_number": {
+            "title": "Interchange Control Number",
+            "type": "string"
+          },
+          "receiver_id": {
+            "title": "Receiver Id",
+            "type": "string"
+          },
+          "sender_id": {
+            "title": "Sender Id",
+            "type": "string"
+          },
+          "transaction_set_control_number": {
+            "title": "Transaction Set Control Number",
+            "type": "string"
+          },
+          "usage_indicator": {
+            "title": "Usage Indicator",
+            "type": "string"
+          },
+          "x12_version": {
+            "title": "X12 Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sender_id",
+          "receiver_id",
+          "interchange_control_number",
+          "group_control_number",
+          "transaction_set_control_number",
+          "usage_indicator",
+          "x12_version"
+        ],
+        "title": "Edi850Envelope",
+        "type": "object"
+      },
+      "Edi850Header": {
+        "description": "BEG/CUR/DTM purchase-order header (Decoded view's PO Header card).\n`purpose_code` is BEG01 (e.g. ``00`` = original); `po_type` is BEG02\n(e.g. ``SA`` = stand-alone).",
+        "properties": {
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "po_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Po Date"
+          },
+          "po_number": {
+            "title": "Po Number",
+            "type": "string"
+          },
+          "po_type": {
+            "title": "Po Type",
+            "type": "string"
+          },
+          "purpose_code": {
+            "title": "Purpose Code",
+            "type": "string"
+          },
+          "requested_delivery_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Delivery Date"
+          }
+        },
+        "required": [
+          "purpose_code",
+          "po_type",
+          "po_number"
+        ],
+        "title": "Edi850Header",
+        "type": "object"
+      },
+      "Edi850LineItem": {
+        "description": "A PO1 baseline-item line (Decoded view's Line Items table).\n`product_qualifier` is the PO1 product/service-ID qualifier (e.g. ``VP``\nvendor part / ``IN`` buyer item); `extended_amount` = quantity \u00d7\nunit_price (deterministic).",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "extended_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extended Amount"
+          },
+          "line_num": {
+            "title": "Line Num",
+            "type": "string"
+          },
+          "product_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Id"
+          },
+          "product_qualifier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Qualifier"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "number"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Price"
+          },
+          "uom": {
+            "title": "Uom",
+            "type": "string"
+          }
+        },
+        "required": [
+          "line_num",
+          "quantity",
+          "uom"
+        ],
+        "title": "Edi850LineItem",
+        "type": "object"
+      },
+      "Edi850Party": {
+        "description": "An N1/N3/N4 party loop (Decoded view's Party Information card).\n`entity_code` is the N101 qualifier (``BY`` buyer / ``SE`` seller /\n``ST`` ship-to); `role` is its decoded label.",
+        "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "city_state_zip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City State Zip"
+          },
+          "entity_code": {
+            "title": "Entity Code",
+            "type": "string"
+          },
+          "id_qualifier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id Qualifier"
+          },
+          "id_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id Value"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_code",
+          "role",
+          "name"
+        ],
+        "title": "Edi850Party",
+        "type": "object"
+      },
+      "Edi850Segment": {
+        "description": "One ANSI X12 segment of the built 850. `seg_id` is the segment tag\n(ISA/BEG/PO1/\u2026); `elements` are its ordered data elements (excluding the\ntag); `raw` is the assembled X12 line (element-separated, segment-\nterminated); `meaning` is the human-readable decode (Segment Map view);\n`group` buckets the segment for the viewer's colour legend \u2208\nenvelope | header | dates | party | line | trailer.",
+        "properties": {
+          "elements": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Elements",
+            "type": "array"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "meaning": {
+            "title": "Meaning",
+            "type": "string"
+          },
+          "raw": {
+            "title": "Raw",
+            "type": "string"
+          },
+          "seg_id": {
+            "title": "Seg Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "seg_id",
+          "raw",
+          "meaning",
+          "group"
+        ],
+        "title": "Edi850Segment",
+        "type": "object"
+      },
+      "Edi850Totals": {
+        "description": "CTT transaction totals. `total_line_items` = CTT01 (PO1 count);\n`total_quantity` = CTT02 (hash total of quantities); `total_amount` =\n\u03a3 extended_amount (deterministic, may be None when no line carries a\nprice).",
+        "properties": {
+          "total_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Amount"
+          },
+          "total_line_items": {
+            "title": "Total Line Items",
+            "type": "integer"
+          },
+          "total_quantity": {
+            "title": "Total Quantity",
+            "type": "number"
+          }
+        },
+        "required": [
+          "total_line_items",
+          "total_quantity"
+        ],
+        "title": "Edi850Totals",
         "type": "object"
       },
       "EdiMismatchAnalysisData": {
