@@ -157,9 +157,38 @@ financially binding; cosign remains the four-eyes control for the ERP write.
 The `/sandbox/simulate-inbound` **isolation sentinel** stays re-homed to
 **Phase 7** (strategy gate #8).
 
+## Phase-5 completion audit (2026-05-24)
+Audited against ADR-042 §5 / scorecard (Phase 5 = EDI 850 builder + section,
+gated by pure-function unit tests) — **met**:
+- ✓ **Deterministic builder** — `gateways/edi850.build_edi_850` is a pure,
+  fully unit-testable port of the prototype `buildEDI850`: reconstructs the ANSI
+  X12 5010 PO (ISA/GS/ST/BEG/CUR/REF/DTM/N1/PO1/PID/CTT/SE/GE/IEA). No I/O,
+  clock, or randomness — control numbers derive from `order_id` (CRC32), so
+  output is byte-stable (9 unit tests: structure, totals, CTT/SE counts,
+  determinism, optional ship-to, priceless line, empty order).
+- ✓ **Schema** — `Edi850Document` (+ envelope/header/party/line/totals/segment
+  submodels) on `AnalysisResponse.edi_850_audit`; surfaced into OpenAPI
+  (openapi-fresh CI check green). Carries the three prototype sub-views.
+- ✓ **Composer** — `compose_edi_850_document` projects
+  `enrichment_context["edi_850"]` (None when absent/malformed — preview-only,
+  Guardrail #6). Builder owns construction; composer only projects.
+- ✓ **Producer wired end-to-end** — `edi_850`/`build` read producer on
+  ManualOrderIntakeRecipe (`required_for_audit=False`); StubGateways in sandbox
+  + conftest build the canned order deterministically, so the EDI 850 Audit tab
+  activates alongside Order Entry / SAP Data.
+- ✓ **UI section** — `Edi850Section` (dumb projector) with Decoded / Raw X12
+  (colour-coded + copy) / Segment Map sub-views; mounts behind the
+  `edi_850_audit` data-presence guard; hand-written + generated types mirror the
+  contract; deliverable lock + component test.
+Full asoe2 suite green (3050 passed / 1 xfailed); asoe-ui tsc + 1192 vitest +
+build green. **Phase 5 complete.**
+
+The 8-section OpenAPI contract gate (`test_inbox_gate_openapi_contract.py`) now
+has 2 of 8 schemas (`OrderEntryExtraction`, `Edi850Document`); stays xfail until
+Phases 6–7 add the remaining 6.
+
 ## PENDING
 ### Later phases
-- **Phase 5:** EDI 850 (`Edi850Document` schema + builder + section).
 - **Phase 6:** Change Analysis (`ConstraintEvaluation` / `ConstraintCheck` /
   `ScenarioOption` / `ChangeDecision`; recipe-homed, variable cardinality).
 - **Phase 7:** Constraint Graph + Knowledge Graph (`KnowledgeGraphPayload`;
@@ -170,8 +199,8 @@ The `/sandbox/simulate-inbound` **isolation sentinel** stays re-homed to
 
 ### Gates still RED / not yet written
 - `tests/test_inbox_gate_openapi_contract.py` (xfail) flips green only when all
-  8 section schemas exist (have `OrderEntryExtraction`; need the other 7 across
-  Phases 4–7).
+  8 section schemas exist (have `OrderEntryExtraction` + `Edi850Document`; need
+  the other 6 across Phases 6–7).
 - DoR safety gates (strategy doc §6) — only **sanitizer** + **autonomy** are
   implemented; the rest are documented-but-unwritten and land in their phases:
   injected-GREEN → `MANUAL_REVIEW` (#2), cosign threshold from SAP master-data
@@ -225,11 +254,13 @@ The `/sandbox/simulate-inbound` **isolation sentinel** stays re-homed to
 > Continue the ASOE Customer-Inbox port on branch `claude/gifted-darwin-NbqQo`
 > (asoe2 PR #166, asoe-ui PR #185). Read `asoe2/HANDOFF.md`, then
 > `asoe2/docs/adr/ADR-042-customer-inbox-prototype-port.md` and both
-> `docs/test-strategy/customer-inbox-tdd-strategy.md`. Phases 0–4 are **done**
-> (MLS + Draft Reply + live WS events). Resume **Phase 5 = EDI 850** — a
-> deterministic server-side `buildEDI850` builder (gateway/recipe) +
-> `Edi850Document` schema + read endpoint + UI section, test-first with
-> pure-function unit tests. Pre-prod: compliance sign-off waived, keep in-code
-> Shadow/audit intact. Discipline: TDD, run tsc/tests before push, wait for CI
-> green (10-min fallback) between tasks, audit each phase against the plan
-> before declaring complete.
+> `docs/test-strategy/customer-inbox-tdd-strategy.md`. Phases 0–5 are **done**
+> (MLS + Draft Reply + live WS events + EDI 850 builder/section). Resume
+> **Phase 6 = Change Analysis** — deterministic recipe evaluations
+> (`ConstraintEvaluation` / `ConstraintCheck` / `ScenarioOption` /
+> `ChangeDecision`; thresholds from `contracts/policy.py`, NOT `constraints/`)
+> + Compliance Shadow + composer, rendering **variable cardinality** (N
+> constraints / M scenarios — not the prototype's fixed 10/7/3). Pre-prod:
+> compliance sign-off waived, keep in-code Shadow/audit intact. Discipline: TDD,
+> run tsc/tests before push, wait for CI green (10-min fallback) between tasks,
+> audit each phase against the plan before declaring complete.
