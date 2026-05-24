@@ -643,6 +643,21 @@ def shadow_audit(state: GraphState) -> GraphState:
 
 def select_recipe(state: GraphState) -> GraphState:
     entered_at = _now_iso()
+
+    # ADR-042 §2.2.6 — directed graph re-entry. The operator-authorised ERP
+    # submit acts on an already-classified record, so the recipe is supplied
+    # directly rather than re-proposed from intent. (propose_recipe maps an
+    # intent to exactly one recipe — the classifier — so it could never select
+    # the submit recipe.)
+    if state.directed_recipe:
+        state.selected_recipe = state.directed_recipe
+        _record(
+            state, node="select_recipe", entered_at=entered_at,
+            decision={"recipe_name": state.selected_recipe, "directed": True},
+            exit_verdict="directed",
+        )
+        return state
+
     backend = _backend(task="recipe")
     proposal = backend.propose_recipe(state)
     _drain_llm_trace(state, backend)
@@ -679,6 +694,65 @@ def select_recipe(state: GraphState) -> GraphState:
 
 def validate_types(state: GraphState) -> GraphState:
     entered_at = _now_iso()
+    if state.selected_recipe == "SubmitToErpRecipe.py":
+        # ADR-042 §2.2.6 — the submit invocation is built from the reviewed
+        # extraction carried on enrichment_context (NOT re-extracted) plus the
+        # operator's corrections. The recipe applies the corrections with a
+        # before/after audit and builds the ERP payload deterministically.
+        extraction = (state.enrichment_context or {}).get("order_entry_extraction") or {}
+        state.invocation = RecipeInvocation(
+            recipe_name=state.selected_recipe,
+            params={
+                "order_id": state.event.order_id,
+                "customer_bp": extraction.get("customer_bp"),
+                "header": extraction.get("header") or {},
+                "line_items": extraction.get("line_items") or [],
+                "corrections": state.directed_corrections or {},
+            },
+        )
+        _record(
+            state, node="validate_types", entered_at=entered_at,
+            decision={"recipe": state.selected_recipe, "directed_submit": True},
+            exit_verdict="ok",
+        )
+        return state
+    if state.selected_recipe == "ReplyDraftRecipe.py":
+        # ADR-042 Phase 4 — the reply-draft invocation is built from the reviewed
+        # extraction on enrichment_context plus the operator's reply params
+        # (recipient / template / edits) carried on directed_corrections. The
+        # recipient is operator-supplied (not captured upstream); the recipe
+        # REJECTs when it is absent.
+        extraction = (state.enrichment_context or {}).get("order_entry_extraction") or {}
+        params = state.directed_corrections or {}
+        header = extraction.get("header") or {}
+        flags = [str(f) for f in (extraction.get("validation_flags") or [])]
+        state.invocation = RecipeInvocation(
+            recipe_name=state.selected_recipe,
+            params={
+                "order_id": state.event.order_id,
+                "recipient": params.get("recipient") or extraction.get("customer_email"),
+                "template_name": params.get("template_name")
+                or "email_order_clarification_request",
+                "customer_name": extraction.get("customer_name"),
+                "context": {
+                    "customer_po": header.get("customer_po"),
+                    "clarification_points": flags
+                    or ["Please confirm the order details before we proceed."],
+                },
+                "edits": params.get("edits") or {},
+                # "draft" composes for review; "send" authorises the
+                # buyer_notification effect (operator-gated via SEND_REPLY).
+                "mode": params.get("mode") or "draft",
+            },
+        )
+        _record(
+            state, node="validate_types", entered_at=entered_at,
+            decision={"recipe": state.selected_recipe,
+                      "directed_reply": True,
+                      "mode": params.get("mode") or "draft"},
+            exit_verdict="ok",
+        )
+        return state
     if state.selected_recipe == "PriceAdjustmentRecipe.py":
         state.invocation = RecipeInvocation(
             recipe_name=state.selected_recipe,
@@ -993,6 +1067,19 @@ def explain_only(state: GraphState) -> GraphState:
 # resolve_dependencies — fetch data from gateways before recipe execution
 # ---------------------------------------------------------------------------
 
+# Dedicated pool for the dependency fan-out, DECOUPLED from
+# GatewayExecutor._pool. The fan-out submits one outer task per dependency, and
+# each GatewayExecutor.run recursively submits gateway.execute to enforce its
+# per-call timeout. Sharing one pool means the outer tasks can saturate it so
+# the inner execute submits never get a worker — a recursive-submit
+# self-deadlock once a recipe's dependency count approaches the pool size (and
+# across concurrent requests, since the pool is process-wide). Separate pools
+# break that coupling: outer tasks live here, inner execute tasks live in
+# GatewayExecutor._pool, so neither can starve the other.
+_DEPENDENCY_FANOUT_POOL = concurrent.futures.ThreadPoolExecutor(
+    max_workers=16, thread_name_prefix="dep-fanout",
+)
+
 
 def resolve_dependencies(state: GraphState) -> GraphState:
     """Call gateway dependencies declared by the selected recipe.
@@ -1065,7 +1152,7 @@ def resolve_dependencies(state: GraphState) -> GraphState:
     # Resolve independent dependencies concurrently.
     future_to_dep = {}
     for dep, req in requests:
-        future = executor._pool.submit(executor.run, req)
+        future = _DEPENDENCY_FANOUT_POOL.submit(executor.run, req)
         future_to_dep[future] = dep
         gateway_started_at[future] = _now_iso()
     for future in concurrent.futures.as_completed(future_to_dep):
@@ -1234,6 +1321,29 @@ def execute_recipe(state: GraphState) -> GraphState:
         state.final_status = TerminalStatus.COMPLETE
         state.explanation = "Deterministic execution completed successfully."
 
+    # ADR-042 DoR #2 — order intake is adversarially-injectable free-text: the
+    # extraction (and therefore a clean GREEN, sub-$10k classification) can be
+    # crafted by an upstream attacker. The financially-binding ERP submit is
+    # therefore operator-gated — a disposition on /exceptions/{id}/disposition
+    # (ADR-042 §2.2.6), never auto-executed by the graph. A one-click-approve
+    # intake that would otherwise auto-COMPLETE is routed to
+    # MANUAL_REVIEW_REQUIRED so a human authorises the submit. (Reject / block
+    # / review terminals are unaffected.)
+    if (
+        state.final_status == TerminalStatus.COMPLETE
+        and state.intent == Intent.MANUAL_ORDER_INTAKE
+        and state.selected_recipe == "ManualOrderIntakeRecipe.py"
+    ):
+        state.final_status = TerminalStatus.MANUAL_REVIEW_REQUIRED
+        state.explanation = (
+            "Order intake classified one-click-approve; the ERP submit is "
+            "operator-gated (ADR-042 §2.2.6 / DoR #2), so the record is routed "
+            "to manual review for human authorisation rather than auto-executed."
+        )
+        # NB: the guard keys on the *classifier* recipe. The operator-authorised
+        # SubmitToErpRecipe (directed graph re-entry) is exempt — it IS the
+        # human-gated submit, so it is allowed to reach COMPLETE.
+
     _record(
         state, node="execute_recipe", entered_at=entered_at,
         decision={
@@ -1291,8 +1401,21 @@ def apply_effects(state: GraphState) -> GraphState:
         state.shadow.trace_id
         if state.shadow else state.request_trace_id
     )
+    recipe_status = (state.execution_log.outputs or {}).get("status")
 
     for effect in spec.effects:
+        # Per-effect firing predicate. A "do the thing" effect (e.g. the
+        # financially-binding ERP write) declares `only_on_recipe_status` so it
+        # fires ONLY when the recipe produced that outcome — a REJECTED submit
+        # must never reach the ERP gateway (Guardrail #5, no partial execution).
+        # Effects without the predicate (e.g. buyer notifications) fire on every
+        # post-GREEN outcome as before — a DuplicatePO BLOCK still notifies the
+        # buyer it was blocked.
+        if (
+            effect.only_on_recipe_status is not None
+            and recipe_status not in effect.only_on_recipe_status
+        ):
+            continue
         params = {}
         for gw_param, output_field in effect.params_from_output.items():
             params[gw_param] = state.execution_log.outputs.get(output_field)
@@ -1305,6 +1428,27 @@ def apply_effects(state: GraphState) -> GraphState:
         )
         response = executor.run(request)
         state.effect_results.append(response)
+
+        # DoR #6 — record every effect outcome in the durable outbox: a SUCCESS
+        # external write is committed; a failure is queued for compensation so a
+        # reconciler can retry/escalate rather than leaving a half-applied state
+        # (ERP-submit-OK durability / reply-fail compensation). Never raises into
+        # the graph.
+        try:
+            from orchestration.outbox import record_effect
+            record_effect(
+                tenant_id=state.tenant_id or "default",
+                gateway=effect.gateway_name,
+                operation=effect.operation,
+                status=response.status,
+                recipe=state.selected_recipe,
+                recipe_status=recipe_status,
+                trace_id=trace_id,
+                error=response.error,
+                params=params,
+            )
+        except Exception:  # pragma: no cover - outbox must never break the graph
+            _node_logger.exception("outbox_record_failed")
 
         if response.status != "SUCCESS":
             state.explanation = (

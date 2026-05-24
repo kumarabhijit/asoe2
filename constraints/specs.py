@@ -32,6 +32,12 @@ AllowedRecipeName = Literal[
     "PalletAlignmentRecipe.py",
     "DeliveryDelayResolutionRecipe.py",
     "ManualOrderIntakeRecipe.py",
+    # ADR-042 Phase 3 — the order-entry ERP write (operator-authorised submit,
+    # executed via directed graph re-entry on a disposition).
+    "SubmitToErpRecipe.py",
+    # ADR-042 Phase 4 — deterministic buyer-reply composition (AI Draft Reply),
+    # executed via directed graph re-entry on a DRAFT_REPLY disposition.
+    "ReplyDraftRecipe.py",
     # ADR-034 §6.3 — legacy recipe-name alias retained until
     # 2026-08-12 so pre-cutover audit-log rows still validate.
     "EmailOrderEntryRecipe.py",
@@ -77,6 +83,15 @@ AllowedResolutionAction = Literal[
     "AUTO_CORRECT",
     "REQUEST_CLARIFICATION",
     "REJECT",
+    # ADR-042 Phase 3 — explicit, financially-binding order-entry ERP submit
+    # (operator disposition → directed graph re-entry; cosign >$10k).
+    "SUBMIT_TO_ERP",
+    # ADR-042 Phase 4 — compose a buyer reply draft (operator disposition →
+    # directed graph re-entry; the send is a separate authorised action).
+    "DRAFT_REPLY",
+    # ADR-042 Phase 4 — send the operator-approved buyer reply (Shadow-gated;
+    # fires the buyer_notification gateway via directed graph re-entry).
+    "SEND_REPLY",
 ]
 
 # Controlled vocabulary for categorizing an override's justification.

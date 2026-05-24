@@ -4,9 +4,76 @@ import os
 
 import pytest
 from contracts.models import GatewayResponse, GraphState, OrderEvent
+from gateways.attachment_fetch import AttachmentFetchGateway
+from gateways.edi850 import build_edi_850
+from gateways.knowledge_graph import build_knowledge_graph
 from gateways.registry import clear_registry, register_gateway
 from gateways.stub import StubGateway
 from gateways.tenant_config import TenantConfigGateway
+from contracts.policy import HIGH_VALUE_OVERRIDE_THRESHOLD_USD
+from recipes.ChangeAnalysisRecipe import evaluate_change
+
+# ADR-042 Phase 5 — canned order for the edi_850 builder stub. Mirrors
+# api/sandbox_gateways.py and the order_extraction stub so the pytest pipeline
+# and the live sandbox build the identical EDI 850 document.
+_EDI_850_ORDER = dict(
+    order_id="0093847612",
+    po_number="0093847612",
+    po_date="2025-03-17",
+    buyer_name="Walmart Stores Inc",
+    buyer_id="300001",
+    seller_name="Acme Beverages Co",
+    seller_id="VENDOR-7788",
+    requested_date="2025-03-24",
+    line_items=[{
+        "line_num": "001", "material": "BEV-COLA-12PK",
+        "description": "Cola 12-pack case", "quantity": 480,
+        "uom": "CS", "unit_price": 8.64,
+    }],
+)
+
+# ADR-042 Phase 6 — canned order-change for the change_analysis evaluator stub.
+# Mirrors api/sandbox_gateways.py so the pytest pipeline and the live sandbox
+# score the identical change.
+_CHANGE = dict(
+    order_id="0093847612",
+    order_value_usd=45200.0,
+    cosign_threshold_usd=HIGH_VALUE_OVERRIDE_THRESHOLD_USD,
+    lifecycle_index=2,
+    change_items=[
+        {"field": "quantity", "from_value": "480", "to_value": "600"},
+        {"field": "requested_date", "from_value": "2025-03-24", "to_value": "2025-03-20"},
+    ],
+    signals={
+        "inventory": {"atp": 520, "required": 600},
+        "production": {"stage": "REL"},
+        "transport": {"route_available": True, "carrier_capacity": True},
+        "warehouse": {"pick_pack_feasible": True},
+        "order_status": {"fulfillment_stage": 2},
+        "sla": {"within_window": True, "days_to_deadline": 1},
+        "dependencies": {"linked_orders": 1},
+        "network": {"dc_routing_ok": True},
+        "priority": {"customer_tier": "GOLD", "auto_approve": False},
+    },
+)
+
+# ADR-042 Phase 7 — canned entities for the knowledge_graph builder stub.
+# Mirrors api/sandbox_gateways.py so the pytest pipeline and the live sandbox
+# project the identical graph.
+_KG = dict(
+    order_id="0093847612",
+    customer_name="Walmart Stores Inc",
+    customer_bp="300001",
+    line_items=[
+        {"material": "BEV-COLA-12PK", "description": "Cola 12-pack case",
+         "quantity": 480, "uom": "CS"},
+    ],
+    sap={"system": "S4H_PRD", "sap_doc_number": "5100012344",
+         "validation_status": "SO confirmed, ATP OK"},
+    entities=[
+        {"key": "customer_po", "value": "0093847612", "kind": "po"},
+    ],
+)
 
 
 @pytest.fixture(autouse=True)
@@ -372,6 +439,111 @@ def _register_oms_stub():
             ),
         },
     )
+    # ADR-042 Phase 3 — Customer Inbox read producers. Deterministic stubs for
+    # the constrained-generation order-extraction read + the SAP "validate"
+    # read; their output populates enrichment_context.{order_entry_extraction,
+    # inbox_entities, sap_data}, activating the Order Entry / Entities / SAP
+    # Data tabs. Mirrors api/sandbox_gateways.py so the live sandbox server and
+    # the pytest pipeline behave identically.
+    order_extraction_stub = StubGateway(
+        "order_extraction",
+        responses={
+            "extract_order": GatewayResponse(
+                gateway_name="order_extraction", operation="extract_order",
+                status="SUCCESS",
+                data={
+                    "source_type": "PDF",
+                    "confidence": 0.94,
+                    "header": {
+                        "customer_po": "0093847612", "order_type": "ZOR",
+                        "sales_org": "1000", "dist_channel": "10",
+                        "requested_date": "2025-03-17",
+                    },
+                    "customer_name": "Walmart Stores Inc",
+                    "customer_bp": "300001",
+                    "line_items": [{
+                        "line_num": "001", "material": "BEV-COLA-12PK",
+                        "description": "Cola 12-pack case", "quantity": 480,
+                        "uom": "CS", "unit_price": 8.64, "mdm_matched": True,
+                    }],
+                    "validation_flags": [{
+                        "field": "line 001", "severity": "INFO",
+                        "message": "matched to material master",
+                    }],
+                },
+            ),
+            "extract_entities": GatewayResponse(
+                gateway_name="order_extraction", operation="extract_entities",
+                status="SUCCESS",
+                data={"extracted": [
+                    {"key": "customer_po", "value": "0093847612", "kind": "po",
+                     "confidence": 0.98, "source_span": "PO# 0093847612"},
+                    {"key": "material", "value": "BEV-COLA-12PK",
+                     "kind": "material", "confidence": 0.95,
+                     "source_span": "Cola 12pk case"},
+                ]},
+            ),
+        },
+    )
+    sap_order_stub = StubGateway(
+        "sap_order",
+        responses={
+            "validate": GatewayResponse(
+                gateway_name="sap_order", operation="validate",
+                status="SUCCESS",
+                data={
+                    "system": "S4H_PRD",
+                    "validation_status": "SO confirmed, ATP OK",
+                    "order_value_usd": 45200.0,
+                    "sap_doc_number": "5100012344",
+                },
+            ),
+        },
+    )
+    # ADR-042 Phase 5 — EDI 850 builder producer (deterministic X12 850).
+    edi_850_stub = StubGateway(
+        "edi_850",
+        responses={
+            "build": GatewayResponse(
+                gateway_name="edi_850", operation="build",
+                status="SUCCESS",
+                data=build_edi_850(**_EDI_850_ORDER),
+            ),
+        },
+    )
+    # ADR-042 Phase 6 — Change Analysis evaluator producer (deterministic).
+    change_analysis_stub = StubGateway(
+        "change_analysis",
+        responses={
+            "evaluate": GatewayResponse(
+                gateway_name="change_analysis", operation="evaluate",
+                status="SUCCESS",
+                data=evaluate_change(**_CHANGE),
+            ),
+        },
+    )
+    # ADR-042 Phase 7 — Knowledge Graph builder producer (deterministic).
+    knowledge_graph_stub = StubGateway(
+        "knowledge_graph",
+        responses={
+            "build": GatewayResponse(
+                gateway_name="knowledge_graph", operation="build",
+                status="SUCCESS",
+                data=build_knowledge_graph(**_KG),
+            ),
+        },
+    )
+    # ADR-042 Phase 3 — ERP write target for SubmitToErpRecipe's effect.
+    erp_stub = StubGateway(
+        "erp",
+        responses={
+            "create_sales_order": GatewayResponse(
+                gateway_name="erp", operation="create_sales_order",
+                status="SUCCESS",
+                data={"sap_doc_number": "5100099999", "created": True},
+            ),
+        },
+    )
     register_gateway(oms_stub)
     register_gateway(notification_stub)
     register_gateway(sap_doc_stub)
@@ -381,14 +553,29 @@ def _register_oms_stub():
     register_gateway(sap_customer_master_stub)
     register_gateway(sla_contract_stub)
     register_gateway(email_intake_stub)
+    register_gateway(order_extraction_stub)
+    register_gateway(sap_order_stub)
+    register_gateway(edi_850_stub)
+    register_gateway(change_analysis_stub)
+    register_gateway(knowledge_graph_stub)
+    register_gateway(AttachmentFetchGateway())
+    register_gateway(erp_stub)
     # ADR-029: tenant_config is registered as the real file-backed
     # gateway (not a stub) — it's pure in-process I/O against
     # gateways/configs/duplicate_po/defaults.json, so graph tests
     # exercise the actual resolver path. Dedicated unit tests for the
     # gateway itself live in tests/test_tenant_config_gateway.py.
     register_gateway(TenantConfigGateway())
+    # DoR #8 — drop any gateway-tier circuit-breaker / metering state so a trip
+    # in one test can't leak into the next. DoR #6 — drop the effect outbox too.
+    from gateways.circuit_breaker import reset_all as _reset_gateway_breakers
+    from orchestration.outbox import reset as _reset_outbox
+    _reset_gateway_breakers()
+    _reset_outbox()
     yield
     clear_registry()
+    _reset_gateway_breakers()
+    _reset_outbox()
 
 
 @pytest.fixture

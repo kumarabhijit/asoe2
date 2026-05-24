@@ -191,6 +191,16 @@
               }
             ]
           },
+          "change_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChangeAnalysis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "confidence": {
             "title": "Confidence",
             "type": "integer"
@@ -209,10 +219,30 @@
             "title": "Diagnosis",
             "type": "string"
           },
+          "draft_reply": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DraftReply"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "duplicate_detection": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/DuplicateDetectionData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "edi_850_audit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Edi850Document"
               },
               {
                 "type": "null"
@@ -249,6 +279,16 @@
               }
             ]
           },
+          "entities_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EntitiesAnalysisData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "entity_profile": {
             "anyOf": [
               {
@@ -263,6 +303,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/ImpactMetrics"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "knowledge_graph": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KnowledgeGraphPayload"
               },
               {
                 "type": "null"
@@ -290,6 +340,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/OrderComparisonData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "order_entry_extraction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrderEntryExtraction"
               },
               {
                 "type": "null"
@@ -365,6 +425,16 @@
               }
             ],
             "title": "Root Cause"
+          },
+          "sap_data_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SapDataAnalysisData"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -485,6 +555,30 @@
           "access_token"
         ],
         "title": "AuthTokenResponse",
+        "type": "object"
+      },
+      "AutonomyLevelInfo": {
+        "description": "One autonomy tier for the UI to render/sort (ADR-042 \u00a75/\u00a78).\n\n`rank` is the degree of automation (higher == more autonomous) under the\nactive `autonomy_vocab_version`; the UI orders the ladder by `rank` rather\nthan hardcoding a map (asoe-ui Guardrail #1). Display vocabulary only \u2014\nnot the engine's gating semantics.",
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "level",
+          "label",
+          "rank"
+        ],
+        "title": "AutonomyLevelInfo",
         "type": "object"
       },
       "BackOrderAnalysisData": {
@@ -727,6 +821,119 @@
           "challenge_reason"
         ],
         "title": "ChallengeRequest",
+        "type": "object"
+      },
+      "ChangeAnalysis": {
+        "description": "Change Analysis tab (ADR-042 Phase 6) \u2014 the deterministic evaluation of a\nrequested order change: an N-constraint evaluation, M resolution scenarios,\nand a decision. Built by the recipe-homed evaluator\n(`recipes/ChangeAnalysisRecipe.evaluate_change`, pure + deterministic;\nthresholds from `contracts/policy.py`, NOT `constraints/`). Projected by the\ncomposer from `enrichment_context[\"change_analysis\"]`; preview-only until\nthat producer is wired (Guardrail #6 \u2014 no partial truth).",
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/ChangeDecision"
+          },
+          "evaluation": {
+            "$ref": "#/components/schemas/ConstraintEvaluation"
+          },
+          "scenarios": {
+            "items": {
+              "$ref": "#/components/schemas/ScenarioOption"
+            },
+            "title": "Scenarios",
+            "type": "array"
+          }
+        },
+        "required": [
+          "evaluation",
+          "decision"
+        ],
+        "title": "ChangeAnalysis",
+        "type": "object"
+      },
+      "ChangeDecision": {
+        "description": "The Change Analysis decision panel (ADR-042 Phase 6). `requires_cosign`\nis set deterministically when `revenue_impact_usd` meets the ADR-040\nfour-eyes threshold (`contracts/policy.HIGH_VALUE_OVERRIDE_THRESHOLD_USD`) \u2014\nthe recipe surfaces the gate; actioning the change is a separate\nShadow-gated disposition. `confidence` \u2208 [0, 1].",
+        "properties": {
+          "confidence": {
+            "title": "Confidence",
+            "type": "number"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "recommended_action": {
+            "title": "Recommended Action",
+            "type": "string"
+          },
+          "requires_cosign": {
+            "default": false,
+            "title": "Requires Cosign",
+            "type": "boolean"
+          },
+          "revenue_impact_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revenue Impact Usd"
+          },
+          "sap_actions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sap Actions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "recommended_action",
+          "confidence"
+        ],
+        "title": "ChangeDecision",
+        "type": "object"
+      },
+      "ChangeItem": {
+        "description": "One field of the requested order change (the from/to grid).",
+        "properties": {
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "from_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Value"
+          },
+          "to_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Value"
+          }
+        },
+        "required": [
+          "field"
+        ],
+        "title": "ChangeItem",
         "type": "object"
       },
       "ComparisonLineItem": {
@@ -1029,6 +1236,117 @@
         "title": "ConfigResolveResponse",
         "type": "object"
       },
+      "ConstraintCheck": {
+        "description": "One deterministic constraint evaluation in the Change Analysis (ADR-042\nPhase 6). `status` \u2208 PASS | CONDITIONAL | WARNING. `agent` is a cosmetic\nlabel (the evaluating discipline) \u2014 NOT audit-bearing (ADR-042 \u00a76: agent\ntimings/labels are decorative). `system_ref` names the system of record the\ncheck reasons over (e.g. ``SAP MM/ATP``).",
+        "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "metric": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "system_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Ref"
+          }
+        },
+        "required": [
+          "name",
+          "status",
+          "detail"
+        ],
+        "title": "ConstraintCheck",
+        "type": "object"
+      },
+      "ConstraintEvaluation": {
+        "description": "The variable-cardinality constraint evaluation for a requested order\nchange (ADR-042 Phase 6). `checks` is an N-length list \u2014 only the\nconstraints whose backing signal is present are evaluated (no fixed 10).\n`lifecycle_stages` is the ordered stage vocabulary (the UI renders the bar\nfrom the payload \u2014 no hardcoded stage list client-side); `lifecycle_index`\nis the current stage's position within it.",
+        "properties": {
+          "change_items": {
+            "items": {
+              "$ref": "#/components/schemas/ChangeItem"
+            },
+            "title": "Change Items",
+            "type": "array"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/ConstraintCheck"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "conditional_count": {
+            "default": 0,
+            "title": "Conditional Count",
+            "type": "integer"
+          },
+          "lifecycle_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lifecycle Index"
+          },
+          "lifecycle_stages": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Lifecycle Stages",
+            "type": "array"
+          },
+          "pass_count": {
+            "default": 0,
+            "title": "Pass Count",
+            "type": "integer"
+          },
+          "warning_count": {
+            "default": 0,
+            "title": "Warning Count",
+            "type": "integer"
+          }
+        },
+        "title": "ConstraintEvaluation",
+        "type": "object"
+      },
       "CosignRequest": {
         "additionalProperties": false,
         "description": "POST /api/v1/exceptions/{id}/override/cosign \u2014 second-reviewer decision\non a pending high-value override (Phase 2 four-eyes control).\n\n``approve=True`` applies the pending override (lifecycle \u2192 RESOLVED);\n``approve=False`` rejects it and restores the prior lifecycle. Notes\nare mandatory (SOX) in both cases.\n\nThe cosigner's identity comes from the authenticated user and must\ndiffer from the initiator \u2014 same-person cosign is a SOD violation.",
@@ -1165,6 +1483,18 @@
             "title": "Action",
             "type": "string"
           },
+          "corrections": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corrections"
+          },
           "notes": {
             "title": "Notes",
             "type": "string"
@@ -1172,6 +1502,18 @@
           "reason_tag": {
             "title": "Reason Tag",
             "type": "string"
+          },
+          "reply": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply"
           }
         },
         "required": [
@@ -1180,6 +1522,140 @@
           "reason_tag"
         ],
         "title": "DispositionRequest",
+        "type": "object"
+      },
+      "DraftReply": {
+        "description": "AI Draft Reply evidence (ADR-042 Phase 4 contract; surfaced on the\nanalysis in Phase 7). The current generated reply for the case, projected by\nthe composer from `resolution_data[\"reply_draft\"]` (the ReplyDraftRecipe\noutput a DRAFT_REPLY disposition persisted). `status` \u2208 DRAFTED | REJECTED;\na REJECTED draft carries a `reason` and no body. Read-only evidence \u2014 sending\nis a separate Shadow-gated disposition (SEND_REPLY).",
+        "properties": {
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body"
+          },
+          "drafted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Drafted At"
+          },
+          "drafted_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Drafted By"
+          },
+          "edits_applied": {
+            "items": {
+              "$ref": "#/components/schemas/DraftReplyEdit"
+            },
+            "title": "Edits Applied",
+            "type": "array"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "recipient": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipient"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "template_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Name"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "DraftReply",
+        "type": "object"
+      },
+      "DraftReplyEdit": {
+        "description": "One operator edit applied to a generated reply (before/after audit).",
+        "properties": {
+          "after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After"
+          },
+          "before": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before"
+          },
+          "field": {
+            "title": "Field",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field"
+        ],
+        "title": "DraftReplyEdit",
         "type": "object"
       },
       "DuplicateDetectionData": {
@@ -1384,6 +1860,377 @@
           "updated_at"
         ],
         "title": "DuplicatePOEnvelope",
+        "type": "object"
+      },
+      "Edi850Document": {
+        "description": "EDI 850 Audit tab (ADR-042 Phase 5). The ANSI X12 5010 purchase-order\ntransaction set the system reconstructs from the reviewed order, built\ndeterministically by the `edi_850` builder (`gateways/edi850.py`) \u2014 a pure,\nfully unit-testable port of the prototype's client-side `buildEDI850`. It is\nthe audit evidence an operator inspects before the order is transmitted to\nthe seller's ERP. Projected by the composer from the builder's\n`enrichment_context[\"edi_850\"]` read; preview-only until that producer is\nwired. The three prototype sub-views map onto this contract: Decoded\n(`envelope` / `header` / `parties` / `line_items` / `totals`), Raw X12\n(`raw_x12`), and Segment Map (`segments`).",
+        "properties": {
+          "envelope": {
+            "$ref": "#/components/schemas/Edi850Envelope"
+          },
+          "header": {
+            "$ref": "#/components/schemas/Edi850Header"
+          },
+          "line_items": {
+            "items": {
+              "$ref": "#/components/schemas/Edi850LineItem"
+            },
+            "title": "Line Items",
+            "type": "array"
+          },
+          "parties": {
+            "items": {
+              "$ref": "#/components/schemas/Edi850Party"
+            },
+            "title": "Parties",
+            "type": "array"
+          },
+          "raw_x12": {
+            "title": "Raw X12",
+            "type": "string"
+          },
+          "segments": {
+            "items": {
+              "$ref": "#/components/schemas/Edi850Segment"
+            },
+            "title": "Segments",
+            "type": "array"
+          },
+          "standard": {
+            "default": "ANSI X12 5010",
+            "title": "Standard",
+            "type": "string"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/Edi850Totals"
+          },
+          "transaction_set": {
+            "default": "850",
+            "title": "Transaction Set",
+            "type": "string"
+          }
+        },
+        "required": [
+          "envelope",
+          "header",
+          "totals",
+          "raw_x12"
+        ],
+        "title": "Edi850Document",
+        "type": "object"
+      },
+      "Edi850Envelope": {
+        "description": "ISA/GS/ST interchange + functional-group identifiers (Decoded view's\nInterchange Envelope card).",
+        "properties": {
+          "group_control_number": {
+            "title": "Group Control Number",
+            "type": "string"
+          },
+          "interchange_control_number": {
+            "title": "Interchange Control Number",
+            "type": "string"
+          },
+          "receiver_id": {
+            "title": "Receiver Id",
+            "type": "string"
+          },
+          "sender_id": {
+            "title": "Sender Id",
+            "type": "string"
+          },
+          "transaction_set_control_number": {
+            "title": "Transaction Set Control Number",
+            "type": "string"
+          },
+          "usage_indicator": {
+            "title": "Usage Indicator",
+            "type": "string"
+          },
+          "x12_version": {
+            "title": "X12 Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sender_id",
+          "receiver_id",
+          "interchange_control_number",
+          "group_control_number",
+          "transaction_set_control_number",
+          "usage_indicator",
+          "x12_version"
+        ],
+        "title": "Edi850Envelope",
+        "type": "object"
+      },
+      "Edi850Header": {
+        "description": "BEG/CUR/DTM purchase-order header (Decoded view's PO Header card).\n`purpose_code` is BEG01 (e.g. ``00`` = original); `po_type` is BEG02\n(e.g. ``SA`` = stand-alone).",
+        "properties": {
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "po_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Po Date"
+          },
+          "po_number": {
+            "title": "Po Number",
+            "type": "string"
+          },
+          "po_type": {
+            "title": "Po Type",
+            "type": "string"
+          },
+          "purpose_code": {
+            "title": "Purpose Code",
+            "type": "string"
+          },
+          "requested_delivery_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Delivery Date"
+          }
+        },
+        "required": [
+          "purpose_code",
+          "po_type",
+          "po_number"
+        ],
+        "title": "Edi850Header",
+        "type": "object"
+      },
+      "Edi850LineItem": {
+        "description": "A PO1 baseline-item line (Decoded view's Line Items table).\n`product_qualifier` is the PO1 product/service-ID qualifier (e.g. ``VP``\nvendor part / ``IN`` buyer item); `extended_amount` = quantity \u00d7\nunit_price (deterministic).",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "extended_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extended Amount"
+          },
+          "line_num": {
+            "title": "Line Num",
+            "type": "string"
+          },
+          "product_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Id"
+          },
+          "product_qualifier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Qualifier"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "number"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Price"
+          },
+          "uom": {
+            "title": "Uom",
+            "type": "string"
+          }
+        },
+        "required": [
+          "line_num",
+          "quantity",
+          "uom"
+        ],
+        "title": "Edi850LineItem",
+        "type": "object"
+      },
+      "Edi850Party": {
+        "description": "An N1/N3/N4 party loop (Decoded view's Party Information card).\n`entity_code` is the N101 qualifier (``BY`` buyer / ``SE`` seller /\n``ST`` ship-to); `role` is its decoded label.",
+        "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "city_state_zip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City State Zip"
+          },
+          "entity_code": {
+            "title": "Entity Code",
+            "type": "string"
+          },
+          "id_qualifier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id Qualifier"
+          },
+          "id_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id Value"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_code",
+          "role",
+          "name"
+        ],
+        "title": "Edi850Party",
+        "type": "object"
+      },
+      "Edi850Segment": {
+        "description": "One ANSI X12 segment of the built 850. `seg_id` is the segment tag\n(ISA/BEG/PO1/\u2026); `elements` are its ordered data elements (excluding the\ntag); `raw` is the assembled X12 line (element-separated, segment-\nterminated); `meaning` is the human-readable decode (Segment Map view);\n`group` buckets the segment for the viewer's colour legend \u2208\nenvelope | header | dates | party | line | trailer.",
+        "properties": {
+          "elements": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Elements",
+            "type": "array"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "meaning": {
+            "title": "Meaning",
+            "type": "string"
+          },
+          "raw": {
+            "title": "Raw",
+            "type": "string"
+          },
+          "seg_id": {
+            "title": "Seg Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "seg_id",
+          "raw",
+          "meaning",
+          "group"
+        ],
+        "title": "Edi850Segment",
+        "type": "object"
+      },
+      "Edi850Totals": {
+        "description": "CTT transaction totals. `total_line_items` = CTT01 (PO1 count);\n`total_quantity` = CTT02 (hash total of quantities); `total_amount` =\n\u03a3 extended_amount (deterministic, may be None when no line carries a\nprice).",
+        "properties": {
+          "total_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Amount"
+          },
+          "total_line_items": {
+            "title": "Total Line Items",
+            "type": "integer"
+          },
+          "total_quantity": {
+            "title": "Total Quantity",
+            "type": "number"
+          }
+        },
+        "required": [
+          "total_line_items",
+          "total_quantity"
+        ],
+        "title": "Edi850Totals",
         "type": "object"
       },
       "EdiMismatchAnalysisData": {
@@ -1648,6 +2495,20 @@
           "body_hash"
         ],
         "title": "EmailSourceData",
+        "type": "object"
+      },
+      "EntitiesAnalysisData": {
+        "description": "Entities tab (ADR-042 Phase 2). Contextual evidence \u2014 the extracted\nentities the operator reviews; the binding control fields remain\n`recommended_action` / `autonomy_level`. Projected by the composer from\nthe intake gateway's extraction; preview-only until that adapter lands.",
+        "properties": {
+          "extracted": {
+            "items": {
+              "$ref": "#/components/schemas/ExtractedEntity"
+            },
+            "title": "Extracted",
+            "type": "array"
+          }
+        },
+        "title": "EntitiesAnalysisData",
         "type": "object"
       },
       "EntityProfile": {
@@ -2172,6 +3033,52 @@
         "title": "ExecutedNode",
         "type": "object"
       },
+      "ExtractedEntity": {
+        "description": "A single structured value the AI intake agent pulled from the email\n/ attachments (ADR-042 Phase 2 \u2014 Entities section). `kind` is the\nfree-form category (order_id | material | date | po | invoice | qty | \u2026);\n`source_span` is the verbatim text it was extracted from (audit trail of\nwhere a value came from).",
+        "properties": {
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "source_span": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Span"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "value",
+          "kind"
+        ],
+        "title": "ExtractedEntity",
+        "type": "object"
+      },
       "GatewayCallSpan": {
         "additionalProperties": false,
         "description": "Per-gateway sub-span emitted by `resolve_dependencies` (Phase B).\n\n`resolve_dependencies` fans gateway calls out via concurrent.futures.\nThe single `ExecutedNode.duration_ms` is the wall-clock fan-out span;\nper-gateway timing lives here so the timeline can render a nested\nexpand without the DAG view having to render N sub-nodes (which would\ndiverge from the orchestration topology \u2014 the DAG renders ONE node,\nnot N).",
@@ -2240,6 +3147,13 @@
       "HealthResponse": {
         "description": "GET /api/v1/health",
         "properties": {
+          "allowed_autonomy_levels": {
+            "items": {
+              "$ref": "#/components/schemas/AutonomyLevelInfo"
+            },
+            "title": "Allowed Autonomy Levels",
+            "type": "array"
+          },
           "allowed_case_sources": {
             "items": {
               "type": "string"
@@ -2291,6 +3205,11 @@
             },
             "title": "Allowed Resolution Actions",
             "type": "array"
+          },
+          "autonomy_vocab_version": {
+            "default": "",
+            "title": "Autonomy Vocab Version",
+            "type": "string"
           },
           "explain_mode": {
             "title": "Explain Mode",
@@ -2494,6 +3413,97 @@
           "qty"
         ],
         "title": "InboundOrder",
+        "type": "object"
+      },
+      "KnowledgeGraphEdge": {
+        "description": "A directed relationship between two `KnowledgeGraphNode` ids (ADR-042\nPhase 7). `relation` is the decoded edge label (e.g. ``places`` /\n``contains`` / ``validated_by``).",
+        "properties": {
+          "relation": {
+            "title": "Relation",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "target",
+          "relation"
+        ],
+        "title": "KnowledgeGraphEdge",
+        "type": "object"
+      },
+      "KnowledgeGraphNode": {
+        "description": "One node in the Change/Knowledge Graph (ADR-042 Phase 7). `kind` buckets\nthe node for the viewer's legend (e.g. ``order`` / ``customer`` /\n``material`` / ``sap_doc`` / ``entity``); `detail` is an optional one-line\nannotation.",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "kind"
+        ],
+        "title": "KnowledgeGraphNode",
+        "type": "object"
+      },
+      "KnowledgeGraphPayload": {
+        "description": "Knowledge Graph tab (ADR-042 Phase 7) \u2014 a net-new DERIVED projection over\nthe case's already-resolved entities (the order, its customer, materials,\nSAP doc, and extracted entities). Built deterministically by\n`gateways/knowledge_graph.build_knowledge_graph` (pure) \u2014 there is no\nstandalone KG data source today, so this is a projection of existing\nenrichment context, not invented data (ADR-042 \u00a75b \u2014 deferrable behind\ndemand). Projected by the composer from\n`enrichment_context[\"knowledge_graph\"]`; preview-only until that producer is\nwired. `root_id` is the focal node (the order/case).",
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeGraphEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeGraphNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "root_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Id"
+          }
+        },
+        "title": "KnowledgeGraphPayload",
         "type": "object"
       },
       "LifecycleState": {
@@ -2811,6 +3821,241 @@
           }
         },
         "title": "OrderComparisonData",
+        "type": "object"
+      },
+      "OrderEntryExtraction": {
+        "description": "Order Entry tab (ADR-042 Phase 3) \u2014 the structured order the AI intake\nagent extracted from the email/attachments, for operator review before ERP\nsubmit. Projected by the composer from the extraction-gateway read;\npreview-only until that gateway lands. The agent's recommendation /\nautonomy live separately on `email_order_entry_analysis`.",
+        "properties": {
+          "confidence": {
+            "title": "Confidence",
+            "type": "number"
+          },
+          "customer_bp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Bp"
+          },
+          "customer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Name"
+          },
+          "header": {
+            "$ref": "#/components/schemas/OrderEntryHeader"
+          },
+          "line_items": {
+            "items": {
+              "$ref": "#/components/schemas/OrderEntryLineItem"
+            },
+            "title": "Line Items",
+            "type": "array"
+          },
+          "source_type": {
+            "title": "Source Type",
+            "type": "string"
+          },
+          "validation_flags": {
+            "items": {
+              "$ref": "#/components/schemas/OrderEntryValidationFlag"
+            },
+            "title": "Validation Flags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "source_type",
+          "confidence",
+          "header"
+        ],
+        "title": "OrderEntryExtraction",
+        "type": "object"
+      },
+      "OrderEntryHeader": {
+        "description": "Extracted order-header fields (ADR-042 Phase 3 \u2014 Order Entry tab).",
+        "properties": {
+          "customer_po": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Po"
+          },
+          "dist_channel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dist Channel"
+          },
+          "order_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order Type"
+          },
+          "requested_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Date"
+          },
+          "sales_org": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sales Org"
+          },
+          "ship_window_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ship Window From"
+          },
+          "ship_window_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ship Window To"
+          }
+        },
+        "title": "OrderEntryHeader",
+        "type": "object"
+      },
+      "OrderEntryLineItem": {
+        "description": "One extracted order line. `mdm_matched` = matched against material\nmaster; None when the master lookup hasn't run.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "line_num": {
+            "title": "Line Num",
+            "type": "string"
+          },
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "mdm_matched": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mdm Matched"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "number"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Price"
+          },
+          "uom": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uom"
+          }
+        },
+        "required": [
+          "line_num",
+          "material",
+          "quantity"
+        ],
+        "title": "OrderEntryLineItem",
+        "type": "object"
+      },
+      "OrderEntryValidationFlag": {
+        "description": "A validation finding on the extracted order. `severity` \u2208\nERROR | WARNING | INFO.",
+        "properties": {
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "severity",
+          "message"
+        ],
+        "title": "OrderEntryValidationFlag",
         "type": "object"
       },
       "OrderSnapshot": {
@@ -3953,6 +5198,93 @@
           "description"
         ],
         "title": "SAPActionStep",
+        "type": "object"
+      },
+      "SapDataAnalysisData": {
+        "description": "SAP Data tab (ADR-042 Phase 2). Live SAP system-of-record context the\noperator authorises against \u2014 which system, its validation state, and the\norder's financial value. Projected by the composer from the SAP gateway\nread; preview-only until that adapter lands. `system` / `validation_status`\n/ `order_value_usd` are audit-bearing (the decision applies to a specific\nSAP order in a specific state at a specific value); `sap_doc_number` is a\ncontextual reference.",
+        "properties": {
+          "order_value_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order Value Usd"
+          },
+          "sap_doc_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sap Doc Number"
+          },
+          "system": {
+            "title": "System",
+            "type": "string"
+          },
+          "validation_status": {
+            "title": "Validation Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "system",
+          "validation_status"
+        ],
+        "title": "SapDataAnalysisData",
+        "type": "object"
+      },
+      "ScenarioOption": {
+        "description": "One resolution scenario the evaluator surfaces for a change (ADR-042\nPhase 6). Variable cardinality \u2014 M scenarios, not the prototype's fixed 7.\n`recommended` marks the evaluator's preferred option; `financial_delta_usd`\nis the deterministic revenue delta vs the as-requested change.",
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "financial_delta_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Financial Delta Usd"
+          },
+          "impact": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Impact"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "recommended": {
+            "default": false,
+            "title": "Recommended",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "description"
+        ],
+        "title": "ScenarioOption",
         "type": "object"
       },
       "SeedFinancialImpactRequest": {
@@ -5227,6 +6559,24 @@
               ],
               "description": "Filter by case source (manual_order | automated_order)",
               "title": "Source"
+            }
+          },
+          {
+            "description": "Filter by case_type (EMAIL_ENTRY | BLOCK). Orthogonal to source (ADR-041 \u00a71); drives the Customer Inbox EMAIL_ENTRY lens (ADR-042).",
+            "in": "query",
+            "name": "case_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by case_type (EMAIL_ENTRY | BLOCK). Orthogonal to source (ADR-041 \u00a71); drives the Customer Inbox EMAIL_ENTRY lens (ADR-042).",
+              "title": "Case Type"
             }
           },
           {

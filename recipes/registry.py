@@ -10,6 +10,8 @@ from recipes.DeliveryDelayResolutionRecipe import resolve_delivery_delay
 from recipes.DuplicatePORecipe import detect_duplicate_po
 from recipes.EdiMismatchRecipe import detect_edi_mismatch
 from recipes.ManualOrderIntakeRecipe import classify_manual_order_intake
+from recipes.SubmitToErpRecipe import build_erp_submission
+from recipes.ReplyDraftRecipe import compose_reply_draft
 from recipes.MOQRoundUpRecipe import round_up_moq
 from recipes.OverMaxTrimRecipe import trim_over_max
 from recipes.PalletAlignmentRecipe import align_pallets
@@ -371,11 +373,125 @@ REGISTRY = {
                 },
                 result_key="email_source_context",
             ),
+            # ADR-042 Phase 3 — the Customer Inbox read producers. These are
+            # evidence-enriching reads (ADR-025 gateway-before-shadow), NOT
+            # lifecycle writes, so required_for_audit=False: when the producer
+            # isn't wired (e.g. no extraction model configured) the run still
+            # proceeds and the corresponding tab stays structurally omitted
+            # (composer returns None on the empty bag — preview-only, no
+            # partial truth). The order-extraction gateway runs constrained
+            # generation over the sanitized email/attachments; the sap_order
+            # gateway is the deterministic SAP "validate" read. Real
+            # email-body sourcing for the live model is the Phase-4 live
+            # pipeline; the sandbox/conftest StubGateways stand in today.
+            GatewayDependency(
+                gateway_name="order_extraction",
+                operation="extract_order",
+                params_from_state={"case": "event.order_id"},
+                result_key="order_entry_extraction",
+                required_for_audit=False,
+            ),
+            GatewayDependency(
+                gateway_name="order_extraction",
+                operation="extract_entities",
+                params_from_state={"case": "event.order_id"},
+                result_key="inbox_entities",
+                required_for_audit=False,
+            ),
+            GatewayDependency(
+                gateway_name="sap_order",
+                operation="validate",
+                params_from_state={"order_id": "event.order_id"},
+                result_key="sap_data",
+                required_for_audit=False,
+            ),
+            # ADR-042 Phase 5 — EDI 850 Audit tab. Deterministic X12 850
+            # reconstruction of the order (gateways/edi850.build_edi_850, a
+            # pure builder). required_for_audit=False: a derived wire-format
+            # view, not a lifecycle write — when unwired the tab stays
+            # structurally omitted (composer returns None). The stub builds
+            # from the same canned order as the order_extraction stub.
+            GatewayDependency(
+                gateway_name="edi_850",
+                operation="build",
+                params_from_state={"order_id": "event.order_id"},
+                result_key="edi_850",
+                required_for_audit=False,
+            ),
+            # ADR-042 Phase 6 — Change Analysis tab. Deterministic constraint
+            # evaluation of a requested order change (recipes/ChangeAnalysisRecipe,
+            # a pure evaluator). required_for_audit=False: a derived evaluation
+            # view, not a lifecycle write — when unwired the tab stays
+            # structurally omitted (composer returns None).
+            GatewayDependency(
+                gateway_name="change_analysis",
+                operation="evaluate",
+                params_from_state={"order_id": "event.order_id"},
+                result_key="change_analysis",
+                required_for_audit=False,
+            ),
+            # ADR-042 Phase 7 — Knowledge Graph tab. Deterministic derived
+            # projection of the case entities (gateways/knowledge_graph, pure).
+            # required_for_audit=False: a derived projection, not a lifecycle
+            # write — when unwired/empty the tab stays structurally omitted.
+            GatewayDependency(
+                gateway_name="knowledge_graph",
+                operation="build",
+                params_from_state={"order_id": "event.order_id"},
+                result_key="knowledge_graph",
+                required_for_audit=False,
+            ),
         ),
         expected_metadata_keys=(
             "composite_confidence",
             "non_disableable_floor",
             "validation_failures",
+        ),
+    ),
+    # ADR-042 Phase 3 — the order-entry ERP write. Not selected by
+    # propose_recipe (it isn't a fresh intent); reached only via directed graph
+    # re-entry (GraphState.directed_recipe) on an operator disposition. Returns
+    # the ERP sales-order payload; the `erp` gateway effect performs the write
+    # after Shadow (+ cosign >$10k) clears. allowed_intents keeps it on the
+    # MANUAL_ORDER_INTAKE record it acts on.
+    "SubmitToErpRecipe.py": RecipeSpec(
+        name="SubmitToErpRecipe.py",
+        func=build_erp_submission,
+        required_params=("order_id", "header", "line_items"),
+        allowed_intents=("MANUAL_ORDER_INTAKE",),
+        effects=(
+            GatewayEffect(
+                gateway_name="erp",
+                operation="create_sales_order",
+                params_from_output={"payload": "erp_payload"},
+                # Binding write — fire ONLY on a successful submit; a REJECTED
+                # order must never reach the ERP gateway (ADR-042 DoR #2 spirit).
+                only_on_recipe_status=("SUCCESS",),
+            ),
+        ),
+    ),
+    # ADR-042 Phase 4 — AI Draft Reply. The recipe composes the draft; the
+    # buyer_notification send fires ONLY when the operator authorises it via a
+    # SEND_REPLY disposition (mode="send" → status READY_TO_SEND). recipient is
+    # NOT a required_param — the recipe REJECTs cleanly when it is absent
+    # (Guardrail #5) rather than failing param validation, and a REJECTED compose
+    # never reaches READY_TO_SEND so no email is sent.
+    "ReplyDraftRecipe.py": RecipeSpec(
+        name="ReplyDraftRecipe.py",
+        func=compose_reply_draft,
+        required_params=("order_id", "template_name"),
+        allowed_intents=("MANUAL_ORDER_INTAKE",),
+        effects=(
+            GatewayEffect(
+                gateway_name="buyer_notification",
+                operation="send",
+                params_from_output={
+                    "recipient": "recipient",
+                    "subject": "subject",
+                    "body": "body",
+                },
+                only_on_recipe_status=("READY_TO_SEND",),
+            ),
         ),
     ),
     "DeliveryDelayResolutionRecipe.py": RecipeSpec(

@@ -22,9 +22,77 @@ import os
 from contracts.models import GatewayResponse
 from db.repository import TenantConfigRepository as _TenantConfigRepository
 from db.shared import get_shared_adapter
+from gateways.attachment_fetch import AttachmentFetchGateway
+from gateways.edi850 import build_edi_850
+from gateways.knowledge_graph import build_knowledge_graph
 from gateways.registry import clear_registry, register_gateway
 from gateways.stub import StubGateway
 from gateways.tenant_config import TenantConfigGateway
+from contracts.policy import HIGH_VALUE_OVERRIDE_THRESHOLD_USD
+from recipes.ChangeAnalysisRecipe import evaluate_change
+
+# ADR-042 Phase 5 — the canned order the edi_850 builder stub reconstructs.
+# Mirrors the order_extraction stub (same PO / customer / line) so the EDI 850
+# Audit tab is consistent with the Order Entry tab. The seller is the ASOE
+# tenant identity (not fabricated third-party data). Kept in sync with the
+# identical constant in tests/conftest.py.
+_SANDBOX_EDI_850_ORDER = dict(
+    order_id="0093847612",
+    po_number="0093847612",
+    po_date="2025-03-17",
+    buyer_name="Walmart Stores Inc",
+    buyer_id="300001",
+    seller_name="Acme Beverages Co",
+    seller_id="VENDOR-7788",
+    requested_date="2025-03-24",
+    line_items=[{
+        "line_num": "001", "material": "BEV-COLA-12PK",
+        "description": "Cola 12-pack case", "quantity": 480,
+        "uom": "CS", "unit_price": 8.64,
+    }],
+)
+
+# ADR-042 Phase 6 — the canned order-change the change_analysis evaluator scores.
+# A qty-increase change with a representative mix of constraint signals; kept in
+# sync with the identical constant in tests/conftest.py.
+_SANDBOX_CHANGE = dict(
+    order_id="0093847612",
+    order_value_usd=45200.0,
+    cosign_threshold_usd=HIGH_VALUE_OVERRIDE_THRESHOLD_USD,
+    lifecycle_index=2,
+    change_items=[
+        {"field": "quantity", "from_value": "480", "to_value": "600"},
+        {"field": "requested_date", "from_value": "2025-03-24", "to_value": "2025-03-20"},
+    ],
+    signals={
+        "inventory": {"atp": 520, "required": 600},
+        "production": {"stage": "REL"},
+        "transport": {"route_available": True, "carrier_capacity": True},
+        "warehouse": {"pick_pack_feasible": True},
+        "order_status": {"fulfillment_stage": 2},
+        "sla": {"within_window": True, "days_to_deadline": 1},
+        "dependencies": {"linked_orders": 1},
+        "network": {"dc_routing_ok": True},
+        "priority": {"customer_tier": "GOLD", "auto_approve": False},
+    },
+)
+
+# ADR-042 Phase 7 — the canned entities the knowledge_graph builder projects.
+# Derived from the same order/customer/SAP context the other producers return.
+_SANDBOX_KG = dict(
+    order_id="0093847612",
+    customer_name="Walmart Stores Inc",
+    customer_bp="300001",
+    line_items=[
+        {"material": "BEV-COLA-12PK", "description": "Cola 12-pack case",
+         "quantity": 480, "uom": "CS"},
+    ],
+    sap={"system": "S4H_PRD", "sap_doc_number": "5100012344",
+         "validation_status": "SO confirmed, ATP OK"},
+    entities=[
+        {"key": "customer_po", "value": "0093847612", "kind": "po"},
+    ],
+)
 
 
 def register_sandbox_gateways() -> None:
@@ -276,6 +344,127 @@ def register_sandbox_gateways() -> None:
                     ),
                     "source_email_id": "stub-msg-001",
                 },
+            ),
+        },
+    ))
+
+    # ADR-042 Phase 3 — Customer Inbox read producers. The order-extraction
+    # gateway is the constrained-generation read (here a deterministic stub
+    # standing in for the live model, mirroring tests/conftest.py); sap_order
+    # is the deterministic SAP "validate" read. Their output activates the
+    # Order Entry / Entities / SAP Data tabs via enrichment_context.
+    register_gateway(StubGateway(
+        "order_extraction",
+        responses={
+            "extract_order": GatewayResponse(
+                gateway_name="order_extraction", operation="extract_order",
+                status="SUCCESS",
+                data={
+                    "source_type": "PDF",
+                    "confidence": 0.94,
+                    "header": {
+                        "customer_po": "0093847612", "order_type": "ZOR",
+                        "sales_org": "1000", "dist_channel": "10",
+                        "requested_date": "2025-03-17",
+                    },
+                    "customer_name": "Walmart Stores Inc",
+                    "customer_bp": "300001",
+                    "line_items": [{
+                        "line_num": "001", "material": "BEV-COLA-12PK",
+                        "description": "Cola 12-pack case", "quantity": 480,
+                        "uom": "CS", "unit_price": 8.64, "mdm_matched": True,
+                    }],
+                    "validation_flags": [{
+                        "field": "line 001", "severity": "INFO",
+                        "message": "matched to material master",
+                    }],
+                },
+            ),
+            "extract_entities": GatewayResponse(
+                gateway_name="order_extraction", operation="extract_entities",
+                status="SUCCESS",
+                data={"extracted": [
+                    {"key": "customer_po", "value": "0093847612", "kind": "po",
+                     "confidence": 0.98, "source_span": "PO# 0093847612"},
+                    {"key": "material", "value": "BEV-COLA-12PK",
+                     "kind": "material", "confidence": 0.95,
+                     "source_span": "Cola 12pk case"},
+                ]},
+            ),
+        },
+    ))
+
+    register_gateway(StubGateway(
+        "sap_order",
+        responses={
+            "validate": GatewayResponse(
+                gateway_name="sap_order", operation="validate",
+                status="SUCCESS",
+                data={
+                    "system": "S4H_PRD",
+                    "validation_status": "SO confirmed, ATP OK",
+                    "order_value_usd": 45200.0,
+                    "sap_doc_number": "5100012344",
+                },
+            ),
+        },
+    ))
+
+    # ADR-042 Phase 5 — EDI 850 builder producer. Deterministic X12 850
+    # reconstruction of the same canned order the order_extraction stub
+    # returns; activates the EDI 850 Audit tab via enrichment_context.edi_850.
+    register_gateway(StubGateway(
+        "edi_850",
+        responses={
+            "build": GatewayResponse(
+                gateway_name="edi_850", operation="build",
+                status="SUCCESS",
+                data=build_edi_850(**_SANDBOX_EDI_850_ORDER),
+            ),
+        },
+    ))
+
+    # ADR-042 Phase 6 — Change Analysis evaluator producer. Deterministic
+    # constraint evaluation of the canned order change; activates the Change
+    # Analysis tab via enrichment_context.change_analysis.
+    register_gateway(StubGateway(
+        "change_analysis",
+        responses={
+            "evaluate": GatewayResponse(
+                gateway_name="change_analysis", operation="evaluate",
+                status="SUCCESS",
+                data=evaluate_change(**_SANDBOX_CHANGE),
+            ),
+        },
+    ))
+
+    # ADR-042 Phase 7 — Knowledge Graph builder producer. Deterministic derived
+    # projection of the canned case entities; activates the Knowledge Graph tab
+    # via enrichment_context.knowledge_graph.
+    register_gateway(StubGateway(
+        "knowledge_graph",
+        responses={
+            "build": GatewayResponse(
+                gateway_name="knowledge_graph", operation="build",
+                status="SUCCESS",
+                data=build_knowledge_graph(**_SANDBOX_KG),
+            ),
+        },
+    ))
+
+    # DoR #10 — attachment fetch, SSRF-guarded. No network in sandbox: the
+    # gateway validates the URL against the allowlist and returns a stub blob.
+    register_gateway(AttachmentFetchGateway())
+
+    # ADR-042 Phase 3 — the ERP write target for SubmitToErpRecipe's effect
+    # (sales-order create). Stub stands in for the real BAPI/EDI-850 connector.
+    register_gateway(StubGateway(
+        "erp",
+        responses={
+            "create_sales_order": GatewayResponse(
+                gateway_name="erp", operation="create_sales_order",
+                status="SUCCESS",
+                data={"sap_doc_number": "5100099999", "created": True},
             ),
         },
     ))

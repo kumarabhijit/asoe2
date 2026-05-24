@@ -440,10 +440,201 @@ def render_event_type_metrics() -> str:
     return "\n".join(out)
 
 
+# ---------------------------------------------------------------------------
+# Ingest → terminal latency SLO histogram (DoR #7).
+#
+# A classic Prometheus cumulative histogram. `observe_ingest_to_terminal_latency`
+# is called once per synchronous resolve (the automated ingest→terminal path)
+# with the wall-clock duration in seconds. Buckets are seconds; the implicit
+# +Inf bucket catches the tail. Telemetry must never raise into the request
+# path, so observe() fails closed on bad input.
+# ---------------------------------------------------------------------------
+
+_SLO_BUCKETS_S: tuple[float, ...] = (0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30)
+_slo_lock = _CaseLock()
+_slo_bucket_counts: list[int] = [0] * (len(_SLO_BUCKETS_S) + 1)  # last = +Inf
+_slo_sum: float = 0.0
+_slo_count: int = 0
+
+
+def observe_ingest_to_terminal_latency(seconds: float) -> None:
+    """Record one ingest→terminal latency sample (seconds). No-op on a
+    negative / NaN / non-numeric input — never raises (DoR #7)."""
+    global _slo_sum, _slo_count
+    try:
+        s = float(seconds)
+    except (TypeError, ValueError):
+        return
+    if s != s or s < 0:  # NaN or negative
+        return
+    with _slo_lock:
+        for i, edge in enumerate(_SLO_BUCKETS_S):
+            if s <= edge:
+                _slo_bucket_counts[i] += 1
+                break
+        else:
+            _slo_bucket_counts[-1] += 1
+        _slo_sum += s
+        _slo_count += 1
+
+
+def reset_slo_histogram() -> None:
+    """Test helper — drop all samples."""
+    global _slo_sum, _slo_count
+    with _slo_lock:
+        for i in range(len(_slo_bucket_counts)):
+            _slo_bucket_counts[i] = 0
+        _slo_sum = 0.0
+        _slo_count = 0
+
+
+def _fmt_le(edge: float) -> str:
+    return str(int(edge)) if edge == int(edge) else repr(edge)
+
+
+def render_ingest_terminal_histogram() -> str:
+    name = "asoe_ingest_to_terminal_latency_seconds"
+    lines = list(_help_type(
+        name, "Wall-clock latency from event ingest to terminal resolve.",
+        "histogram",
+    ))
+    with _slo_lock:
+        cumulative = 0
+        for i, edge in enumerate(_SLO_BUCKETS_S):
+            cumulative += _slo_bucket_counts[i]
+            lines.append(_line(f"{name}_bucket", cumulative, labels={"le": _fmt_le(edge)}))
+        cumulative += _slo_bucket_counts[-1]
+        lines.append(_line(f"{name}_bucket", cumulative, labels={"le": "+Inf"}))
+        lines.append(_line(f"{name}_sum", _slo_sum))
+        lines.append(_line(f"{name}_count", _slo_count))
+    return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# Gateway-tier metering + circuit-breaker state (DoR #8 — parity with the LLM
+# tier). Per-gateway counters; the breaker state is exported as a labelled
+# gauge (0=closed, 1=half_open, 2=open) for alerting on a tripped dependency.
+# ---------------------------------------------------------------------------
+
+_BREAKER_STATE_CODE = {"closed": 0, "half_open": 1, "open": 2}
+
+
+def render_gateway_metrics() -> str:
+    # Lazy import keeps the metrics module importable without pulling the
+    # gateway stack at app boot, and avoids any import cycle.
+    from gateways.circuit_breaker import breaker_snapshots, metering_snapshot
+
+    meters = metering_snapshot()
+    breakers = breaker_snapshots()
+    lines: list[str] = []
+
+    lines += _help_type("gateway_calls_total", "Gateway calls that reached the dependency.", "counter")
+    for name, m in sorted(meters.items()):
+        lines.append(_line("gateway_calls_total", m.calls, labels={"gateway": name}))
+
+    lines += _help_type("gateway_call_failures_total", "Gateway calls that failed (timeout/exception/error status).", "counter")
+    for name, m in sorted(meters.items()):
+        lines.append(_line("gateway_call_failures_total", m.failures, labels={"gateway": name}))
+
+    lines += _help_type("gateway_short_circuits_total", "Gateway calls rejected because the circuit breaker was OPEN.", "counter")
+    for name, m in sorted(meters.items()):
+        lines.append(_line("gateway_short_circuits_total", m.short_circuits, labels={"gateway": name}))
+
+    lines += _help_type("gateway_latency_ms_sum", "Cumulative gateway call latency (ms).", "counter")
+    for name, m in sorted(meters.items()):
+        lines.append(_line("gateway_latency_ms_sum", m.latency_ms_sum, labels={"gateway": name}))
+
+    lines += _help_type("gateway_circuit_breaker_state", "Gateway circuit breaker state (0=closed,1=half_open,2=open).", "gauge")
+    for name, snap in sorted(breakers.items()):
+        code = _BREAKER_STATE_CODE.get(snap.state.value, 0)
+        lines.append(_line("gateway_circuit_breaker_state", code, labels={"gateway": name}))
+
+    return "\n".join(lines) + "\n" if lines else ""
+
+
+# ---------------------------------------------------------------------------
+# Automation-bias SLIs (DoR #11). The reviewer-override rate already lives on
+# the shadow-LLM surface; these add the two behavioural signals that detect
+# rubber-stamping: the Layer-2-open rate (did the operator expand the evidence
+# before deciding?) and decision dwell (how long from opening the case to acting).
+# Fed by POST /api/v1/metrics/reviewer-activity at disposition time.
+# ---------------------------------------------------------------------------
+
+_DWELL_BUCKETS_S: tuple[float, ...] = (1, 3, 5, 10, 30, 60, 300)
+_ab_lock = _CaseLock()
+_ab_decisions: int = 0
+_ab_layer2_opened: int = 0
+_ab_dwell_buckets: list[int] = [0] * (len(_DWELL_BUCKETS_S) + 1)
+_ab_dwell_sum: float = 0.0
+
+
+def record_reviewer_activity(*, dwell_ms: float, layer2_opened: bool) -> None:
+    """Record one operator decision's automation-bias signals. No-op on a
+    negative / NaN / non-numeric dwell — never raises (DoR #11)."""
+    global _ab_decisions, _ab_layer2_opened, _ab_dwell_sum
+    try:
+        dwell_s = float(dwell_ms) / 1000.0
+    except (TypeError, ValueError):
+        return
+    if dwell_s != dwell_s or dwell_s < 0:  # NaN or negative
+        return
+    with _ab_lock:
+        _ab_decisions += 1
+        if layer2_opened:
+            _ab_layer2_opened += 1
+        for i, edge in enumerate(_DWELL_BUCKETS_S):
+            if dwell_s <= edge:
+                _ab_dwell_buckets[i] += 1
+                break
+        else:
+            _ab_dwell_buckets[-1] += 1
+        _ab_dwell_sum += dwell_s
+
+
+def reset_reviewer_activity() -> None:
+    """Test helper — drop all automation-bias samples."""
+    global _ab_decisions, _ab_layer2_opened, _ab_dwell_sum
+    with _ab_lock:
+        _ab_decisions = 0
+        _ab_layer2_opened = 0
+        for i in range(len(_ab_dwell_buckets)):
+            _ab_dwell_buckets[i] = 0
+        _ab_dwell_sum = 0.0
+
+
+def render_reviewer_activity_metrics() -> str:
+    lines: list[str] = []
+    with _ab_lock:
+        decisions = _ab_decisions
+        opened = _ab_layer2_opened
+        buckets = list(_ab_dwell_buckets)
+        dwell_sum = _ab_dwell_sum
+    lines += _help_type("reviewer_decisions_total", "Operator disposition decisions observed.", "counter")
+    lines.append(_line("reviewer_decisions_total", decisions))
+    lines += _help_type("reviewer_layer2_opened_total", "Decisions where the operator expanded Layer-2 evidence first.", "counter")
+    lines.append(_line("reviewer_layer2_opened_total", opened))
+    lines += _help_type("reviewer_layer2_open_rate", "Layer-2-open rate (opened / decisions); low values flag automation bias.", "gauge")
+    lines.append(_line("reviewer_layer2_open_rate", round(opened / decisions, 4) if decisions else 0.0))
+    lines += _help_type("reviewer_decision_dwell_seconds", "Time from opening a case to acting on it.", "histogram")
+    name = "reviewer_decision_dwell_seconds"
+    cumulative = 0
+    for i, edge in enumerate(_DWELL_BUCKETS_S):
+        cumulative += buckets[i]
+        lines.append(_line(f"{name}_bucket", cumulative, labels={"le": _fmt_le(edge)}))
+    cumulative += buckets[-1]
+    lines.append(_line(f"{name}_bucket", cumulative, labels={"le": "+Inf"}))
+    lines.append(_line(f"{name}_sum", dwell_sum))
+    lines.append(_line(f"{name}_count", decisions))
+    return "\n".join(lines) + "\n"
+
+
 def render_all() -> str:
     """Convenience entrypoint for the route handler."""
     return (
         render_shadow_llm_metrics(shadow_llm_metrics)
         + render_cases_returned_metrics()
         + render_event_type_metrics()
+        + render_ingest_terminal_histogram()
+        + render_gateway_metrics()
+        + render_reviewer_activity_metrics()
     )

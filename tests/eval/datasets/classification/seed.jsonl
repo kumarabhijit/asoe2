@@ -1,0 +1,3 @@
+{"id": "cls-dup-1", "input": {"order_id": "PO-4001", "po_price": 100.0, "sap_base_price": 100.0, "event_type": "EDI_850_DUPLICATE_PO"}, "expected": "DUPLICATE_PO"}
+{"id": "cls-hold-1", "input": {"order_id": "SO-7001", "po_price": 100.0, "sap_base_price": 100.0, "event_type": "EDI_850_PRICE_HOLD"}, "expected": "PRICE_HOLD_RELEASE"}
+{"id": "cls-mass-1", "input": {"order_id": "SO-3001", "po_price": 70.0, "sap_base_price": 100.0, "line_count": 11}, "expected": "MASS_PRICING_ERROR"}

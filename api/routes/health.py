@@ -9,7 +9,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from api.schemas import HealthResponse
+from api.schemas import AutonomyLevelInfo, HealthResponse
+from contracts.autonomy import (
+    CURRENT_AUTONOMY_VOCAB_VERSION,
+    allowed_autonomy_levels,
+)
 from constraints.specs import (
     INTENT_REASON_TAGS,
     AllowedIntent,
@@ -51,6 +55,10 @@ async def health() -> HealthResponse:
         allowed_override_reason_tags_by_intent=_REASON_TAGS_BY_INTENT,
         allowed_case_statuses=_ALLOWED_CASE_STATUSES,
         allowed_case_sources=_ALLOWED_CASE_SOURCES,
+        autonomy_vocab_version=CURRENT_AUTONOMY_VOCAB_VERSION,
+        allowed_autonomy_levels=[
+            AutonomyLevelInfo(**entry) for entry in allowed_autonomy_levels()
+        ],
     )
 
 
@@ -89,3 +97,56 @@ async def metrics() -> Response:
         content=_render_metrics(),
         media_type="text/plain; version=0.0.4; charset=utf-8",
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/metrics/reviewer-activity — automation-bias telemetry (DoR #11)
+# ---------------------------------------------------------------------------
+# The UI reports one event per operator decision: how long the operator dwelled
+# on the case and whether they expanded Layer-2 evidence first. Authenticated
+# (a reviewer action), but never blocks the UI — best-effort telemetry.
+
+from fastapi import Depends, status  # noqa: E402
+from pydantic import BaseModel, ConfigDict, Field  # noqa: E402
+
+from api.deps import require_role  # noqa: E402
+from api.metrics import record_reviewer_activity  # noqa: E402
+
+
+class ReviewerActivityRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    dwell_ms: float = Field(ge=0)
+    layer2_opened: bool
+
+
+@router.post(
+    "/metrics/reviewer-activity",
+    status_code=status.HTTP_202_ACCEPTED,
+    include_in_schema=False,
+    dependencies=[Depends(require_role("analyst", "manager", "admin"))],
+)
+async def reviewer_activity(req: ReviewerActivityRequest) -> dict:
+    """Record one decision's automation-bias signals (Layer-2-open + dwell)."""
+    record_reviewer_activity(dwell_ms=req.dwell_ms, layer2_opened=req.layer2_opened)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/outbox/reconcile — drain the effect-compensation queue (DoR #6)
+# ---------------------------------------------------------------------------
+# Operational endpoint: retries pending failed gateway effects (delivery-
+# idempotent) and escalates the ones that exhaust their retries. Admin-only;
+# scoped to the caller's tenant. A scheduler can call this periodically.
+
+from api.deps import get_tenant_id  # noqa: E402
+from orchestration.outbox import reconcile_pending  # noqa: E402
+
+
+@router.post(
+    "/outbox/reconcile",
+    include_in_schema=False,
+    dependencies=[Depends(require_role("admin"))],
+)
+async def outbox_reconcile(tenant_id: str = Depends(get_tenant_id)) -> dict:
+    """Run one reconciliation pass over this tenant's compensation queue."""
+    return reconcile_pending(tenant_id=tenant_id)

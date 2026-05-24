@@ -24,6 +24,10 @@ EventType = Literal[
     # envelope makes both fields optional so the same channel can
     # multiplex per-event and per-case streams.
     "case_open", "case_update", "case_close",
+    # ADR-042 Phase 4 — AI Draft Reply live events. Emitted when an operator
+    # composes (DRAFT_REPLY) or sends (SEND_REPLY) a buyer reply so subscribed
+    # detail / list views refresh without polling. Carry `exception_id`.
+    "reply_drafted", "reply_sent",
 ]
 NodeStatus = Literal["started", "completed", "failed"]
 
@@ -115,6 +119,29 @@ class CaseClosedPayload(BaseModel):
     """Published when a case reaches RESOLVED / FAILED / BLOCKED."""
     status: str
     closed_at: str
+
+
+# ADR-042 Phase 4 — AI Draft Reply event payloads. The reply body is NOT carried
+# on the wire (it can be large and is human-facing); clients fetch the record
+# detail (resolution_data.reply_draft / reply_sent) on invalidation.
+
+
+class ReplyDraftedPayload(BaseModel):
+    """Published when an operator composes a buyer reply (DRAFT_REPLY)."""
+    status: str  # DRAFTED | REJECTED
+    template_name: Optional[str] = None
+    recipient: Optional[str] = None
+    subject: Optional[str] = None
+    drafted_by: Optional[str] = None
+
+
+class ReplySentPayload(BaseModel):
+    """Published when an operator sends a buyer reply (SEND_REPLY)."""
+    status: str  # SENT | FAILED
+    recipient: Optional[str] = None
+    subject: Optional[str] = None
+    delivered: bool = False
+    sent_by: Optional[str] = None
 
 
 class WSEvent(BaseModel):
@@ -337,4 +364,52 @@ class WSEvent(BaseModel):
             case_id=case_id,
             tenant_id=tenant_id,
             payload=payload.model_dump(),
+        )
+
+    @classmethod
+    def reply_drafted(
+        cls,
+        trace_id: str,
+        exception_id: str,
+        tenant_id: str,
+        status: str,
+        template_name: Optional[str] = None,
+        recipient: Optional[str] = None,
+        subject: Optional[str] = None,
+        drafted_by: Optional[str] = None,
+    ) -> "WSEvent":
+        payload = ReplyDraftedPayload(
+            status=status, template_name=template_name, recipient=recipient,
+            subject=subject, drafted_by=drafted_by,
+        )
+        return cls(
+            type="reply_drafted",
+            trace_id=trace_id,
+            exception_id=exception_id,
+            tenant_id=tenant_id,
+            payload=payload.model_dump(exclude_none=True),
+        )
+
+    @classmethod
+    def reply_sent(
+        cls,
+        trace_id: str,
+        exception_id: str,
+        tenant_id: str,
+        status: str,
+        recipient: Optional[str] = None,
+        subject: Optional[str] = None,
+        delivered: bool = False,
+        sent_by: Optional[str] = None,
+    ) -> "WSEvent":
+        payload = ReplySentPayload(
+            status=status, recipient=recipient, subject=subject,
+            delivered=delivered, sent_by=sent_by,
+        )
+        return cls(
+            type="reply_sent",
+            trace_id=trace_id,
+            exception_id=exception_id,
+            tenant_id=tenant_id,
+            payload=payload.model_dump(exclude_none=True),
         )

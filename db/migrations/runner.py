@@ -531,6 +531,43 @@ def _apply_sqlite_v013(conn: sqlite3.Connection) -> None:
     logger.info("SQLite schema V013 applied (case_locks cross-pod mutex)")
 
 
+def _apply_sqlite_v015(conn: sqlite3.Connection) -> None:
+    """V015 — effect_outbox durable ledger (DoR #6)."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS effect_outbox (
+            id                 TEXT PRIMARY KEY,
+            tenant_id          TEXT NOT NULL,
+            trace_id           TEXT,
+            recipe             TEXT,
+            gateway            TEXT NOT NULL,
+            operation          TEXT NOT NULL,
+            status             TEXT NOT NULL,
+            recipe_status      TEXT,
+            committed          INTEGER NOT NULL DEFAULT 0,
+            needs_compensation INTEGER NOT NULL DEFAULT 0,
+            error              TEXT,
+            params             TEXT NOT NULL DEFAULT '{}',
+            attempts           INTEGER NOT NULL DEFAULT 0,
+            escalated          INTEGER NOT NULL DEFAULT 0,
+            compensated        INTEGER NOT NULL DEFAULT 0,
+            compensated_at     TEXT,
+            created_at         TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_effect_outbox_pending
+            ON effect_outbox (tenant_id, needs_compensation, compensated, escalated);
+        CREATE INDEX IF NOT EXISTS idx_effect_outbox_tenant_time
+            ON effect_outbox (tenant_id, created_at);
+        """
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+        ("V015", datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    logger.info("SQLite schema V015 applied (effect_outbox ledger)")
+
+
 def apply_sqlite(conn: sqlite3.Connection) -> None:
     """Apply the SQLite-compatible schema (V001 + subsequent migrations)."""
     conn.executescript(_SQLITE_SCHEMA)
@@ -557,6 +594,7 @@ def apply_sqlite(conn: sqlite3.Connection) -> None:
     _apply_sqlite_v008(conn)
     _apply_sqlite_v012(conn)
     _apply_sqlite_v013(conn)
+    _apply_sqlite_v015(conn)
 
 
 def apply_postgres(database_url: str) -> None:

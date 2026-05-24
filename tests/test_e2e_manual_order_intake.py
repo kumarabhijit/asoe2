@@ -114,10 +114,30 @@ class TestResolveEmailOrderEntry:
         assert r.status_code == 200
         data = r.json()
         assert data["intent"] == "MANUAL_ORDER_INTAKE"
-        # ONE_CLICK_APPROVE → autonomy L3 → no human approval needed.
-        # With GREEN shadow the run reaches COMPLETE. Allow either
-        # COMPLETE or RESOLVED-equivalent terminal states.
-        assert data["final_status"] == "COMPLETE"
+        # ADR-042 DoR #2: order intake is adversarially-injectable free-text,
+        # so a GREEN one-click-approve intake does NOT auto-execute — the
+        # financially-binding ERP submit is operator-gated (a disposition,
+        # ADR-042 §2.2.6). The run lands in MANUAL_REVIEW_REQUIRED for submit.
+        assert data["final_status"] == "MANUAL_REVIEW_REQUIRED"
+
+    def test_injected_sub_threshold_green_does_not_auto_execute(
+        self, client, analyst_token,
+    ):
+        # DoR #2 regression: an injected sub-$10k order that classifies clean
+        # (high confidence, no failures, all floors green → ONE_CLICK_APPROVE,
+        # GREEN shadow) must route to MANUAL_REVIEW_REQUIRED, never COMPLETE.
+        # This closes the auto-execute hole an attacker could ride by crafting
+        # an email whose extraction looks clean and small.
+        r = client.post(
+            "/api/v1/exceptions/resolve",
+            json=_email_event(confidence=0.98, order_suffix="INJECT"),
+            headers=_auth(analyst_token),
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["intent"] == "MANUAL_ORDER_INTAKE"
+        assert data["final_status"] != "COMPLETE"
+        assert data["final_status"] == "MANUAL_REVIEW_REQUIRED"
 
     def test_standard_review_band(self, client, analyst_token):
         r = client.post(
@@ -177,8 +197,10 @@ class TestResolveEmailOrderEntry:
         data = r.json()
         assert data["intent"] == "MANUAL_ORDER_INTAKE"
         # Gateway says all-green → recipe classifies on confidence alone:
-        # 0.99 + no failures → ONE_CLICK_APPROVE → COMPLETE.
-        assert data["final_status"] == "COMPLETE"
+        # 0.99 + no failures → ONE_CLICK_APPROVE. Per DoR #2 the intake still
+        # routes to MANUAL_REVIEW_REQUIRED (operator-gated ERP submit), not
+        # auto-execute.
+        assert data["final_status"] == "MANUAL_REVIEW_REQUIRED"
 
     def test_explicit_reject_reason(self, client, analyst_token):
         r = client.post(

@@ -919,3 +919,110 @@ class CaseLockRepository:
             )
             count = cur.rowcount if hasattr(cur, "rowcount") else 0
         return int(count or 0)
+
+
+# ---------------------------------------------------------------------------
+# Effect Outbox Repository (DoR #6 — durable compensation ledger)
+# ---------------------------------------------------------------------------
+
+class OutboxRepository:
+    """CRUD for the ``effect_outbox`` table.
+
+    Dict-based by design — the DB layer stays independent of
+    ``orchestration.outbox`` (which adapts these dicts to/from its
+    ``OutboxEntry`` DTO). Booleans are stored as native bool (Postgres
+    ``BOOLEAN``; SQLite coerces to 0/1) and coerced back on read.
+    """
+
+    _COLUMNS = (
+        "id", "tenant_id", "trace_id", "recipe", "gateway", "operation",
+        "status", "recipe_status", "committed", "needs_compensation", "error",
+        "params", "attempts", "escalated", "compensated", "compensated_at",
+        "created_at",
+    )
+
+    def __init__(self, adapter=None):
+        self._adapter = adapter or create_adapter()
+
+    def insert(self, tenant_id: str, entry: Dict[str, Any]) -> None:
+        with self._adapter.cursor(tenant_id) as cur:
+            cur.execute(
+                """INSERT INTO effect_outbox
+                   (id, tenant_id, trace_id, recipe, gateway, operation,
+                    status, recipe_status, committed, needs_compensation,
+                    error, params, attempts, escalated, compensated,
+                    compensated_at, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    entry["id"], entry["tenant_id"], entry.get("trace_id"),
+                    entry.get("recipe"), entry["gateway"], entry["operation"],
+                    entry["status"], entry.get("recipe_status"),
+                    bool(entry.get("committed")), bool(entry.get("needs_compensation")),
+                    entry.get("error"), _json_dumps(entry.get("params") or {}),
+                    int(entry.get("attempts", 0)), bool(entry.get("escalated")),
+                    bool(entry.get("compensated")), entry.get("compensated_at"),
+                    entry["created_at"],
+                ),
+            )
+
+    def list_pending(self, tenant_id: str) -> List[Dict[str, Any]]:
+        with self._adapter.cursor(tenant_id) as cur:
+            cur.execute(
+                """SELECT * FROM effect_outbox
+                   WHERE tenant_id = ? AND needs_compensation = ?
+                     AND compensated = ? AND escalated = ?
+                   ORDER BY created_at""",
+                (tenant_id, True, False, False),
+            )
+            return [self._to_dict(r) for r in cur.fetchall()]
+
+    def list_all(self, tenant_id: str) -> List[Dict[str, Any]]:
+        with self._adapter.cursor(tenant_id) as cur:
+            cur.execute(
+                "SELECT * FROM effect_outbox WHERE tenant_id = ? ORDER BY created_at",
+                (tenant_id,),
+            )
+            return [self._to_dict(r) for r in cur.fetchall()]
+
+    def increment_attempts(self, tenant_id: str, entry_id: str) -> int:
+        with self._adapter.cursor(tenant_id) as cur:
+            cur.execute(
+                "UPDATE effect_outbox SET attempts = attempts + 1 WHERE id = ? AND tenant_id = ?",
+                (entry_id, tenant_id),
+            )
+            cur.execute(
+                "SELECT attempts FROM effect_outbox WHERE id = ? AND tenant_id = ?",
+                (entry_id, tenant_id),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return 0
+        return int(row[0] if not hasattr(row, "keys") else row["attempts"])
+
+    def mark_compensated(self, tenant_id: str, entry_id: str, compensated_at: str) -> bool:
+        with self._adapter.cursor(tenant_id) as cur:
+            cur.execute(
+                "UPDATE effect_outbox SET compensated = ?, compensated_at = ? WHERE id = ? AND tenant_id = ?",
+                (True, compensated_at, entry_id, tenant_id),
+            )
+            return bool(getattr(cur, "rowcount", 0))
+
+    def mark_escalated(self, tenant_id: str, entry_id: str) -> bool:
+        with self._adapter.cursor(tenant_id) as cur:
+            cur.execute(
+                "UPDATE effect_outbox SET escalated = ? WHERE id = ? AND tenant_id = ?",
+                (True, entry_id, tenant_id),
+            )
+            return bool(getattr(cur, "rowcount", 0))
+
+    def _to_dict(self, row) -> Dict[str, Any]:
+        r = _row_to_dict(row, self._COLUMNS)
+        if isinstance(r.get("params"), str):
+            r["params"] = _json_loads(r["params"]) or {}
+        elif r.get("params") is None:
+            r["params"] = {}
+        for bool_col in ("committed", "needs_compensation", "escalated", "compensated"):
+            r[bool_col] = bool(r.get(bool_col))
+        if r.get("attempts") is None:
+            r["attempts"] = 0
+        return r

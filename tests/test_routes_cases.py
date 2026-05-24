@@ -180,6 +180,24 @@ class TestList:
         assert body["total"] == 1
         assert body["items"][0]["case_id"] == manual.case_id
 
+    def test_filter_by_case_type(self, client, analyst_token):
+        # ADR-041 infer_case_type: manual_order => EMAIL_ENTRY,
+        # automated_order => BLOCK. The EMAIL_ENTRY lens (ADR-042) filters here.
+        email_case = _open_case(
+            customer_po_number="PO-1", source="manual_order",
+            source_channel="email",
+        )
+        _open_case(customer_po_number="PO-2", source="automated_order")
+        r = client.get(
+            "/api/v1/cases?case_type=EMAIL_ENTRY",
+            headers=_auth(analyst_token),
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["total"] == 1
+        assert body["items"][0]["case_id"] == email_case.case_id
+        assert body["items"][0]["case_type"] == "EMAIL_ENTRY"
+
     def test_filter_by_status(self, client, analyst_token):
         c1 = _open_case(customer_po_number="PO-1")
         c2 = _open_case(customer_po_number="PO-2")

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, ConfigDict, model_validator
@@ -657,6 +657,16 @@ class GatewayEffect(BaseModel):
         default_factory=dict,
         description="Maps gateway param name → recipe output field name",
     )
+    only_on_recipe_status: Optional[Tuple[str, ...]] = Field(
+        default=None,
+        description=(
+            "When set, the effect fires only if the recipe output `status` is "
+            "in this tuple. Used to gate a binding write (e.g. the ERP "
+            "sales-order create fires only on 'SUCCESS') so a refused recipe "
+            "never triggers its side effect. None ⇒ fire on every post-GREEN "
+            "outcome (the default — e.g. buyer notifications)."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -851,6 +861,14 @@ class GraphState(BaseModel):
     confidence: float = 0.0
     shadow: Optional[ComplianceDecision] = None
     selected_recipe: Optional[str] = None
+    # ADR-042 §2.2.6 — directed graph re-entry for the operator-authorised
+    # order-entry ERP submit. When set, `select_recipe` uses this recipe
+    # instead of classifying-then-proposing (the submit is a human-authorised
+    # action on an already-classified record, not a fresh intent), and
+    # `validate_types` builds its invocation from the reviewed extraction in
+    # `enrichment_context` plus `directed_corrections` (operator edits).
+    directed_recipe: Optional[str] = None
+    directed_corrections: Dict[str, Any] = Field(default_factory=dict)
     invocation: Optional[RecipeInvocation] = None
     execution_log: Optional[ExecutionLog] = None
     final_status: Optional[TerminalStatus] = None

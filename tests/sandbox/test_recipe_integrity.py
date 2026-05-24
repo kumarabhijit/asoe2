@@ -56,6 +56,10 @@ class TestRecipeModuleIntegrity:
         "DeliveryDelayResolutionRecipe",
         # ADR-034 §6.3 — canonical recipe-name post-cutover.
         "ManualOrderIntakeRecipe",
+        # ADR-042 Phase 3 — order-entry ERP write (directed graph re-entry).
+        "SubmitToErpRecipe",
+        # ADR-042 Phase 4 — buyer-reply composition (directed graph re-entry).
+        "ReplyDraftRecipe",
         # ADR-034 §6.3 — legacy alias retained until 2026-08-12.
         # Removed in the same PR that flips the §6.2 hard rejection on.
         "EmailOrderEntryRecipe",

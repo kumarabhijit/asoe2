@@ -52,6 +52,14 @@ class DispositionRequest(BaseModel):
     action: str  # validated against AllowedResolutionAction ∪ {NO_ACTION}
     notes: str  # mandatory (SOX)
     reason_tag: str  # required (Phase 3); validated against AllowedOverrideReasonTag
+    # ADR-042 §2.2.6 — operator corrections to the extracted order, applied by
+    # SubmitToErpRecipe on a SUBMIT_TO_ERP disposition with a before/after audit.
+    # Shape: {"header": {field: value}, "lines": {line_num: {field: value}}}.
+    corrections: Optional[Dict[str, Any]] = None
+    # ADR-042 Phase 4 — operator reply params for a DRAFT_REPLY disposition,
+    # composed by ReplyDraftRecipe. Shape: {"recipient": str, "template_name":
+    # str, "edits": {"subject"/"body": str}}.
+    reply: Optional[Dict[str, Any]] = None
 
 
 class CosignRequest(BaseModel):
@@ -178,6 +186,19 @@ class RefreshRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class AutonomyLevelInfo(BaseModel):
+    """One autonomy tier for the UI to render/sort (ADR-042 §5/§8).
+
+    `rank` is the degree of automation (higher == more autonomous) under the
+    active `autonomy_vocab_version`; the UI orders the ladder by `rank` rather
+    than hardcoding a map (asoe-ui Guardrail #1). Display vocabulary only —
+    not the engine's gating semantics."""
+
+    level: str
+    label: str
+    rank: int
+
+
 class HealthResponse(BaseModel):
     """GET /api/v1/health"""
 
@@ -206,6 +227,12 @@ class HealthResponse(BaseModel):
     # `src/lib/api.ts`; once available, the UI consumes from health
     # exclusively.
     allowed_case_sources: List[str] = Field(default_factory=list)
+    # ADR-042 §5/§8 — the autonomy vocabulary the UI renders. The UI sorts the
+    # ladder by `rank` and reads labels from here (no hardcoded autonomy map,
+    # Guardrail #1). `autonomy_vocab_version` is the version these rows resolve
+    # under (records stamp their own version; this is the current display set).
+    autonomy_vocab_version: str = ""
+    allowed_autonomy_levels: List[AutonomyLevelInfo] = Field(default_factory=list)
 
 
 class ResolveResponse(BaseModel):
@@ -1297,6 +1324,346 @@ class ImpactMetrics(BaseModel):
     affected_lines: int
 
 
+class ExtractedEntity(BaseModel):
+    """A single structured value the AI intake agent pulled from the email
+    / attachments (ADR-042 Phase 2 — Entities section). `kind` is the
+    free-form category (order_id | material | date | po | invoice | qty | …);
+    `source_span` is the verbatim text it was extracted from (audit trail of
+    where a value came from)."""
+
+    key: str
+    value: str
+    kind: str
+    confidence: Optional[float] = None
+    source_span: Optional[str] = None
+
+
+class EntitiesAnalysisData(BaseModel):
+    """Entities tab (ADR-042 Phase 2). Contextual evidence — the extracted
+    entities the operator reviews; the binding control fields remain
+    `recommended_action` / `autonomy_level`. Projected by the composer from
+    the intake gateway's extraction; preview-only until that adapter lands."""
+
+    extracted: List[ExtractedEntity] = Field(default_factory=list)
+
+
+class SapDataAnalysisData(BaseModel):
+    """SAP Data tab (ADR-042 Phase 2). Live SAP system-of-record context the
+    operator authorises against — which system, its validation state, and the
+    order's financial value. Projected by the composer from the SAP gateway
+    read; preview-only until that adapter lands. `system` / `validation_status`
+    / `order_value_usd` are audit-bearing (the decision applies to a specific
+    SAP order in a specific state at a specific value); `sap_doc_number` is a
+    contextual reference."""
+
+    system: str
+    validation_status: str
+    order_value_usd: Optional[float] = None
+    sap_doc_number: Optional[str] = None
+
+
+class OrderEntryHeader(BaseModel):
+    """Extracted order-header fields (ADR-042 Phase 3 — Order Entry tab)."""
+
+    customer_po: Optional[str] = None
+    order_type: Optional[str] = None
+    sales_org: Optional[str] = None
+    dist_channel: Optional[str] = None
+    ship_window_from: Optional[str] = None
+    ship_window_to: Optional[str] = None
+    requested_date: Optional[str] = None
+
+
+class OrderEntryLineItem(BaseModel):
+    """One extracted order line. `mdm_matched` = matched against material
+    master; None when the master lookup hasn't run."""
+
+    line_num: str
+    material: str
+    description: Optional[str] = None
+    quantity: float
+    uom: Optional[str] = None
+    unit_price: Optional[float] = None
+    mdm_matched: Optional[bool] = None
+
+
+class OrderEntryValidationFlag(BaseModel):
+    """A validation finding on the extracted order. `severity` ∈
+    ERROR | WARNING | INFO."""
+
+    field: str
+    severity: str
+    message: str
+
+
+class OrderEntryExtraction(BaseModel):
+    """Order Entry tab (ADR-042 Phase 3) — the structured order the AI intake
+    agent extracted from the email/attachments, for operator review before ERP
+    submit. Projected by the composer from the extraction-gateway read;
+    preview-only until that gateway lands. The agent's recommendation /
+    autonomy live separately on `email_order_entry_analysis`."""
+
+    source_type: str
+    confidence: float
+    header: OrderEntryHeader
+    customer_name: Optional[str] = None
+    customer_bp: Optional[str] = None
+    line_items: List[OrderEntryLineItem] = Field(default_factory=list)
+    validation_flags: List[OrderEntryValidationFlag] = Field(default_factory=list)
+
+
+class Edi850Segment(BaseModel):
+    """One ANSI X12 segment of the built 850. `seg_id` is the segment tag
+    (ISA/BEG/PO1/…); `elements` are its ordered data elements (excluding the
+    tag); `raw` is the assembled X12 line (element-separated, segment-
+    terminated); `meaning` is the human-readable decode (Segment Map view);
+    `group` buckets the segment for the viewer's colour legend ∈
+    envelope | header | dates | party | line | trailer."""
+
+    seg_id: str
+    elements: List[str] = Field(default_factory=list)
+    raw: str
+    meaning: str
+    group: str
+
+
+class Edi850Envelope(BaseModel):
+    """ISA/GS/ST interchange + functional-group identifiers (Decoded view's
+    Interchange Envelope card)."""
+
+    sender_id: str
+    receiver_id: str
+    interchange_control_number: str
+    group_control_number: str
+    transaction_set_control_number: str
+    usage_indicator: str
+    x12_version: str
+
+
+class Edi850Header(BaseModel):
+    """BEG/CUR/DTM purchase-order header (Decoded view's PO Header card).
+    `purpose_code` is BEG01 (e.g. ``00`` = original); `po_type` is BEG02
+    (e.g. ``SA`` = stand-alone)."""
+
+    purpose_code: str
+    po_type: str
+    po_number: str
+    po_date: Optional[str] = None
+    currency: Optional[str] = None
+    requested_delivery_date: Optional[str] = None
+
+
+class Edi850Party(BaseModel):
+    """An N1/N3/N4 party loop (Decoded view's Party Information card).
+    `entity_code` is the N101 qualifier (``BY`` buyer / ``SE`` seller /
+    ``ST`` ship-to); `role` is its decoded label."""
+
+    entity_code: str
+    role: str
+    name: str
+    id_qualifier: Optional[str] = None
+    id_value: Optional[str] = None
+    address: Optional[str] = None
+    city_state_zip: Optional[str] = None
+
+
+class Edi850LineItem(BaseModel):
+    """A PO1 baseline-item line (Decoded view's Line Items table).
+    `product_qualifier` is the PO1 product/service-ID qualifier (e.g. ``VP``
+    vendor part / ``IN`` buyer item); `extended_amount` = quantity ×
+    unit_price (deterministic)."""
+
+    line_num: str
+    quantity: float
+    uom: str
+    unit_price: Optional[float] = None
+    product_qualifier: Optional[str] = None
+    product_id: Optional[str] = None
+    description: Optional[str] = None
+    extended_amount: Optional[float] = None
+
+
+class Edi850Totals(BaseModel):
+    """CTT transaction totals. `total_line_items` = CTT01 (PO1 count);
+    `total_quantity` = CTT02 (hash total of quantities); `total_amount` =
+    Σ extended_amount (deterministic, may be None when no line carries a
+    price)."""
+
+    total_line_items: int
+    total_quantity: float
+    total_amount: Optional[float] = None
+
+
+class Edi850Document(BaseModel):
+    """EDI 850 Audit tab (ADR-042 Phase 5). The ANSI X12 5010 purchase-order
+    transaction set the system reconstructs from the reviewed order, built
+    deterministically by the `edi_850` builder (`gateways/edi850.py`) — a pure,
+    fully unit-testable port of the prototype's client-side `buildEDI850`. It is
+    the audit evidence an operator inspects before the order is transmitted to
+    the seller's ERP. Projected by the composer from the builder's
+    `enrichment_context["edi_850"]` read; preview-only until that producer is
+    wired. The three prototype sub-views map onto this contract: Decoded
+    (`envelope` / `header` / `parties` / `line_items` / `totals`), Raw X12
+    (`raw_x12`), and Segment Map (`segments`)."""
+
+    standard: str = "ANSI X12 5010"
+    transaction_set: str = "850"
+    envelope: Edi850Envelope
+    header: Edi850Header
+    parties: List[Edi850Party] = Field(default_factory=list)
+    line_items: List[Edi850LineItem] = Field(default_factory=list)
+    totals: Edi850Totals
+    segments: List[Edi850Segment] = Field(default_factory=list)
+    raw_x12: str
+
+
+class ConstraintCheck(BaseModel):
+    """One deterministic constraint evaluation in the Change Analysis (ADR-042
+    Phase 6). `status` ∈ PASS | CONDITIONAL | WARNING. `agent` is a cosmetic
+    label (the evaluating discipline) — NOT audit-bearing (ADR-042 §6: agent
+    timings/labels are decorative). `system_ref` names the system of record the
+    check reasons over (e.g. ``SAP MM/ATP``)."""
+
+    name: str
+    status: str
+    detail: str
+    metric: Optional[str] = None
+    agent: Optional[str] = None
+    system_ref: Optional[str] = None
+
+
+class ChangeItem(BaseModel):
+    """One field of the requested order change (the from/to grid)."""
+
+    field: str
+    from_value: Optional[str] = None
+    to_value: Optional[str] = None
+
+
+class ConstraintEvaluation(BaseModel):
+    """The variable-cardinality constraint evaluation for a requested order
+    change (ADR-042 Phase 6). `checks` is an N-length list — only the
+    constraints whose backing signal is present are evaluated (no fixed 10).
+    `lifecycle_stages` is the ordered stage vocabulary (the UI renders the bar
+    from the payload — no hardcoded stage list client-side); `lifecycle_index`
+    is the current stage's position within it."""
+
+    lifecycle_stages: List[str] = Field(default_factory=list)
+    lifecycle_index: Optional[int] = None
+    change_items: List[ChangeItem] = Field(default_factory=list)
+    checks: List[ConstraintCheck] = Field(default_factory=list)
+    pass_count: int = 0
+    conditional_count: int = 0
+    warning_count: int = 0
+
+
+class ScenarioOption(BaseModel):
+    """One resolution scenario the evaluator surfaces for a change (ADR-042
+    Phase 6). Variable cardinality — M scenarios, not the prototype's fixed 7.
+    `recommended` marks the evaluator's preferred option; `financial_delta_usd`
+    is the deterministic revenue delta vs the as-requested change."""
+
+    name: str
+    description: str
+    recommended: bool = False
+    impact: Optional[str] = None
+    financial_delta_usd: Optional[float] = None
+
+
+class ChangeDecision(BaseModel):
+    """The Change Analysis decision panel (ADR-042 Phase 6). `requires_cosign`
+    is set deterministically when `revenue_impact_usd` meets the ADR-040
+    four-eyes threshold (`contracts/policy.HIGH_VALUE_OVERRIDE_THRESHOLD_USD`) —
+    the recipe surfaces the gate; actioning the change is a separate
+    Shadow-gated disposition. `confidence` ∈ [0, 1]."""
+
+    recommended_action: str
+    confidence: float
+    rationale: Optional[str] = None
+    revenue_impact_usd: Optional[float] = None
+    requires_cosign: bool = False
+    sap_actions: List[str] = Field(default_factory=list)
+
+
+class ChangeAnalysis(BaseModel):
+    """Change Analysis tab (ADR-042 Phase 6) — the deterministic evaluation of a
+    requested order change: an N-constraint evaluation, M resolution scenarios,
+    and a decision. Built by the recipe-homed evaluator
+    (`recipes/ChangeAnalysisRecipe.evaluate_change`, pure + deterministic;
+    thresholds from `contracts/policy.py`, NOT `constraints/`). Projected by the
+    composer from `enrichment_context["change_analysis"]`; preview-only until
+    that producer is wired (Guardrail #6 — no partial truth)."""
+
+    evaluation: ConstraintEvaluation
+    scenarios: List[ScenarioOption] = Field(default_factory=list)
+    decision: ChangeDecision
+
+
+class KnowledgeGraphNode(BaseModel):
+    """One node in the Change/Knowledge Graph (ADR-042 Phase 7). `kind` buckets
+    the node for the viewer's legend (e.g. ``order`` / ``customer`` /
+    ``material`` / ``sap_doc`` / ``entity``); `detail` is an optional one-line
+    annotation."""
+
+    id: str
+    label: str
+    kind: str
+    detail: Optional[str] = None
+
+
+class KnowledgeGraphEdge(BaseModel):
+    """A directed relationship between two `KnowledgeGraphNode` ids (ADR-042
+    Phase 7). `relation` is the decoded edge label (e.g. ``places`` /
+    ``contains`` / ``validated_by``)."""
+
+    source: str
+    target: str
+    relation: str
+
+
+class KnowledgeGraphPayload(BaseModel):
+    """Knowledge Graph tab (ADR-042 Phase 7) — a net-new DERIVED projection over
+    the case's already-resolved entities (the order, its customer, materials,
+    SAP doc, and extracted entities). Built deterministically by
+    `gateways/knowledge_graph.build_knowledge_graph` (pure) — there is no
+    standalone KG data source today, so this is a projection of existing
+    enrichment context, not invented data (ADR-042 §5b — deferrable behind
+    demand). Projected by the composer from
+    `enrichment_context["knowledge_graph"]`; preview-only until that producer is
+    wired. `root_id` is the focal node (the order/case)."""
+
+    nodes: List[KnowledgeGraphNode] = Field(default_factory=list)
+    edges: List[KnowledgeGraphEdge] = Field(default_factory=list)
+    root_id: Optional[str] = None
+
+
+class DraftReplyEdit(BaseModel):
+    """One operator edit applied to a generated reply (before/after audit)."""
+
+    field: str
+    before: Optional[str] = None
+    after: Optional[str] = None
+
+
+class DraftReply(BaseModel):
+    """AI Draft Reply evidence (ADR-042 Phase 4 contract; surfaced on the
+    analysis in Phase 7). The current generated reply for the case, projected by
+    the composer from `resolution_data["reply_draft"]` (the ReplyDraftRecipe
+    output a DRAFT_REPLY disposition persisted). `status` ∈ DRAFTED | REJECTED;
+    a REJECTED draft carries a `reason` and no body. Read-only evidence — sending
+    is a separate Shadow-gated disposition (SEND_REPLY)."""
+
+    status: str
+    reason: Optional[str] = None
+    template_name: Optional[str] = None
+    recipient: Optional[str] = None
+    subject: Optional[str] = None
+    body: Optional[str] = None
+    edits_applied: List[DraftReplyEdit] = Field(default_factory=list)
+    drafted_by: Optional[str] = None
+    drafted_at: Optional[str] = None
+
+
 class AnalysisResponse(BaseModel):
     """GET /api/v1/exceptions/{id}/analysis"""
 
@@ -1348,6 +1715,29 @@ class AnalysisResponse(BaseModel):
     # mounts on the Exception Queue detail page above
     # email_order_entry_analysis via data-presence dispatch.
     email_source: Optional[EmailSourceData] = None
+    # ADR-042 Phase 2 — Customer Inbox Entities tab. Preview-only until the
+    # intake-extraction composer adapter lands; the rich type is a product
+    # commitment (Guardrail #7).
+    entities_analysis: Optional[EntitiesAnalysisData] = None
+    # ADR-042 Phase 2 — Customer Inbox SAP Data tab. Preview-only until the
+    # SAP-gateway composer adapter lands.
+    sap_data_analysis: Optional[SapDataAnalysisData] = None
+    # ADR-042 Phase 3 — Order Entry tab (extracted order form). Preview-only
+    # until the extraction-gateway composer adapter lands.
+    order_entry_extraction: Optional[OrderEntryExtraction] = None
+    # ADR-042 Phase 5 — EDI 850 Audit tab (deterministic X12 850 reconstruction).
+    # Preview-only until the edi_850 builder producer populates enrichment_context.
+    edi_850_audit: Optional[Edi850Document] = None
+    # ADR-042 Phase 6 — Change Analysis tab (deterministic constraint evaluation
+    # + scenarios + decision). Preview-only until the change_analysis producer
+    # populates enrichment_context.
+    change_analysis: Optional[ChangeAnalysis] = None
+    # ADR-042 Phase 7 — Knowledge Graph tab (derived entity projection).
+    # Preview-only until the knowledge_graph producer populates enrichment_context.
+    knowledge_graph: Optional[KnowledgeGraphPayload] = None
+    # ADR-042 Phase 7 — AI Draft Reply evidence (projected from
+    # resolution_data["reply_draft"]). Absent until a DRAFT_REPLY disposition runs.
+    draft_reply: Optional[DraftReply] = None
 
 
 # ---------------------------------------------------------------------------

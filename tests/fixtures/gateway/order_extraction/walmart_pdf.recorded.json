@@ -1,0 +1,42 @@
+{
+  "case": "walmart_pdf",
+  "gateway": "order_extraction",
+  "operation": "extract_order",
+  "model_id": "recorded-fixture:phi-3-mini-4k-instruct@2026-05-24",
+  "prompt_hash": "sha256:fixture-walmart-pdf-do-not-auto-refresh",
+  "recorded_by": "scripts/record_gateway.py",
+  "note": "Synthetic golden recording. Coherent with tests/eval/datasets/extraction seed ext-1.",
+  "output": {
+    "source_type": "PDF",
+    "confidence": 0.94,
+    "header": {
+      "customer_po": "0093847612",
+      "order_type": "ZOR",
+      "sales_org": "1000",
+      "dist_channel": "10",
+      "requested_date": "2025-03-17"
+    },
+    "customer_name": "Walmart Stores Inc",
+    "customer_bp": "300001",
+    "line_items": [
+      {
+        "line_num": "001",
+        "material": "BEV-COLA-12PK",
+        "description": "Cola 12-pack can",
+        "quantity": 480,
+        "uom": "CS",
+        "unit_price": 8.64,
+        "mdm_matched": true
+      }
+    ],
+    "validation_flags": [
+      {"field": "line 001", "severity": "INFO", "message": "matched to material master"}
+    ],
+    "entities": [
+      {"key": "customer_po", "value": "0093847612", "kind": "po", "confidence": 0.98, "source_span": "PO# 0093847612"},
+      {"key": "requested_date", "value": "2025-03-17", "kind": "date", "confidence": 0.91, "source_span": "deliver by 03/17/2025"},
+      {"key": "material", "value": "BEV-COLA-12PK", "kind": "material", "confidence": 0.95, "source_span": "Cola 12pk case"},
+      {"key": "quantity", "value": "480", "kind": "qty", "confidence": 0.93, "source_span": "480 CS"}
+    ]
+  }
+}

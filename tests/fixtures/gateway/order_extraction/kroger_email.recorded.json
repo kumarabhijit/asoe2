@@ -1,0 +1,41 @@
+{
+  "case": "kroger_email",
+  "gateway": "order_extraction",
+  "operation": "extract_order",
+  "model_id": "recorded-fixture:phi-3-mini-4k-instruct@2026-05-24",
+  "prompt_hash": "sha256:fixture-kroger-email-do-not-auto-refresh",
+  "recorded_by": "scripts/record_gateway.py",
+  "note": "Synthetic golden recording. Coherent with tests/eval/datasets/extraction seed ext-2.",
+  "output": {
+    "source_type": "EMAIL_BODY",
+    "confidence": 0.88,
+    "header": {
+      "customer_po": "KRO-2025-03-44821",
+      "order_type": "ZOR",
+      "sales_org": "1000",
+      "dist_channel": "10",
+      "requested_date": "2025-04-02"
+    },
+    "customer_name": "The Kroger Co",
+    "customer_bp": "300114",
+    "line_items": [
+      {
+        "line_num": "001",
+        "material": "SKU-NR-001",
+        "description": "Sparkling water 24-pack",
+        "quantity": 400,
+        "uom": "CS",
+        "unit_price": 11.20,
+        "mdm_matched": true
+      }
+    ],
+    "validation_flags": [
+      {"field": "requested_date", "severity": "WARNING", "message": "lead time under 7 days"}
+    ],
+    "entities": [
+      {"key": "customer_po", "value": "KRO-2025-03-44821", "kind": "po", "confidence": 0.9, "source_span": "our PO KRO-2025-03-44821"},
+      {"key": "material", "value": "SKU-NR-001", "kind": "material", "confidence": 0.86, "source_span": "item SKU-NR-001"},
+      {"key": "quantity", "value": "400", "kind": "qty", "confidence": 0.89, "source_span": "400 cases"}
+    ]
+  }
+}

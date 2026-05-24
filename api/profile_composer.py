@@ -26,7 +26,19 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from api.schemas import EntityProfile, ImpactMetrics
+from api.schemas import (
+    ChangeAnalysis,
+    DraftReply,
+    DraftReplyEdit,
+    Edi850Document,
+    EntitiesAnalysisData,
+    EntityProfile,
+    ExtractedEntity,
+    ImpactMetrics,
+    KnowledgeGraphPayload,
+    OrderEntryExtraction,
+    SapDataAnalysisData,
+)
 from api.store import ExceptionRecord
 from api.users import get_account
 
@@ -80,6 +92,159 @@ def compose_entity_profile(record: ExceptionRecord) -> Optional[EntityProfile]:
         location=None,             # grandfathered — no producer
         region=acct.region,
     )
+
+
+# ---------------------------------------------------------------------------
+# Customer Inbox sections (ADR-042 Phase 2) — cross-cutting projections
+# from enrichment_context. SOLE source of truth (no recipe/UI synthesis);
+# return None when the backing gateway context is absent so the UI
+# structurally omits the tab (Guardrail #6 — no partial-truth). Preview-only
+# until the intake-extraction / SAP-read gateways populate enrichment_context.
+# ---------------------------------------------------------------------------
+
+def compose_entities_analysis(
+    record: ExceptionRecord,
+) -> Optional[EntitiesAnalysisData]:
+    """Project the AI-extracted entities from
+    `enrichment_context["inbox_entities"]` (shape: ``{"extracted": [...]}``).
+    None when absent or empty."""
+    ctx = record.enrichment_context.get("inbox_entities")
+    raw = ctx.get("extracted") if isinstance(ctx, dict) else None
+    if not isinstance(raw, list) or not raw:
+        return None
+    try:
+        entities = [ExtractedEntity(**e) for e in raw if isinstance(e, dict)]
+    except (TypeError, ValueError):
+        return None
+    if not entities:
+        return None
+    return EntitiesAnalysisData(extracted=entities)
+
+
+def compose_sap_data_analysis(
+    record: ExceptionRecord,
+) -> Optional[SapDataAnalysisData]:
+    """Project live SAP context from `enrichment_context["sap_data"]`. Requires
+    `system` + `validation_status` (the audit-bearing anchors); None otherwise."""
+    ctx = record.enrichment_context.get("sap_data")
+    if not isinstance(ctx, dict):
+        return None
+    if not ctx.get("system") or not ctx.get("validation_status"):
+        return None
+    try:
+        return SapDataAnalysisData(
+            system=ctx["system"],
+            validation_status=ctx["validation_status"],
+            order_value_usd=ctx.get("order_value_usd"),
+            sap_doc_number=ctx.get("sap_doc_number"),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def compose_order_entry_extraction(
+    record: ExceptionRecord,
+) -> Optional[OrderEntryExtraction]:
+    """Project the extracted order form from
+    `enrichment_context["order_entry_extraction"]`. None when absent or
+    malformed (preview-only until the extraction gateway lands)."""
+    ctx = record.enrichment_context.get("order_entry_extraction")
+    if not isinstance(ctx, dict) or not ctx:
+        return None
+    try:
+        return OrderEntryExtraction(**ctx)
+    except (TypeError, ValueError):
+        return None
+
+
+def compose_edi_850_document(
+    record: ExceptionRecord,
+) -> Optional[Edi850Document]:
+    """Project the deterministically built EDI 850 from
+    `enrichment_context["edi_850"]` (the `edi_850` builder producer's read).
+    None when absent or malformed (preview-only until the producer is wired).
+    The builder owns construction (`gateways/edi850.py`); the composer only
+    projects — no synthesis here (Guardrail #6)."""
+    ctx = record.enrichment_context.get("edi_850")
+    if not isinstance(ctx, dict) or not ctx:
+        return None
+    try:
+        return Edi850Document(**ctx)
+    except (TypeError, ValueError):
+        return None
+
+
+def compose_change_analysis(
+    record: ExceptionRecord,
+) -> Optional[ChangeAnalysis]:
+    """Project the deterministic Change Analysis from
+    `enrichment_context["change_analysis"]` (the recipe-homed evaluator's read).
+    None when absent or malformed (preview-only until the producer is wired).
+    The evaluator owns the logic (`recipes/ChangeAnalysisRecipe.py`); the
+    composer only projects — no synthesis here (Guardrail #6)."""
+    ctx = record.enrichment_context.get("change_analysis")
+    if not isinstance(ctx, dict) or not ctx:
+        return None
+    try:
+        return ChangeAnalysis(**ctx)
+    except (TypeError, ValueError):
+        return None
+
+
+def compose_knowledge_graph(
+    record: ExceptionRecord,
+) -> Optional[KnowledgeGraphPayload]:
+    """Project the derived knowledge graph from
+    `enrichment_context["knowledge_graph"]` (the builder producer's read). None
+    when absent, malformed, or empty (no projectable entities → tab omitted;
+    deferrable per ADR-042 §5b). The builder owns construction
+    (`gateways/knowledge_graph.py`); the composer only projects (Guardrail #6)."""
+    ctx = record.enrichment_context.get("knowledge_graph")
+    if not isinstance(ctx, dict) or not ctx.get("nodes"):
+        return None
+    try:
+        return KnowledgeGraphPayload(**ctx)
+    except (TypeError, ValueError):
+        return None
+
+
+def compose_draft_reply(record: ExceptionRecord) -> Optional[DraftReply]:
+    """Project the current AI reply draft from `resolution_data["reply_draft"]`
+    (the ReplyDraftRecipe output a DRAFT_REPLY disposition persisted). None when
+    no draft exists. Flattens the nested `draft` block into the typed contract;
+    the recipe owns generation — the composer only projects (Guardrail #6)."""
+    rd = record.resolution_data or {}
+    ctx = rd.get("reply_draft")
+    if not isinstance(ctx, dict) or not ctx.get("status"):
+        return None
+    draft = ctx.get("draft") if isinstance(ctx.get("draft"), dict) else {}
+    try:
+        edits = [
+            DraftReplyEdit(
+                field=str(e.get("field", "")),
+                before=_opt_str(e.get("before")),
+                after=_opt_str(e.get("after")),
+            )
+            for e in (ctx.get("edits_applied") or [])
+            if isinstance(e, dict)
+        ]
+        return DraftReply(
+            status=ctx["status"],
+            reason=_opt_str(ctx.get("reason")),
+            template_name=_opt_str(draft.get("template_name")),
+            recipient=_opt_str(draft.get("recipient")),
+            subject=_opt_str(draft.get("subject")),
+            body=_opt_str(draft.get("body")),
+            edits_applied=edits,
+            drafted_by=_opt_str(ctx.get("drafted_by")),
+            drafted_at=_opt_str(ctx.get("drafted_at")),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _opt_str(value: Any) -> Optional[str]:
+    return None if value is None else str(value)
 
 
 # ---------------------------------------------------------------------------

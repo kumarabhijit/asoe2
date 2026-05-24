@@ -34,6 +34,7 @@ import logging
 import re
 import threading
 import time
+import hashlib
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
@@ -54,9 +55,16 @@ from api.analysis_adapters import (
 )
 from api.analysis_composer import compose as compose_analysis
 from api.profile_composer import (
+    compose_change_analysis,
+    compose_draft_reply,
+    compose_edi_850_document,
+    compose_entities_analysis,
     compose_entity_profile,
     compose_impact_metrics,
+    compose_knowledge_graph,
     compose_narrative,
+    compose_order_entry_extraction,
+    compose_sap_data_analysis,
 )
 from api.errors import ASOEError
 from api.schemas import (
@@ -290,12 +298,23 @@ def _resolve_via_case_agent(
 
 def _resolve_state(state: GraphState, tenant_id: str) -> GraphState:
     """Single dispatch point: route via case agent when the
-    predicate fires, otherwise the deterministic graph."""
+    predicate fires, otherwise the deterministic graph.
+
+    DoR #7: this is the synchronous ingest→terminal path, so it is the natural
+    point to record the SLO latency histogram (telemetry only — never raises)."""
     from agents.harness import should_route_to_case_agent
 
-    if should_route_to_case_agent(state.event, enabled=_case_agent_enabled()):
-        return _resolve_via_case_agent(state, tenant_id)
-    return _run_graph_safe(state)
+    started = time.perf_counter()
+    try:
+        if should_route_to_case_agent(state.event, enabled=_case_agent_enabled()):
+            return _resolve_via_case_agent(state, tenant_id)
+        return _run_graph_safe(state)
+    finally:
+        try:
+            from api.metrics import observe_ingest_to_terminal_latency
+            observe_ingest_to_terminal_latency(time.perf_counter() - started)
+        except Exception:  # pragma: no cover - telemetry must never break resolve
+            pass
 
 
 def _state_to_resolve_response(
@@ -645,6 +664,50 @@ def _clear_idempotency_cache() -> None:
     """Test helper: wipe the module-level cache between tests."""
     with _idempotency_lock:
         _idempotency_cache.clear()
+    _clear_delivery_dedup()
+
+
+# ---------------------------------------------------------------------------
+# DoR #5 — delivery idempotency for buyer-reply sends.
+#
+# The HTTP Idempotency-Key above dedupes a *client retry* of one request. This
+# dedupes the *delivery itself*, keyed on the reply content (a provider-message-
+# id analog): the same reply (recipient + subject + body) for the same case is
+# delivered AT MOST ONCE, even across two distinct SEND_REPLY requests with no /
+# different idempotency keys. The dedup ledger is the authoritative "delivered"
+# record (it survives later mutation of resolution_data). Process-local; reset
+# per test via `_clear_idempotency_cache`.
+# ---------------------------------------------------------------------------
+
+_delivery_dedup: Dict[Tuple[str, str], Dict[str, Any]] = {}
+_delivery_lock = threading.Lock()
+
+
+def _reply_delivery_key(exception_id: str, draft: Dict[str, Any]) -> str:
+    """Deterministic delivery key over (case, recipient, subject, body)."""
+    recipient = (draft.get("recipient") or "").strip().lower()
+    subject = draft.get("subject") or ""
+    body = draft.get("body") or ""
+    raw = "\x1f".join([exception_id, recipient, subject, body])
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _delivery_seen(tenant_id: str, delivery_key: str) -> Optional[Dict[str, Any]]:
+    with _delivery_lock:
+        return _delivery_dedup.get((tenant_id, delivery_key))
+
+
+def _delivery_record(
+    tenant_id: str, delivery_key: str, entry: Dict[str, Any]
+) -> None:
+    with _delivery_lock:
+        _delivery_dedup[(tenant_id, delivery_key)] = entry
+
+
+def _clear_delivery_dedup() -> None:
+    """Test helper: wipe the delivery-dedup ledger between tests."""
+    with _delivery_lock:
+        _delivery_dedup.clear()
 
 
 def _utc_now_iso() -> str:
@@ -667,6 +730,423 @@ def _financial_impact_usd(record) -> Optional[float]:
         if isinstance(val, (int, float)):
             return float(val)
     return None
+
+
+def _cosign_materiality_usd(record) -> Optional[float]:
+    """Financial materiality that gates the four-eyes cosign (ADR-042 DoR #3).
+
+    Computed from the SAP system-of-record order value (master-data re-price,
+    surfaced by the sap_order producer in
+    ``enrichment_context["sap_data"]["order_value_usd"]``) — NOT the
+    LLM-extracted ``financial_impact_usd``. An upstream adversary who drives the
+    extracted impact below the threshold must not dodge cosign on a genuinely
+    high-value order. The SAP value is authoritative when present; we fall back
+    to the recipe/LLM impact only when no SAP read exists so the gate never
+    silently under-fires.
+    """
+    sap = (record.enrichment_context or {}).get("sap_data")
+    if isinstance(sap, dict):
+        val = sap.get("order_value_usd")
+        if isinstance(val, (int, float)):
+            return float(val)
+    return _financial_impact_usd(record)
+
+
+# ---------------------------------------------------------------------------
+# Order-entry ERP submit (ADR-042 §2.2.6) — disposition-triggered, executed on
+# the deterministic graph path via directed re-entry (NOT inline business logic;
+# Guardrail #1). Sub-$10k submits run immediately; >=$10k stage four-eyes cosign.
+# ---------------------------------------------------------------------------
+
+
+def _run_erp_submit(record, tenant_id: str, corrections):
+    """Re-enter the graph to execute the ERP submit for a reviewed record.
+
+    Shadow → SubmitToErpRecipe → apply_effects (the `erp` write) all run on the
+    deterministic path; the reviewed extraction rides on enrichment_context and
+    the operator corrections on directed_corrections."""
+    event = OrderEvent.model_validate(record.original_event or {})
+    state = GraphState(
+        event=event,
+        tenant_id=tenant_id,
+        enrichment_context=dict(record.enrichment_context or {}),
+        directed_recipe="SubmitToErpRecipe.py",
+        directed_corrections=corrections or {},
+    )
+    return _run_graph_safe(state)
+
+
+def _erp_submission_record(result, submitted_by: str) -> dict:
+    """Project the submit graph run into the durable erp_submission audit dict."""
+    outputs = result.execution_log.outputs if result.execution_log else {}
+    sap_doc = None
+    for er in result.effect_results:
+        if er.gateway_name == "erp" and er.status == "SUCCESS":
+            sap_doc = (er.data or {}).get("sap_doc_number")
+            break
+    return {
+        "status": outputs.get("status"),
+        "reason": outputs.get("reason"),
+        "erp_payload": outputs.get("erp_payload"),
+        "sap_doc_number": sap_doc,
+        "corrections_applied": outputs.get("corrections_applied", []),
+        "submitted_by": submitted_by,
+        "submitted_at": _utc_now_iso(),
+    }
+
+
+def _persist_erp_submit(exception_id, tenant_id, record, result, user_sub, notes,
+                        *, extra_resolution=None):
+    """Persist a submit graph run + emit the audit event. On SUCCESS the record
+    resolves; a REJECTED submit stays in review for correction (no false
+    resolution, Guardrail #5)."""
+    submission = _erp_submission_record(result, user_sub)
+    merged = dict(record.resolution_data or {})
+    merged.pop("pending_override", None)
+    merged["erp_submission"] = submission
+    if extra_resolution:
+        merged.update(extra_resolution)
+    success = submission["status"] == "SUCCESS"
+    if success:
+        updated = exception_store.update(
+            exception_id, tenant_id,
+            lifecycle_state="RESOLVED", final_status="COMPLETE",
+            resolved_by=user_sub, resolved_action="SUBMIT_TO_ERP",
+            resolution_notes=notes, resolution_data=merged,
+        )
+    else:
+        updated = exception_store.update(
+            exception_id, tenant_id, resolution_data=merged,
+        )
+    if not updated:
+        raise ASOEError(code="UPDATE_FAILED",
+                        message="Failed to persist ERP submit.", status_code=500)
+    exception_store.log_audit_event(
+        tenant_id=tenant_id,
+        policy_key="EXCEPTION_ERP_SUBMITTED" if success else "EXCEPTION_ERP_SUBMIT_REJECTED",
+        previous_value={"lifecycle_state": record.lifecycle_state,
+                        "exception_id": exception_id},
+        new_value={
+            "lifecycle_state": "RESOLVED" if success else record.lifecycle_state,
+            "resolved_action": "SUBMIT_TO_ERP",
+            "erp_status": submission["status"],
+            "sap_doc_number": submission["sap_doc_number"],
+            "corrections_applied": submission["corrections_applied"],
+            "submitted_by": user_sub,
+        },
+        changed_by=user_sub,
+        change_reason=notes,
+    )
+    return updated
+
+
+def _run_reply_draft(record, tenant_id: str, reply_params):
+    """Re-enter the graph to compose a buyer reply draft (ADR-042 Phase 4).
+
+    The compose runs on the deterministic path (Shadow → ReplyDraftRecipe); the
+    reviewed extraction rides on enrichment_context and the operator's reply
+    params (recipient / template / edits) on directed_corrections. No gateway
+    effect fires — the send is a separate authorised SEND_REPLY."""
+    event = OrderEvent.model_validate(record.original_event or {})
+    state = GraphState(
+        event=event,
+        tenant_id=tenant_id,
+        enrichment_context=dict(record.enrichment_context or {}),
+        directed_recipe="ReplyDraftRecipe.py",
+        directed_corrections=reply_params or {},
+    )
+    return _run_graph_safe(state)
+
+
+def _persist_reply_draft(exception_id, tenant_id, record, result, user_sub, notes):
+    """Persist a composed draft to resolution_data.reply_draft + emit audit.
+
+    The record lifecycle is unchanged: a draft is not a resolution — the
+    operator still reviews / edits / sends. A REJECTED compose (no recipient /
+    unknown template) is recorded with its reason, not masked as success."""
+    outputs = result.execution_log.outputs if result.execution_log else {}
+    status = outputs.get("status")
+    draft = outputs.get("draft") or {}
+    entry = {
+        "status": status,
+        "reason": outputs.get("reason"),
+        "draft": draft,
+        "edits_applied": outputs.get("edits_applied", []),
+        "drafted_by": user_sub,
+        "drafted_at": _utc_now_iso(),
+    }
+    merged = dict(record.resolution_data or {})
+    merged["reply_draft"] = entry
+    updated = exception_store.update(exception_id, tenant_id, resolution_data=merged)
+    if not updated:
+        raise ASOEError(code="UPDATE_FAILED",
+                        message="Failed to persist reply draft.", status_code=500)
+    exception_store.log_audit_event(
+        tenant_id=tenant_id,
+        policy_key="EXCEPTION_REPLY_DRAFTED" if status == "DRAFTED"
+        else "EXCEPTION_REPLY_DRAFT_REJECTED",
+        previous_value={"exception_id": exception_id},
+        new_value={
+            "reply_status": status,
+            "template_name": draft.get("template_name"),
+            "recipient": draft.get("recipient"),
+            "edits_applied": entry["edits_applied"],
+            "drafted_by": user_sub,
+        },
+        changed_by=user_sub, change_reason=notes,
+    )
+    event_publisher.publish(
+        tenant_id,
+        WSEvent.reply_drafted(
+            trace_id=record.trace_id or exception_id,
+            exception_id=exception_id,
+            tenant_id=tenant_id,
+            status=status or "REJECTED",
+            template_name=draft.get("template_name"),
+            recipient=draft.get("recipient"),
+            subject=draft.get("subject"),
+            drafted_by=user_sub,
+        ),
+    )
+    return updated
+
+
+def _disposition_draft_reply(exception_id, tenant_id, record, req, user, key,
+                             request_body):
+    """DRAFT_REPLY disposition: compose a buyer reply draft (no send)."""
+    if not req.notes or not req.notes.strip():
+        raise ASOEError(code="NOTES_REQUIRED",
+                        message="Notes are required (SOX audit trail).",
+                        status_code=422)
+    if record.intent != "MANUAL_ORDER_INTAKE":
+        raise ASOEError(
+            code="NOT_DRAFTABLE",
+            message=("DRAFT_REPLY applies only to order-entry "
+                     "(MANUAL_ORDER_INTAKE) records."),
+            status_code=409,
+        )
+    if not (record.enrichment_context or {}).get("order_entry_extraction"):
+        raise ASOEError(code="NO_EXTRACTED_ORDER",
+                        message="Record carries no extracted order to reply about.",
+                        status_code=409)
+    _require_state(record, HITL_DISPOSITION_STATES, "draft_reply")
+
+    result = _run_reply_draft(record, tenant_id, req.reply or {})
+    updated = _persist_reply_draft(
+        exception_id, tenant_id, record, result, user.sub, req.notes,
+    )
+    response = updated.to_detail()
+    if key is not None:
+        _idempotency_store(
+            tenant_id, exception_id, user.sub, key, request_body,
+            response.model_dump(),
+        )
+    return response
+
+
+def _persist_reply_sent(exception_id, tenant_id, record, result, user_sub, notes):
+    """Persist a send re-entry to resolution_data.reply_sent + emit audit.
+
+    SENT only when the recipe reached READY_TO_SEND and the buyer_notification
+    gateway delivered; otherwise FAILED with the reason (a rejected compose or a
+    gateway failure is never masked as success — Guardrail #5). The record
+    lifecycle is unchanged: a clarification reply does not resolve the order, the
+    case stays open awaiting the buyer."""
+    outputs = result.execution_log.outputs if result.execution_log else {}
+    status = outputs.get("status")
+    draft = outputs.get("draft") or {}
+    delivered = False
+    gw_status = None
+    for er in result.effect_results:
+        if er.gateway_name == "buyer_notification" and er.operation == "send":
+            gw_status = er.status
+            delivered = er.status == "SUCCESS" and bool((er.data or {}).get("delivered"))
+            break
+    sent_ok = status == "READY_TO_SEND" and delivered
+    # DoR #5 — provider-message-id analog: stable per (case, recipient, content).
+    delivery_key = _reply_delivery_key(exception_id, draft)
+    entry = {
+        "status": "SENT" if sent_ok else "FAILED",
+        "reason": None if sent_ok
+        else (outputs.get("reason") or gw_status or "Send did not complete."),
+        "recipient": draft.get("recipient"),
+        "subject": draft.get("subject"),
+        "gateway_status": gw_status,
+        "delivered": delivered,
+        "delivery_key": delivery_key,
+        "sent_by": user_sub,
+        "sent_at": _utc_now_iso(),
+    }
+    # Record the successful delivery in the idempotency ledger so a later
+    # SEND_REPLY of the same reply is short-circuited (no double send).
+    if sent_ok:
+        _delivery_record(tenant_id, delivery_key, entry)
+    merged = dict(record.resolution_data or {})
+    merged["reply_sent"] = entry
+    updated = exception_store.update(exception_id, tenant_id, resolution_data=merged)
+    if not updated:
+        raise ASOEError(code="UPDATE_FAILED",
+                        message="Failed to persist reply send.", status_code=500)
+    exception_store.log_audit_event(
+        tenant_id=tenant_id,
+        policy_key="EXCEPTION_REPLY_SENT" if sent_ok else "EXCEPTION_REPLY_SEND_FAILED",
+        previous_value={"exception_id": exception_id},
+        new_value={
+            "reply_status": entry["status"],
+            "recipient": entry["recipient"],
+            "gateway_status": gw_status,
+            "sent_by": user_sub,
+        },
+        changed_by=user_sub, change_reason=notes,
+    )
+    event_publisher.publish(
+        tenant_id,
+        WSEvent.reply_sent(
+            trace_id=record.trace_id or exception_id,
+            exception_id=exception_id,
+            tenant_id=tenant_id,
+            status=entry["status"],
+            recipient=entry["recipient"],
+            subject=entry["subject"],
+            delivered=entry["delivered"],
+            sent_by=user_sub,
+        ),
+    )
+    return updated
+
+
+def _disposition_send_reply(exception_id, tenant_id, record, req, user, key,
+                            request_body):
+    """SEND_REPLY disposition: send the operator-approved buyer reply."""
+    if not req.notes or not req.notes.strip():
+        raise ASOEError(code="NOTES_REQUIRED",
+                        message="Notes are required (SOX audit trail).",
+                        status_code=422)
+    if record.intent != "MANUAL_ORDER_INTAKE":
+        raise ASOEError(
+            code="NOT_SENDABLE",
+            message=("SEND_REPLY applies only to order-entry "
+                     "(MANUAL_ORDER_INTAKE) records."),
+            status_code=409,
+        )
+    if not (record.enrichment_context or {}).get("order_entry_extraction"):
+        raise ASOEError(code="NO_EXTRACTED_ORDER",
+                        message="Record carries no extracted order to reply about.",
+                        status_code=409)
+    _require_state(record, HITL_DISPOSITION_STATES, "send_reply")
+
+    # DoR #5 — delivery idempotency. Compose (no send) to derive the
+    # deterministic delivery key; if this exact reply was already delivered for
+    # this case, DO NOT re-send — return the current state (idempotent). The
+    # extra compose is pure + deterministic (no gateway effect fires in draft
+    # mode); it only reads the content we are about to deliver.
+    preview = _run_reply_draft(record, tenant_id, req.reply or {})
+    p_out = preview.execution_log.outputs if preview.execution_log else {}
+    p_draft = p_out.get("draft") or {}
+    if p_out.get("status") == "DRAFTED" and p_draft.get("recipient"):
+        dkey = _reply_delivery_key(exception_id, p_draft)
+        if _delivery_seen(tenant_id, dkey) is not None:
+            exception_store.log_audit_event(
+                tenant_id=tenant_id,
+                policy_key="EXCEPTION_REPLY_SEND_DEDUPED",
+                previous_value={"exception_id": exception_id},
+                new_value={
+                    "recipient": p_draft.get("recipient"),
+                    "delivery_key": dkey,
+                },
+                changed_by=user.sub, change_reason=req.notes,
+            )
+            fresh = exception_store.get(exception_id, tenant_id) or record
+            response = fresh.to_detail()
+            if key is not None:
+                _idempotency_store(
+                    tenant_id, exception_id, user.sub, key, request_body,
+                    response.model_dump(),
+                )
+            return response
+
+    result = _run_reply_draft(
+        record, tenant_id, {**(req.reply or {}), "mode": "send"},
+    )
+    updated = _persist_reply_sent(
+        exception_id, tenant_id, record, result, user.sub, req.notes,
+    )
+    response = updated.to_detail()
+    if key is not None:
+        _idempotency_store(
+            tenant_id, exception_id, user.sub, key, request_body,
+            response.model_dump(),
+        )
+    return response
+
+
+def _disposition_erp_submit(exception_id, tenant_id, record, req, user, key,
+                            request_body):
+    """SUBMIT_TO_ERP disposition: the financially-binding order-entry submit."""
+    if not req.notes or not req.notes.strip():
+        raise ASOEError(code="NOTES_REQUIRED",
+                        message="Notes are required (SOX audit trail).",
+                        status_code=422)
+    if record.intent != "MANUAL_ORDER_INTAKE":
+        raise ASOEError(
+            code="NOT_SUBMITTABLE",
+            message=("SUBMIT_TO_ERP applies only to order-entry "
+                     "(MANUAL_ORDER_INTAKE) records."),
+            status_code=409,
+        )
+    if not (record.enrichment_context or {}).get("order_entry_extraction"):
+        raise ASOEError(code="NO_EXTRACTED_ORDER",
+                        message="Record carries no extracted order to submit.",
+                        status_code=409)
+    _require_state(record, HITL_DISPOSITION_STATES, "submit_to_erp")
+
+    materiality = _cosign_materiality_usd(record)
+    if materiality is not None and materiality >= HIGH_VALUE_OVERRIDE_THRESHOLD_USD:
+        # Four-eyes: park the submit for cosign (reuses the PENDING_COSIGN flow).
+        merged = dict(record.resolution_data or {})
+        merged["pending_override"] = {
+            "action": "SUBMIT_TO_ERP",
+            "notes": req.notes,
+            "reason_tag": req.reason_tag,
+            "corrections": req.corrections or {},
+            "initiator": user.sub,
+            "initiated_at": _utc_now_iso(),
+            "financial_impact_usd": materiality,
+            "from_lifecycle_state": record.lifecycle_state,
+        }
+        updated = exception_store.update(
+            exception_id, tenant_id,
+            lifecycle_state="PENDING_COSIGN", resolution_data=merged,
+        )
+        if not updated:
+            raise ASOEError(code="UPDATE_FAILED",
+                            message="Failed to stage pending submit.",
+                            status_code=500)
+        exception_store.log_audit_event(
+            tenant_id=tenant_id,
+            policy_key="EXCEPTION_ERP_SUBMIT_INITIATED",
+            previous_value={"lifecycle_state": record.lifecycle_state,
+                            "exception_id": exception_id},
+            new_value={"lifecycle_state": "PENDING_COSIGN",
+                       "pending_action": "SUBMIT_TO_ERP",
+                       "financial_impact_usd": materiality,
+                       "initiator": user.sub},
+            changed_by=user.sub, change_reason=req.notes,
+        )
+        response = updated.to_detail()
+    else:
+        result = _run_erp_submit(record, tenant_id, req.corrections)
+        updated = _persist_erp_submit(
+            exception_id, tenant_id, record, result, user.sub, req.notes,
+        )
+        response = updated.to_detail()
+
+    if key is not None:
+        _idempotency_store(
+            tenant_id, exception_id, user.sub, key, request_body,
+            response.model_dump(),
+        )
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -949,6 +1429,32 @@ async def cosign_override(
         "exception_id": exception_id,
     }
 
+    if req.approve and pending.get("action") == "SUBMIT_TO_ERP":
+        # ADR-042 §2.2.6 — the parked high-value ERP submit runs now, on the
+        # deterministic graph path, executed under four-eyes (initiator +
+        # cosigner). The recipe applies the operator corrections captured at
+        # initiation; the erp gateway write fires only on a SUCCESS submit.
+        result = _run_erp_submit(record, tenant_id, pending.get("corrections"))
+        cosign_meta = {
+            "cosigned_by": user.sub,
+            "cosigned_at": _utc_now_iso(),
+            "cosign_notes": req.notes,
+            "initiator": pending["initiator"],
+            "initiated_at": pending.get("initiated_at"),
+        }
+        updated = _persist_erp_submit(
+            exception_id, tenant_id, record, result,
+            pending["initiator"], req.notes,
+            extra_resolution={"cosign": cosign_meta},
+        )
+        response = updated.to_detail()
+        if key is not None:
+            _idempotency_store(
+                tenant_id, exception_id, user.sub, key,
+                request_body, response.model_dump(),
+            )
+        return response
+
     if req.approve:
         # Apply the pending override. resolved_by is set to the INITIATOR
         # (they proposed the action); cosigned_by and cosigned_at capture
@@ -1106,6 +1612,23 @@ async def disposition_exception(
             ),
             status_code=422,
         )
+
+    # ADR-042 §2.2.6 — SUBMIT_TO_ERP is an explicit, financially-binding
+    # execution (not a HITL disposition of the agent's recommendation), so it
+    # takes a dedicated path: directed graph re-entry + four-eyes cosign >$10k.
+    if req.action == "SUBMIT_TO_ERP":
+        return _disposition_erp_submit(
+            exception_id, tenant_id, record, req, user, key, request_body,
+        )
+    if req.action == "DRAFT_REPLY":
+        return _disposition_draft_reply(
+            exception_id, tenant_id, record, req, user, key, request_body,
+        )
+    if req.action == "SEND_REPLY":
+        return _disposition_send_reply(
+            exception_id, tenant_id, record, req, user, key, request_body,
+        )
+
     # Per-intent reason-tag validation (Phase 5.2 — panel 2026-05-10).
     # The new validator accepts the per-intent curated set OR the
     # legacy `_GLOBAL_REASON_TAGS` set during the transition window
@@ -1178,7 +1701,7 @@ async def disposition_exception(
         # reanalysis_history audit trail records every override
         # initiator/timestamp so SOX evidence-of-control is preserved.
         # Four-eyes: high-value overrides stage to PENDING_COSIGN.
-        impact = _financial_impact_usd(record)
+        impact = _cosign_materiality_usd(record)
         if impact is not None and impact >= HIGH_VALUE_OVERRIDE_THRESHOLD_USD:
             prior_snapshot = {
                 "lifecycle_state": record.lifecycle_state,
@@ -1933,6 +2456,15 @@ async def get_analysis(
     entity_profile = compose_entity_profile(record)
     impact_metrics = compose_impact_metrics(record)
     root_cause, recommendation = compose_narrative(record, trace_data)
+    # ADR-042 Phase 2 — Customer Inbox Entities / SAP Data tabs. Cross-cutting
+    # composer projections (None until the gateways populate enrichment_context).
+    entities_analysis = compose_entities_analysis(record)
+    sap_data_analysis = compose_sap_data_analysis(record)
+    order_entry_extraction = compose_order_entry_extraction(record)
+    edi_850_audit = compose_edi_850_document(record)
+    change_analysis = compose_change_analysis(record)
+    knowledge_graph = compose_knowledge_graph(record)
+    draft_reply = compose_draft_reply(record)
 
     return AnalysisResponse(
         diagnosis=diagnosis,
@@ -1944,5 +2476,12 @@ async def get_analysis(
         recommendation=recommendation,
         entity_profile=entity_profile,
         impact_metrics=impact_metrics,
+        entities_analysis=entities_analysis,
+        sap_data_analysis=sap_data_analysis,
+        order_entry_extraction=order_entry_extraction,
+        edi_850_audit=edi_850_audit,
+        change_analysis=change_analysis,
+        knowledge_graph=knowledge_graph,
+        draft_reply=draft_reply,
         **extras,
     )

@@ -344,6 +344,43 @@ LLM_CIRCUIT_BREAKER_COOLDOWN_S: int = 300
 """Time the LLM-tier circuit breaker stays in OPEN state before
 moving to HALF_OPEN. Default 5 minutes."""
 
+# ---------------------------------------------------------------------------
+# Gateway-tier circuit breaker (DoR #8 — email/SAP/infra gateway parity with
+# the LLM tier). Applied per gateway_name at the GatewayExecutor chokepoint.
+# ---------------------------------------------------------------------------
+
+GATEWAY_CIRCUIT_BREAKER_ERROR_RATE_PCT: float = 0.50
+"""Rolling 60-second per-gateway error rate at/above which the gateway-tier
+circuit breaker trips, short-circuiting further calls to that gateway to an
+UNAVAILABLE response for a cooldown window. Higher than the LLM tier (0.25):
+gateway reads are retried/fanned-out and a transient infra blip shouldn't trip
+as eagerly as a model outage."""
+
+GATEWAY_CIRCUIT_BREAKER_P95_LATENCY_S: float = 10.0
+"""Rolling 60-second per-gateway p95 latency (seconds) above which the
+gateway-tier breaker trips. Pairs with the error-rate threshold above."""
+
+GATEWAY_CIRCUIT_BREAKER_COOLDOWN_S: int = 60
+"""Time the gateway-tier breaker stays OPEN before probing HALF_OPEN. Shorter
+than the LLM tier (60s vs 5m): infra gateways recover faster than a rate-limited
+model and the read is non-binding evidence enrichment."""
+
+# ---------------------------------------------------------------------------
+# Attachment-fetch SSRF allowlist (DoR #10). Hosts the attachment_fetch gateway
+# is permitted to retrieve email attachments from. Allowlist-first: an inbound
+# email cannot point an attachment at an arbitrary (internal) URL. Override per
+# tenant/deploy as the real attachment stores are wired.
+# ---------------------------------------------------------------------------
+
+ATTACHMENT_FETCH_ALLOWED_HOSTS: frozenset = frozenset({
+    "attachments.acme.example",
+    "mail.acme.example",
+    "s3.amazonaws.com",
+})
+"""Hostnames (exact or dot-suffix) the attachment_fetch gateway may fetch from.
+Everything else — and any host resolving to a non-global address — is refused by
+`hardening.ssrf.validate_outbound_url`."""
+
 LLM_CALL_TIMEOUT_S: float = 30.0
 """Per-call timeout for an Anthropic SDK request (constrained tool-use
 output is normally <2s; tail latency on cache writes can hit 10s+).

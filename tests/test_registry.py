@@ -216,27 +216,45 @@ class TestEmailOrderEntrySpec:
             self.spec.name = "tampered"  # type: ignore[misc]
 
     def test_gateway_dependencies_declared(self):
-        # ADR-034 Phase B + Phase G: five `email_intake` operations
-        # land as required_for_audit=True dependencies — the four
-        # non-disable-able floor checks plus fetch_message (Phase G —
-        # email source-of-truth substrate for the EmailSourceSection
-        # secondary-adapter projection).
-        assert len(self.spec.dependencies) == 5
+        # ADR-034 Phase B + Phase G: five `email_intake` operations land as
+        # required_for_audit=True dependencies — the four non-disable-able
+        # floor checks plus fetch_message (Phase G — email source-of-truth
+        # substrate for the EmailSourceSection secondary-adapter projection).
+        # ADR-042 Phase 3 + 5 + 6 + 7: six Customer Inbox read producers land as
+        # required_for_audit=False evidence reads — order_extraction
+        # (extract_order + extract_entities), sap_order (validate), the edi_850
+        # builder (build), change_analysis (evaluate), and knowledge_graph
+        # (build) — whose output activates the Order Entry / Entities / SAP Data /
+        # EDI 850 Audit / Change Analysis / Knowledge Graph tabs.
+        assert len(self.spec.dependencies) == 11
         gateways = {d.gateway_name for d in self.spec.dependencies}
-        assert gateways == {"email_intake"}
+        assert gateways == {
+            "email_intake", "order_extraction", "sap_order", "edi_850",
+            "change_analysis", "knowledge_graph",
+        }
         ops = {d.operation for d in self.spec.dependencies}
         assert ops == {
             "sender_auth", "resolve_customer",
             "duplicate_po_pre_check", "credit_check",
             "fetch_message",
+            "extract_order", "extract_entities", "validate", "build",
+            "evaluate",
         }
-        for dep in self.spec.dependencies:
-            assert dep.required_for_audit is True
-        result_keys = {d.result_key for d in self.spec.dependencies}
-        assert result_keys == {
+        audit_required = {
+            d.result_key for d in self.spec.dependencies if d.required_for_audit
+        }
+        assert audit_required == {
             "sender_auth_context", "customer_resolution_context",
             "duplicate_po_pre_check_context", "credit_check_context",
             "email_source_context",
+        }
+        # The inbox read producers are evidence-enriching, not lifecycle-gating.
+        soft = {
+            d.result_key for d in self.spec.dependencies if not d.required_for_audit
+        }
+        assert soft == {
+            "order_entry_extraction", "inbox_entities", "sap_data", "edi_850",
+            "change_analysis", "knowledge_graph",
         }
 
     def test_no_effects(self):

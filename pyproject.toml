@@ -94,4 +94,8 @@ packages = [
 pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "replay: eval-harness run against frozen recorded gateway outputs (PR gate; no live model)",
+    "live: eval-harness run against a live model (nightly only; never gates red-green)",
+]
 
