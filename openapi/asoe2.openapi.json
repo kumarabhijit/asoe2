@@ -375,6 +375,16 @@
               }
             ],
             "title": "Root Cause"
+          },
+          "sap_data_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SapDataAnalysisData"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -4023,6 +4033,47 @@
           "description"
         ],
         "title": "SAPActionStep",
+        "type": "object"
+      },
+      "SapDataAnalysisData": {
+        "description": "SAP Data tab (ADR-042 Phase 2). Live SAP system-of-record context the\noperator authorises against \u2014 which system, its validation state, and the\norder's financial value. Projected by the composer from the SAP gateway\nread; preview-only until that adapter lands. `system` / `validation_status`\n/ `order_value_usd` are audit-bearing (the decision applies to a specific\nSAP order in a specific state at a specific value); `sap_doc_number` is a\ncontextual reference.",
+        "properties": {
+          "order_value_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order Value Usd"
+          },
+          "sap_doc_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sap Doc Number"
+          },
+          "system": {
+            "title": "System",
+            "type": "string"
+          },
+          "validation_status": {
+            "title": "Validation Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "system",
+          "validation_status"
+        ],
+        "title": "SapDataAnalysisData",
         "type": "object"
       },
       "SeedFinancialImpactRequest": {

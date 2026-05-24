@@ -1320,6 +1320,21 @@ class EntitiesAnalysisData(BaseModel):
     extracted: List[ExtractedEntity] = Field(default_factory=list)
 
 
+class SapDataAnalysisData(BaseModel):
+    """SAP Data tab (ADR-042 Phase 2). Live SAP system-of-record context the
+    operator authorises against — which system, its validation state, and the
+    order's financial value. Projected by the composer from the SAP gateway
+    read; preview-only until that adapter lands. `system` / `validation_status`
+    / `order_value_usd` are audit-bearing (the decision applies to a specific
+    SAP order in a specific state at a specific value); `sap_doc_number` is a
+    contextual reference."""
+
+    system: str
+    validation_status: str
+    order_value_usd: Optional[float] = None
+    sap_doc_number: Optional[str] = None
+
+
 class AnalysisResponse(BaseModel):
     """GET /api/v1/exceptions/{id}/analysis"""
 
@@ -1375,6 +1390,9 @@ class AnalysisResponse(BaseModel):
     # intake-extraction composer adapter lands; the rich type is a product
     # commitment (Guardrail #7).
     entities_analysis: Optional[EntitiesAnalysisData] = None
+    # ADR-042 Phase 2 — Customer Inbox SAP Data tab. Preview-only until the
+    # SAP-gateway composer adapter lands.
+    sap_data_analysis: Optional[SapDataAnalysisData] = None
 
 
 # ---------------------------------------------------------------------------

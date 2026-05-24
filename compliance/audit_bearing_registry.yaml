@@ -725,6 +725,35 @@ EntitiesAnalysisData:
       surfaced to the operator as evidence (each with an optional
       source_span for provenance). Not itself a binding control field.
 
+SapDataAnalysisData:
+  # ADR-042 Phase 2 — Customer Inbox SAP Data tab. The SAP system of record,
+  # its validation state, and the order value are what the operator authorises
+  # against; the doc number is a contextual reference.
+  system:
+    tier: audit-bearing
+    source: gateway
+    rationale: >-
+      SAP system of record (e.g. S4H_PRD / ECC_PRD) the decision applies to.
+      §404 — authorization is scoped to a specific system's order.
+  validation_status:
+    tier: audit-bearing
+    source: gateway
+    rationale: >-
+      Live SAP validation state (e.g. "SO confirmed, ATP OK") the operator
+      acts on; a different state changes the authorization.
+  order_value_usd:
+    tier: audit-bearing
+    source: gateway
+    rationale: >-
+      Order / financial value from SAP — drives the four-eyes threshold and
+      the operator's risk assessment.
+  sap_doc_number:
+    tier: contextual
+    source: gateway
+    rationale: >-
+      SAP document reference (FI/SD doc) for traceability; contextual, not a
+      binding control field.
+
 LLMProvenance:
   llm_provider_used:
     tier: audit-bearing
@@ -1153,9 +1182,12 @@ summary:
   # 2026-05-24: +1 row for EntitiesAnalysisData (ADR-042 Phase 2 — Customer
   # Inbox Entities tab). 1 contextual (extracted — entities the AI intake
   # agent pulled from the email/attachments; evidence, not a binding control).
-  total_fields: 160
-  audit_bearing: 119
+  # 2026-05-24: +4 rows for SapDataAnalysisData (ADR-042 Phase 2 — SAP Data
+  # tab). 3 audit-bearing (system, validation_status, order_value_usd),
+  # 1 contextual (sap_doc_number). All gateway-sourced (SAP read).
+  total_fields: 164
+  audit_bearing: 122
   conditional: 7
-  contextual: 34
+  contextual: 35
   backend_gap_fields: 0
-  gateway_dependent_fields: 13
+  gateway_dependent_fields: 17
