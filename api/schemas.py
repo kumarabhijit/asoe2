@@ -1599,6 +1599,71 @@ class ChangeAnalysis(BaseModel):
     decision: ChangeDecision
 
 
+class KnowledgeGraphNode(BaseModel):
+    """One node in the Change/Knowledge Graph (ADR-042 Phase 7). `kind` buckets
+    the node for the viewer's legend (e.g. ``order`` / ``customer`` /
+    ``material`` / ``sap_doc`` / ``entity``); `detail` is an optional one-line
+    annotation."""
+
+    id: str
+    label: str
+    kind: str
+    detail: Optional[str] = None
+
+
+class KnowledgeGraphEdge(BaseModel):
+    """A directed relationship between two `KnowledgeGraphNode` ids (ADR-042
+    Phase 7). `relation` is the decoded edge label (e.g. ``places`` /
+    ``contains`` / ``validated_by``)."""
+
+    source: str
+    target: str
+    relation: str
+
+
+class KnowledgeGraphPayload(BaseModel):
+    """Knowledge Graph tab (ADR-042 Phase 7) — a net-new DERIVED projection over
+    the case's already-resolved entities (the order, its customer, materials,
+    SAP doc, and extracted entities). Built deterministically by
+    `gateways/knowledge_graph.build_knowledge_graph` (pure) — there is no
+    standalone KG data source today, so this is a projection of existing
+    enrichment context, not invented data (ADR-042 §5b — deferrable behind
+    demand). Projected by the composer from
+    `enrichment_context["knowledge_graph"]`; preview-only until that producer is
+    wired. `root_id` is the focal node (the order/case)."""
+
+    nodes: List[KnowledgeGraphNode] = Field(default_factory=list)
+    edges: List[KnowledgeGraphEdge] = Field(default_factory=list)
+    root_id: Optional[str] = None
+
+
+class DraftReplyEdit(BaseModel):
+    """One operator edit applied to a generated reply (before/after audit)."""
+
+    field: str
+    before: Optional[str] = None
+    after: Optional[str] = None
+
+
+class DraftReply(BaseModel):
+    """AI Draft Reply evidence (ADR-042 Phase 4 contract; surfaced on the
+    analysis in Phase 7). The current generated reply for the case, projected by
+    the composer from `resolution_data["reply_draft"]` (the ReplyDraftRecipe
+    output a DRAFT_REPLY disposition persisted). `status` ∈ DRAFTED | REJECTED;
+    a REJECTED draft carries a `reason` and no body. Read-only evidence — sending
+    is a separate Shadow-gated disposition (SEND_REPLY)."""
+
+    status: str
+    reason: Optional[str] = None
+    template_name: Optional[str] = None
+    recipient: Optional[str] = None
+    subject: Optional[str] = None
+    body: Optional[str] = None
+    edits_applied: List[DraftReplyEdit] = Field(default_factory=list)
+    drafted_by: Optional[str] = None
+    drafted_at: Optional[str] = None
+
+
 class AnalysisResponse(BaseModel):
     """GET /api/v1/exceptions/{id}/analysis"""
 
@@ -1667,6 +1732,12 @@ class AnalysisResponse(BaseModel):
     # + scenarios + decision). Preview-only until the change_analysis producer
     # populates enrichment_context.
     change_analysis: Optional[ChangeAnalysis] = None
+    # ADR-042 Phase 7 — Knowledge Graph tab (derived entity projection).
+    # Preview-only until the knowledge_graph producer populates enrichment_context.
+    knowledge_graph: Optional[KnowledgeGraphPayload] = None
+    # ADR-042 Phase 7 — AI Draft Reply evidence (projected from
+    # resolution_data["reply_draft"]). Absent until a DRAFT_REPLY disposition runs.
+    draft_reply: Optional[DraftReply] = None
 
 
 # ---------------------------------------------------------------------------

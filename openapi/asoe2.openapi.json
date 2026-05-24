@@ -219,6 +219,16 @@
             "title": "Diagnosis",
             "type": "string"
           },
+          "draft_reply": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DraftReply"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "duplicate_detection": {
             "anyOf": [
               {
@@ -293,6 +303,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/ImpactMetrics"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "knowledge_graph": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KnowledgeGraphPayload"
               },
               {
                 "type": "null"
@@ -1502,6 +1522,140 @@
           "reason_tag"
         ],
         "title": "DispositionRequest",
+        "type": "object"
+      },
+      "DraftReply": {
+        "description": "AI Draft Reply evidence (ADR-042 Phase 4 contract; surfaced on the\nanalysis in Phase 7). The current generated reply for the case, projected by\nthe composer from `resolution_data[\"reply_draft\"]` (the ReplyDraftRecipe\noutput a DRAFT_REPLY disposition persisted). `status` \u2208 DRAFTED | REJECTED;\na REJECTED draft carries a `reason` and no body. Read-only evidence \u2014 sending\nis a separate Shadow-gated disposition (SEND_REPLY).",
+        "properties": {
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body"
+          },
+          "drafted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Drafted At"
+          },
+          "drafted_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Drafted By"
+          },
+          "edits_applied": {
+            "items": {
+              "$ref": "#/components/schemas/DraftReplyEdit"
+            },
+            "title": "Edits Applied",
+            "type": "array"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "recipient": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipient"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "template_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Name"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "DraftReply",
+        "type": "object"
+      },
+      "DraftReplyEdit": {
+        "description": "One operator edit applied to a generated reply (before/after audit).",
+        "properties": {
+          "after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After"
+          },
+          "before": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before"
+          },
+          "field": {
+            "title": "Field",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field"
+        ],
+        "title": "DraftReplyEdit",
         "type": "object"
       },
       "DuplicateDetectionData": {
@@ -3259,6 +3413,97 @@
           "qty"
         ],
         "title": "InboundOrder",
+        "type": "object"
+      },
+      "KnowledgeGraphEdge": {
+        "description": "A directed relationship between two `KnowledgeGraphNode` ids (ADR-042\nPhase 7). `relation` is the decoded edge label (e.g. ``places`` /\n``contains`` / ``validated_by``).",
+        "properties": {
+          "relation": {
+            "title": "Relation",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "target",
+          "relation"
+        ],
+        "title": "KnowledgeGraphEdge",
+        "type": "object"
+      },
+      "KnowledgeGraphNode": {
+        "description": "One node in the Change/Knowledge Graph (ADR-042 Phase 7). `kind` buckets\nthe node for the viewer's legend (e.g. ``order`` / ``customer`` /\n``material`` / ``sap_doc`` / ``entity``); `detail` is an optional one-line\nannotation.",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "kind"
+        ],
+        "title": "KnowledgeGraphNode",
+        "type": "object"
+      },
+      "KnowledgeGraphPayload": {
+        "description": "Knowledge Graph tab (ADR-042 Phase 7) \u2014 a net-new DERIVED projection over\nthe case's already-resolved entities (the order, its customer, materials,\nSAP doc, and extracted entities). Built deterministically by\n`gateways/knowledge_graph.build_knowledge_graph` (pure) \u2014 there is no\nstandalone KG data source today, so this is a projection of existing\nenrichment context, not invented data (ADR-042 \u00a75b \u2014 deferrable behind\ndemand). Projected by the composer from\n`enrichment_context[\"knowledge_graph\"]`; preview-only until that producer is\nwired. `root_id` is the focal node (the order/case).",
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeGraphEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeGraphNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "root_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Id"
+          }
+        },
+        "title": "KnowledgeGraphPayload",
         "type": "object"
       },
       "LifecycleState": {
