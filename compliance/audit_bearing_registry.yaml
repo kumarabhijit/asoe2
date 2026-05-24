@@ -713,6 +713,18 @@ PriceAnalysisData:
 # reconstruct WHICH model produced WHICH decision and to file a
 # support ticket with the provider on disputed runs (Marcus Chen
 # review §4: "request_id is critical for support tickets").
+EntitiesAnalysisData:
+  # ADR-042 Phase 2 — Customer Inbox Entities tab. Extracted entities are
+  # contextual evidence the operator reviews; the binding control fields
+  # remain recommended_action / autonomy_level.
+  extracted:
+    tier: contextual
+    source: gateway
+    rationale: >-
+      Entities the AI intake agent extracted from the email / attachments,
+      surfaced to the operator as evidence (each with an optional
+      source_span for provenance). Not itself a binding control field.
+
 LLMProvenance:
   llm_provider_used:
     tier: audit-bearing
@@ -1138,9 +1150,12 @@ summary:
   # (body_excerpt — decorative; audit trail reads body_hash;
   # source_email_id — Inbox correlation id for the bidirectional
   # deep-link).
-  total_fields: 159
+  # 2026-05-24: +1 row for EntitiesAnalysisData (ADR-042 Phase 2 — Customer
+  # Inbox Entities tab). 1 contextual (extracted — entities the AI intake
+  # agent pulled from the email/attachments; evidence, not a binding control).
+  total_fields: 160
   audit_bearing: 119
   conditional: 7
-  contextual: 33
+  contextual: 34
   backend_gap_fields: 0
   gateway_dependent_fields: 13

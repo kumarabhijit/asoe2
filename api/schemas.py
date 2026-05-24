@@ -1297,6 +1297,29 @@ class ImpactMetrics(BaseModel):
     affected_lines: int
 
 
+class ExtractedEntity(BaseModel):
+    """A single structured value the AI intake agent pulled from the email
+    / attachments (ADR-042 Phase 2 — Entities section). `kind` is the
+    free-form category (order_id | material | date | po | invoice | qty | …);
+    `source_span` is the verbatim text it was extracted from (audit trail of
+    where a value came from)."""
+
+    key: str
+    value: str
+    kind: str
+    confidence: Optional[float] = None
+    source_span: Optional[str] = None
+
+
+class EntitiesAnalysisData(BaseModel):
+    """Entities tab (ADR-042 Phase 2). Contextual evidence — the extracted
+    entities the operator reviews; the binding control fields remain
+    `recommended_action` / `autonomy_level`. Projected by the composer from
+    the intake gateway's extraction; preview-only until that adapter lands."""
+
+    extracted: List[ExtractedEntity] = Field(default_factory=list)
+
+
 class AnalysisResponse(BaseModel):
     """GET /api/v1/exceptions/{id}/analysis"""
 
@@ -1348,6 +1371,10 @@ class AnalysisResponse(BaseModel):
     # mounts on the Exception Queue detail page above
     # email_order_entry_analysis via data-presence dispatch.
     email_source: Optional[EmailSourceData] = None
+    # ADR-042 Phase 2 — Customer Inbox Entities tab. Preview-only until the
+    # intake-extraction composer adapter lands; the rich type is a product
+    # commitment (Guardrail #7).
+    entities_analysis: Optional[EntitiesAnalysisData] = None
 
 
 # ---------------------------------------------------------------------------

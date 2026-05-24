@@ -249,6 +249,16 @@
               }
             ]
           },
+          "entities_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EntitiesAnalysisData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "entity_profile": {
             "anyOf": [
               {
@@ -1650,6 +1660,20 @@
         "title": "EmailSourceData",
         "type": "object"
       },
+      "EntitiesAnalysisData": {
+        "description": "Entities tab (ADR-042 Phase 2). Contextual evidence \u2014 the extracted\nentities the operator reviews; the binding control fields remain\n`recommended_action` / `autonomy_level`. Projected by the composer from\nthe intake gateway's extraction; preview-only until that adapter lands.",
+        "properties": {
+          "extracted": {
+            "items": {
+              "$ref": "#/components/schemas/ExtractedEntity"
+            },
+            "title": "Extracted",
+            "type": "array"
+          }
+        },
+        "title": "EntitiesAnalysisData",
+        "type": "object"
+      },
       "EntityProfile": {
         "description": "Master-data context for the exception's customer entity.\n\nMirrors `EntityProfile` in `asoe-ui/src/types/exceptions.ts`.\nComposed by `api.profile_composer.compose_entity_profile` from a\nseed `Account` lookup; tier / VIP / credit-standing fields are\noptional today (no producer wired) and tracked under the\n`EntityProfile` grandfather clause in the audit-bearing registry.",
         "properties": {
@@ -2170,6 +2194,52 @@
           "status"
         ],
         "title": "ExecutedNode",
+        "type": "object"
+      },
+      "ExtractedEntity": {
+        "description": "A single structured value the AI intake agent pulled from the email\n/ attachments (ADR-042 Phase 2 \u2014 Entities section). `kind` is the\nfree-form category (order_id | material | date | po | invoice | qty | \u2026);\n`source_span` is the verbatim text it was extracted from (audit trail of\nwhere a value came from).",
+        "properties": {
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "source_span": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Span"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "value",
+          "kind"
+        ],
+        "title": "ExtractedEntity",
         "type": "object"
       },
       "GatewayCallSpan": {
