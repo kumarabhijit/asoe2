@@ -740,11 +740,16 @@ def validate_types(state: GraphState) -> GraphState:
                     or ["Please confirm the order details before we proceed."],
                 },
                 "edits": params.get("edits") or {},
+                # "draft" composes for review; "send" authorises the
+                # buyer_notification effect (operator-gated via SEND_REPLY).
+                "mode": params.get("mode") or "draft",
             },
         )
         _record(
             state, node="validate_types", entered_at=entered_at,
-            decision={"recipe": state.selected_recipe, "directed_reply": True},
+            decision={"recipe": state.selected_recipe,
+                      "directed_reply": True,
+                      "mode": params.get("mode") or "draft"},
             exit_verdict="ok",
         )
         return state

@@ -113,3 +113,48 @@ def test_draft_reply_on_non_intake_record_is_rejected(client) -> None:
     r = _draft(client, rec.id, reply={"recipient": "x@y.com"},
                reason_tag="CONFIRMED_DUPLICATE")
     assert r.status_code in (409, 422)
+
+
+def _send(client, rec_id, **body):
+    payload = {"action": "SEND_REPLY", "reason_tag": "OTHER", "notes": "sending reply"}
+    payload.update(body)
+    return client.patch(f"/api/v1/exceptions/{rec_id}/disposition",
+                        json=payload, headers=_auth())
+
+
+def test_send_reply_fires_buyer_notification_and_records_sent(client) -> None:
+    rec = _seed()
+    r = _send(client, rec.id, reply={"recipient": "orders@walmart.example"})
+    assert r.status_code == 200, r.text
+    rs = exception_store.get(rec.id, "tenant-a").resolution_data["reply_sent"]
+    assert rs["status"] == "SENT"
+    assert rs["delivered"] is True
+    assert rs["gateway_status"] == "SUCCESS"
+    assert rs["recipient"] == "orders@walmart.example"
+    assert rs["sent_by"] == "user-A"
+
+
+def test_send_reply_does_not_resolve_the_record(client) -> None:
+    rec = _seed()
+    before = exception_store.get(rec.id, "tenant-a").lifecycle_state
+    _send(client, rec.id, reply={"recipient": "orders@walmart.example"})
+    after = exception_store.get(rec.id, "tenant-a").lifecycle_state
+    assert after == before  # the case stays open awaiting the buyer
+    assert after != "RESOLVED"
+
+
+def test_send_without_recipient_does_not_send(client) -> None:
+    rec = _seed()
+    r = _send(client, rec.id)  # no recipient
+    assert r.status_code == 200, r.text
+    rs = exception_store.get(rec.id, "tenant-a").resolution_data["reply_sent"]
+    assert rs["status"] == "FAILED"
+    assert rs["delivered"] is False
+    assert "recipient" in (rs["reason"] or "").lower()
+
+
+def test_send_reply_on_non_intake_record_is_rejected(client) -> None:
+    rec = _seed(intent="DUPLICATE_PO")
+    r = _send(client, rec.id, reply={"recipient": "x@y.com"},
+              reason_tag="CONFIRMED_DUPLICATE")
+    assert r.status_code in (409, 422)

@@ -434,16 +434,29 @@ REGISTRY = {
             ),
         ),
     ),
-    # ADR-042 Phase 4 — AI Draft Reply compose leg. Pure composition, no
-    # gateway effect on this recipe; the buyer_notification send is fired by a
-    # separate operator-authorised SEND_REPLY (next increment). recipient is
+    # ADR-042 Phase 4 — AI Draft Reply. The recipe composes the draft; the
+    # buyer_notification send fires ONLY when the operator authorises it via a
+    # SEND_REPLY disposition (mode="send" → status READY_TO_SEND). recipient is
     # NOT a required_param — the recipe REJECTs cleanly when it is absent
-    # (Guardrail #5) rather than failing param validation.
+    # (Guardrail #5) rather than failing param validation, and a REJECTED compose
+    # never reaches READY_TO_SEND so no email is sent.
     "ReplyDraftRecipe.py": RecipeSpec(
         name="ReplyDraftRecipe.py",
         func=compose_reply_draft,
         required_params=("order_id", "template_name"),
         allowed_intents=("MANUAL_ORDER_INTAKE",),
+        effects=(
+            GatewayEffect(
+                gateway_name="buyer_notification",
+                operation="send",
+                params_from_output={
+                    "recipient": "recipient",
+                    "subject": "subject",
+                    "body": "body",
+                },
+                only_on_recipe_status=("READY_TO_SEND",),
+            ),
+        ),
     ),
     "DeliveryDelayResolutionRecipe.py": RecipeSpec(
         name="DeliveryDelayResolutionRecipe.py",

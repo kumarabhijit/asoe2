@@ -871,6 +871,92 @@ def _disposition_draft_reply(exception_id, tenant_id, record, req, user, key,
     return response
 
 
+def _persist_reply_sent(exception_id, tenant_id, record, result, user_sub, notes):
+    """Persist a send re-entry to resolution_data.reply_sent + emit audit.
+
+    SENT only when the recipe reached READY_TO_SEND and the buyer_notification
+    gateway delivered; otherwise FAILED with the reason (a rejected compose or a
+    gateway failure is never masked as success — Guardrail #5). The record
+    lifecycle is unchanged: a clarification reply does not resolve the order, the
+    case stays open awaiting the buyer."""
+    outputs = result.execution_log.outputs if result.execution_log else {}
+    status = outputs.get("status")
+    draft = outputs.get("draft") or {}
+    delivered = False
+    gw_status = None
+    for er in result.effect_results:
+        if er.gateway_name == "buyer_notification" and er.operation == "send":
+            gw_status = er.status
+            delivered = er.status == "SUCCESS" and bool((er.data or {}).get("delivered"))
+            break
+    sent_ok = status == "READY_TO_SEND" and delivered
+    entry = {
+        "status": "SENT" if sent_ok else "FAILED",
+        "reason": None if sent_ok
+        else (outputs.get("reason") or gw_status or "Send did not complete."),
+        "recipient": draft.get("recipient"),
+        "subject": draft.get("subject"),
+        "gateway_status": gw_status,
+        "delivered": delivered,
+        "sent_by": user_sub,
+        "sent_at": _utc_now_iso(),
+    }
+    merged = dict(record.resolution_data or {})
+    merged["reply_sent"] = entry
+    updated = exception_store.update(exception_id, tenant_id, resolution_data=merged)
+    if not updated:
+        raise ASOEError(code="UPDATE_FAILED",
+                        message="Failed to persist reply send.", status_code=500)
+    exception_store.log_audit_event(
+        tenant_id=tenant_id,
+        policy_key="EXCEPTION_REPLY_SENT" if sent_ok else "EXCEPTION_REPLY_SEND_FAILED",
+        previous_value={"exception_id": exception_id},
+        new_value={
+            "reply_status": entry["status"],
+            "recipient": entry["recipient"],
+            "gateway_status": gw_status,
+            "sent_by": user_sub,
+        },
+        changed_by=user_sub, change_reason=notes,
+    )
+    return updated
+
+
+def _disposition_send_reply(exception_id, tenant_id, record, req, user, key,
+                            request_body):
+    """SEND_REPLY disposition: send the operator-approved buyer reply."""
+    if not req.notes or not req.notes.strip():
+        raise ASOEError(code="NOTES_REQUIRED",
+                        message="Notes are required (SOX audit trail).",
+                        status_code=422)
+    if record.intent != "MANUAL_ORDER_INTAKE":
+        raise ASOEError(
+            code="NOT_SENDABLE",
+            message=("SEND_REPLY applies only to order-entry "
+                     "(MANUAL_ORDER_INTAKE) records."),
+            status_code=409,
+        )
+    if not (record.enrichment_context or {}).get("order_entry_extraction"):
+        raise ASOEError(code="NO_EXTRACTED_ORDER",
+                        message="Record carries no extracted order to reply about.",
+                        status_code=409)
+    _require_state(record, HITL_DISPOSITION_STATES, "send_reply")
+
+    result = _run_reply_draft(
+        record, tenant_id, {**(req.reply or {}), "mode": "send"},
+    )
+    updated = _persist_reply_sent(
+        exception_id, tenant_id, record, result, user.sub, req.notes,
+    )
+    response = updated.to_detail()
+    if key is not None:
+        _idempotency_store(
+            tenant_id, exception_id, user.sub, key, request_body,
+            response.model_dump(),
+        )
+    return response
+
+
 def _disposition_erp_submit(exception_id, tenant_id, record, req, user, key,
                             request_body):
     """SUBMIT_TO_ERP disposition: the financially-binding order-entry submit."""
@@ -1413,6 +1499,10 @@ async def disposition_exception(
         )
     if req.action == "DRAFT_REPLY":
         return _disposition_draft_reply(
+            exception_id, tenant_id, record, req, user, key, request_body,
+        )
+    if req.action == "SEND_REPLY":
+        return _disposition_send_reply(
             exception_id, tenant_id, record, req, user, key, request_body,
         )
 

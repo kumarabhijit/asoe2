@@ -89,6 +89,9 @@ AllowedResolutionAction = Literal[
     # ADR-042 Phase 4 — compose a buyer reply draft (operator disposition →
     # directed graph re-entry; the send is a separate authorised action).
     "DRAFT_REPLY",
+    # ADR-042 Phase 4 — send the operator-approved buyer reply (Shadow-gated;
+    # fires the buyer_notification gateway via directed graph re-entry).
+    "SEND_REPLY",
 ]
 
 # Controlled vocabulary for categorizing an override's justification.

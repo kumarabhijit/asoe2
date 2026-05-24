@@ -80,8 +80,17 @@ def compose_reply_draft(
     customer_name: Optional[str] = None,
     context: Optional[Dict[str, Any]] = None,
     edits: Optional[Dict[str, Any]] = None,
+    mode: str = "draft",
 ) -> Dict[str, Any]:
-    """Compose a buyer reply draft. See the module docstring for the contract."""
+    """Compose a buyer reply draft. See the module docstring for the contract.
+
+    ``mode`` selects the outcome: "draft" (default) returns status DRAFTED for
+    operator review; "send" returns status READY_TO_SEND and mirrors the draft
+    onto flat ``recipient``/``subject``/``body`` output keys so the orchestrator
+    can fire the buyer_notification GatewayEffect (params_from_output resolves
+    against flat keys). Send recomposes from the same inputs, so the sent content
+    is byte-identical to what the operator reviewed. A REJECTED compose never
+    reaches READY_TO_SEND — no recipient means no send (Guardrail #5)."""
     context = context or {}
     edits = edits or {}
 
@@ -111,17 +120,25 @@ def compose_reply_draft(
             rendered[field] = after
             edits_applied.append({"field": field, "before": before, "after": after})
 
-    return {
-        "status": "DRAFTED",
+    draft = {
+        "template_name": template_name,
+        "recipient": recipient,
+        "subject": rendered["subject"],
+        "body": rendered["body"],
+    }
+    sending = mode == "send"
+    result: Dict[str, Any] = {
+        "status": "READY_TO_SEND" if sending else "DRAFTED",
         "reason": None,
-        "draft": {
-            "template_name": template_name,
-            "recipient": recipient,
-            "subject": rendered["subject"],
-            "body": rendered["body"],
-        },
+        "draft": draft,
         "edits_applied": edits_applied,
     }
+    if sending:
+        # Flat keys for the buyer_notification GatewayEffect param mapping.
+        result["recipient"] = recipient
+        result["subject"] = rendered["subject"]
+        result["body"] = rendered["body"]
+    return result
 
 
 def _bullets(points: Any) -> str:

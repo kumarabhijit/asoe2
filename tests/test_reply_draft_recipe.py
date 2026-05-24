@@ -98,3 +98,25 @@ def test_missing_context_placeholder_does_not_crash() -> None:
 
 def test_is_deterministic() -> None:
     assert _compose() == _compose()
+
+
+def test_send_mode_marks_ready_and_exposes_flat_fields() -> None:
+    out = _compose(mode="send")
+    assert out["status"] == "READY_TO_SEND"
+    # Flat keys the buyer_notification GatewayEffect maps from.
+    assert out["recipient"] == "orders@walmart.example"
+    assert out["subject"] == out["draft"]["subject"]
+    assert out["body"] == out["draft"]["body"]
+
+
+def test_send_recompose_is_byte_identical_to_draft() -> None:
+    drafted = _compose(mode="draft")
+    sent = _compose(mode="send")
+    # The operator reviews the draft; send recomposes the same content.
+    assert sent["draft"] == drafted["draft"]
+
+
+def test_send_without_recipient_never_becomes_ready() -> None:
+    out = _compose(mode="send", recipient=None)
+    assert out["status"] == "REJECTED"
+    assert "recipient" not in out  # no flat send fields on a rejected compose
