@@ -564,8 +564,13 @@ def _register_oms_stub():
     # exercise the actual resolver path. Dedicated unit tests for the
     # gateway itself live in tests/test_tenant_config_gateway.py.
     register_gateway(TenantConfigGateway())
+    # DoR #8 — drop any gateway-tier circuit-breaker / metering state so a trip
+    # in one test can't leak into the next.
+    from gateways.circuit_breaker import reset_all as _reset_gateway_breakers
+    _reset_gateway_breakers()
     yield
     clear_registry()
+    _reset_gateway_breakers()
 
 
 @pytest.fixture

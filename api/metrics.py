@@ -510,6 +510,48 @@ def render_ingest_terminal_histogram() -> str:
     return "\n".join(lines) + "\n"
 
 
+# ---------------------------------------------------------------------------
+# Gateway-tier metering + circuit-breaker state (DoR #8 — parity with the LLM
+# tier). Per-gateway counters; the breaker state is exported as a labelled
+# gauge (0=closed, 1=half_open, 2=open) for alerting on a tripped dependency.
+# ---------------------------------------------------------------------------
+
+_BREAKER_STATE_CODE = {"closed": 0, "half_open": 1, "open": 2}
+
+
+def render_gateway_metrics() -> str:
+    # Lazy import keeps the metrics module importable without pulling the
+    # gateway stack at app boot, and avoids any import cycle.
+    from gateways.circuit_breaker import breaker_snapshots, metering_snapshot
+
+    meters = metering_snapshot()
+    breakers = breaker_snapshots()
+    lines: list[str] = []
+
+    lines += _help_type("gateway_calls_total", "Gateway calls that reached the dependency.", "counter")
+    for name, m in sorted(meters.items()):
+        lines.append(_line("gateway_calls_total", m.calls, labels={"gateway": name}))
+
+    lines += _help_type("gateway_call_failures_total", "Gateway calls that failed (timeout/exception/error status).", "counter")
+    for name, m in sorted(meters.items()):
+        lines.append(_line("gateway_call_failures_total", m.failures, labels={"gateway": name}))
+
+    lines += _help_type("gateway_short_circuits_total", "Gateway calls rejected because the circuit breaker was OPEN.", "counter")
+    for name, m in sorted(meters.items()):
+        lines.append(_line("gateway_short_circuits_total", m.short_circuits, labels={"gateway": name}))
+
+    lines += _help_type("gateway_latency_ms_sum", "Cumulative gateway call latency (ms).", "counter")
+    for name, m in sorted(meters.items()):
+        lines.append(_line("gateway_latency_ms_sum", m.latency_ms_sum, labels={"gateway": name}))
+
+    lines += _help_type("gateway_circuit_breaker_state", "Gateway circuit breaker state (0=closed,1=half_open,2=open).", "gauge")
+    for name, snap in sorted(breakers.items()):
+        code = _BREAKER_STATE_CODE.get(snap.state.value, 0)
+        lines.append(_line("gateway_circuit_breaker_state", code, labels={"gateway": name}))
+
+    return "\n".join(lines) + "\n" if lines else ""
+
+
 def render_all() -> str:
     """Convenience entrypoint for the route handler."""
     return (
@@ -517,4 +559,5 @@ def render_all() -> str:
         + render_cases_returned_metrics()
         + render_event_type_metrics()
         + render_ingest_terminal_histogram()
+        + render_gateway_metrics()
     )
