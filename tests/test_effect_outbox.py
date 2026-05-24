@@ -49,7 +49,7 @@ def test_failed_effect_needs_compensation_and_can_be_cleared():
     )
     pending = outbox.pending_compensation("t")
     assert [p.id for p in pending] == [e.id]
-    assert outbox.mark_compensated(e.id) is True
+    assert outbox.mark_compensated(e.id, "t") is True
     assert outbox.pending_compensation("t") == []
 
 
