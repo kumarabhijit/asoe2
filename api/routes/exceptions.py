@@ -58,6 +58,7 @@ from api.profile_composer import (
     compose_entity_profile,
     compose_impact_metrics,
     compose_narrative,
+    compose_order_entry_extraction,
     compose_sap_data_analysis,
 )
 from api.errors import ASOEError
@@ -1939,6 +1940,7 @@ async def get_analysis(
     # composer projections (None until the gateways populate enrichment_context).
     entities_analysis = compose_entities_analysis(record)
     sap_data_analysis = compose_sap_data_analysis(record)
+    order_entry_extraction = compose_order_entry_extraction(record)
 
     return AnalysisResponse(
         diagnosis=diagnosis,
@@ -1952,5 +1954,6 @@ async def get_analysis(
         impact_metrics=impact_metrics,
         entities_analysis=entities_analysis,
         sap_data_analysis=sap_data_analysis,
+        order_entry_extraction=order_entry_extraction,
         **extras,
     )

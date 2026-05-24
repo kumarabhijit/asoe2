@@ -31,6 +31,7 @@ from api.schemas import (
     EntityProfile,
     ExtractedEntity,
     ImpactMetrics,
+    OrderEntryExtraction,
     SapDataAnalysisData,
 )
 from api.store import ExceptionRecord
@@ -132,6 +133,21 @@ def compose_sap_data_analysis(
             order_value_usd=ctx.get("order_value_usd"),
             sap_doc_number=ctx.get("sap_doc_number"),
         )
+    except (TypeError, ValueError):
+        return None
+
+
+def compose_order_entry_extraction(
+    record: ExceptionRecord,
+) -> Optional[OrderEntryExtraction]:
+    """Project the extracted order form from
+    `enrichment_context["order_entry_extraction"]`. None when absent or
+    malformed (preview-only until the extraction gateway lands)."""
+    ctx = record.enrichment_context.get("order_entry_extraction")
+    if not isinstance(ctx, dict) or not ctx:
+        return None
+    try:
+        return OrderEntryExtraction(**ctx)
     except (TypeError, ValueError):
         return None
 

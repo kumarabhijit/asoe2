@@ -306,6 +306,16 @@
               }
             ]
           },
+          "order_entry_extraction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrderEntryExtraction"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "overmax_analysis": {
             "anyOf": [
               {
@@ -2891,6 +2901,241 @@
           }
         },
         "title": "OrderComparisonData",
+        "type": "object"
+      },
+      "OrderEntryExtraction": {
+        "description": "Order Entry tab (ADR-042 Phase 3) \u2014 the structured order the AI intake\nagent extracted from the email/attachments, for operator review before ERP\nsubmit. Projected by the composer from the extraction-gateway read;\npreview-only until that gateway lands. The agent's recommendation /\nautonomy live separately on `email_order_entry_analysis`.",
+        "properties": {
+          "confidence": {
+            "title": "Confidence",
+            "type": "number"
+          },
+          "customer_bp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Bp"
+          },
+          "customer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Name"
+          },
+          "header": {
+            "$ref": "#/components/schemas/OrderEntryHeader"
+          },
+          "line_items": {
+            "items": {
+              "$ref": "#/components/schemas/OrderEntryLineItem"
+            },
+            "title": "Line Items",
+            "type": "array"
+          },
+          "source_type": {
+            "title": "Source Type",
+            "type": "string"
+          },
+          "validation_flags": {
+            "items": {
+              "$ref": "#/components/schemas/OrderEntryValidationFlag"
+            },
+            "title": "Validation Flags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "source_type",
+          "confidence",
+          "header"
+        ],
+        "title": "OrderEntryExtraction",
+        "type": "object"
+      },
+      "OrderEntryHeader": {
+        "description": "Extracted order-header fields (ADR-042 Phase 3 \u2014 Order Entry tab).",
+        "properties": {
+          "customer_po": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Po"
+          },
+          "dist_channel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dist Channel"
+          },
+          "order_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order Type"
+          },
+          "requested_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Date"
+          },
+          "sales_org": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sales Org"
+          },
+          "ship_window_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ship Window From"
+          },
+          "ship_window_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ship Window To"
+          }
+        },
+        "title": "OrderEntryHeader",
+        "type": "object"
+      },
+      "OrderEntryLineItem": {
+        "description": "One extracted order line. `mdm_matched` = matched against material\nmaster; None when the master lookup hasn't run.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "line_num": {
+            "title": "Line Num",
+            "type": "string"
+          },
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "mdm_matched": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mdm Matched"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "number"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Price"
+          },
+          "uom": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uom"
+          }
+        },
+        "required": [
+          "line_num",
+          "material",
+          "quantity"
+        ],
+        "title": "OrderEntryLineItem",
+        "type": "object"
+      },
+      "OrderEntryValidationFlag": {
+        "description": "A validation finding on the extracted order. `severity` \u2208\nERROR | WARNING | INFO.",
+        "properties": {
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "severity",
+          "message"
+        ],
+        "title": "OrderEntryValidationFlag",
         "type": "object"
       },
       "OrderSnapshot": {

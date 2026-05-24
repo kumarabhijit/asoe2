@@ -1335,6 +1335,56 @@ class SapDataAnalysisData(BaseModel):
     sap_doc_number: Optional[str] = None
 
 
+class OrderEntryHeader(BaseModel):
+    """Extracted order-header fields (ADR-042 Phase 3 — Order Entry tab)."""
+
+    customer_po: Optional[str] = None
+    order_type: Optional[str] = None
+    sales_org: Optional[str] = None
+    dist_channel: Optional[str] = None
+    ship_window_from: Optional[str] = None
+    ship_window_to: Optional[str] = None
+    requested_date: Optional[str] = None
+
+
+class OrderEntryLineItem(BaseModel):
+    """One extracted order line. `mdm_matched` = matched against material
+    master; None when the master lookup hasn't run."""
+
+    line_num: str
+    material: str
+    description: Optional[str] = None
+    quantity: float
+    uom: Optional[str] = None
+    unit_price: Optional[float] = None
+    mdm_matched: Optional[bool] = None
+
+
+class OrderEntryValidationFlag(BaseModel):
+    """A validation finding on the extracted order. `severity` ∈
+    ERROR | WARNING | INFO."""
+
+    field: str
+    severity: str
+    message: str
+
+
+class OrderEntryExtraction(BaseModel):
+    """Order Entry tab (ADR-042 Phase 3) — the structured order the AI intake
+    agent extracted from the email/attachments, for operator review before ERP
+    submit. Projected by the composer from the extraction-gateway read;
+    preview-only until that gateway lands. The agent's recommendation /
+    autonomy live separately on `email_order_entry_analysis`."""
+
+    source_type: str
+    confidence: float
+    header: OrderEntryHeader
+    customer_name: Optional[str] = None
+    customer_bp: Optional[str] = None
+    line_items: List[OrderEntryLineItem] = Field(default_factory=list)
+    validation_flags: List[OrderEntryValidationFlag] = Field(default_factory=list)
+
+
 class AnalysisResponse(BaseModel):
     """GET /api/v1/exceptions/{id}/analysis"""
 
@@ -1393,6 +1443,9 @@ class AnalysisResponse(BaseModel):
     # ADR-042 Phase 2 — Customer Inbox SAP Data tab. Preview-only until the
     # SAP-gateway composer adapter lands.
     sap_data_analysis: Optional[SapDataAnalysisData] = None
+    # ADR-042 Phase 3 — Order Entry tab (extracted order form). Preview-only
+    # until the extraction-gateway composer adapter lands.
+    order_entry_extraction: Optional[OrderEntryExtraction] = None
 
 
 # ---------------------------------------------------------------------------
