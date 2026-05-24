@@ -297,9 +297,35 @@ the `autonomy_vocab_version` hard gate keeps it Proposed until autonomy-v2
 this pre-prod project, so flipping the status unilaterally would misrepresent the
 compliance gate. Leave the flip to the sign-off step.
 
-## PENDING
-### Productionization backlog (post-ADR-042 feature port)
-- DoR deep-infra gates #5 / #6 / #8 / #10 + #11 Layer-2/dwell telemetry (above).
+## Productionization audit (2026-05-24) — deferred-gate progress
+Working the post-feature-port backlog. **Landed this pass:**
+- ✓ **#8 gateway circuit breaker + metering** — per-`gateway_name`
+  `LLMCircuitBreaker` at the single `GatewayExecutor.run` chokepoint (OPEN
+  short-circuits to UNAVAILABLE without hitting the dependency; cooldown →
+  HALF_OPEN probe → CLOSED). Per-gateway call/failure/short-circuit/latency
+  metering + breaker-state gauge on `/metrics`. Thresholds in `policy.py`;
+  process-local + reset per test (conftest). `tests/test_gateway_circuit_breaker.py`.
+- ✓ **#10 XSS/CSP** — `SecurityHeadersMiddleware` (strict `default-src 'none'`
+  CSP on the JSON API + nosniff / frame-DENY / no-referrer / CORP on every
+  response incl. errors; docs paths get a Swagger-compatible CSP).
+  `tests/test_security_headers.py`. UI: no `dangerouslySetInnerHTML` anywhere —
+  a source lock + render-escaping tests (`<script>`/`<img onerror>` → inert)
+  prove backend free text is escaped. **SSRF deferred** — no live
+  attachment-fetch path exists to allowlist yet.
+
+**Findings (lower remaining scope than thought):**
+- **#5 correlation_id is largely already present** — `TraceIDMiddleware`
+  propagates/generates `X-Trace-ID` end-to-end and the `trace_id` chain runs
+  through GraphState → record → trace. Remaining: **delivery idempotency on the
+  reply-send path** (dedupe `buyer_notification` on a provider message-id) — the
+  `/resolve` idempotency cache already exists.
+
+### Still PENDING
+- **#5** delivery idempotency on send (correlation_id already covered).
+- **#6** outbox/compensation (ERP-OK / reply-fail saga) — most complex.
+- **#11** Layer-2-open rate + decision-dwell telemetry (needs a UI→backend
+  event pipeline; override-rate SLI already exists).
+- **#10 SSRF** allowlist — lands with the first real attachment-fetch path.
 - Constraint Graph (deferred per ADR §5b — reuses trace/topology).
 - ADR-042 → Accepted on autonomy-v2 dual-control sign-off.
 
@@ -308,8 +334,9 @@ compliance gate. Leave the flip to the sign-off step.
   section schemas exported; xfail marker removed → standing hard gate.
 - DoR safety gates (strategy §6): implemented — **sanitizer**, **autonomy**,
   #2 (no auto-execute), #3 (SAP re-price cosign), **#4** (calibration), **#7**
-  (SLO histogram), **#9** (disposition hash chain), **S** (sandbox isolation).
-  Deferred — #5, #6, #8, #10, #11 (Layer-2/dwell). See the Phase-8 audit.
+  (SLO histogram), **#8** (gateway circuit breaker), **#9** (disposition hash
+  chain), **#10** (XSS/CSP; SSRF deferred), **S** (sandbox isolation).
+  Remaining — #5 (send idempotency), #6, #11 (Layer-2/dwell).
 
 ## Documents to refer to
 **asoe2**
