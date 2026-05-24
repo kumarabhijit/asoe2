@@ -1517,6 +1517,88 @@ class Edi850Document(BaseModel):
     raw_x12: str
 
 
+class ConstraintCheck(BaseModel):
+    """One deterministic constraint evaluation in the Change Analysis (ADR-042
+    Phase 6). `status` ∈ PASS | CONDITIONAL | WARNING. `agent` is a cosmetic
+    label (the evaluating discipline) — NOT audit-bearing (ADR-042 §6: agent
+    timings/labels are decorative). `system_ref` names the system of record the
+    check reasons over (e.g. ``SAP MM/ATP``)."""
+
+    name: str
+    status: str
+    detail: str
+    metric: Optional[str] = None
+    agent: Optional[str] = None
+    system_ref: Optional[str] = None
+
+
+class ChangeItem(BaseModel):
+    """One field of the requested order change (the from/to grid)."""
+
+    field: str
+    from_value: Optional[str] = None
+    to_value: Optional[str] = None
+
+
+class ConstraintEvaluation(BaseModel):
+    """The variable-cardinality constraint evaluation for a requested order
+    change (ADR-042 Phase 6). `checks` is an N-length list — only the
+    constraints whose backing signal is present are evaluated (no fixed 10).
+    `lifecycle_stages` is the ordered stage vocabulary (the UI renders the bar
+    from the payload — no hardcoded stage list client-side); `lifecycle_index`
+    is the current stage's position within it."""
+
+    lifecycle_stages: List[str] = Field(default_factory=list)
+    lifecycle_index: Optional[int] = None
+    change_items: List[ChangeItem] = Field(default_factory=list)
+    checks: List[ConstraintCheck] = Field(default_factory=list)
+    pass_count: int = 0
+    conditional_count: int = 0
+    warning_count: int = 0
+
+
+class ScenarioOption(BaseModel):
+    """One resolution scenario the evaluator surfaces for a change (ADR-042
+    Phase 6). Variable cardinality — M scenarios, not the prototype's fixed 7.
+    `recommended` marks the evaluator's preferred option; `financial_delta_usd`
+    is the deterministic revenue delta vs the as-requested change."""
+
+    name: str
+    description: str
+    recommended: bool = False
+    impact: Optional[str] = None
+    financial_delta_usd: Optional[float] = None
+
+
+class ChangeDecision(BaseModel):
+    """The Change Analysis decision panel (ADR-042 Phase 6). `requires_cosign`
+    is set deterministically when `revenue_impact_usd` meets the ADR-040
+    four-eyes threshold (`contracts/policy.HIGH_VALUE_OVERRIDE_THRESHOLD_USD`) —
+    the recipe surfaces the gate; actioning the change is a separate
+    Shadow-gated disposition. `confidence` ∈ [0, 1]."""
+
+    recommended_action: str
+    confidence: float
+    rationale: Optional[str] = None
+    revenue_impact_usd: Optional[float] = None
+    requires_cosign: bool = False
+    sap_actions: List[str] = Field(default_factory=list)
+
+
+class ChangeAnalysis(BaseModel):
+    """Change Analysis tab (ADR-042 Phase 6) — the deterministic evaluation of a
+    requested order change: an N-constraint evaluation, M resolution scenarios,
+    and a decision. Built by the recipe-homed evaluator
+    (`recipes/ChangeAnalysisRecipe.evaluate_change`, pure + deterministic;
+    thresholds from `contracts/policy.py`, NOT `constraints/`). Projected by the
+    composer from `enrichment_context["change_analysis"]`; preview-only until
+    that producer is wired (Guardrail #6 — no partial truth)."""
+
+    evaluation: ConstraintEvaluation
+    scenarios: List[ScenarioOption] = Field(default_factory=list)
+    decision: ChangeDecision
+
+
 class AnalysisResponse(BaseModel):
     """GET /api/v1/exceptions/{id}/analysis"""
 
@@ -1581,6 +1663,10 @@ class AnalysisResponse(BaseModel):
     # ADR-042 Phase 5 — EDI 850 Audit tab (deterministic X12 850 reconstruction).
     # Preview-only until the edi_850 builder producer populates enrichment_context.
     edi_850_audit: Optional[Edi850Document] = None
+    # ADR-042 Phase 6 — Change Analysis tab (deterministic constraint evaluation
+    # + scenarios + decision). Preview-only until the change_analysis producer
+    # populates enrichment_context.
+    change_analysis: Optional[ChangeAnalysis] = None
 
 
 # ---------------------------------------------------------------------------

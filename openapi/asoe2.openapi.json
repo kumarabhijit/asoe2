@@ -191,6 +191,16 @@
               }
             ]
           },
+          "change_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChangeAnalysis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "confidence": {
             "title": "Confidence",
             "type": "integer"
@@ -793,6 +803,119 @@
         "title": "ChallengeRequest",
         "type": "object"
       },
+      "ChangeAnalysis": {
+        "description": "Change Analysis tab (ADR-042 Phase 6) \u2014 the deterministic evaluation of a\nrequested order change: an N-constraint evaluation, M resolution scenarios,\nand a decision. Built by the recipe-homed evaluator\n(`recipes/ChangeAnalysisRecipe.evaluate_change`, pure + deterministic;\nthresholds from `contracts/policy.py`, NOT `constraints/`). Projected by the\ncomposer from `enrichment_context[\"change_analysis\"]`; preview-only until\nthat producer is wired (Guardrail #6 \u2014 no partial truth).",
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/ChangeDecision"
+          },
+          "evaluation": {
+            "$ref": "#/components/schemas/ConstraintEvaluation"
+          },
+          "scenarios": {
+            "items": {
+              "$ref": "#/components/schemas/ScenarioOption"
+            },
+            "title": "Scenarios",
+            "type": "array"
+          }
+        },
+        "required": [
+          "evaluation",
+          "decision"
+        ],
+        "title": "ChangeAnalysis",
+        "type": "object"
+      },
+      "ChangeDecision": {
+        "description": "The Change Analysis decision panel (ADR-042 Phase 6). `requires_cosign`\nis set deterministically when `revenue_impact_usd` meets the ADR-040\nfour-eyes threshold (`contracts/policy.HIGH_VALUE_OVERRIDE_THRESHOLD_USD`) \u2014\nthe recipe surfaces the gate; actioning the change is a separate\nShadow-gated disposition. `confidence` \u2208 [0, 1].",
+        "properties": {
+          "confidence": {
+            "title": "Confidence",
+            "type": "number"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "recommended_action": {
+            "title": "Recommended Action",
+            "type": "string"
+          },
+          "requires_cosign": {
+            "default": false,
+            "title": "Requires Cosign",
+            "type": "boolean"
+          },
+          "revenue_impact_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revenue Impact Usd"
+          },
+          "sap_actions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sap Actions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "recommended_action",
+          "confidence"
+        ],
+        "title": "ChangeDecision",
+        "type": "object"
+      },
+      "ChangeItem": {
+        "description": "One field of the requested order change (the from/to grid).",
+        "properties": {
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "from_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Value"
+          },
+          "to_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Value"
+          }
+        },
+        "required": [
+          "field"
+        ],
+        "title": "ChangeItem",
+        "type": "object"
+      },
       "ComparisonLineItem": {
         "additionalProperties": false,
         "properties": {
@@ -1091,6 +1214,117 @@
           "scope"
         ],
         "title": "ConfigResolveResponse",
+        "type": "object"
+      },
+      "ConstraintCheck": {
+        "description": "One deterministic constraint evaluation in the Change Analysis (ADR-042\nPhase 6). `status` \u2208 PASS | CONDITIONAL | WARNING. `agent` is a cosmetic\nlabel (the evaluating discipline) \u2014 NOT audit-bearing (ADR-042 \u00a76: agent\ntimings/labels are decorative). `system_ref` names the system of record the\ncheck reasons over (e.g. ``SAP MM/ATP``).",
+        "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "metric": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "system_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Ref"
+          }
+        },
+        "required": [
+          "name",
+          "status",
+          "detail"
+        ],
+        "title": "ConstraintCheck",
+        "type": "object"
+      },
+      "ConstraintEvaluation": {
+        "description": "The variable-cardinality constraint evaluation for a requested order\nchange (ADR-042 Phase 6). `checks` is an N-length list \u2014 only the\nconstraints whose backing signal is present are evaluated (no fixed 10).\n`lifecycle_stages` is the ordered stage vocabulary (the UI renders the bar\nfrom the payload \u2014 no hardcoded stage list client-side); `lifecycle_index`\nis the current stage's position within it.",
+        "properties": {
+          "change_items": {
+            "items": {
+              "$ref": "#/components/schemas/ChangeItem"
+            },
+            "title": "Change Items",
+            "type": "array"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/ConstraintCheck"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "conditional_count": {
+            "default": 0,
+            "title": "Conditional Count",
+            "type": "integer"
+          },
+          "lifecycle_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lifecycle Index"
+          },
+          "lifecycle_stages": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Lifecycle Stages",
+            "type": "array"
+          },
+          "pass_count": {
+            "default": 0,
+            "title": "Pass Count",
+            "type": "integer"
+          },
+          "warning_count": {
+            "default": 0,
+            "title": "Warning Count",
+            "type": "integer"
+          }
+        },
+        "title": "ConstraintEvaluation",
         "type": "object"
       },
       "CosignRequest": {
@@ -4760,6 +4994,52 @@
           "validation_status"
         ],
         "title": "SapDataAnalysisData",
+        "type": "object"
+      },
+      "ScenarioOption": {
+        "description": "One resolution scenario the evaluator surfaces for a change (ADR-042\nPhase 6). Variable cardinality \u2014 M scenarios, not the prototype's fixed 7.\n`recommended` marks the evaluator's preferred option; `financial_delta_usd`\nis the deterministic revenue delta vs the as-requested change.",
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "financial_delta_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Financial Delta Usd"
+          },
+          "impact": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Impact"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "recommended": {
+            "default": false,
+            "title": "Recommended",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "description"
+        ],
+        "title": "ScenarioOption",
         "type": "object"
       },
       "SeedFinancialImpactRequest": {
