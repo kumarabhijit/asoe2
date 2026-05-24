@@ -220,15 +220,17 @@ class TestEmailOrderEntrySpec:
         # required_for_audit=True dependencies — the four non-disable-able
         # floor checks plus fetch_message (Phase G — email source-of-truth
         # substrate for the EmailSourceSection secondary-adapter projection).
-        # ADR-042 Phase 3 + 5: four Customer Inbox read producers land as
+        # ADR-042 Phase 3 + 5 + 6: five Customer Inbox read producers land as
         # required_for_audit=False evidence reads — order_extraction
-        # (extract_order + extract_entities), sap_order (validate), and the
-        # edi_850 builder (build) — whose output activates the Order Entry /
-        # Entities / SAP Data / EDI 850 Audit tabs.
-        assert len(self.spec.dependencies) == 9
+        # (extract_order + extract_entities), sap_order (validate), the edi_850
+        # builder (build), and change_analysis (evaluate) — whose output
+        # activates the Order Entry / Entities / SAP Data / EDI 850 Audit /
+        # Change Analysis tabs.
+        assert len(self.spec.dependencies) == 10
         gateways = {d.gateway_name for d in self.spec.dependencies}
         assert gateways == {
             "email_intake", "order_extraction", "sap_order", "edi_850",
+            "change_analysis",
         }
         ops = {d.operation for d in self.spec.dependencies}
         assert ops == {
@@ -236,6 +238,7 @@ class TestEmailOrderEntrySpec:
             "duplicate_po_pre_check", "credit_check",
             "fetch_message",
             "extract_order", "extract_entities", "validate", "build",
+            "evaluate",
         }
         audit_required = {
             d.result_key for d in self.spec.dependencies if d.required_for_audit
@@ -251,6 +254,7 @@ class TestEmailOrderEntrySpec:
         }
         assert soft == {
             "order_entry_extraction", "inbox_entities", "sap_data", "edi_850",
+            "change_analysis",
         }
 
     def test_no_effects(self):

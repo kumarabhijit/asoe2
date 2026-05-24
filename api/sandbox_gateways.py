@@ -26,6 +26,8 @@ from gateways.edi850 import build_edi_850
 from gateways.registry import clear_registry, register_gateway
 from gateways.stub import StubGateway
 from gateways.tenant_config import TenantConfigGateway
+from contracts.policy import HIGH_VALUE_OVERRIDE_THRESHOLD_USD
+from recipes.ChangeAnalysisRecipe import evaluate_change
 
 # ADR-042 Phase 5 — the canned order the edi_850 builder stub reconstructs.
 # Mirrors the order_extraction stub (same PO / customer / line) so the EDI 850
@@ -46,6 +48,31 @@ _SANDBOX_EDI_850_ORDER = dict(
         "description": "Cola 12-pack case", "quantity": 480,
         "uom": "CS", "unit_price": 8.64,
     }],
+)
+
+# ADR-042 Phase 6 — the canned order-change the change_analysis evaluator scores.
+# A qty-increase change with a representative mix of constraint signals; kept in
+# sync with the identical constant in tests/conftest.py.
+_SANDBOX_CHANGE = dict(
+    order_id="0093847612",
+    order_value_usd=45200.0,
+    cosign_threshold_usd=HIGH_VALUE_OVERRIDE_THRESHOLD_USD,
+    lifecycle_index=2,
+    change_items=[
+        {"field": "quantity", "from_value": "480", "to_value": "600"},
+        {"field": "requested_date", "from_value": "2025-03-24", "to_value": "2025-03-20"},
+    ],
+    signals={
+        "inventory": {"atp": 520, "required": 600},
+        "production": {"stage": "REL"},
+        "transport": {"route_available": True, "carrier_capacity": True},
+        "warehouse": {"pick_pack_feasible": True},
+        "order_status": {"fulfillment_stage": 2},
+        "sla": {"within_window": True, "days_to_deadline": 1},
+        "dependencies": {"linked_orders": 1},
+        "network": {"dc_routing_ok": True},
+        "priority": {"customer_tier": "GOLD", "auto_approve": False},
+    },
 )
 
 
@@ -374,6 +401,20 @@ def register_sandbox_gateways() -> None:
                 gateway_name="edi_850", operation="build",
                 status="SUCCESS",
                 data=build_edi_850(**_SANDBOX_EDI_850_ORDER),
+            ),
+        },
+    ))
+
+    # ADR-042 Phase 6 — Change Analysis evaluator producer. Deterministic
+    # constraint evaluation of the canned order change; activates the Change
+    # Analysis tab via enrichment_context.change_analysis.
+    register_gateway(StubGateway(
+        "change_analysis",
+        responses={
+            "evaluate": GatewayResponse(
+                gateway_name="change_analysis", operation="evaluate",
+                status="SUCCESS",
+                data=evaluate_change(**_SANDBOX_CHANGE),
             ),
         },
     ))

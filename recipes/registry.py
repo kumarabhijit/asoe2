@@ -418,6 +418,18 @@ REGISTRY = {
                 result_key="edi_850",
                 required_for_audit=False,
             ),
+            # ADR-042 Phase 6 — Change Analysis tab. Deterministic constraint
+            # evaluation of a requested order change (recipes/ChangeAnalysisRecipe,
+            # a pure evaluator). required_for_audit=False: a derived evaluation
+            # view, not a lifecycle write — when unwired the tab stays
+            # structurally omitted (composer returns None).
+            GatewayDependency(
+                gateway_name="change_analysis",
+                operation="evaluate",
+                params_from_state={"order_id": "event.order_id"},
+                result_key="change_analysis",
+                required_for_audit=False,
+            ),
         ),
         expected_metadata_keys=(
             "composite_confidence",

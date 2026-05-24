@@ -54,6 +54,7 @@ from api.analysis_adapters import (
 )
 from api.analysis_composer import compose as compose_analysis
 from api.profile_composer import (
+    compose_change_analysis,
     compose_edi_850_document,
     compose_entities_analysis,
     compose_entity_profile,
@@ -2366,6 +2367,7 @@ async def get_analysis(
     sap_data_analysis = compose_sap_data_analysis(record)
     order_entry_extraction = compose_order_entry_extraction(record)
     edi_850_audit = compose_edi_850_document(record)
+    change_analysis = compose_change_analysis(record)
 
     return AnalysisResponse(
         diagnosis=diagnosis,
@@ -2381,5 +2383,6 @@ async def get_analysis(
         sap_data_analysis=sap_data_analysis,
         order_entry_extraction=order_entry_extraction,
         edi_850_audit=edi_850_audit,
+        change_analysis=change_analysis,
         **extras,
     )

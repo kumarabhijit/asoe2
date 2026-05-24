@@ -27,6 +27,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 from api.schemas import (
+    ChangeAnalysis,
     Edi850Document,
     EntitiesAnalysisData,
     EntityProfile,
@@ -166,6 +167,23 @@ def compose_edi_850_document(
         return None
     try:
         return Edi850Document(**ctx)
+    except (TypeError, ValueError):
+        return None
+
+
+def compose_change_analysis(
+    record: ExceptionRecord,
+) -> Optional[ChangeAnalysis]:
+    """Project the deterministic Change Analysis from
+    `enrichment_context["change_analysis"]` (the recipe-homed evaluator's read).
+    None when absent or malformed (preview-only until the producer is wired).
+    The evaluator owns the logic (`recipes/ChangeAnalysisRecipe.py`); the
+    composer only projects — no synthesis here (Guardrail #6)."""
+    ctx = record.enrichment_context.get("change_analysis")
+    if not isinstance(ctx, dict) or not ctx:
+        return None
+    try:
+        return ChangeAnalysis(**ctx)
     except (TypeError, ValueError):
         return None
 
