@@ -338,21 +338,25 @@ Working the post-feature-port backlog. **Landed this pass:**
   re-runs pending failed effects via the executor (retry is delivery-idempotent),
   marks compensated on success, escalates after `max_attempts`. Admin trigger
   `POST /api/v1/outbox/reconcile`. `tests/test_effect_outbox.py`.
-- ✓ **#10 SSRF guard** — `hardening/ssrf.py::validate_outbound_url`
+- ✓ **#10 SSRF guard + live wiring** — `hardening/ssrf.py::validate_outbound_url`
   (allowlist-first, HTTPS-only, default-port, no creds, blocks non-global /
-  metadata / loopback / localhost / private + DNS-rebinding). Ships ready-to-wire
-  with threat cases locked. `tests/test_ssrf_allowlist.py`.
+  metadata / loopback / localhost / private + DNS-rebinding). **Wired** into
+  `gateways/attachment_fetch.AttachmentFetchGateway`: every attachment URL is
+  validated BEFORE retrieval (allowlist `policy.ATTACHMENT_FETCH_ALLOWED_HOSTS`);
+  blocked URLs return FAILED and never reach the (injectable) fetcher. Registered
+  in sandbox + conftest. `tests/test_ssrf_allowlist.py` + `test_attachment_fetch_gateway.py`.
 - ✓ **Validation mock data (asoe-ui)** — `src/lib/mock-data/inbox-sections.ts`
-  populates every inbox section in mock mode: enriched the email-order case
-  (exc-026) with Order Entry / EDI 850 / Entities / SAP Data / Draft Reply /
-  Knowledge Graph, and added 4 EMAIL_ENTRY change cases (exc-040..043: qty
-  reduction / expedite / cancellation / SKU substitution) with full Change
-  Analysis + Knowledge Graph. Click through `/cases` (EMAIL_ENTRY lens) to
-  validate.
+  populates every inbox section in mock mode. **8 EMAIL_ENTRY cases**: enriched
+  exc-026 (new order — all sections); exc-040..043 change requests (qty
+  reduction / expedite / cancellation / SKU substitution → Change Analysis +
+  graph); exc-044 INQUIRY, exc-045 COMPLAINT, exc-046 happy-path auto-resolved
+  EDI order. Classification chips (NEW_ORDER/ORDER_CHANGE/INQUIRY/COMPLAINT) all
+  exercised. Click through `/cases` (EMAIL_ENTRY lens) to validate.
 
 ### Still PENDING (smallest residue — pure infra)
-- **#10 SSRF** — the guard exists; wire it into the first real attachment-fetch.
 - **#6** DB-backed outbox table (durability) + scheduler to poll the reconciler.
+- **#10 SSRF** — inject a REAL fetcher into AttachmentFetchGateway (+ resolve=True)
+  when the production attachment store is wired (the guard + stub are in place).
 - Constraint Graph (deferred per ADR §5b — reuses trace/topology).
 - ADR-042 → Accepted on autonomy-v2 dual-control sign-off.
 
