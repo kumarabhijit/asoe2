@@ -372,6 +372,67 @@ def _register_oms_stub():
             ),
         },
     )
+    # ADR-042 Phase 3 — Customer Inbox read producers. Deterministic stubs for
+    # the constrained-generation order-extraction read + the SAP "validate"
+    # read; their output populates enrichment_context.{order_entry_extraction,
+    # inbox_entities, sap_data}, activating the Order Entry / Entities / SAP
+    # Data tabs. Mirrors api/sandbox_gateways.py so the live sandbox server and
+    # the pytest pipeline behave identically.
+    order_extraction_stub = StubGateway(
+        "order_extraction",
+        responses={
+            "extract_order": GatewayResponse(
+                gateway_name="order_extraction", operation="extract_order",
+                status="SUCCESS",
+                data={
+                    "source_type": "PDF",
+                    "confidence": 0.94,
+                    "header": {
+                        "customer_po": "0093847612", "order_type": "ZOR",
+                        "sales_org": "1000", "dist_channel": "10",
+                        "requested_date": "2025-03-17",
+                    },
+                    "customer_name": "Walmart Stores Inc",
+                    "customer_bp": "300001",
+                    "line_items": [{
+                        "line_num": "001", "material": "BEV-COLA-12PK",
+                        "description": "Cola 12-pack case", "quantity": 480,
+                        "uom": "CS", "unit_price": 8.64, "mdm_matched": True,
+                    }],
+                    "validation_flags": [{
+                        "field": "line 001", "severity": "INFO",
+                        "message": "matched to material master",
+                    }],
+                },
+            ),
+            "extract_entities": GatewayResponse(
+                gateway_name="order_extraction", operation="extract_entities",
+                status="SUCCESS",
+                data={"extracted": [
+                    {"key": "customer_po", "value": "0093847612", "kind": "po",
+                     "confidence": 0.98, "source_span": "PO# 0093847612"},
+                    {"key": "material", "value": "BEV-COLA-12PK",
+                     "kind": "material", "confidence": 0.95,
+                     "source_span": "Cola 12pk case"},
+                ]},
+            ),
+        },
+    )
+    sap_order_stub = StubGateway(
+        "sap_order",
+        responses={
+            "validate": GatewayResponse(
+                gateway_name="sap_order", operation="validate",
+                status="SUCCESS",
+                data={
+                    "system": "S4H_PRD",
+                    "validation_status": "SO confirmed, ATP OK",
+                    "order_value_usd": 45200.0,
+                    "sap_doc_number": "5100012344",
+                },
+            ),
+        },
+    )
     register_gateway(oms_stub)
     register_gateway(notification_stub)
     register_gateway(sap_doc_stub)
@@ -381,6 +442,8 @@ def _register_oms_stub():
     register_gateway(sap_customer_master_stub)
     register_gateway(sla_contract_stub)
     register_gateway(email_intake_stub)
+    register_gateway(order_extraction_stub)
+    register_gateway(sap_order_stub)
     # ADR-029: tenant_config is registered as the real file-backed
     # gateway (not a stub) — it's pure in-process I/O against
     # gateways/configs/duplicate_po/defaults.json, so graph tests

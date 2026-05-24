@@ -23,6 +23,7 @@ import pytest
 from api.profile_composer import (
     compose_entities_analysis,
     compose_order_entry_extraction,
+    compose_sap_data_analysis,
 )
 from api.schemas import OrderEntryHeader
 from api.store import ExceptionRecord
@@ -207,3 +208,28 @@ def test_resolve_dependencies_populates_context_and_activates_tabs(monkeypatch) 
     assert compose_entities_analysis(rec) is not None
 
     clear_registry()
+
+
+def test_live_recipe_wiring_activates_all_three_tabs() -> None:
+    """The canonical ManualOrderIntakeRecipe declares the inbox read producers
+    (extract_order, extract_entities, sap_order/validate). With the
+    sandbox/conftest stubs registered (autouse), a real resolve_dependencies
+    pass populates all three enrichment keys and the composer activates the
+    Order Entry + Entities + SAP Data tabs (preview → active)."""
+    from orchestration.nodes import resolve_dependencies
+
+    state = GraphState(event=OrderEvent(
+        order_id="SO-LIVE-1", event_type="MANUAL_ORDER_INTAKE",
+        po_price=0.0, sap_base_price=0.0,
+    ))
+    state.selected_recipe = "ManualOrderIntakeRecipe.py"
+    state.request_trace_id = "trace-live"
+
+    out = resolve_dependencies(state)
+    for key in ("order_entry_extraction", "inbox_entities", "sap_data"):
+        assert out.enrichment_context.get(key), f"{key} not populated"
+
+    rec = _record(enrichment_context=dict(out.enrichment_context))
+    assert compose_order_entry_extraction(rec) is not None
+    assert compose_entities_analysis(rec) is not None
+    assert compose_sap_data_analysis(rec) is not None

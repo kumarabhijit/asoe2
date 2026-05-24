@@ -371,6 +371,38 @@ REGISTRY = {
                 },
                 result_key="email_source_context",
             ),
+            # ADR-042 Phase 3 — the Customer Inbox read producers. These are
+            # evidence-enriching reads (ADR-025 gateway-before-shadow), NOT
+            # lifecycle writes, so required_for_audit=False: when the producer
+            # isn't wired (e.g. no extraction model configured) the run still
+            # proceeds and the corresponding tab stays structurally omitted
+            # (composer returns None on the empty bag — preview-only, no
+            # partial truth). The order-extraction gateway runs constrained
+            # generation over the sanitized email/attachments; the sap_order
+            # gateway is the deterministic SAP "validate" read. Real
+            # email-body sourcing for the live model is the Phase-4 live
+            # pipeline; the sandbox/conftest StubGateways stand in today.
+            GatewayDependency(
+                gateway_name="order_extraction",
+                operation="extract_order",
+                params_from_state={"case": "event.order_id"},
+                result_key="order_entry_extraction",
+                required_for_audit=False,
+            ),
+            GatewayDependency(
+                gateway_name="order_extraction",
+                operation="extract_entities",
+                params_from_state={"case": "event.order_id"},
+                result_key="inbox_entities",
+                required_for_audit=False,
+            ),
+            GatewayDependency(
+                gateway_name="sap_order",
+                operation="validate",
+                params_from_state={"order_id": "event.order_id"},
+                result_key="sap_data",
+                required_for_audit=False,
+            ),
         ),
         expected_metadata_keys=(
             "composite_confidence",

@@ -280,6 +280,68 @@ def register_sandbox_gateways() -> None:
         },
     ))
 
+    # ADR-042 Phase 3 — Customer Inbox read producers. The order-extraction
+    # gateway is the constrained-generation read (here a deterministic stub
+    # standing in for the live model, mirroring tests/conftest.py); sap_order
+    # is the deterministic SAP "validate" read. Their output activates the
+    # Order Entry / Entities / SAP Data tabs via enrichment_context.
+    register_gateway(StubGateway(
+        "order_extraction",
+        responses={
+            "extract_order": GatewayResponse(
+                gateway_name="order_extraction", operation="extract_order",
+                status="SUCCESS",
+                data={
+                    "source_type": "PDF",
+                    "confidence": 0.94,
+                    "header": {
+                        "customer_po": "0093847612", "order_type": "ZOR",
+                        "sales_org": "1000", "dist_channel": "10",
+                        "requested_date": "2025-03-17",
+                    },
+                    "customer_name": "Walmart Stores Inc",
+                    "customer_bp": "300001",
+                    "line_items": [{
+                        "line_num": "001", "material": "BEV-COLA-12PK",
+                        "description": "Cola 12-pack case", "quantity": 480,
+                        "uom": "CS", "unit_price": 8.64, "mdm_matched": True,
+                    }],
+                    "validation_flags": [{
+                        "field": "line 001", "severity": "INFO",
+                        "message": "matched to material master",
+                    }],
+                },
+            ),
+            "extract_entities": GatewayResponse(
+                gateway_name="order_extraction", operation="extract_entities",
+                status="SUCCESS",
+                data={"extracted": [
+                    {"key": "customer_po", "value": "0093847612", "kind": "po",
+                     "confidence": 0.98, "source_span": "PO# 0093847612"},
+                    {"key": "material", "value": "BEV-COLA-12PK",
+                     "kind": "material", "confidence": 0.95,
+                     "source_span": "Cola 12pk case"},
+                ]},
+            ),
+        },
+    ))
+
+    register_gateway(StubGateway(
+        "sap_order",
+        responses={
+            "validate": GatewayResponse(
+                gateway_name="sap_order", operation="validate",
+                status="SUCCESS",
+                data={
+                    "system": "S4H_PRD",
+                    "validation_status": "SO confirmed, ATP OK",
+                    "order_value_usd": 45200.0,
+                    "sap_doc_number": "5100012344",
+                },
+            ),
+        },
+    ))
+
     # ADR-029 / ADR-030: tenant_config is the file-backed PLATFORM resolver
     # for layer 1 + the DB-backed resolver for layers 2-5 (PR-C.2). It's
     # not a stub — the platform JSON ships with the application and the
