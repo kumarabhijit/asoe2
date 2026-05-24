@@ -34,12 +34,9 @@ except ImportError:
 
 _GATE = "ADR-042 §5: contracts.autonomy versioned resolver not implemented yet"
 
-# RED gate committed ahead of implementation (TDD). xfail(strict) keeps CI
-# honest-green while the resolver is unimplemented, and flips to a hard CI
-# failure (strict XPASS) the moment it IS implemented — forcing a deliberate
-# marker removal that coincides with the required human + compliance
-# dual-control sign-off on the autonomy-vocabulary flip.
-pytestmark = pytest.mark.xfail(reason=_GATE, strict=True)
+# Implemented 2026-05-24 — the autonomy v2 (prototype-ordering) vocabulary
+# landed once the compliance sign-off gate was waived for pre-production
+# (owner veto). The xfail marker is removed; these now assert for real.
 
 
 def test_product_decision_current_vocab_is_v2() -> None:
