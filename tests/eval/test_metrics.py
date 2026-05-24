@@ -13,6 +13,8 @@ import pytest
 from evals.metrics import (
     confusion_matrix,
     expected_calibration_error,
+    field_accuracy,
+    hallucination_rate,
     macro_f1,
 )
 
@@ -62,3 +64,22 @@ def test_ece_flags_overconfidence() -> None:
 def test_ece_fails_closed_on_bad_input(confidences, correct) -> None:
     with pytest.raises(ValueError):
         expected_calibration_error(confidences, correct)
+
+
+def test_field_accuracy_counts_exact_matches_over_expected() -> None:
+    # sku right, qty wrong -> 1/2.
+    assert field_accuracy([({"sku": "A", "qty": 5}, {"sku": "A", "qty": 3})]) == 0.5
+    assert field_accuracy([({"sku": "A"}, {"sku": "A"})]) == 1.0
+    assert field_accuracy([]) == 0.0
+
+
+def test_hallucination_rate_flags_fabricated_fields() -> None:
+    # Predicted a price the ground truth never asserts -> 1 of 2 fields fabricated.
+    assert hallucination_rate([({"sku": "A"}, {"sku": "A", "price": 9.99})]) == 0.5
+    # A null/empty expected value counts as not-asserted -> still fabrication.
+    assert (
+        hallucination_rate([({"sku": "A", "price": None}, {"sku": "A", "price": 9.99})])
+        == 0.5
+    )
+    # Faithful prediction -> zero.
+    assert hallucination_rate([({"sku": "A", "qty": 5}, {"sku": "A", "qty": 5})]) == 0.0

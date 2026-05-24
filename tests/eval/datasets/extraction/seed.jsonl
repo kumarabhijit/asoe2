@@ -1,0 +1,2 @@
+{"id": "ext-1", "expected": {"customer_po": "0093847612", "sku": "BEV-COLA-12PK", "qty": 480}, "predicted": {"customer_po": "0093847612", "sku": "BEV-COLA-12PK", "qty": 480}}
+{"id": "ext-2", "expected": {"customer_po": "KRO-2025-03-44821", "sku": "SKU-NR-001", "qty": 400}, "predicted": {"customer_po": "KRO-2025-03-44821", "sku": "SKU-NR-001", "qty": 400}}

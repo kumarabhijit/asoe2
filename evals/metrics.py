@@ -57,6 +57,59 @@ def macro_f1(pairs: Iterable[tuple[str, str]]) -> float:
     return sum(_per_label_f1(pairs, lbl) for lbl in truth_labels) / len(truth_labels)
 
 
+def field_accuracy(
+    records: Iterable[tuple[dict[str, object], dict[str, object]]],
+) -> float:
+    """Per-field exact-match accuracy over (expected, predicted) record pairs.
+
+    Denominator is the count of expected fields (so omitting a field counts
+    against you); numerator is fields whose predicted value exactly matches.
+    """
+    records = list(records)
+    total = sum(len(exp) for exp, _ in records)
+    if total == 0:
+        return 0.0
+    hits = sum(
+        1
+        for exp, pred in records
+        for key, val in exp.items()
+        if pred.get(key) == val
+    )
+    return hits / total
+
+
+def _is_present(value: object) -> bool:
+    return value not in (None, "")
+
+
+def hallucination_rate(
+    records: Iterable[tuple[dict[str, object], dict[str, object]]],
+) -> float:
+    """Rate of *fabricated* predicted fields — a non-empty predicted value for
+    a field the ground truth does not assert (absent, or null/empty).
+
+    This is the metric that maps to dollars: a hallucinated price / qty / SKU
+    is a fabricated order line. Denominator is all non-empty predicted fields.
+
+    NOTE: this is the dataset-level approximation (no source spans yet). The
+    rigorous span-grounded definition ("asserted a field with no supporting
+    span in the source") lands with the extraction gateway (ADR-042 Phase 3).
+    """
+    records = list(records)
+    predicted_present = sum(
+        1 for _, pred in records for v in pred.values() if _is_present(v)
+    )
+    if predicted_present == 0:
+        return 0.0
+    fabricated = sum(
+        1
+        for exp, pred in records
+        for key, val in pred.items()
+        if _is_present(val) and not _is_present(exp.get(key))
+    )
+    return fabricated / predicted_present
+
+
 def expected_calibration_error(
     confidences: Sequence[float],
     correct: Sequence[bool],

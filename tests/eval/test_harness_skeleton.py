@@ -27,6 +27,7 @@ try:
         load_dataset,
         load_thresholds,
         score_classification,
+        score_extraction,
     )
 
     _IMPLEMENTED = True
@@ -71,3 +72,23 @@ def test_invoice_query_is_a_classification_label() -> None:
     thresholds = load_thresholds()
     labels = set(thresholds["classification"].get("labels", []))
     assert "INVOICE_QUERY" in labels
+
+
+@pytest.mark.replay
+def test_extraction_scorer_reports_accuracy_and_hallucination() -> None:
+    """Extraction scoring (replay) must surface field accuracy + the
+    hallucination rate — the dollar metric (panel 2026-05-24)."""
+    assert _IMPLEMENTED, _GATE
+    rows = load_dataset("extraction")
+    report = score_extraction(rows)
+    assert {"field_accuracy", "hallucination_rate", "n"} <= set(report)
+    # The frozen seed is a clean match: perfect accuracy, zero fabrication.
+    assert report["field_accuracy"] == 1.0
+    assert report["hallucination_rate"] == 0.0
+
+
+@pytest.mark.replay
+def test_extraction_thresholds_are_declared() -> None:
+    thresholds = load_thresholds()
+    assert "extraction" in thresholds
+    assert "hallucination_rate_max" in thresholds["extraction"]

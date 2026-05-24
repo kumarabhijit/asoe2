@@ -24,6 +24,8 @@ import yaml
 from evals.metrics import (
     confusion_matrix,
     expected_calibration_error,
+    field_accuracy,
+    hallucination_rate,
     macro_f1,
 )
 
@@ -93,4 +95,21 @@ def score_classification(
         "macro_f1": macro_f1(pairs),
         "ece": ece,
         "confusion": confusion_matrix(pairs),
+    }
+
+
+def score_extraction(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Score extracted-order fields against ground truth (replay mode).
+
+    Each row carries ``{"expected": {<field>: <value>}, "predicted":
+    {<field>: <value>}}`` — the prediction is a recorded gateway output, so
+    this runs deterministically with no live model. Reports per-field accuracy
+    and the hallucination rate (fabricated fields — the dollar metric).
+    """
+    records = [(row["expected"], row["predicted"]) for row in rows]
+    n = len(records)
+    return {
+        "n": n,
+        "field_accuracy": field_accuracy(records),
+        "hallucination_rate": hallucination_rate(records),
     }

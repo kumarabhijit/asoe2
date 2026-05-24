@@ -13,3 +13,7 @@ classification:
     - OTHER
   macro_f1_min: 0.90
   ece_max: 0.10
+extraction:
+  field_accuracy_min: 0.95
+  # Hallucinated price/qty/SKU == a fabricated order line. Tight by design.
+  hallucination_rate_max: 0.02
