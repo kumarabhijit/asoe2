@@ -993,6 +993,19 @@ def explain_only(state: GraphState) -> GraphState:
 # resolve_dependencies — fetch data from gateways before recipe execution
 # ---------------------------------------------------------------------------
 
+# Dedicated pool for the dependency fan-out, DECOUPLED from
+# GatewayExecutor._pool. The fan-out submits one outer task per dependency, and
+# each GatewayExecutor.run recursively submits gateway.execute to enforce its
+# per-call timeout. Sharing one pool means the outer tasks can saturate it so
+# the inner execute submits never get a worker — a recursive-submit
+# self-deadlock once a recipe's dependency count approaches the pool size (and
+# across concurrent requests, since the pool is process-wide). Separate pools
+# break that coupling: outer tasks live here, inner execute tasks live in
+# GatewayExecutor._pool, so neither can starve the other.
+_DEPENDENCY_FANOUT_POOL = concurrent.futures.ThreadPoolExecutor(
+    max_workers=16, thread_name_prefix="dep-fanout",
+)
+
 
 def resolve_dependencies(state: GraphState) -> GraphState:
     """Call gateway dependencies declared by the selected recipe.
@@ -1065,7 +1078,7 @@ def resolve_dependencies(state: GraphState) -> GraphState:
     # Resolve independent dependencies concurrently.
     future_to_dep = {}
     for dep, req in requests:
-        future = executor._pool.submit(executor.run, req)
+        future = _DEPENDENCY_FANOUT_POOL.submit(executor.run, req)
         future_to_dep[future] = dep
         gateway_started_at[future] = _now_iso()
     for future in concurrent.futures.as_completed(future_to_dep):

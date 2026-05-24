@@ -19,16 +19,15 @@ class GatewayExecutor:
     A shared thread pool is reused across calls to avoid OS-level
     thread create/destroy overhead per gateway invocation.
 
-    Sizing note: ``orchestration.nodes.resolve_dependencies`` fans out
-    GatewayDependency calls by submitting to this same ``_pool`` AND
-    each ``run()`` here also submits to ``_pool`` to enforce the
-    per-call timeout. With N dependencies the worst case is N outer
-    + N inner tasks competing for the pool — classic recursive-submit
-    deadlock when ``max_workers <= N``. The pool is sized at 16 so
-    recipes with up to ~7 declared dependencies stay safely above the
-    deadlock floor (current max is EmailOrderEntryRecipe at 4). If a
-    future recipe needs more, the right fix is to give the outer
-    fan-out its own pool — not to keep bumping this constant.
+    Pooling note: ``run()`` submits ``gateway.execute`` to this ``_pool`` to
+    enforce the per-call timeout. ``orchestration.nodes.resolve_dependencies``
+    fans out GatewayDependency calls on its OWN dedicated pool
+    (``_DEPENDENCY_FANOUT_POOL``), NOT this one — so the outer fan-out and the
+    inner execute submits never compete for the same workers. That decoupling
+    removes the former recursive-submit self-deadlock (where N outer + N inner
+    tasks contended for one shared pool), so a recipe's dependency count is no
+    longer bounded by this pool's size. Do not route the fan-out back through
+    ``_pool``.
     """
 
     _pool = concurrent.futures.ThreadPoolExecutor(max_workers=16)
