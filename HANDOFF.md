@@ -333,9 +333,26 @@ Working the post-feature-port backlog. **Landed this pass:**
   + asoe-ui `collapsible_layer2_signal` / `report_reviewer_activity` tests.
   (Override-rate SLI already existed.)
 
-### Still PENDING (smaller residue)
-- **#10 SSRF** allowlist — lands with the first real attachment-fetch path.
-- **#6** DB-backed outbox table + automatic reconciliation worker.
+### Infra-residue pass (2026-05-24)
+- ✓ **#6 reconciliation worker** — `orchestration.outbox.reconcile_pending`
+  re-runs pending failed effects via the executor (retry is delivery-idempotent),
+  marks compensated on success, escalates after `max_attempts`. Admin trigger
+  `POST /api/v1/outbox/reconcile`. `tests/test_effect_outbox.py`.
+- ✓ **#10 SSRF guard** — `hardening/ssrf.py::validate_outbound_url`
+  (allowlist-first, HTTPS-only, default-port, no creds, blocks non-global /
+  metadata / loopback / localhost / private + DNS-rebinding). Ships ready-to-wire
+  with threat cases locked. `tests/test_ssrf_allowlist.py`.
+- ✓ **Validation mock data (asoe-ui)** — `src/lib/mock-data/inbox-sections.ts`
+  populates every inbox section in mock mode: enriched the email-order case
+  (exc-026) with Order Entry / EDI 850 / Entities / SAP Data / Draft Reply /
+  Knowledge Graph, and added 4 EMAIL_ENTRY change cases (exc-040..043: qty
+  reduction / expedite / cancellation / SKU substitution) with full Change
+  Analysis + Knowledge Graph. Click through `/cases` (EMAIL_ENTRY lens) to
+  validate.
+
+### Still PENDING (smallest residue — pure infra)
+- **#10 SSRF** — the guard exists; wire it into the first real attachment-fetch.
+- **#6** DB-backed outbox table (durability) + scheduler to poll the reconciler.
 - Constraint Graph (deferred per ADR §5b — reuses trace/topology).
 - ADR-042 → Accepted on autonomy-v2 dual-control sign-off.
 
