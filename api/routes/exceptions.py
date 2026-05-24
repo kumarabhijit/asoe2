@@ -297,12 +297,23 @@ def _resolve_via_case_agent(
 
 def _resolve_state(state: GraphState, tenant_id: str) -> GraphState:
     """Single dispatch point: route via case agent when the
-    predicate fires, otherwise the deterministic graph."""
+    predicate fires, otherwise the deterministic graph.
+
+    DoR #7: this is the synchronous ingest→terminal path, so it is the natural
+    point to record the SLO latency histogram (telemetry only — never raises)."""
     from agents.harness import should_route_to_case_agent
 
-    if should_route_to_case_agent(state.event, enabled=_case_agent_enabled()):
-        return _resolve_via_case_agent(state, tenant_id)
-    return _run_graph_safe(state)
+    started = time.perf_counter()
+    try:
+        if should_route_to_case_agent(state.event, enabled=_case_agent_enabled()):
+            return _resolve_via_case_agent(state, tenant_id)
+        return _run_graph_safe(state)
+    finally:
+        try:
+            from api.metrics import observe_ingest_to_terminal_latency
+            observe_ingest_to_terminal_latency(time.perf_counter() - started)
+        except Exception:  # pragma: no cover - telemetry must never break resolve
+            pass
 
 
 def _state_to_resolve_response(

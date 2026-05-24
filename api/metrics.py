@@ -440,10 +440,81 @@ def render_event_type_metrics() -> str:
     return "\n".join(out)
 
 
+# ---------------------------------------------------------------------------
+# Ingest → terminal latency SLO histogram (DoR #7).
+#
+# A classic Prometheus cumulative histogram. `observe_ingest_to_terminal_latency`
+# is called once per synchronous resolve (the automated ingest→terminal path)
+# with the wall-clock duration in seconds. Buckets are seconds; the implicit
+# +Inf bucket catches the tail. Telemetry must never raise into the request
+# path, so observe() fails closed on bad input.
+# ---------------------------------------------------------------------------
+
+_SLO_BUCKETS_S: tuple[float, ...] = (0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30)
+_slo_lock = _CaseLock()
+_slo_bucket_counts: list[int] = [0] * (len(_SLO_BUCKETS_S) + 1)  # last = +Inf
+_slo_sum: float = 0.0
+_slo_count: int = 0
+
+
+def observe_ingest_to_terminal_latency(seconds: float) -> None:
+    """Record one ingest→terminal latency sample (seconds). No-op on a
+    negative / NaN / non-numeric input — never raises (DoR #7)."""
+    global _slo_sum, _slo_count
+    try:
+        s = float(seconds)
+    except (TypeError, ValueError):
+        return
+    if s != s or s < 0:  # NaN or negative
+        return
+    with _slo_lock:
+        for i, edge in enumerate(_SLO_BUCKETS_S):
+            if s <= edge:
+                _slo_bucket_counts[i] += 1
+                break
+        else:
+            _slo_bucket_counts[-1] += 1
+        _slo_sum += s
+        _slo_count += 1
+
+
+def reset_slo_histogram() -> None:
+    """Test helper — drop all samples."""
+    global _slo_sum, _slo_count
+    with _slo_lock:
+        for i in range(len(_slo_bucket_counts)):
+            _slo_bucket_counts[i] = 0
+        _slo_sum = 0.0
+        _slo_count = 0
+
+
+def _fmt_le(edge: float) -> str:
+    return str(int(edge)) if edge == int(edge) else repr(edge)
+
+
+def render_ingest_terminal_histogram() -> str:
+    name = "asoe_ingest_to_terminal_latency_seconds"
+    lines = list(_help_type(
+        name, "Wall-clock latency from event ingest to terminal resolve.",
+        "histogram",
+    ))
+    with _slo_lock:
+        cumulative = 0
+        for i, edge in enumerate(_SLO_BUCKETS_S):
+            cumulative += _slo_bucket_counts[i]
+            lines.append(_line(f"{name}_bucket", cumulative, labels={"le": _fmt_le(edge)}))
+        cumulative += _slo_bucket_counts[-1]
+        lines.append(_line(f"{name}_bucket", cumulative, labels={"le": "+Inf"}))
+        lines.append(_line(f"{name}_sum", _slo_sum))
+        lines.append(_line(f"{name}_count", _slo_count))
+    return "\n".join(lines) + "\n"
+
+
 def render_all() -> str:
     """Convenience entrypoint for the route handler."""
     return (
         render_shadow_llm_metrics(shadow_llm_metrics)
         + render_cases_returned_metrics()
         + render_event_type_metrics()
+        + render_ingest_terminal_histogram()
     )
