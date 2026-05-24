@@ -34,6 +34,7 @@ import logging
 import re
 import threading
 import time
+import hashlib
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
@@ -663,6 +664,50 @@ def _clear_idempotency_cache() -> None:
     """Test helper: wipe the module-level cache between tests."""
     with _idempotency_lock:
         _idempotency_cache.clear()
+    _clear_delivery_dedup()
+
+
+# ---------------------------------------------------------------------------
+# DoR #5 — delivery idempotency for buyer-reply sends.
+#
+# The HTTP Idempotency-Key above dedupes a *client retry* of one request. This
+# dedupes the *delivery itself*, keyed on the reply content (a provider-message-
+# id analog): the same reply (recipient + subject + body) for the same case is
+# delivered AT MOST ONCE, even across two distinct SEND_REPLY requests with no /
+# different idempotency keys. The dedup ledger is the authoritative "delivered"
+# record (it survives later mutation of resolution_data). Process-local; reset
+# per test via `_clear_idempotency_cache`.
+# ---------------------------------------------------------------------------
+
+_delivery_dedup: Dict[Tuple[str, str], Dict[str, Any]] = {}
+_delivery_lock = threading.Lock()
+
+
+def _reply_delivery_key(exception_id: str, draft: Dict[str, Any]) -> str:
+    """Deterministic delivery key over (case, recipient, subject, body)."""
+    recipient = (draft.get("recipient") or "").strip().lower()
+    subject = draft.get("subject") or ""
+    body = draft.get("body") or ""
+    raw = "\x1f".join([exception_id, recipient, subject, body])
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _delivery_seen(tenant_id: str, delivery_key: str) -> Optional[Dict[str, Any]]:
+    with _delivery_lock:
+        return _delivery_dedup.get((tenant_id, delivery_key))
+
+
+def _delivery_record(
+    tenant_id: str, delivery_key: str, entry: Dict[str, Any]
+) -> None:
+    with _delivery_lock:
+        _delivery_dedup[(tenant_id, delivery_key)] = entry
+
+
+def _clear_delivery_dedup() -> None:
+    """Test helper: wipe the delivery-dedup ledger between tests."""
+    with _delivery_lock:
+        _delivery_dedup.clear()
 
 
 def _utc_now_iso() -> str:
@@ -918,6 +963,8 @@ def _persist_reply_sent(exception_id, tenant_id, record, result, user_sub, notes
             delivered = er.status == "SUCCESS" and bool((er.data or {}).get("delivered"))
             break
     sent_ok = status == "READY_TO_SEND" and delivered
+    # DoR #5 — provider-message-id analog: stable per (case, recipient, content).
+    delivery_key = _reply_delivery_key(exception_id, draft)
     entry = {
         "status": "SENT" if sent_ok else "FAILED",
         "reason": None if sent_ok
@@ -926,9 +973,14 @@ def _persist_reply_sent(exception_id, tenant_id, record, result, user_sub, notes
         "subject": draft.get("subject"),
         "gateway_status": gw_status,
         "delivered": delivered,
+        "delivery_key": delivery_key,
         "sent_by": user_sub,
         "sent_at": _utc_now_iso(),
     }
+    # Record the successful delivery in the idempotency ledger so a later
+    # SEND_REPLY of the same reply is short-circuited (no double send).
+    if sent_ok:
+        _delivery_record(tenant_id, delivery_key, entry)
     merged = dict(record.resolution_data or {})
     merged["reply_sent"] = entry
     updated = exception_store.update(exception_id, tenant_id, resolution_data=merged)
@@ -982,6 +1034,36 @@ def _disposition_send_reply(exception_id, tenant_id, record, req, user, key,
                         message="Record carries no extracted order to reply about.",
                         status_code=409)
     _require_state(record, HITL_DISPOSITION_STATES, "send_reply")
+
+    # DoR #5 — delivery idempotency. Compose (no send) to derive the
+    # deterministic delivery key; if this exact reply was already delivered for
+    # this case, DO NOT re-send — return the current state (idempotent). The
+    # extra compose is pure + deterministic (no gateway effect fires in draft
+    # mode); it only reads the content we are about to deliver.
+    preview = _run_reply_draft(record, tenant_id, req.reply or {})
+    p_out = preview.execution_log.outputs if preview.execution_log else {}
+    p_draft = p_out.get("draft") or {}
+    if p_out.get("status") == "DRAFTED" and p_draft.get("recipient"):
+        dkey = _reply_delivery_key(exception_id, p_draft)
+        if _delivery_seen(tenant_id, dkey) is not None:
+            exception_store.log_audit_event(
+                tenant_id=tenant_id,
+                policy_key="EXCEPTION_REPLY_SEND_DEDUPED",
+                previous_value={"exception_id": exception_id},
+                new_value={
+                    "recipient": p_draft.get("recipient"),
+                    "delivery_key": dkey,
+                },
+                changed_by=user.sub, change_reason=req.notes,
+            )
+            fresh = exception_store.get(exception_id, tenant_id) or record
+            response = fresh.to_detail()
+            if key is not None:
+                _idempotency_store(
+                    tenant_id, exception_id, user.sub, key, request_body,
+                    response.model_dump(),
+                )
+            return response
 
     result = _run_reply_draft(
         record, tenant_id, {**(req.reply or {}), "mode": "send"},
