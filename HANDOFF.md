@@ -44,27 +44,76 @@ _Last updated: 2026-05-24._
   Data sections + AI-Analysis; audited).
 - **Autonomy v2** ✓ — `contracts/autonomy.py` (prototype ordering
   L1=most-autonomous … L4=human; versioned, no historical reinterpretation).
-- **Phase 3 partial:** `OrderEntryExtraction` schema + composer ✓,
-  `OrderEntrySection` UI projector ✓, email-content sanitizer
-  (`llm.sanitizer.sanitize_email_text_for_llm`) ✓.
-- All four Customer-Inbox tabs render as data-presence projectors —
-  **preview-only** until producers populate `enrichment_context`.
+- **Phase 3 — extraction read path** ✓ — `OrderEntryExtraction` schema +
+  composer, `OrderEntrySection` UI projector, email-content sanitizer
+  (`llm.sanitizer.sanitize_email_text_for_llm`).
+- **Phase 3 — extraction gateway core** ✓ (2026-05-24): `OrderExtractionGateway`
+  (`gateways/extraction.py`) + `RecordedGatewayBackend` replay seam
+  (`gateways/recorded_backend.py`) + recorded fixtures
+  (`tests/fixtures/gateway/order_extraction/*.recorded.json`, provenance via
+  `scripts/record_gateway.py`; live `OutlinesExtractionBackend` import-guarded).
+  Constrained-gen contract `ExtractedOrderEnvelope` reuses `api.schemas`
+  submodels (no drift). DoR #1 sanitizer wired into the gateway. Red-green never
+  hits a live model.
+- **Gateway fan-out pool decoupled** ✓ — `resolve_dependencies` fans out on its
+  own pool (`_DEPENDENCY_FANOUT_POOL`), not `GatewayExecutor._pool` (fixed the
+  recursive-submit self-deadlock; a recipe's dep count is no longer pool-bounded).
+- **Phase 3 — producers wired live** ✓ — `ManualOrderIntakeRecipe` declares the
+  `order_extraction` (extract_order + extract_entities) + `sap_order` (validate)
+  read producers (`required_for_audit=False`); stubs in `api/sandbox_gateways.py`
+  + `tests/conftest.py`. The Order Entry / Entities / SAP Data tabs now activate
+  end-to-end (`enrichment_context` → composer). Preview-only when a producer
+  isn't wired (empty bag → tab omitted).
+- **Phase 3 — health-autonomy gate → green** ✓ — `/health` serves
+  `autonomy_vocab_version` + ranked `allowed_autonomy_levels` ({level,label,rank});
+  asoe-ui regen'd types + drives autonomy labels/ordering from health by `rank`
+  (Guardrail #1), hardcoded map demoted to transition fallback. **Display only —
+  policy.py gating ladder NOT migrated (that coherent v2 flip stays separately
+  gated).**
+- **Phase 3 — ERP-submit safety foundation** ✓:
+  - DoR #1 — email/attachment sanitizer wired into the extraction gateway.
+  - DoR #2 — order intake never auto-executes; a one-click-approve intake routes
+    to `MANUAL_REVIEW_REQUIRED` (the ERP submit is operator-gated). Guard in
+    `execute_recipe` keyed on `intent == MANUAL_ORDER_INTAKE`.
+  - DoR #3 — four-eyes cosign materiality from the SAP re-price
+    (`_cosign_materiality_usd`, reads `sap_data.order_value_usd`), not the LLM
+    `financial_impact_usd`.
+- **Phase 3 — SubmitToErpRecipe (deterministic core)** ✓ —
+  `recipes/SubmitToErpRecipe.build_erp_submission` builds the SAP
+  sales-order-create payload from the reviewed order, applies operator
+  corrections with a before/after audit, validates submittability (pure;
+  REJECTED on empty/invalid). **Not yet registered/graph-wired** — see PENDING.
 
 ## PENDING
-### Phase 3 (resume here)
-1. **Extraction gateway core** — constrained-generation LLM (Guidance/Outlines)
-   reading the sanitized email/attachments → writes `order_entry_extraction` +
-   `inbox_entities` + `sap_data` into `enrichment_context` (the producer that
-   activates the tabs). Build a `RecordedGatewayBackend` replay harness first;
-   TDD against recorded fixtures (never a live model in red-green).
-2. **SAP-read producer** (pipeline "SAP check" → `enrichment_context["sap_data"]`).
-3. **ERP-submit recipe** via sandbox/stub gateway + **order-entry corrections**
-   as dispositions on `/exceptions/{id}/disposition` (NOT new `/cases` verbs).
-4. **health-autonomy gate → green:** add `allowed_autonomy_levels`
-   (`{level,label,rank}`) to the health route + `HealthResponse`, regen UI
-   types, drive UI ordering from health by `rank` (greens
-   `tests/test_health_autonomy.py`). Bounded.
-5. Phase-3 completion audit.
+### Phase 3 (resume here) — ERP-submit execution wiring (graph re-entry)
+Owner chose **graph re-entry** for the financial write (not inline-in-handler).
+Remaining, in order:
+1. **Register + wire SubmitToErpRecipe**: add `"SubmitToErpRecipe.py"` to
+   `constraints/specs.py::AllowedRecipeName` + `recipes/registry.py::REGISTRY`
+   (allowed_intents `MANUAL_ORDER_INTAKE`; declare an **ERP gateway effect** —
+   e.g. `erp`/`create_sales_order`); register the `erp` StubGateway in
+   `api/sandbox_gateways.py` + `tests/conftest.py` (the
+   `test_gateway_registry_coverage` gate enforces both sites); update
+   `test_registry.py` len/▷recipe-count assertions.
+2. **Directed graph re-entry**: add a `directed_recipe` (and corrections-carrying)
+   field to `GraphState`; `select_recipe` uses it when set (bypass
+   `propose_recipe`); `validate_types` builds the `SubmitToErpRecipe` invocation
+   from `enrichment_context["order_entry_extraction"]` + operator corrections.
+3. **DoR #2 guard exemption**: the `execute_recipe` COMPLETE→MANUAL_REVIEW guard
+   must key on the **classifier** recipe (`selected_recipe ==
+   "ManualOrderIntakeRecipe.py"`), so the operator-authorised
+   `SubmitToErpRecipe` is allowed to reach COMPLETE.
+4. **Disposition trigger + cosign-on-approve**: on operator APPROVE of an intake
+   record, the disposition handler re-enters the graph with
+   `directed_recipe=SubmitToErpRecipe` (Shadow → execute → apply_effects = ERP
+   write). When `_cosign_materiality_usd >= $10k`, stage `PENDING_COSIGN` first;
+   the submit runs on cosign-approve. Corrections ride as disposition params →
+   before/after + actor + timestamp into the hash-chained audit (ADR-023);
+   retraining export stays a separate, gated sink.
+5. **Phase-3 completion audit** against ADR-042 §3 + this handoff.
+
+### Later phases
+- (unchanged — Phases 4–8 below.)
 
 ### Later phases
 - **Phase 4:** Draft Reply + Simulate Inbound + live pipeline. WS new event
