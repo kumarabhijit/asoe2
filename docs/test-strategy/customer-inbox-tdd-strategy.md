@@ -54,6 +54,17 @@ Per work item, **outside-in**, test-first:
 5. **Eval (parallel gate)** — golden cases added *before* the gateway exists.
 6. Green minimal code → refactor under green.
 
+### Spec tests committed ahead of implementation (CI hygiene)
+A RED gate landed before its production code uses
+`@pytest.mark.xfail(reason=..., strict=True)` (or module-level `pytestmark`).
+While unimplemented the assertion fails → recorded as **xfail** → CI stays
+green and honest ("spec pending"). The instant the code is implemented the
+test passes → **strict XPASS → hard CI failure**, forcing a deliberate marker
+removal. For gated work (autonomy-vocab flip, financial writes) that marker
+removal is the checkpoint that coincides with human + compliance sign-off —
+so the gate cannot be silently satisfied. Never delete the assertion to go
+green; only remove the `xfail` when the implementation legitimately lands.
+
 ### The recorded-fixture boundary (how we TDD non-deterministic LLM steps)
 Red-green **never** hits a live model. The fixture boundary is the *gateway
 interface*, not the model.
