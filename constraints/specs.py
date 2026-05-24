@@ -32,6 +32,9 @@ AllowedRecipeName = Literal[
     "PalletAlignmentRecipe.py",
     "DeliveryDelayResolutionRecipe.py",
     "ManualOrderIntakeRecipe.py",
+    # ADR-042 Phase 3 — the order-entry ERP write (operator-authorised submit,
+    # executed via directed graph re-entry on a disposition).
+    "SubmitToErpRecipe.py",
     # ADR-034 §6.3 — legacy recipe-name alias retained until
     # 2026-08-12 so pre-cutover audit-log rows still validate.
     "EmailOrderEntryRecipe.py",

@@ -342,6 +342,19 @@ def register_sandbox_gateways() -> None:
         },
     ))
 
+    # ADR-042 Phase 3 — the ERP write target for SubmitToErpRecipe's effect
+    # (sales-order create). Stub stands in for the real BAPI/EDI-850 connector.
+    register_gateway(StubGateway(
+        "erp",
+        responses={
+            "create_sales_order": GatewayResponse(
+                gateway_name="erp", operation="create_sales_order",
+                status="SUCCESS",
+                data={"sap_doc_number": "5100099999", "created": True},
+            ),
+        },
+    ))
+
     # ADR-029 / ADR-030: tenant_config is the file-backed PLATFORM resolver
     # for layer 1 + the DB-backed resolver for layers 2-5 (PR-C.2). It's
     # not a stub — the platform JSON ships with the application and the

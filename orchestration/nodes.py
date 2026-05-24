@@ -643,6 +643,21 @@ def shadow_audit(state: GraphState) -> GraphState:
 
 def select_recipe(state: GraphState) -> GraphState:
     entered_at = _now_iso()
+
+    # ADR-042 §2.2.6 — directed graph re-entry. The operator-authorised ERP
+    # submit acts on an already-classified record, so the recipe is supplied
+    # directly rather than re-proposed from intent. (propose_recipe maps an
+    # intent to exactly one recipe — the classifier — so it could never select
+    # the submit recipe.)
+    if state.directed_recipe:
+        state.selected_recipe = state.directed_recipe
+        _record(
+            state, node="select_recipe", entered_at=entered_at,
+            decision={"recipe_name": state.selected_recipe, "directed": True},
+            exit_verdict="directed",
+        )
+        return state
+
     backend = _backend(task="recipe")
     proposal = backend.propose_recipe(state)
     _drain_llm_trace(state, backend)
@@ -679,6 +694,28 @@ def select_recipe(state: GraphState) -> GraphState:
 
 def validate_types(state: GraphState) -> GraphState:
     entered_at = _now_iso()
+    if state.selected_recipe == "SubmitToErpRecipe.py":
+        # ADR-042 §2.2.6 — the submit invocation is built from the reviewed
+        # extraction carried on enrichment_context (NOT re-extracted) plus the
+        # operator's corrections. The recipe applies the corrections with a
+        # before/after audit and builds the ERP payload deterministically.
+        extraction = (state.enrichment_context or {}).get("order_entry_extraction") or {}
+        state.invocation = RecipeInvocation(
+            recipe_name=state.selected_recipe,
+            params={
+                "order_id": state.event.order_id,
+                "customer_bp": extraction.get("customer_bp"),
+                "header": extraction.get("header") or {},
+                "line_items": extraction.get("line_items") or [],
+                "corrections": state.directed_corrections or {},
+            },
+        )
+        _record(
+            state, node="validate_types", entered_at=entered_at,
+            decision={"recipe": state.selected_recipe, "directed_submit": True},
+            exit_verdict="ok",
+        )
+        return state
     if state.selected_recipe == "PriceAdjustmentRecipe.py":
         state.invocation = RecipeInvocation(
             recipe_name=state.selected_recipe,
@@ -1258,6 +1295,7 @@ def execute_recipe(state: GraphState) -> GraphState:
     if (
         state.final_status == TerminalStatus.COMPLETE
         and state.intent == Intent.MANUAL_ORDER_INTAKE
+        and state.selected_recipe == "ManualOrderIntakeRecipe.py"
     ):
         state.final_status = TerminalStatus.MANUAL_REVIEW_REQUIRED
         state.explanation = (
@@ -1265,6 +1303,9 @@ def execute_recipe(state: GraphState) -> GraphState:
             "operator-gated (ADR-042 §2.2.6 / DoR #2), so the record is routed "
             "to manual review for human authorisation rather than auto-executed."
         )
+        # NB: the guard keys on the *classifier* recipe. The operator-authorised
+        # SubmitToErpRecipe (directed graph re-entry) is exempt — it IS the
+        # human-gated submit, so it is allowed to reach COMPLETE.
 
     _record(
         state, node="execute_recipe", entered_at=entered_at,
@@ -1323,8 +1364,21 @@ def apply_effects(state: GraphState) -> GraphState:
         state.shadow.trace_id
         if state.shadow else state.request_trace_id
     )
+    recipe_status = (state.execution_log.outputs or {}).get("status")
 
     for effect in spec.effects:
+        # Per-effect firing predicate. A "do the thing" effect (e.g. the
+        # financially-binding ERP write) declares `only_on_recipe_status` so it
+        # fires ONLY when the recipe produced that outcome — a REJECTED submit
+        # must never reach the ERP gateway (Guardrail #5, no partial execution).
+        # Effects without the predicate (e.g. buyer notifications) fire on every
+        # post-GREEN outcome as before — a DuplicatePO BLOCK still notifies the
+        # buyer it was blocked.
+        if (
+            effect.only_on_recipe_status is not None
+            and recipe_status not in effect.only_on_recipe_status
+        ):
+            continue
         params = {}
         for gw_param, output_field in effect.params_from_output.items():
             params[gw_param] = state.execution_log.outputs.get(output_field)

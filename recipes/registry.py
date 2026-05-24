@@ -10,6 +10,7 @@ from recipes.DeliveryDelayResolutionRecipe import resolve_delivery_delay
 from recipes.DuplicatePORecipe import detect_duplicate_po
 from recipes.EdiMismatchRecipe import detect_edi_mismatch
 from recipes.ManualOrderIntakeRecipe import classify_manual_order_intake
+from recipes.SubmitToErpRecipe import build_erp_submission
 from recipes.MOQRoundUpRecipe import round_up_moq
 from recipes.OverMaxTrimRecipe import trim_over_max
 from recipes.PalletAlignmentRecipe import align_pallets
@@ -408,6 +409,28 @@ REGISTRY = {
             "composite_confidence",
             "non_disableable_floor",
             "validation_failures",
+        ),
+    ),
+    # ADR-042 Phase 3 — the order-entry ERP write. Not selected by
+    # propose_recipe (it isn't a fresh intent); reached only via directed graph
+    # re-entry (GraphState.directed_recipe) on an operator disposition. Returns
+    # the ERP sales-order payload; the `erp` gateway effect performs the write
+    # after Shadow (+ cosign >$10k) clears. allowed_intents keeps it on the
+    # MANUAL_ORDER_INTAKE record it acts on.
+    "SubmitToErpRecipe.py": RecipeSpec(
+        name="SubmitToErpRecipe.py",
+        func=build_erp_submission,
+        required_params=("order_id", "header", "line_items"),
+        allowed_intents=("MANUAL_ORDER_INTAKE",),
+        effects=(
+            GatewayEffect(
+                gateway_name="erp",
+                operation="create_sales_order",
+                params_from_output={"payload": "erp_payload"},
+                # Binding write — fire ONLY on a successful submit; a REJECTED
+                # order must never reach the ERP gateway (ADR-042 DoR #2 spirit).
+                only_on_recipe_status=("SUCCESS",),
+            ),
         ),
     ),
     "DeliveryDelayResolutionRecipe.py": RecipeSpec(

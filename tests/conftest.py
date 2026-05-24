@@ -433,6 +433,17 @@ def _register_oms_stub():
             ),
         },
     )
+    # ADR-042 Phase 3 — ERP write target for SubmitToErpRecipe's effect.
+    erp_stub = StubGateway(
+        "erp",
+        responses={
+            "create_sales_order": GatewayResponse(
+                gateway_name="erp", operation="create_sales_order",
+                status="SUCCESS",
+                data={"sap_doc_number": "5100099999", "created": True},
+            ),
+        },
+    )
     register_gateway(oms_stub)
     register_gateway(notification_stub)
     register_gateway(sap_doc_stub)
@@ -444,6 +455,7 @@ def _register_oms_stub():
     register_gateway(email_intake_stub)
     register_gateway(order_extraction_stub)
     register_gateway(sap_order_stub)
+    register_gateway(erp_stub)
     # ADR-029: tenant_config is registered as the real file-backed
     # gateway (not a stub) — it's pure in-process I/O against
     # gateways/configs/duplicate_po/defaults.json, so graph tests
