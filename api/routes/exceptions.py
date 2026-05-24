@@ -780,6 +780,97 @@ def _persist_erp_submit(exception_id, tenant_id, record, result, user_sub, notes
     return updated
 
 
+def _run_reply_draft(record, tenant_id: str, reply_params):
+    """Re-enter the graph to compose a buyer reply draft (ADR-042 Phase 4).
+
+    The compose runs on the deterministic path (Shadow → ReplyDraftRecipe); the
+    reviewed extraction rides on enrichment_context and the operator's reply
+    params (recipient / template / edits) on directed_corrections. No gateway
+    effect fires — the send is a separate authorised SEND_REPLY."""
+    event = OrderEvent.model_validate(record.original_event or {})
+    state = GraphState(
+        event=event,
+        tenant_id=tenant_id,
+        enrichment_context=dict(record.enrichment_context or {}),
+        directed_recipe="ReplyDraftRecipe.py",
+        directed_corrections=reply_params or {},
+    )
+    return _run_graph_safe(state)
+
+
+def _persist_reply_draft(exception_id, tenant_id, record, result, user_sub, notes):
+    """Persist a composed draft to resolution_data.reply_draft + emit audit.
+
+    The record lifecycle is unchanged: a draft is not a resolution — the
+    operator still reviews / edits / sends. A REJECTED compose (no recipient /
+    unknown template) is recorded with its reason, not masked as success."""
+    outputs = result.execution_log.outputs if result.execution_log else {}
+    status = outputs.get("status")
+    draft = outputs.get("draft") or {}
+    entry = {
+        "status": status,
+        "reason": outputs.get("reason"),
+        "draft": draft,
+        "edits_applied": outputs.get("edits_applied", []),
+        "drafted_by": user_sub,
+        "drafted_at": _utc_now_iso(),
+    }
+    merged = dict(record.resolution_data or {})
+    merged["reply_draft"] = entry
+    updated = exception_store.update(exception_id, tenant_id, resolution_data=merged)
+    if not updated:
+        raise ASOEError(code="UPDATE_FAILED",
+                        message="Failed to persist reply draft.", status_code=500)
+    exception_store.log_audit_event(
+        tenant_id=tenant_id,
+        policy_key="EXCEPTION_REPLY_DRAFTED" if status == "DRAFTED"
+        else "EXCEPTION_REPLY_DRAFT_REJECTED",
+        previous_value={"exception_id": exception_id},
+        new_value={
+            "reply_status": status,
+            "template_name": draft.get("template_name"),
+            "recipient": draft.get("recipient"),
+            "edits_applied": entry["edits_applied"],
+            "drafted_by": user_sub,
+        },
+        changed_by=user_sub, change_reason=notes,
+    )
+    return updated
+
+
+def _disposition_draft_reply(exception_id, tenant_id, record, req, user, key,
+                             request_body):
+    """DRAFT_REPLY disposition: compose a buyer reply draft (no send)."""
+    if not req.notes or not req.notes.strip():
+        raise ASOEError(code="NOTES_REQUIRED",
+                        message="Notes are required (SOX audit trail).",
+                        status_code=422)
+    if record.intent != "MANUAL_ORDER_INTAKE":
+        raise ASOEError(
+            code="NOT_DRAFTABLE",
+            message=("DRAFT_REPLY applies only to order-entry "
+                     "(MANUAL_ORDER_INTAKE) records."),
+            status_code=409,
+        )
+    if not (record.enrichment_context or {}).get("order_entry_extraction"):
+        raise ASOEError(code="NO_EXTRACTED_ORDER",
+                        message="Record carries no extracted order to reply about.",
+                        status_code=409)
+    _require_state(record, HITL_DISPOSITION_STATES, "draft_reply")
+
+    result = _run_reply_draft(record, tenant_id, req.reply or {})
+    updated = _persist_reply_draft(
+        exception_id, tenant_id, record, result, user.sub, req.notes,
+    )
+    response = updated.to_detail()
+    if key is not None:
+        _idempotency_store(
+            tenant_id, exception_id, user.sub, key, request_body,
+            response.model_dump(),
+        )
+    return response
+
+
 def _disposition_erp_submit(exception_id, tenant_id, record, req, user, key,
                             request_body):
     """SUBMIT_TO_ERP disposition: the financially-binding order-entry submit."""
@@ -1318,6 +1409,10 @@ async def disposition_exception(
     # takes a dedicated path: directed graph re-entry + four-eyes cosign >$10k.
     if req.action == "SUBMIT_TO_ERP":
         return _disposition_erp_submit(
+            exception_id, tenant_id, record, req, user, key, request_body,
+        )
+    if req.action == "DRAFT_REPLY":
+        return _disposition_draft_reply(
             exception_id, tenant_id, record, req, user, key, request_body,
         )
 

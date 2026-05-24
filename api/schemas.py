@@ -56,6 +56,10 @@ class DispositionRequest(BaseModel):
     # SubmitToErpRecipe on a SUBMIT_TO_ERP disposition with a before/after audit.
     # Shape: {"header": {field: value}, "lines": {line_num: {field: value}}}.
     corrections: Optional[Dict[str, Any]] = None
+    # ADR-042 Phase 4 — operator reply params for a DRAFT_REPLY disposition,
+    # composed by ReplyDraftRecipe. Shape: {"recipient": str, "template_name":
+    # str, "edits": {"subject"/"body": str}}.
+    reply: Optional[Dict[str, Any]] = None
 
 
 class CosignRequest(BaseModel):

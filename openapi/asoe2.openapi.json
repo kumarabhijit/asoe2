@@ -1238,6 +1238,18 @@
           "reason_tag": {
             "title": "Reason Tag",
             "type": "string"
+          },
+          "reply": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply"
           }
         },
         "required": [

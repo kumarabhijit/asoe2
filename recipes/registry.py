@@ -11,6 +11,7 @@ from recipes.DuplicatePORecipe import detect_duplicate_po
 from recipes.EdiMismatchRecipe import detect_edi_mismatch
 from recipes.ManualOrderIntakeRecipe import classify_manual_order_intake
 from recipes.SubmitToErpRecipe import build_erp_submission
+from recipes.ReplyDraftRecipe import compose_reply_draft
 from recipes.MOQRoundUpRecipe import round_up_moq
 from recipes.OverMaxTrimRecipe import trim_over_max
 from recipes.PalletAlignmentRecipe import align_pallets
@@ -432,6 +433,17 @@ REGISTRY = {
                 only_on_recipe_status=("SUCCESS",),
             ),
         ),
+    ),
+    # ADR-042 Phase 4 — AI Draft Reply compose leg. Pure composition, no
+    # gateway effect on this recipe; the buyer_notification send is fired by a
+    # separate operator-authorised SEND_REPLY (next increment). recipient is
+    # NOT a required_param — the recipe REJECTs cleanly when it is absent
+    # (Guardrail #5) rather than failing param validation.
+    "ReplyDraftRecipe.py": RecipeSpec(
+        name="ReplyDraftRecipe.py",
+        func=compose_reply_draft,
+        required_params=("order_id", "template_name"),
+        allowed_intents=("MANUAL_ORDER_INTAKE",),
     ),
     "DeliveryDelayResolutionRecipe.py": RecipeSpec(
         name="DeliveryDelayResolutionRecipe.py",

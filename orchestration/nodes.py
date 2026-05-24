@@ -716,6 +716,38 @@ def validate_types(state: GraphState) -> GraphState:
             exit_verdict="ok",
         )
         return state
+    if state.selected_recipe == "ReplyDraftRecipe.py":
+        # ADR-042 Phase 4 — the reply-draft invocation is built from the reviewed
+        # extraction on enrichment_context plus the operator's reply params
+        # (recipient / template / edits) carried on directed_corrections. The
+        # recipient is operator-supplied (not captured upstream); the recipe
+        # REJECTs when it is absent.
+        extraction = (state.enrichment_context or {}).get("order_entry_extraction") or {}
+        params = state.directed_corrections or {}
+        header = extraction.get("header") or {}
+        flags = [str(f) for f in (extraction.get("validation_flags") or [])]
+        state.invocation = RecipeInvocation(
+            recipe_name=state.selected_recipe,
+            params={
+                "order_id": state.event.order_id,
+                "recipient": params.get("recipient") or extraction.get("customer_email"),
+                "template_name": params.get("template_name")
+                or "email_order_clarification_request",
+                "customer_name": extraction.get("customer_name"),
+                "context": {
+                    "customer_po": header.get("customer_po"),
+                    "clarification_points": flags
+                    or ["Please confirm the order details before we proceed."],
+                },
+                "edits": params.get("edits") or {},
+            },
+        )
+        _record(
+            state, node="validate_types", entered_at=entered_at,
+            decision={"recipe": state.selected_recipe, "directed_reply": True},
+            exit_verdict="ok",
+        )
+        return state
     if state.selected_recipe == "PriceAdjustmentRecipe.py":
         state.invocation = RecipeInvocation(
             recipe_name=state.selected_recipe,
