@@ -111,6 +111,14 @@ async def list_cases(
         None,
         description="Filter by case source (manual_order | automated_order)",
     ),
+    case_type: Optional[str] = Query(
+        None,
+        description=(
+            "Filter by case_type (EMAIL_ENTRY | BLOCK). Orthogonal to source "
+            "(ADR-041 §1); drives the Customer Inbox EMAIL_ENTRY lens "
+            "(ADR-042)."
+        ),
+    ),
     status: Optional[str] = Query(
         None,
         description=(
@@ -161,6 +169,9 @@ async def list_cases(
 
     if source:
         cases = [c for c in cases if c.source == source]
+
+    if case_type:
+        cases = [c for c in cases if c.case_type == case_type]
 
     # Multi-value status: any-match. The empty list (after parse) is
     # treated as "no filter" so a trailing comma in the URL doesn't

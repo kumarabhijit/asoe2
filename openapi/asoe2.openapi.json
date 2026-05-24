@@ -5230,6 +5230,24 @@
             }
           },
           {
+            "description": "Filter by case_type (EMAIL_ENTRY | BLOCK). Orthogonal to source (ADR-041 \u00a71); drives the Customer Inbox EMAIL_ENTRY lens (ADR-042).",
+            "in": "query",
+            "name": "case_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by case_type (EMAIL_ENTRY | BLOCK). Orthogonal to source (ADR-041 \u00a71); drives the Customer Inbox EMAIL_ENTRY lens (ADR-042).",
+              "title": "Case Type"
+            }
+          },
+          {
             "description": "Filter by case status. Multi-value via comma-separated list (e.g. status=OPEN_AWAITING_HUMAN,OPEN_AWAITING_BUYER). Any-match: a case in any of the listed statuses passes.",
             "in": "query",
             "name": "status",
