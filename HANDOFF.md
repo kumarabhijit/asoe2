@@ -350,15 +350,27 @@ Working the post-feature-port backlog. **Landed this pass:**
   exc-026 (new order — all sections); exc-040..043 change requests (qty
   reduction / expedite / cancellation / SKU substitution → Change Analysis +
   graph); exc-044 INQUIRY, exc-045 COMPLAINT, exc-046 happy-path auto-resolved
-  EDI order. Classification chips (NEW_ORDER/ORDER_CHANGE/INQUIRY/COMPLAINT) all
-  exercised. Click through `/cases` (EMAIL_ENTRY lens) to validate.
+  EDI order, exc-047 OTHER (uncategorised → routed). All five classification
+  chips (NEW_ORDER/ORDER_CHANGE/INQUIRY/COMPLAINT/OTHER) exercised. Click through
+  `/cases` (EMAIL_ENTRY lens) to validate.
+- ✓ **#6 DB persistence + scheduler** — `effect_outbox` table (V015, Postgres +
+  SQLite) + tenant-scoped `OutboxRepository`; `orchestration/outbox` is now
+  backend-pluggable (in-memory default, DB when DATABASE_URL set) so the queue
+  survives restarts. Opt-in reconcile scheduler (`orchestration/outbox_scheduler`,
+  wired into a FastAPI lifespan, gated by `ASOE_OUTBOX_RECONCILE_INTERVAL_S`,
+  OFF by default). `tests/test_outbox_db.py` + `test_outbox_scheduler.py`.
+- ✓ **#10 SSRF wired** — `gateways/attachment_fetch.AttachmentFetchGateway`
+  validates every URL via the guard before fetch (stub blob in sandbox).
 
-### Still PENDING (smallest residue — pure infra)
-- **#6** DB-backed outbox table (durability) + scheduler to poll the reconciler.
+### Still PENDING (only what genuinely cannot be built now)
 - **#10 SSRF** — inject a REAL fetcher into AttachmentFetchGateway (+ resolve=True)
-  when the production attachment store is wired (the guard + stub are in place).
-- Constraint Graph (deferred per ADR §5b — reuses trace/topology).
-- ADR-042 → Accepted on autonomy-v2 dual-control sign-off.
+  once a production attachment store exists (guard + stub are in place).
+- **Constraint Graph** — deliberately NOT built: ADR §2.1/§5b say reuse
+  `get_pipeline_topology` + `/exceptions/{id}/trace` and do NOT add a new
+  surface; the Phase-6 Change Analysis section already renders the constraint
+  data. (Not a buildable task — an architectural deferral.)
+- **ADR-042 → Accepted** — compliance-gated on autonomy-v2 dual-control sign-off;
+  must not be flipped unilaterally.
 
 ### Gates status — DoR safety gates (strategy §6): ALL IMPLEMENTED
 - ✓ `tests/test_inbox_gate_openapi_contract.py` — **GREEN** (Phase 7): all 8
