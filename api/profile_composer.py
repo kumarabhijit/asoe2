@@ -26,7 +26,13 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from api.schemas import EntityProfile, ImpactMetrics
+from api.schemas import (
+    EntitiesAnalysisData,
+    EntityProfile,
+    ExtractedEntity,
+    ImpactMetrics,
+    SapDataAnalysisData,
+)
 from api.store import ExceptionRecord
 from api.users import get_account
 
@@ -80,6 +86,54 @@ def compose_entity_profile(record: ExceptionRecord) -> Optional[EntityProfile]:
         location=None,             # grandfathered — no producer
         region=acct.region,
     )
+
+
+# ---------------------------------------------------------------------------
+# Customer Inbox sections (ADR-042 Phase 2) — cross-cutting projections
+# from enrichment_context. SOLE source of truth (no recipe/UI synthesis);
+# return None when the backing gateway context is absent so the UI
+# structurally omits the tab (Guardrail #6 — no partial-truth). Preview-only
+# until the intake-extraction / SAP-read gateways populate enrichment_context.
+# ---------------------------------------------------------------------------
+
+def compose_entities_analysis(
+    record: ExceptionRecord,
+) -> Optional[EntitiesAnalysisData]:
+    """Project the AI-extracted entities from
+    `enrichment_context["inbox_entities"]` (shape: ``{"extracted": [...]}``).
+    None when absent or empty."""
+    ctx = record.enrichment_context.get("inbox_entities")
+    raw = ctx.get("extracted") if isinstance(ctx, dict) else None
+    if not isinstance(raw, list) or not raw:
+        return None
+    try:
+        entities = [ExtractedEntity(**e) for e in raw if isinstance(e, dict)]
+    except (TypeError, ValueError):
+        return None
+    if not entities:
+        return None
+    return EntitiesAnalysisData(extracted=entities)
+
+
+def compose_sap_data_analysis(
+    record: ExceptionRecord,
+) -> Optional[SapDataAnalysisData]:
+    """Project live SAP context from `enrichment_context["sap_data"]`. Requires
+    `system` + `validation_status` (the audit-bearing anchors); None otherwise."""
+    ctx = record.enrichment_context.get("sap_data")
+    if not isinstance(ctx, dict):
+        return None
+    if not ctx.get("system") or not ctx.get("validation_status"):
+        return None
+    try:
+        return SapDataAnalysisData(
+            system=ctx["system"],
+            validation_status=ctx["validation_status"],
+            order_value_usd=ctx.get("order_value_usd"),
+            sap_doc_number=ctx.get("sap_doc_number"),
+        )
+    except (TypeError, ValueError):
+        return None
 
 
 # ---------------------------------------------------------------------------

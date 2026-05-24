@@ -54,9 +54,11 @@ from api.analysis_adapters import (
 )
 from api.analysis_composer import compose as compose_analysis
 from api.profile_composer import (
+    compose_entities_analysis,
     compose_entity_profile,
     compose_impact_metrics,
     compose_narrative,
+    compose_sap_data_analysis,
 )
 from api.errors import ASOEError
 from api.schemas import (
@@ -1933,6 +1935,10 @@ async def get_analysis(
     entity_profile = compose_entity_profile(record)
     impact_metrics = compose_impact_metrics(record)
     root_cause, recommendation = compose_narrative(record, trace_data)
+    # ADR-042 Phase 2 — Customer Inbox Entities / SAP Data tabs. Cross-cutting
+    # composer projections (None until the gateways populate enrichment_context).
+    entities_analysis = compose_entities_analysis(record)
+    sap_data_analysis = compose_sap_data_analysis(record)
 
     return AnalysisResponse(
         diagnosis=diagnosis,
@@ -1944,5 +1950,7 @@ async def get_analysis(
         recommendation=recommendation,
         entity_profile=entity_profile,
         impact_metrics=impact_metrics,
+        entities_analysis=entities_analysis,
+        sap_data_analysis=sap_data_analysis,
         **extras,
     )
