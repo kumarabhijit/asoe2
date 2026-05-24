@@ -220,24 +220,49 @@ test + composer) — **met**:
 Full asoe2 suite green (3068 passed / 1 xfailed); asoe-ui tsc + 1199 vitest +
 build green. **Phase 6 complete.**
 
-The 8-section OpenAPI contract gate now has **6 of 8** schemas (adds the 4
-Change-Analysis names); still xfail until `KnowledgeGraphPayload` (Phase 7) and
-`DraftReply` land (the latter a Phase-4 carry-over — reply drafting shipped via
-`resolution_data`, no `DraftReply` analysis schema yet).
+## Phase-7 completion audit (2026-05-24)
+Audited against ADR-042 §7 / §5b (Phase 7 = Constraint Graph + Knowledge Graph,
+deferrable; + sandbox isolation sentinel) — **met**:
+- ✓ **Knowledge Graph** — `gateways/knowledge_graph.build_knowledge_graph` is a
+  pure, deterministic DERIVED projection of the case entities (order →
+  customer / materials / SAP doc / extracted entities) into nodes+edges. No
+  standalone KG source exists (§5b), so it derives from existing enrichment
+  context, not invented data. `KnowledgeGraphNode/Edge/Payload` schema +
+  composer (None when absent/empty — deferrable, Guardrail #6) +
+  `knowledge_graph`/`build` read producer + stubs. `KnowledgeGraphSection`
+  renders a deterministic radial SVG + an accessible relationships list (WCAG
+  parity). 5 builder unit tests + composer + component + deliverable-lock tests.
+- ✓ **DraftReply** (Phase-4 carry-over) — `DraftReply` (+ `DraftReplyEdit`)
+  schema + `compose_draft_reply` (projects `resolution_data["reply_draft"]`,
+  flattening the nested draft) + `DraftReplySection`. Completes the contract for
+  the AI Draft Reply evidence on the analysis payload.
+- ✓ **8-section OpenAPI contract gate GREEN** — all 8 ADR-042 §2.2.1 schemas now
+  exported; `test_inbox_gate_openapi_contract.py` xfail marker **removed** — it
+  is now a standing hard gate against section-schema removal.
+- ✓ **Sandbox isolation sentinel (gate #8)** — `test_sandbox_inbound_isolation`:
+  the inbound injector does not append to the prod audit hash-chain and its
+  records are tenant-scoped. (The env-gate 403 was already locked in
+  `tests/contract/test_sandbox_manual_order_intake_producer.py`.)
+- ✓ **Registry** — ManualOrderIntakeRecipe now declares 6 inbox read producers
+  (11 deps total); the registry lock asserts the full set.
+Full asoe2 suite green (3088 passed, **0 xfailed** — the contract gate flipped);
+asoe-ui tsc + 1213 vitest + build green. **Phase 7 complete.**
+
+**Constraint Graph — deliberately deferred** (ADR §5b "deferrable behind
+demand"; ADR §2.1 "reuse `get_pipeline_topology` + `/exceptions/{id}/trace`, do
+NOT build a new surface"). It would duplicate the existing ADR-027 PipelineDAG /
+trace and the Phase-6 ChangeAnalysisSection (which already renders the
+constraint evaluation). No new graph surface built — the existing trace/topology
++ the Change Analysis section cover it.
 
 ## PENDING
 ### Later phases
-- **Phase 7:** Constraint Graph + Knowledge Graph (`KnowledgeGraphPayload`;
-  deferrable) + sandbox `/sandbox/simulate-inbound` injector isolation sentinel
-  (re-homed gate #8).
 - **Phase 8:** Hardening — full test pyramid, axe, contract snapshots,
   ADR-042 → **Accepted**.
 
 ### Gates still RED / not yet written
-- `tests/test_inbox_gate_openapi_contract.py` (xfail) flips green only when all
-  8 section schemas exist (have `OrderEntryExtraction` + `Edi850Document` +
-  Change-Analysis 4 = 6 of 8; need `KnowledgeGraphPayload` (Phase 7) +
-  `DraftReply` (Phase-4 carry-over)).
+- ✓ `tests/test_inbox_gate_openapi_contract.py` — **GREEN** (Phase 7): all 8
+  section schemas exported; xfail marker removed → standing hard gate.
 - DoR safety gates (strategy doc §6) — only **sanitizer** + **autonomy** are
   implemented; the rest are documented-but-unwritten and land in their phases:
   injected-GREEN → `MANUAL_REVIEW` (#2), cosign threshold from SAP master-data
@@ -291,16 +316,17 @@ Change-Analysis names); still xfail until `KnowledgeGraphPayload` (Phase 7) and
 > Continue the ASOE Customer-Inbox port on branch `claude/gifted-darwin-NbqQo`
 > (asoe2 PR #166, asoe-ui PR #185). Read `asoe2/HANDOFF.md`, then
 > `asoe2/docs/adr/ADR-042-customer-inbox-prototype-port.md` and both
-> `docs/test-strategy/customer-inbox-tdd-strategy.md`. Phases 0–6 are **done**
-> (MLS + Draft Reply + live WS events + EDI 850 + Change Analysis). Resume
-> **Phase 7 = Constraint Graph + Knowledge Graph** — reuse
-> `orchestration/graph.py::get_pipeline_topology` + per-record
-> `/exceptions/{id}/trace` for the constraint graph (do NOT build a new
-> surface); the Knowledge Graph is a net-new derived projection
-> (`KnowledgeGraphPayload`) over `OrderCase`/`ExceptionRecord` entities, and is
-> **deferrable** (no KG data source today). Also lands the
-> `/sandbox/simulate-inbound` injector **isolation sentinel** (re-homed gate #8)
-> and the Phase-4 `DraftReply` analysis-schema carry-over. Pre-prod: compliance
-> sign-off waived, keep in-code Shadow/audit intact. Discipline: TDD, run
-> tsc/tests before push, wait for CI green (10-min fallback) between tasks,
-> audit each phase against the plan before declaring complete.
+> `docs/test-strategy/customer-inbox-tdd-strategy.md`. Phases 0–7 are **done**
+> (MLS + Draft Reply + live WS events + EDI 850 + Change Analysis + Knowledge
+> Graph; all 8 section schemas exported, contract gate green). Resume **Phase 8 =
+> Hardening** — the strategy §6 DoR safety gates that were deferred "to their
+> phases" but are cross-cutting (#5 delivery idempotency + correlation_id, #6
+> outbox/compensation, #8 gateway circuit breaker, #9 business/disposition audit
+> hash chain, #10 XSS/CSP + SSRF, plus #4 confidence calibration/ECE, #7 SLO
+> histogram, #11 automation-bias metrics), the full test pyramid (axe
+> accessibility sweeps, contract snapshots), and finally flip **ADR-042 status →
+> Accepted**. The Constraint Graph stays deferred per ADR §5b (reuses the
+> existing trace/topology). Pre-prod: compliance sign-off waived, keep in-code
+> Shadow/audit intact. Discipline: TDD, run tsc/tests before push, wait for CI
+> green (10-min fallback) between tasks, audit each phase against the plan
+> before declaring complete.
