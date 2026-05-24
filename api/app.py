@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.errors import ASOEError, asoe_error_handler, unhandled_error_handler
-from api.middleware import TraceIDMiddleware
+from api.middleware import SecurityHeadersMiddleware, TraceIDMiddleware
 import os
 
 from api.routes import accounts, auth, cases, exceptions, health, pipeline, policies, workflows, ws
@@ -101,6 +101,7 @@ def create_app() -> FastAPI:
         )
 
     application.add_middleware(TraceIDMiddleware)
+    application.add_middleware(SecurityHeadersMiddleware)
 
     application.add_exception_handler(ASOEError, asoe_error_handler)  # type: ignore[arg-type]
     application.add_exception_handler(Exception, unhandled_error_handler)  # type: ignore[arg-type]
