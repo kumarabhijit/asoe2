@@ -672,6 +672,26 @@ def _financial_impact_usd(record) -> Optional[float]:
     return None
 
 
+def _cosign_materiality_usd(record) -> Optional[float]:
+    """Financial materiality that gates the four-eyes cosign (ADR-042 DoR #3).
+
+    Computed from the SAP system-of-record order value (master-data re-price,
+    surfaced by the sap_order producer in
+    ``enrichment_context["sap_data"]["order_value_usd"]``) — NOT the
+    LLM-extracted ``financial_impact_usd``. An upstream adversary who drives the
+    extracted impact below the threshold must not dodge cosign on a genuinely
+    high-value order. The SAP value is authoritative when present; we fall back
+    to the recipe/LLM impact only when no SAP read exists so the gate never
+    silently under-fires.
+    """
+    sap = (record.enrichment_context or {}).get("sap_data")
+    if isinstance(sap, dict):
+        val = sap.get("order_value_usd")
+        if isinstance(val, (int, float)):
+            return float(val)
+    return _financial_impact_usd(record)
+
+
 # ---------------------------------------------------------------------------
 # POST /api/v1/exceptions/resolve — Synchronous resolution
 # ---------------------------------------------------------------------------
@@ -1181,7 +1201,7 @@ async def disposition_exception(
         # reanalysis_history audit trail records every override
         # initiator/timestamp so SOX evidence-of-control is preserved.
         # Four-eyes: high-value overrides stage to PENDING_COSIGN.
-        impact = _financial_impact_usd(record)
+        impact = _cosign_materiality_usd(record)
         if impact is not None and impact >= HIGH_VALUE_OVERRIDE_THRESHOLD_USD:
             prior_snapshot = {
                 "lifecycle_state": record.lifecycle_state,
