@@ -97,3 +97,35 @@ async def metrics() -> Response:
         content=_render_metrics(),
         media_type="text/plain; version=0.0.4; charset=utf-8",
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/metrics/reviewer-activity — automation-bias telemetry (DoR #11)
+# ---------------------------------------------------------------------------
+# The UI reports one event per operator decision: how long the operator dwelled
+# on the case and whether they expanded Layer-2 evidence first. Authenticated
+# (a reviewer action), but never blocks the UI — best-effort telemetry.
+
+from fastapi import Depends, status  # noqa: E402
+from pydantic import BaseModel, ConfigDict, Field  # noqa: E402
+
+from api.deps import require_role  # noqa: E402
+from api.metrics import record_reviewer_activity  # noqa: E402
+
+
+class ReviewerActivityRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    dwell_ms: float = Field(ge=0)
+    layer2_opened: bool
+
+
+@router.post(
+    "/metrics/reviewer-activity",
+    status_code=status.HTTP_202_ACCEPTED,
+    include_in_schema=False,
+    dependencies=[Depends(require_role("analyst", "manager", "admin"))],
+)
+async def reviewer_activity(req: ReviewerActivityRequest) -> dict:
+    """Record one decision's automation-bias signals (Layer-2-open + dwell)."""
+    record_reviewer_activity(dwell_ms=req.dwell_ms, layer2_opened=req.layer2_opened)
+    return {"ok": True}

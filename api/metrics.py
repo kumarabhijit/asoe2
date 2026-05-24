@@ -552,6 +552,82 @@ def render_gateway_metrics() -> str:
     return "\n".join(lines) + "\n" if lines else ""
 
 
+# ---------------------------------------------------------------------------
+# Automation-bias SLIs (DoR #11). The reviewer-override rate already lives on
+# the shadow-LLM surface; these add the two behavioural signals that detect
+# rubber-stamping: the Layer-2-open rate (did the operator expand the evidence
+# before deciding?) and decision dwell (how long from opening the case to acting).
+# Fed by POST /api/v1/metrics/reviewer-activity at disposition time.
+# ---------------------------------------------------------------------------
+
+_DWELL_BUCKETS_S: tuple[float, ...] = (1, 3, 5, 10, 30, 60, 300)
+_ab_lock = _CaseLock()
+_ab_decisions: int = 0
+_ab_layer2_opened: int = 0
+_ab_dwell_buckets: list[int] = [0] * (len(_DWELL_BUCKETS_S) + 1)
+_ab_dwell_sum: float = 0.0
+
+
+def record_reviewer_activity(*, dwell_ms: float, layer2_opened: bool) -> None:
+    """Record one operator decision's automation-bias signals. No-op on a
+    negative / NaN / non-numeric dwell — never raises (DoR #11)."""
+    global _ab_decisions, _ab_layer2_opened, _ab_dwell_sum
+    try:
+        dwell_s = float(dwell_ms) / 1000.0
+    except (TypeError, ValueError):
+        return
+    if dwell_s != dwell_s or dwell_s < 0:  # NaN or negative
+        return
+    with _ab_lock:
+        _ab_decisions += 1
+        if layer2_opened:
+            _ab_layer2_opened += 1
+        for i, edge in enumerate(_DWELL_BUCKETS_S):
+            if dwell_s <= edge:
+                _ab_dwell_buckets[i] += 1
+                break
+        else:
+            _ab_dwell_buckets[-1] += 1
+        _ab_dwell_sum += dwell_s
+
+
+def reset_reviewer_activity() -> None:
+    """Test helper — drop all automation-bias samples."""
+    global _ab_decisions, _ab_layer2_opened, _ab_dwell_sum
+    with _ab_lock:
+        _ab_decisions = 0
+        _ab_layer2_opened = 0
+        for i in range(len(_ab_dwell_buckets)):
+            _ab_dwell_buckets[i] = 0
+        _ab_dwell_sum = 0.0
+
+
+def render_reviewer_activity_metrics() -> str:
+    lines: list[str] = []
+    with _ab_lock:
+        decisions = _ab_decisions
+        opened = _ab_layer2_opened
+        buckets = list(_ab_dwell_buckets)
+        dwell_sum = _ab_dwell_sum
+    lines += _help_type("reviewer_decisions_total", "Operator disposition decisions observed.", "counter")
+    lines.append(_line("reviewer_decisions_total", decisions))
+    lines += _help_type("reviewer_layer2_opened_total", "Decisions where the operator expanded Layer-2 evidence first.", "counter")
+    lines.append(_line("reviewer_layer2_opened_total", opened))
+    lines += _help_type("reviewer_layer2_open_rate", "Layer-2-open rate (opened / decisions); low values flag automation bias.", "gauge")
+    lines.append(_line("reviewer_layer2_open_rate", round(opened / decisions, 4) if decisions else 0.0))
+    lines += _help_type("reviewer_decision_dwell_seconds", "Time from opening a case to acting on it.", "histogram")
+    name = "reviewer_decision_dwell_seconds"
+    cumulative = 0
+    for i, edge in enumerate(_DWELL_BUCKETS_S):
+        cumulative += buckets[i]
+        lines.append(_line(f"{name}_bucket", cumulative, labels={"le": _fmt_le(edge)}))
+    cumulative += buckets[-1]
+    lines.append(_line(f"{name}_bucket", cumulative, labels={"le": "+Inf"}))
+    lines.append(_line(f"{name}_sum", dwell_sum))
+    lines.append(_line(f"{name}_count", decisions))
+    return "\n".join(lines) + "\n"
+
+
 def render_all() -> str:
     """Convenience entrypoint for the route handler."""
     return (
@@ -560,4 +636,5 @@ def render_all() -> str:
         + render_event_type_metrics()
         + render_ingest_terminal_histogram()
         + render_gateway_metrics()
+        + render_reviewer_activity_metrics()
     )
