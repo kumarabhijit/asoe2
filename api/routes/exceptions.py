@@ -835,6 +835,19 @@ def _persist_reply_draft(exception_id, tenant_id, record, result, user_sub, note
         },
         changed_by=user_sub, change_reason=notes,
     )
+    event_publisher.publish(
+        tenant_id,
+        WSEvent.reply_drafted(
+            trace_id=record.trace_id or exception_id,
+            exception_id=exception_id,
+            tenant_id=tenant_id,
+            status=status or "REJECTED",
+            template_name=draft.get("template_name"),
+            recipient=draft.get("recipient"),
+            subject=draft.get("subject"),
+            drafted_by=user_sub,
+        ),
+    )
     return updated
 
 
@@ -918,6 +931,19 @@ def _persist_reply_sent(exception_id, tenant_id, record, result, user_sub, notes
             "sent_by": user_sub,
         },
         changed_by=user_sub, change_reason=notes,
+    )
+    event_publisher.publish(
+        tenant_id,
+        WSEvent.reply_sent(
+            trace_id=record.trace_id or exception_id,
+            exception_id=exception_id,
+            tenant_id=tenant_id,
+            status=entry["status"],
+            recipient=entry["recipient"],
+            subject=entry["subject"],
+            delivered=entry["delivered"],
+            sent_by=user_sub,
+        ),
     )
     return updated
 

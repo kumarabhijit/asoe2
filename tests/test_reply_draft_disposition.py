@@ -11,11 +11,14 @@ Written test-first.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
 from api.app import create_app
 from api.deps import create_test_token
+from api.pubsub import event_publisher
 from api.routes.exceptions import _clear_idempotency_cache
 from api.store import exception_store
 
@@ -35,7 +38,13 @@ _EXTRACTION = {
 def client():
     exception_store.clear()
     _clear_idempotency_cache()
+    if hasattr(event_publisher, "clear"):
+        event_publisher.clear()
     return TestClient(create_app(), raise_server_exceptions=False)
+
+
+def _events(tenant_id="tenant-a"):
+    return [json.loads(e) for e in event_publisher.get_recent(tenant_id)]
 
 
 def _auth(sub="user-A"):
@@ -158,3 +167,23 @@ def test_send_reply_on_non_intake_record_is_rejected(client) -> None:
     r = _send(client, rec.id, reply={"recipient": "x@y.com"},
               reason_tag="CONFIRMED_DUPLICATE")
     assert r.status_code in (409, 422)
+
+
+def test_draft_reply_emits_reply_drafted_event(client) -> None:
+    rec = _seed()
+    _draft(client, rec.id, reply={"recipient": "orders@walmart.example"})
+    drafted = [e for e in _events() if e["type"] == "reply_drafted"]
+    assert len(drafted) == 1
+    ev = drafted[0]
+    assert ev["exception_id"] == rec.id
+    assert ev["payload"]["status"] == "DRAFTED"
+    assert ev["payload"]["recipient"] == "orders@walmart.example"
+
+
+def test_send_reply_emits_reply_sent_event(client) -> None:
+    rec = _seed()
+    _send(client, rec.id, reply={"recipient": "orders@walmart.example"})
+    sent = [e for e in _events() if e["type"] == "reply_sent"]
+    assert len(sent) == 1
+    assert sent[0]["payload"]["status"] == "SENT"
+    assert sent[0]["payload"]["delivered"] is True
