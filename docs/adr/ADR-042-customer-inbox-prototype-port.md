@@ -52,7 +52,11 @@ ASOE production architecture, where:
 
 Crucially, **ADR-041 already retired the standalone Customer Inbox.**
 `/inbox` permanently redirects to `/cases?source=manual_order`; the
-`/cases` two-/three-pane workspace is the single canonical surface.
+`/cases` **two-pane** workspace (queue + detail, with the record
+picker stacked at the top of the detail pane) is the single
+canonical surface. (asoe-ui `662c9d2` collapsed the short-lived
+3-column layout back to two panes; the dedicated `RecordListPane`
+column was removed and the picker is now inline in the detail pane.)
 ADR-041 also added the `case_type ∈ {EMAIL_ENTRY, BLOCK}` axis and
 `email_classification ∈ {NEW_ORDER, ORDER_CHANGE, INQUIRY,
 COMPLAINT, OTHER}` — i.e. the prototype's email-intent taxonomy
@@ -83,8 +87,8 @@ becomes a Pydantic-typed analysis section assembled by
 | Order Entry (extract→form→validate→submit) | Extraction **gateway** (constrained LLM) + `EMAIL_ORDER_ENTRY` **recipe** + master-data **constraints** + ERP-submit recipe (Shadow-gated); corrections logged to audit | Skill ✅ (ADR-034); full path ⛔ |
 | EDI 850 Audit | Deterministic server builder (port client `buildEDI850`) as a gateway/recipe; read endpoint | ⛔ |
 | Change Analysis (constraints / scenarios / decision / financials) | **Recipe** evaluations (deterministic, thresholds from `contracts/policy.py`) + Compliance Shadow + composer. NOT `constraints/` (that is the constrained-LLM-generation router) and NOT `agents/harness.py` (a gated-off single-case sequential loop, not a parallel fan-out). Render **variable cardinality** (N constraints / M scenarios), not the prototype's fixed 10/7/3; agent timings are cosmetic, not audit-bearing. | recipe home ⛔ |
-| Constraint Graph | `orchestration/graph.py::get_pipeline_topology` + per-record `/exceptions/{id}/trace` (ADR-027) | Topology ✅; per-case projection ⛔ |
-| Knowledge Graph | `knowledge/` subsystem → entity-relationship payload section | Partial ⛔ |
+| Constraint Graph | Reuse `orchestration/graph.py::get_pipeline_topology` + per-record `/exceptions/{id}/trace` (ADR-027) — do **not** build a new surface | Topology ✅; per-case projection ⛔ |
+| Knowledge Graph | **Net-new derived projection** over `OrderCase` / `ExceptionRecord` entities. **Correction:** the `knowledge/` package is NOT a graph producer — it is `compaction / policy / shadow_llm / skills` (the skill/policy knowledge base). No KG data source exists today; this is deferrable (see §3 / §5b). | ⛔ no source |
 | AI Draft Reply (gen/edit/approve/send) | Reply-draft recipe action (`REQUEST_CLARIFICATION` / `REQUEST_BUYER_CONFIRMATION`, already in UI `ACTION_LABELS`) + email gateway send, Shadow + cosign | Action vocab ✅; send path ⛔ |
 | Simulate Inbound | `api/routes/sandbox.py` injector (sandbox env only) → real pipeline | Sandbox harness ✅; scenario injector ⛔ |
 | AI Intake Flow (6-step) | `GET /api/v1/pipeline/topology` + WS step events | ✅ (ADR-027) — UI wiring only |
@@ -128,42 +132,56 @@ becomes a Pydantic-typed analysis section assembled by
    constraints / M scenarios. Putting evaluation in the harness
    would violate Guardrail #1 (execution outside recipes) and
    depend on an unshipped loop.
-5. **Orchestration & composer (lazy, not eager).** The composer
-   (`api/analysis_composer.py`) remains the **sole** assembler
-   (Guardrail #6), projecting already-resolved
-   `state.enrichment_context`. But `build_analysis`
-   (`orchestration/nodes.py`) is a synchronous graph node under the
-   per-call budgets in `policy.py`; loading EDI-850, knowledge
-   graph, the full constraint evaluation, and SAP reads inline risks
-   the SLA. Heavy sections are fetched via **lazy per-section read
-   endpoints** (`GET /cases/{id}/edi-850`, `/knowledge-graph`,
-   `/change-analysis`); only light evidence is eager in
-   `build_analysis`. Ensure `orchestration/graph.py` topology covers
+5. **Orchestration & composer (composer-first; split only on an
+   ADR-031 trigger).** The composer (`api/analysis_composer.py`)
+   remains the **sole** assembler (Guardrail #6), projecting
+   already-resolved `state.enrichment_context`. **Fidelity
+   correction:** the default is the *unified* `OrderAnalysis`
+   composer payload — sections are projected fields on it, **not**
+   eagerly-invented per-section endpoints. Splitting a heavy section
+   (EDI-850, knowledge graph, change-analysis) out to a dedicated
+   read projection happens **only when a pre-committed ADR-031-style
+   trigger fires** (P95 latency / payload-size budget), starting as
+   a materialised view. (`/cases/{id}/records` and
+   `/exceptions/{id}/trace` are the existing precedents for a
+   separate read.) Ensure `orchestration/graph.py` topology covers
    the order-entry path.
-6. **API routes** (extend, don't fork — mirror the RBAC + tenant +
-   `_scope_to_user` shape in `api/routes/cases.py`):
-   * `GET /cases?case_type=EMAIL_ENTRY` filter (list lens).
-   * `POST /cases/{id}/order-entry/extract`
-   * `PATCH /cases/{id}/order-entry` — operator corrections.
-     **Compliance correction:** the before/after + actor + timestamp
-     of each corrected field MUST land in the hash-chained audit log
-     (ADR-023), system-derived identity. "Logged for retraining" is
-     a **separate, gated, consented, de-identified** export — not
-     the same sink as the immutable audit capture, and subject to a
-     documented lawful-basis + retention control.
-   * `POST /cases/{id}/order-entry/submit` — **Shadow + cosign(>$10k)
-     (ADR-040)**, explicitly: this is the financially-binding ERP
-     write and inherits the case-level four-eyes gate.
-   * `POST /cases/{id}/reply/draft`, `POST /cases/{id}/reply/send`
-     — Shadow + cosign(>$10k). Audit MUST persist `body_hash` +
-     content + actor + verdict before send (outbound customer
-     commitment, analogous to `EmailSourceData.body_hash`). The
-     email **body is human-facing** prose → constrained generation
-     (Guardrail #3) is NOT required for it; any **machine-consumed
-     control field** (action enum, recipient, send-decision) MUST be
-     constrained.
-   * `GET /cases/{id}/edi-850`, `GET /cases/{id}/knowledge-graph`,
-     `GET /cases/{id}/change-analysis` (lazy per-section reads).
+6. **API routes — reuse the disposition surface, do NOT add
+   bespoke `/cases` write verbs (fidelity correction).**
+   `api/routes/cases.py` is **read-only by explicit design** ("any
+   write path that wants to alter case state must go through the
+   existing override / cosign / disposition flows"); the only case
+   writes that exist are ADR-040 `override` + `override/cosign`. The
+   canonical per-record action surface is on **exceptions**
+   (`/exceptions/resolve`, `/exceptions/{id}/disposition`,
+   `/escalate`, `/reanalyze`, `/challenge`, `/admin-release`,
+   `/override/cosign`). Therefore:
+   * **Reads / list:** `GET /cases?case_type=EMAIL_ENTRY` filter
+     (list lens). Extraction and draft-generation are **reads /
+     enrichment** (no lifecycle mutation) — surfaced via the
+     analysis payload + a sandbox/agent trigger, **not** new write
+     endpoints.
+   * **Order-entry submit (ERP write)** → a **disposition /
+     recipe-execution** through `/exceptions/{id}/disposition`
+     (+ override/cosign >$10k, ADR-040), NOT a new
+     `POST /cases/{id}/order-entry/submit`. It is financially
+     binding and inherits the four-eyes gate.
+   * **Operator corrections** → carried as disposition parameters;
+     before/after + actor + timestamp land in the hash-chained
+     audit log (ADR-023). "Logged for retraining" is a **separate,
+     gated, consented, de-identified** export — never the same sink
+     as the immutable audit capture.
+   * **Reply send (outbound write)** → a **disposition action**
+     (Shadow + cosign >$10k). Audit MUST persist `body_hash` +
+     content + actor + verdict before send (analogous to
+     `EmailSourceData.body_hash`). The email **body is human-facing**
+     → constrained generation (Guardrail #3) is NOT required for it;
+     any **machine-consumed control field** (action enum, recipient,
+     send-decision) MUST be constrained.
+   * **Heavy section reads** (EDI-850, knowledge-graph,
+     change-analysis) ship as composer-payload fields by default;
+     promote to a dedicated `GET` read projection **only** on an
+     ADR-031 trigger (see item 5).
    * `POST /api/v1/sandbox/simulate-inbound` (sandbox only) —
      **must** carry a non-prod `tenant_id` and be excluded from the
      prod hash chain; a test asserts sandbox-injected records cannot
@@ -176,15 +194,15 @@ becomes a Pydantic-typed analysis section assembled by
 
 ### 2.3 Frontend workstream (summary; full detail in the paired plan)
 
-The inbox becomes an **`EMAIL_ENTRY` lens on `/cases`** (filter chip
-+ existing master-detail), not a revived route. New colocated
-`/cases` detail sections (`OrderEntrySection`, `Edi850Section`,
-`EntitiesSection`, `SapDataSection`, `ConstraintGraphSection`,
-`KnowledgeGraphSection`, `DraftReplyPanel`) are dumb `EvidenceBlock`
-projectors using `AgentReasoningCard` (Layer 1/2), enums from
-`useHealth`, graphs via `dagre`, design tokens only. Full breakdown,
-component list, and test gates live in
-`asoe-ui/docs/customer-inbox-implementation-plan.md`.
+The inbox becomes an **`EMAIL_ENTRY` lens on the two-pane `/cases`
+workspace** (filter chip + existing master-detail), not a revived
+route. New detail sections mount **inside `ExceptionDetailPanel`**
+(the record picker is now stacked atop the detail pane after
+`662c9d2`) as dumb `EvidenceBlock` projectors using
+`AgentReasoningCard` (Layer 1/2), enums from `useHealth`, SVG graphs
+(dagre for the constraint graph; radial/SVG for the knowledge
+graph), design tokens only. Full breakdown, component list, and test
+gates live in `asoe-ui/docs/customer-inbox-implementation-plan.md`.
 
 ## 3. Phased delivery
 
@@ -321,6 +339,31 @@ Domain) of the draft. Adopted corrections, all folded in above:
   render variable-cardinality constraints, drop agent timings as
   evidence; MLS = Phases 0–3; Draft Reply pulled ahead of graphs
   (§3).
+
+## 5d. Architecture-fidelity audit (2026-05-23)
+
+A follow-up audit against the live codebase caught the draft drifting
+from current architecture in three places; all corrected above:
+
+1. **Bespoke `/cases` write verbs → the disposition surface.**
+   `api/routes/cases.py` is read-only by design (writes go through
+   override / cosign / disposition). Order-entry submit, reply send,
+   and corrections are now modelled as **dispositions /
+   recipe-executions on the per-record exception surface** (+ cosign),
+   not new `/cases/{id}/...` POST/PATCH verbs. Extraction and
+   draft-generation are reads/enrichment, not writes (§2.2.6).
+2. **Knowledge Graph mis-homed to `knowledge/`.** That package is
+   `compaction / policy / shadow_llm / skills`, not a graph producer.
+   The KG is a net-new derived projection (or deferred); the
+   Constraint Graph reuses `/exceptions/{id}/trace` + topology
+   (§2.1).
+3. **Per-section read endpoints pre-empted ADR-031.** Sections are
+   composer-payload fields by default; a dedicated read projection
+   is split out **only on a pre-committed ADR-031 trigger** (§2.2.5).
+
+Plus the two-pane correction: asoe-ui `662c9d2` collapsed the
+3-column layout to two panes (record picker inline in the detail
+pane); all pane references updated (§1, §2.3).
 
 ## 6. Definition of Done
 
