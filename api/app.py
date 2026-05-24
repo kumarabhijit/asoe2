@@ -11,6 +11,9 @@ Usage:
 
 from __future__ import annotations
 
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -80,12 +83,34 @@ def _resolve_cors_config(env: dict[str, str] | None = None) -> tuple[list[str], 
     return origins, regex
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """App lifespan — starts the opt-in outbox reconcile scheduler (DoR #6).
+
+    Disabled by default; only runs when ASOE_OUTBOX_RECONCILE_INTERVAL_S is set
+    (see orchestration/outbox_scheduler). No-op otherwise, so the default
+    runtime + tests are unaffected."""
+    from orchestration.outbox_scheduler import start_if_configured
+
+    task = None
+    try:
+        task = start_if_configured()
+    except Exception:  # pragma: no cover - scheduler must never block startup
+        logging.getLogger("asoe").exception("outbox scheduler failed to start")
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
+
+
 def create_app() -> FastAPI:
     """Build and configure the FastAPI application."""
     application = FastAPI(
         title="ASOE — Agentic System for Order-to-Cash Exceptions",
         version="0.3.2",
         description="Deterministic, compliance-aware exception management API.",
+        lifespan=_lifespan,
     )
 
     cors_origins, cors_regex = _resolve_cors_config()
