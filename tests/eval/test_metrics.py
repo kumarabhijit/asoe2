@@ -23,9 +23,11 @@ def test_confusion_matrix_counts_actual_by_predicted() -> None:
 
 
 def test_confusion_matrix_includes_never_true_labels() -> None:
-    # "C" only ever appears as a (wrong) prediction — it must still be a column.
+    # "C" only ever appears as a (wrong) prediction — it must still be a row
+    # (all-zero, since it's never the truth) AND a column. The single
+    # (actual=A, predicted=C) pair lands at [A][C].
     cm = confusion_matrix([("A", "C")])
-    assert cm == {"A": {"A": 0, "C": 0}, "C": {"A": 0, "C": 0}}
+    assert cm == {"A": {"A": 0, "C": 1}, "C": {"A": 0, "C": 0}}
 
 
 def test_macro_f1_weights_each_label_equally() -> None:
