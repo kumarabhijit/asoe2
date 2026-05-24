@@ -60,6 +60,53 @@ def test_pending_is_tenant_scoped():
     assert len(outbox.pending_compensation()) == 2
 
 
+# --- the reconciliation worker (DoR #6) ----------------------------------
+
+class _ScriptedExecutor:
+    """Stand-in GatewayExecutor returning scripted statuses per gateway."""
+
+    def __init__(self, statuses: dict[str, list[str]]):
+        self._statuses = statuses
+        self.runs = 0
+
+    def run(self, request):
+        self.runs += 1
+        seq = self._statuses.get(request.gateway_name, ["FAILED"])
+        status = seq[min(len(seq) - 1, self.runs - 1)]
+        return GatewayResponse(
+            gateway_name=request.gateway_name, operation=request.operation,
+            status=status,
+        )
+
+
+def test_reconcile_retries_and_clears_on_success():
+    outbox.record_effect(
+        tenant_id="t", gateway="buyer_notification", operation="send",
+        status="FAILED", params={"recipient": "x@y.example"},
+    )
+    ex = _ScriptedExecutor({"buyer_notification": ["SUCCESS"]})
+    report = outbox.reconcile_pending(tenant_id="t", executor=ex)
+    assert report["retried"] == 1 and report["compensated"] == 1
+    assert outbox.pending_compensation("t") == []  # cleared
+
+
+def test_reconcile_escalates_after_max_attempts():
+    outbox.record_effect(
+        tenant_id="t", gateway="erp", operation="create_sales_order",
+        status="FAILED", params={"order_id": "SO-1"},
+    )
+    ex = _ScriptedExecutor({"erp": ["FAILED"]})
+    # 3 passes at max_attempts=3 → escalated, then it drops out of the queue.
+    for _ in range(2):
+        outbox.reconcile_pending(tenant_id="t", executor=ex, max_attempts=3)
+        assert outbox.pending_compensation("t"), "still pending before exhaustion"
+    final = outbox.reconcile_pending(tenant_id="t", executor=ex, max_attempts=3)
+    assert final["escalated"] == 1
+    assert outbox.pending_compensation("t") == []
+    escalated = [e for e in outbox.all_entries("t") if e.escalated]
+    assert len(escalated) == 1 and escalated[0].attempts == 3
+
+
 # --- integration: apply_effects populates the outbox ---------------------
 
 _EXTRACTION = {
@@ -131,3 +178,13 @@ def test_failed_send_queues_compensation(client):
     assert any(p.gateway == "buyer_notification" and p.operation == "send" for p in pending)
     # And the persisted reply_sent reflects the failure (not masked as success).
     assert exception_store.get(rec.id, "tenant-a").resolution_data["reply_sent"]["status"] == "FAILED"
+
+
+def test_reconcile_endpoint_is_admin_only(client):
+    outbox.record_effect(tenant_id="tenant-a", gateway="g", operation="o", status="FAILED")
+    analyst = {"Authorization": f"Bearer {create_test_token(roles=['analyst'], org='tenant-a')}"}
+    assert client.post("/api/v1/outbox/reconcile", headers=analyst).status_code in (401, 403)
+    admin = {"Authorization": f"Bearer {create_test_token(roles=['admin'], org='tenant-a')}"}
+    res = client.post("/api/v1/outbox/reconcile", headers=admin)
+    assert res.status_code == 200, res.text
+    assert set(res.json()) == {"retried", "compensated", "escalated", "still_pending"}

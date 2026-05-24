@@ -1445,6 +1445,7 @@ def apply_effects(state: GraphState) -> GraphState:
                 recipe_status=recipe_status,
                 trace_id=trace_id,
                 error=response.error,
+                params=params,
             )
         except Exception:  # pragma: no cover - outbox must never break the graph
             _node_logger.exception("outbox_record_failed")

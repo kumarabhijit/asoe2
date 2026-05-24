@@ -129,3 +129,24 @@ async def reviewer_activity(req: ReviewerActivityRequest) -> dict:
     """Record one decision's automation-bias signals (Layer-2-open + dwell)."""
     record_reviewer_activity(dwell_ms=req.dwell_ms, layer2_opened=req.layer2_opened)
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/outbox/reconcile — drain the effect-compensation queue (DoR #6)
+# ---------------------------------------------------------------------------
+# Operational endpoint: retries pending failed gateway effects (delivery-
+# idempotent) and escalates the ones that exhaust their retries. Admin-only;
+# scoped to the caller's tenant. A scheduler can call this periodically.
+
+from api.deps import get_tenant_id  # noqa: E402
+from orchestration.outbox import reconcile_pending  # noqa: E402
+
+
+@router.post(
+    "/outbox/reconcile",
+    include_in_schema=False,
+    dependencies=[Depends(require_role("admin"))],
+)
+async def outbox_reconcile(tenant_id: str = Depends(get_tenant_id)) -> dict:
+    """Run one reconciliation pass over this tenant's compensation queue."""
+    return reconcile_pending(tenant_id=tenant_id)

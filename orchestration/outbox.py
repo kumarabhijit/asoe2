@@ -45,6 +45,12 @@ class OutboxEntry:
     needs_compensation: bool    # failed → a reconciler must retry / undo / escalate
     error: Optional[str]
     created_at: str
+    # The originating gateway-call params, retained so the reconciler can RETRY
+    # the effect idempotently (delivery idempotency on the send side dedupes a
+    # duplicate retry — DoR #5).
+    params: dict = field(default_factory=dict)
+    attempts: int = 0           # reconciliation retries performed
+    escalated: bool = False     # retries exhausted → human follow-up required
     compensated: bool = False
     compensated_at: Optional[str] = None
 
@@ -70,6 +76,7 @@ def record_effect(
     recipe_status: Optional[str] = None,
     trace_id: Optional[str] = None,
     error: Optional[str] = None,
+    params: Optional[dict] = None,
 ) -> OutboxEntry:
     """Record one effect outcome. SUCCESS → committed; anything else →
     needs_compensation (the partial-failure window the outbox closes)."""
@@ -86,6 +93,7 @@ def record_effect(
         committed=committed,
         needs_compensation=not committed,
         error=error,
+        params=dict(params or {}),
         created_at=_now(),
     )
     with _lock:
@@ -94,12 +102,12 @@ def record_effect(
 
 
 def pending_compensation(tenant_id: Optional[str] = None) -> List[OutboxEntry]:
-    """Effects that failed and have not yet been compensated — the work queue
-    a reconciler drains."""
+    """Effects that failed and have not yet been compensated or escalated — the
+    work queue a reconciler drains."""
     with _lock:
         return [
             e for e in _entries
-            if e.needs_compensation and not e.compensated
+            if e.needs_compensation and not e.compensated and not e.escalated
             and (tenant_id is None or e.tenant_id == tenant_id)
         ]
 
@@ -122,6 +130,64 @@ def all_entries(tenant_id: Optional[str] = None) -> List[OutboxEntry]:
             e for e in _entries
             if tenant_id is None or e.tenant_id == tenant_id
         ]
+
+
+def mark_escalated(entry_id: str) -> bool:
+    with _lock:
+        for e in _entries:
+            if e.id == entry_id:
+                e.escalated = True
+                return True
+    return False
+
+
+def reconcile_pending(
+    *,
+    tenant_id: Optional[str] = None,
+    max_attempts: int = 3,
+    executor=None,
+) -> dict:
+    """Drain the compensation queue (DoR #6 — the reconciliation worker).
+
+    For each pending entry it RE-RUNS the original gateway effect via the
+    GatewayExecutor (retry is safe — the send path is delivery-idempotent,
+    DoR #5; an already-committed ERP write is deduped downstream). On SUCCESS the
+    entry is marked compensated; on failure its attempt count rises and, once it
+    reaches `max_attempts`, it is escalated for human follow-up (and leaves the
+    active queue). Returns a summary report. Pure of scheduling — call it from a
+    periodic task or the admin trigger endpoint.
+    """
+    from contracts.models import GatewayRequest  # local import avoids a cycle
+
+    if executor is None:
+        from gateways.executor import GatewayExecutor
+        executor = GatewayExecutor()
+
+    report = {"retried": 0, "compensated": 0, "escalated": 0, "still_pending": 0}
+    for entry in pending_compensation(tenant_id):
+        report["retried"] += 1
+        with _lock:
+            entry.attempts += 1
+            attempts = entry.attempts
+        try:
+            response = executor.run(GatewayRequest(
+                gateway_name=entry.gateway,
+                operation=entry.operation,
+                params=dict(entry.params or {}),
+                trace_id=entry.trace_id or "outbox-reconcile",
+            ))
+            ok = response.status == "SUCCESS"
+        except Exception:  # pragma: no cover - reconciler must not crash the loop
+            ok = False
+        if ok:
+            mark_compensated(entry.id)
+            report["compensated"] += 1
+        elif attempts >= max_attempts:
+            mark_escalated(entry.id)
+            report["escalated"] += 1
+        else:
+            report["still_pending"] += 1
+    return report
 
 
 def reset() -> None:
