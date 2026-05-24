@@ -1429,6 +1429,26 @@ def apply_effects(state: GraphState) -> GraphState:
         response = executor.run(request)
         state.effect_results.append(response)
 
+        # DoR #6 — record every effect outcome in the durable outbox: a SUCCESS
+        # external write is committed; a failure is queued for compensation so a
+        # reconciler can retry/escalate rather than leaving a half-applied state
+        # (ERP-submit-OK durability / reply-fail compensation). Never raises into
+        # the graph.
+        try:
+            from orchestration.outbox import record_effect
+            record_effect(
+                tenant_id=state.tenant_id or "default",
+                gateway=effect.gateway_name,
+                operation=effect.operation,
+                status=response.status,
+                recipe=state.selected_recipe,
+                recipe_status=recipe_status,
+                trace_id=trace_id,
+                error=response.error,
+            )
+        except Exception:  # pragma: no cover - outbox must never break the graph
+            _node_logger.exception("outbox_record_failed")
+
         if response.status != "SUCCESS":
             state.explanation = (
                 f"Effect partially failed: {effect.gateway_name}/{effect.operation}"

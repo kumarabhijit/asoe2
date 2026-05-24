@@ -565,12 +565,15 @@ def _register_oms_stub():
     # gateway itself live in tests/test_tenant_config_gateway.py.
     register_gateway(TenantConfigGateway())
     # DoR #8 — drop any gateway-tier circuit-breaker / metering state so a trip
-    # in one test can't leak into the next.
+    # in one test can't leak into the next. DoR #6 — drop the effect outbox too.
     from gateways.circuit_breaker import reset_all as _reset_gateway_breakers
+    from orchestration.outbox import reset as _reset_outbox
     _reset_gateway_breakers()
+    _reset_outbox()
     yield
     clear_registry()
     _reset_gateway_breakers()
+    _reset_outbox()
 
 
 @pytest.fixture
