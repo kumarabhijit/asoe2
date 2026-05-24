@@ -255,22 +255,61 @@ trace and the Phase-6 ChangeAnalysisSection (which already renders the
 constraint evaluation). No new graph surface built — the existing trace/topology
 + the Change Analysis section cover it.
 
-## PENDING
-### Later phases
-- **Phase 8:** Hardening — full test pyramid, axe, contract snapshots,
-  ADR-042 → **Accepted**.
+## Phase-8 audit (2026-05-24) — hardening, tractable subset
+Scoped (owner-approved) to the deterministic, low-risk, high-value gates; the
+deep-infra gates are documented-deferred to productionization (they need new
+instrumentation in the gateway/delivery/render core, not test-only work).
 
-### Gates still RED / not yet written
+**Delivered + green:**
+- ✓ **Field-level contract snapshot** — `test_inbox_section_contract_snapshot.py`
+  pins the exact field set of all 8 SOX-evidence section schemas (a field move
+  fails with a precise diff; complements the coarse openapi-drift test + the
+  name-existence gate). Locks the asoe-ui type mirror in lockstep.
+- ✓ **#4 confidence calibration** — `test_confidence_calibration.py`: the ECE
+  scorer holds the `thresholds.yaml` budget (with teeth), and the autonomy bands
+  are the named `policy.py` constants — AST guard forbids inline `0.95`/`0.99`
+  in `orchestration/nodes.py`.
+- ✓ **#7 ingest→terminal SLO histogram** — `asoe_ingest_to_terminal_latency_
+  seconds` (Prometheus cumulative histogram) in `api/metrics.py`, surfaced via
+  `render_all` on `/metrics`, fed from one contained never-raises timing point
+  at `_resolve_state`. `test_slo_histogram.py`.
+- ✓ **#9 business/disposition audit hash-chain** — already wired incrementally
+  (12 chained `log_audit_event` call sites; tamper-evidence in
+  `test_audit_chain.py`); Phase 8 adds `test_disposition_audit_chain_lock.py`, an
+  AST guard that the ADR-042 disposition handlers keep chaining (no regression).
+- ✓ **axe sweeps** — `tests/accessibility/inbox_sections_sweep.test.tsx` asserts
+  all five Phase 3–7 sections are axe-clean in their canonical states.
+Full asoe2 suite green (3106 passed); asoe-ui tsc + 1219 vitest + build green.
+
+**Deferred to productionization (documented, NOT done):**
+- #5 delivery idempotency (provider message-id) + end-to-end `correlation_id`,
+  #6 outbox/compensation (ERP-OK / reply-fail), #8 email/SAP gateway
+  circuit-breaker parity (LLM tier has one), #10 XSS/CSP headers + SSRF
+  attachment allowlist — each needs new instrumentation in the gateway/delivery/
+  render core (real infra + design tradeoffs), out of the low-risk subset.
+- #11 automation-bias: override-rate SLI already exists
+  (`shadow_llm_reviewer_override_rate_on_downgrades`); **Layer-2-open rate +
+  decision dwell** need a UI→backend telemetry pipeline that does not exist yet.
+
+**ADR-042 status stays *Proposed*** (NOT flipped to Accepted): per strategy §8
+the `autonomy_vocab_version` hard gate keeps it Proposed until autonomy-v2
+**dual-control compliance sign-off** — which is *waived-but-mechanism-intact* in
+this pre-prod project, so flipping the status unilaterally would misrepresent the
+compliance gate. Leave the flip to the sign-off step.
+
+## PENDING
+### Productionization backlog (post-ADR-042 feature port)
+- DoR deep-infra gates #5 / #6 / #8 / #10 + #11 Layer-2/dwell telemetry (above).
+- Constraint Graph (deferred per ADR §5b — reuses trace/topology).
+- ADR-042 → Accepted on autonomy-v2 dual-control sign-off.
+
+### Gates status
 - ✓ `tests/test_inbox_gate_openapi_contract.py` — **GREEN** (Phase 7): all 8
   section schemas exported; xfail marker removed → standing hard gate.
-- DoR safety gates (strategy doc §6) — only **sanitizer** + **autonomy** are
-  implemented; the rest are documented-but-unwritten and land in their phases:
-  injected-GREEN → `MANUAL_REVIEW` (#2), cosign threshold from SAP master-data
-  **re-price not LLM values** (#3), confidence **calibration/ECE** (#4),
-  delivery **idempotency + correlation_id** (#5), **outbox/compensation** (#6),
-  ingest→terminal **SLO histogram** (#7), email/SAP gateway **circuit breaker**
-  (#8), **business/disposition audit hash chain** (#9), **XSS/CSP + SSRF** (#10),
-  **automation-bias metrics** (#11).
+- DoR safety gates (strategy §6): implemented — **sanitizer**, **autonomy**,
+  #2 (no auto-execute), #3 (SAP re-price cosign), **#4** (calibration), **#7**
+  (SLO histogram), **#9** (disposition hash chain), **S** (sandbox isolation).
+  Deferred — #5, #6, #8, #10, #11 (Layer-2/dwell). See the Phase-8 audit.
 
 ## Documents to refer to
 **asoe2**
@@ -316,17 +355,18 @@ constraint evaluation). No new graph surface built — the existing trace/topolo
 > Continue the ASOE Customer-Inbox port on branch `claude/gifted-darwin-NbqQo`
 > (asoe2 PR #166, asoe-ui PR #185). Read `asoe2/HANDOFF.md`, then
 > `asoe2/docs/adr/ADR-042-customer-inbox-prototype-port.md` and both
-> `docs/test-strategy/customer-inbox-tdd-strategy.md`. Phases 0–7 are **done**
-> (MLS + Draft Reply + live WS events + EDI 850 + Change Analysis + Knowledge
-> Graph; all 8 section schemas exported, contract gate green). Resume **Phase 8 =
-> Hardening** — the strategy §6 DoR safety gates that were deferred "to their
-> phases" but are cross-cutting (#5 delivery idempotency + correlation_id, #6
-> outbox/compensation, #8 gateway circuit breaker, #9 business/disposition audit
-> hash chain, #10 XSS/CSP + SSRF, plus #4 confidence calibration/ECE, #7 SLO
-> histogram, #11 automation-bias metrics), the full test pyramid (axe
-> accessibility sweeps, contract snapshots), and finally flip **ADR-042 status →
-> Accepted**. The Constraint Graph stays deferred per ADR §5b (reuses the
-> existing trace/topology). Pre-prod: compliance sign-off waived, keep in-code
+> `docs/test-strategy/customer-inbox-tdd-strategy.md`. **Phases 0–8 are done** —
+> the full Customer-Inbox feature port (MLS + Draft Reply + live WS + EDI 850 +
+> Change Analysis + Knowledge Graph) plus the Phase-8 hardening **tractable
+> subset** (contract snapshot, #4 calibration, #7 SLO histogram, #9 disposition
+> hash-chain lock, axe sweeps). What remains is the **productionization
+> backlog**, NOT feature work: the deep-infra DoR gates **#5** (correlation_id +
+> delivery idempotency), **#6** (outbox/compensation), **#8** (email/SAP
+> circuit-breaker parity), **#10** (XSS/CSP + SSRF allowlist), and **#11**
+> Layer-2-open/dwell telemetry — each needs real instrumentation in the
+> gateway/delivery/render core. ADR-042 stays *Proposed* until autonomy-v2
+> dual-control sign-off (do NOT flip it unilaterally). Pick one gate, design it,
+> land it test-first. Pre-prod: compliance sign-off waived, keep in-code
 > Shadow/audit intact. Discipline: TDD, run tsc/tests before push, wait for CI
-> green (10-min fallback) between tasks, audit each phase against the plan
-> before declaring complete.
+> green (10-min fallback) between tasks, audit against the plan before declaring
+> complete.
