@@ -122,11 +122,43 @@ phases", not Phase-3 blockers for the MLS): #5 delivery idempotency +
 correlation_id, #6 outbox/compensation, #8 gateway circuit breaker, #9
 business/disposition hash chain, #10 XSS/CSP + SSRF.
 
+## Phase-4 completion audit (2026-05-24)
+Audited against ADR-042 §4 (Phase 4 = Draft Reply + Simulate Inbound + live
+pipeline (WS); gated by Shadow + cosign; sandbox-isolation test) — **met for the
+shipped scope**:
+- ✓ **AI Draft Reply (gen/edit/approve/send)** — `ReplyDraftRecipe` (pure,
+  deterministic template composition; operator subject/body edits with a
+  before/after audit; REJECTs on no-recipient / unknown-template). Wired via
+  directed graph re-entry (Shadow → recipe → apply_effects). Two operator
+  actions: `DRAFT_REPLY` composes → `resolution_data.reply_draft` (record stays
+  in review); `SEND_REPLY` (mode="send" → status READY_TO_SEND) fires the
+  `buyer_notification` GatewayEffect gated `only_on_recipe_status` so a REJECTED
+  compose never sends. Send recomposes deterministically → sent == reviewed.
+  `resolution_data.reply_sent` is SENT only when the gateway delivered, else
+  FAILED with reason (Guardrail #5). Both actions health-surfaced + UI label +
+  ResolutionAction/enum-parity/MOCK_HEALTH mirrored.
+- ✓ **Live pipeline (WS)** — `reply_drafted` / `reply_sent` event types +
+  payloads + factories, emitted from the disposition handlers; UI WSEventType
+  union + payload interfaces mirrored; `isCaseInvalidationEvent` invalidates the
+  list on them (re-homed strategy **gate #5**). `pipeline_step` is covered by
+  the pre-existing `pipeline_progress` (ADR-027) — no redundant type added.
+- ✓ **Shadow-gated** — every reply action runs the directed re-entry through
+  `shadow_audit` before execute/apply_effects.
+- ✓ **Simulate Inbound (backend injector)** — already exists:
+  `POST /_sandbox/seed/manual-order-intake` (sandbox.py) pushes a synthetic
+  order event through the **real** pipeline via `_resolve_state`.
+Full asoe2 suite green (3033 passed / 1 xfailed); asoe-ui tsc + 1184 vitest +
+build green. **Phase 4 complete for shipped scope.**
+
+Deferred (panel-noted, low value vs. cost): the sandbox-only **Simulate Inbound
+UI modal** (backend injector already exists; a dev affordance). Cosign on
+replies is intentionally **not** applied — a clarification email is not
+financially binding; cosign remains the four-eyes control for the ERP write.
+The `/sandbox/simulate-inbound` **isolation sentinel** stays re-homed to
+**Phase 7** (strategy gate #8).
+
 ## PENDING
 ### Later phases
-- **Phase 4:** Draft Reply + Simulate Inbound + live pipeline. WS new event
-  types (`pipeline_step` / `reply_drafted` / `reply_sent`) through
-  `isCaseInvalidationEvent` (re-homed gate #5).
 - **Phase 5:** EDI 850 (`Edi850Document` schema + builder + section).
 - **Phase 6:** Change Analysis (`ConstraintEvaluation` / `ConstraintCheck` /
   `ScenarioOption` / `ChangeDecision`; recipe-homed, variable cardinality).
@@ -193,9 +225,11 @@ business/disposition hash chain, #10 XSS/CSP + SSRF.
 > Continue the ASOE Customer-Inbox port on branch `claude/gifted-darwin-NbqQo`
 > (asoe2 PR #166, asoe-ui PR #185). Read `asoe2/HANDOFF.md`, then
 > `asoe2/docs/adr/ADR-042-customer-inbox-prototype-port.md` and both
-> `docs/test-strategy/customer-inbox-tdd-strategy.md`. Resume **Phase 3 =
-> extraction gateway core**, test-first via a `RecordedGatewayBackend` replay
-> harness (no live model). Pre-prod: compliance sign-off waived, keep in-code
+> `docs/test-strategy/customer-inbox-tdd-strategy.md`. Phases 0–4 are **done**
+> (MLS + Draft Reply + live WS events). Resume **Phase 5 = EDI 850** — a
+> deterministic server-side `buildEDI850` builder (gateway/recipe) +
+> `Edi850Document` schema + read endpoint + UI section, test-first with
+> pure-function unit tests. Pre-prod: compliance sign-off waived, keep in-code
 > Shadow/audit intact. Discipline: TDD, run tsc/tests before push, wait for CI
 > green (10-min fallback) between tasks, audit each phase against the plan
 > before declaring complete.
