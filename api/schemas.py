@@ -178,6 +178,19 @@ class RefreshRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class AutonomyLevelInfo(BaseModel):
+    """One autonomy tier for the UI to render/sort (ADR-042 §5/§8).
+
+    `rank` is the degree of automation (higher == more autonomous) under the
+    active `autonomy_vocab_version`; the UI orders the ladder by `rank` rather
+    than hardcoding a map (asoe-ui Guardrail #1). Display vocabulary only —
+    not the engine's gating semantics."""
+
+    level: str
+    label: str
+    rank: int
+
+
 class HealthResponse(BaseModel):
     """GET /api/v1/health"""
 
@@ -206,6 +219,12 @@ class HealthResponse(BaseModel):
     # `src/lib/api.ts`; once available, the UI consumes from health
     # exclusively.
     allowed_case_sources: List[str] = Field(default_factory=list)
+    # ADR-042 §5/§8 — the autonomy vocabulary the UI renders. The UI sorts the
+    # ladder by `rank` and reads labels from here (no hardcoded autonomy map,
+    # Guardrail #1). `autonomy_vocab_version` is the version these rows resolve
+    # under (records stamp their own version; this is the current display set).
+    autonomy_vocab_version: str = ""
+    allowed_autonomy_levels: List[AutonomyLevelInfo] = Field(default_factory=list)
 
 
 class ResolveResponse(BaseModel):

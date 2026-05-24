@@ -517,6 +517,30 @@
         "title": "AuthTokenResponse",
         "type": "object"
       },
+      "AutonomyLevelInfo": {
+        "description": "One autonomy tier for the UI to render/sort (ADR-042 \u00a75/\u00a78).\n\n`rank` is the degree of automation (higher == more autonomous) under the\nactive `autonomy_vocab_version`; the UI orders the ladder by `rank` rather\nthan hardcoding a map (asoe-ui Guardrail #1). Display vocabulary only \u2014\nnot the engine's gating semantics.",
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "level",
+          "label",
+          "rank"
+        ],
+        "title": "AutonomyLevelInfo",
+        "type": "object"
+      },
       "BackOrderAnalysisData": {
         "additionalProperties": false,
         "description": "BackOrderResolutionRecipe \u2192 UI `backorder_analysis`.\n\nRegistry-classified fields (2026-04-22 workshop):\n  * audit-bearing: ordered_qty, available_qty, gap_qty, gap_pct,\n    unit_price, uom, at_risk, atp_date, resolution_options.\n  * audit-bearing (gateway): primary_dc.\n  * conditional (gateway, depends_on resolved_action):\n    alternate_warehouses (ALT_DC), substitutes (SUBSTITUTE),\n    production / inbound_po (RESCHEDULE).\n\nNo grandfather clause in this engagement. Gateway-dependent\naudit-bearing fields (primary_dc, atp_date) MUST persist via\nenrichment_context[\"inventory_snapshot\"]; missing \u2192 composer\nroutes to AUDIT_CONTEXT_MISSING.\n\nSources:\n  * `record.original_event` \u2014 recipe input metadata (ordered_qty,\n    available_qty, unit_price, uom, sku).\n  * `record.enrichment_context[\"inventory_snapshot\"]` \u2014 gateway\n    snapshot (primary_dc, atp_date, alternate_warehouses,\n    substitutes, production, inbound_po).\n  * `record.resolution_data` \u2014 recipe-computed fields (gap_qty,\n    gap_pct, at_risk, resolution_options, recommended_action).",
@@ -2330,6 +2354,13 @@
       "HealthResponse": {
         "description": "GET /api/v1/health",
         "properties": {
+          "allowed_autonomy_levels": {
+            "items": {
+              "$ref": "#/components/schemas/AutonomyLevelInfo"
+            },
+            "title": "Allowed Autonomy Levels",
+            "type": "array"
+          },
           "allowed_case_sources": {
             "items": {
               "type": "string"
@@ -2381,6 +2412,11 @@
             },
             "title": "Allowed Resolution Actions",
             "type": "array"
+          },
+          "autonomy_vocab_version": {
+            "default": "",
+            "title": "Autonomy Vocab Version",
+            "type": "string"
           },
           "explain_mode": {
             "title": "Explain Mode",

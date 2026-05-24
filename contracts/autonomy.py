@@ -64,3 +64,26 @@ def autonomy_label(level: str, vocab_version: str) -> str:
         raise ValueError(
             f"unknown autonomy level/version: {level!r}/{vocab_version!r}"
         ) from exc
+
+
+def allowed_autonomy_levels(
+    vocab_version: str = CURRENT_AUTONOMY_VOCAB_VERSION,
+) -> list[dict]:
+    """The operator-facing autonomy vocabulary for ``vocab_version`` as
+    ``{level, label, rank}`` rows (rank == degree of automation).
+
+    Surfaced on ``/health`` so the UI sorts/labels by ``rank`` at runtime
+    instead of hardcoding a map (asoe-ui Guardrail #1). Display-only — this
+    does NOT change the numeric→behaviour gating recipes dispatch on (that
+    coherent v2 migration is separately gated). Fails closed on an unknown
+    version.
+    """
+    try:
+        ranks = _RANKS[vocab_version]
+        labels = _LABELS[vocab_version]
+    except KeyError as exc:
+        raise ValueError(f"unknown autonomy vocab version: {vocab_version!r}") from exc
+    return [
+        {"level": level, "label": labels[level], "rank": ranks[level]}
+        for level in ("L1", "L2", "L3", "L4")
+    ]

@@ -9,7 +9,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from api.schemas import HealthResponse
+from api.schemas import AutonomyLevelInfo, HealthResponse
+from contracts.autonomy import (
+    CURRENT_AUTONOMY_VOCAB_VERSION,
+    allowed_autonomy_levels,
+)
 from constraints.specs import (
     INTENT_REASON_TAGS,
     AllowedIntent,
@@ -51,6 +55,10 @@ async def health() -> HealthResponse:
         allowed_override_reason_tags_by_intent=_REASON_TAGS_BY_INTENT,
         allowed_case_statuses=_ALLOWED_CASE_STATUSES,
         allowed_case_sources=_ALLOWED_CASE_SOURCES,
+        autonomy_vocab_version=CURRENT_AUTONOMY_VOCAB_VERSION,
+        allowed_autonomy_levels=[
+            AutonomyLevelInfo(**entry) for entry in allowed_autonomy_levels()
+        ],
     )
 
 

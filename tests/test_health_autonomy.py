@@ -14,13 +14,22 @@ tests/test_v1_guardrails.py::test_health_serves_all_allowed_intents).
 from __future__ import annotations
 
 import pytest
+from fastapi.testclient import TestClient
+
+from api.app import create_app
 
 
-@pytest.mark.xfail(
-    reason="ADR-042 §5/§8: health.allowed_autonomy_levels not implemented "
-    "(gated on autonomy-vocab v2 sign-off)",
-    strict=True,
-)
+@pytest.fixture()
+def client() -> TestClient:
+    # Health is a public, no-auth endpoint.
+    return TestClient(create_app(), raise_server_exceptions=False)
+
+
+# Implemented 2026-05-24 — the bounded health-autonomy surface landed (the
+# compliance sign-off gate is waived for pre-production, owner veto). This
+# exposes the v2 display vocabulary for the UI to rank-sort; it does NOT change
+# the policy.py gating ladder (that coherent migration stays separately gated).
+# The xfail marker is removed; this now asserts for real.
 def test_health_exposes_ranked_autonomy_levels(client) -> None:
     r = client.get("/api/v1/health")
     assert r.status_code == 200

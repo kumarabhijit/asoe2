@@ -87,3 +87,28 @@ def test_unknown_version_fails_closed() -> None:
     assert _IMPLEMENTED, _GATE
     with pytest.raises((KeyError, ValueError)):
         autonomy_rank("L1", "v999")
+
+
+def test_allowed_autonomy_levels_default_is_current_vocab_ranked() -> None:
+    """The health surface (ADR-042 §5/§8) sources its {level,label,rank} list
+    from this contract. Default vocab is the current (v2) one; ranks form a
+    total order so the UI can sort deterministically."""
+    from contracts.autonomy import allowed_autonomy_levels, autonomy_label
+
+    levels = allowed_autonomy_levels()
+    assert {e["level"] for e in levels} == {"L1", "L2", "L3", "L4"}
+    for e in levels:
+        assert {"level", "label", "rank"} <= set(e)
+    ranks = [e["rank"] for e in levels]
+    assert len(set(ranks)) == len(ranks)
+    by_level = {e["level"]: e for e in levels}
+    assert by_level["L1"]["label"] == autonomy_label("L1", "v2")
+    # v2 ordering: L1 most autonomous (highest rank) … L4 human (lowest).
+    assert by_level["L1"]["rank"] > by_level["L4"]["rank"]
+
+
+def test_allowed_autonomy_levels_unknown_version_fails_closed() -> None:
+    from contracts.autonomy import allowed_autonomy_levels
+
+    with pytest.raises((KeyError, ValueError)):
+        allowed_autonomy_levels("v999")
