@@ -27,6 +27,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 from api.schemas import (
+    Edi850Document,
     EntitiesAnalysisData,
     EntityProfile,
     ExtractedEntity,
@@ -148,6 +149,23 @@ def compose_order_entry_extraction(
         return None
     try:
         return OrderEntryExtraction(**ctx)
+    except (TypeError, ValueError):
+        return None
+
+
+def compose_edi_850_document(
+    record: ExceptionRecord,
+) -> Optional[Edi850Document]:
+    """Project the deterministically built EDI 850 from
+    `enrichment_context["edi_850"]` (the `edi_850` builder producer's read).
+    None when absent or malformed (preview-only until the producer is wired).
+    The builder owns construction (`gateways/edi850.py`); the composer only
+    projects — no synthesis here (Guardrail #6)."""
+    ctx = record.enrichment_context.get("edi_850")
+    if not isinstance(ctx, dict) or not ctx:
+        return None
+    try:
+        return Edi850Document(**ctx)
     except (TypeError, ValueError):
         return None
 

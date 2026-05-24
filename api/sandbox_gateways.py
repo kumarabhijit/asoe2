@@ -22,9 +22,31 @@ import os
 from contracts.models import GatewayResponse
 from db.repository import TenantConfigRepository as _TenantConfigRepository
 from db.shared import get_shared_adapter
+from gateways.edi850 import build_edi_850
 from gateways.registry import clear_registry, register_gateway
 from gateways.stub import StubGateway
 from gateways.tenant_config import TenantConfigGateway
+
+# ADR-042 Phase 5 — the canned order the edi_850 builder stub reconstructs.
+# Mirrors the order_extraction stub (same PO / customer / line) so the EDI 850
+# Audit tab is consistent with the Order Entry tab. The seller is the ASOE
+# tenant identity (not fabricated third-party data). Kept in sync with the
+# identical constant in tests/conftest.py.
+_SANDBOX_EDI_850_ORDER = dict(
+    order_id="0093847612",
+    po_number="0093847612",
+    po_date="2025-03-17",
+    buyer_name="Walmart Stores Inc",
+    buyer_id="300001",
+    seller_name="Acme Beverages Co",
+    seller_id="VENDOR-7788",
+    requested_date="2025-03-24",
+    line_items=[{
+        "line_num": "001", "material": "BEV-COLA-12PK",
+        "description": "Cola 12-pack case", "quantity": 480,
+        "uom": "CS", "unit_price": 8.64,
+    }],
+)
 
 
 def register_sandbox_gateways() -> None:
@@ -338,6 +360,20 @@ def register_sandbox_gateways() -> None:
                     "order_value_usd": 45200.0,
                     "sap_doc_number": "5100012344",
                 },
+            ),
+        },
+    ))
+
+    # ADR-042 Phase 5 — EDI 850 builder producer. Deterministic X12 850
+    # reconstruction of the same canned order the order_extraction stub
+    # returns; activates the EDI 850 Audit tab via enrichment_context.edi_850.
+    register_gateway(StubGateway(
+        "edi_850",
+        responses={
+            "build": GatewayResponse(
+                gateway_name="edi_850", operation="build",
+                status="SUCCESS",
+                data=build_edi_850(**_SANDBOX_EDI_850_ORDER),
             ),
         },
     ))

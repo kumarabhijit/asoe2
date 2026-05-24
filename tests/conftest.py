@@ -4,9 +4,29 @@ import os
 
 import pytest
 from contracts.models import GatewayResponse, GraphState, OrderEvent
+from gateways.edi850 import build_edi_850
 from gateways.registry import clear_registry, register_gateway
 from gateways.stub import StubGateway
 from gateways.tenant_config import TenantConfigGateway
+
+# ADR-042 Phase 5 — canned order for the edi_850 builder stub. Mirrors
+# api/sandbox_gateways.py and the order_extraction stub so the pytest pipeline
+# and the live sandbox build the identical EDI 850 document.
+_EDI_850_ORDER = dict(
+    order_id="0093847612",
+    po_number="0093847612",
+    po_date="2025-03-17",
+    buyer_name="Walmart Stores Inc",
+    buyer_id="300001",
+    seller_name="Acme Beverages Co",
+    seller_id="VENDOR-7788",
+    requested_date="2025-03-24",
+    line_items=[{
+        "line_num": "001", "material": "BEV-COLA-12PK",
+        "description": "Cola 12-pack case", "quantity": 480,
+        "uom": "CS", "unit_price": 8.64,
+    }],
+)
 
 
 @pytest.fixture(autouse=True)
@@ -433,6 +453,17 @@ def _register_oms_stub():
             ),
         },
     )
+    # ADR-042 Phase 5 — EDI 850 builder producer (deterministic X12 850).
+    edi_850_stub = StubGateway(
+        "edi_850",
+        responses={
+            "build": GatewayResponse(
+                gateway_name="edi_850", operation="build",
+                status="SUCCESS",
+                data=build_edi_850(**_EDI_850_ORDER),
+            ),
+        },
+    )
     # ADR-042 Phase 3 — ERP write target for SubmitToErpRecipe's effect.
     erp_stub = StubGateway(
         "erp",
@@ -455,6 +486,7 @@ def _register_oms_stub():
     register_gateway(email_intake_stub)
     register_gateway(order_extraction_stub)
     register_gateway(sap_order_stub)
+    register_gateway(edi_850_stub)
     register_gateway(erp_stub)
     # ADR-029: tenant_config is registered as the real file-backed
     # gateway (not a stub) — it's pure in-process I/O against

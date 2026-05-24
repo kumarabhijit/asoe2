@@ -405,6 +405,19 @@ REGISTRY = {
                 result_key="sap_data",
                 required_for_audit=False,
             ),
+            # ADR-042 Phase 5 — EDI 850 Audit tab. Deterministic X12 850
+            # reconstruction of the order (gateways/edi850.build_edi_850, a
+            # pure builder). required_for_audit=False: a derived wire-format
+            # view, not a lifecycle write — when unwired the tab stays
+            # structurally omitted (composer returns None). The stub builds
+            # from the same canned order as the order_extraction stub.
+            GatewayDependency(
+                gateway_name="edi_850",
+                operation="build",
+                params_from_state={"order_id": "event.order_id"},
+                result_key="edi_850",
+                required_for_audit=False,
+            ),
         ),
         expected_metadata_keys=(
             "composite_confidence",
