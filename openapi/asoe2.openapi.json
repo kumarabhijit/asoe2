@@ -1219,6 +1219,18 @@
             "title": "Action",
             "type": "string"
           },
+          "corrections": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corrections"
+          },
           "notes": {
             "title": "Notes",
             "type": "string"

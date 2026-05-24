@@ -693,6 +693,163 @@ def _cosign_materiality_usd(record) -> Optional[float]:
 
 
 # ---------------------------------------------------------------------------
+# Order-entry ERP submit (ADR-042 §2.2.6) — disposition-triggered, executed on
+# the deterministic graph path via directed re-entry (NOT inline business logic;
+# Guardrail #1). Sub-$10k submits run immediately; >=$10k stage four-eyes cosign.
+# ---------------------------------------------------------------------------
+
+
+def _run_erp_submit(record, tenant_id: str, corrections):
+    """Re-enter the graph to execute the ERP submit for a reviewed record.
+
+    Shadow → SubmitToErpRecipe → apply_effects (the `erp` write) all run on the
+    deterministic path; the reviewed extraction rides on enrichment_context and
+    the operator corrections on directed_corrections."""
+    event = OrderEvent.model_validate(record.original_event or {})
+    state = GraphState(
+        event=event,
+        tenant_id=tenant_id,
+        enrichment_context=dict(record.enrichment_context or {}),
+        directed_recipe="SubmitToErpRecipe.py",
+        directed_corrections=corrections or {},
+    )
+    return _run_graph_safe(state)
+
+
+def _erp_submission_record(result, submitted_by: str) -> dict:
+    """Project the submit graph run into the durable erp_submission audit dict."""
+    outputs = result.execution_log.outputs if result.execution_log else {}
+    sap_doc = None
+    for er in result.effect_results:
+        if er.gateway_name == "erp" and er.status == "SUCCESS":
+            sap_doc = (er.data or {}).get("sap_doc_number")
+            break
+    return {
+        "status": outputs.get("status"),
+        "reason": outputs.get("reason"),
+        "erp_payload": outputs.get("erp_payload"),
+        "sap_doc_number": sap_doc,
+        "corrections_applied": outputs.get("corrections_applied", []),
+        "submitted_by": submitted_by,
+        "submitted_at": _utc_now_iso(),
+    }
+
+
+def _persist_erp_submit(exception_id, tenant_id, record, result, user_sub, notes,
+                        *, extra_resolution=None):
+    """Persist a submit graph run + emit the audit event. On SUCCESS the record
+    resolves; a REJECTED submit stays in review for correction (no false
+    resolution, Guardrail #5)."""
+    submission = _erp_submission_record(result, user_sub)
+    merged = dict(record.resolution_data or {})
+    merged.pop("pending_override", None)
+    merged["erp_submission"] = submission
+    if extra_resolution:
+        merged.update(extra_resolution)
+    success = submission["status"] == "SUCCESS"
+    if success:
+        updated = exception_store.update(
+            exception_id, tenant_id,
+            lifecycle_state="RESOLVED", final_status="COMPLETE",
+            resolved_by=user_sub, resolved_action="SUBMIT_TO_ERP",
+            resolution_notes=notes, resolution_data=merged,
+        )
+    else:
+        updated = exception_store.update(
+            exception_id, tenant_id, resolution_data=merged,
+        )
+    if not updated:
+        raise ASOEError(code="UPDATE_FAILED",
+                        message="Failed to persist ERP submit.", status_code=500)
+    exception_store.log_audit_event(
+        tenant_id=tenant_id,
+        policy_key="EXCEPTION_ERP_SUBMITTED" if success else "EXCEPTION_ERP_SUBMIT_REJECTED",
+        previous_value={"lifecycle_state": record.lifecycle_state,
+                        "exception_id": exception_id},
+        new_value={
+            "lifecycle_state": "RESOLVED" if success else record.lifecycle_state,
+            "resolved_action": "SUBMIT_TO_ERP",
+            "erp_status": submission["status"],
+            "sap_doc_number": submission["sap_doc_number"],
+            "corrections_applied": submission["corrections_applied"],
+            "submitted_by": user_sub,
+        },
+        changed_by=user_sub,
+        change_reason=notes,
+    )
+    return updated
+
+
+def _disposition_erp_submit(exception_id, tenant_id, record, req, user, key,
+                            request_body):
+    """SUBMIT_TO_ERP disposition: the financially-binding order-entry submit."""
+    if not req.notes or not req.notes.strip():
+        raise ASOEError(code="NOTES_REQUIRED",
+                        message="Notes are required (SOX audit trail).",
+                        status_code=422)
+    if record.intent != "MANUAL_ORDER_INTAKE":
+        raise ASOEError(
+            code="NOT_SUBMITTABLE",
+            message=("SUBMIT_TO_ERP applies only to order-entry "
+                     "(MANUAL_ORDER_INTAKE) records."),
+            status_code=409,
+        )
+    if not (record.enrichment_context or {}).get("order_entry_extraction"):
+        raise ASOEError(code="NO_EXTRACTED_ORDER",
+                        message="Record carries no extracted order to submit.",
+                        status_code=409)
+    _require_state(record, HITL_DISPOSITION_STATES, "submit_to_erp")
+
+    materiality = _cosign_materiality_usd(record)
+    if materiality is not None and materiality >= HIGH_VALUE_OVERRIDE_THRESHOLD_USD:
+        # Four-eyes: park the submit for cosign (reuses the PENDING_COSIGN flow).
+        merged = dict(record.resolution_data or {})
+        merged["pending_override"] = {
+            "action": "SUBMIT_TO_ERP",
+            "notes": req.notes,
+            "reason_tag": req.reason_tag,
+            "corrections": req.corrections or {},
+            "initiator": user.sub,
+            "initiated_at": _utc_now_iso(),
+            "financial_impact_usd": materiality,
+            "from_lifecycle_state": record.lifecycle_state,
+        }
+        updated = exception_store.update(
+            exception_id, tenant_id,
+            lifecycle_state="PENDING_COSIGN", resolution_data=merged,
+        )
+        if not updated:
+            raise ASOEError(code="UPDATE_FAILED",
+                            message="Failed to stage pending submit.",
+                            status_code=500)
+        exception_store.log_audit_event(
+            tenant_id=tenant_id,
+            policy_key="EXCEPTION_ERP_SUBMIT_INITIATED",
+            previous_value={"lifecycle_state": record.lifecycle_state,
+                            "exception_id": exception_id},
+            new_value={"lifecycle_state": "PENDING_COSIGN",
+                       "pending_action": "SUBMIT_TO_ERP",
+                       "financial_impact_usd": materiality,
+                       "initiator": user.sub},
+            changed_by=user.sub, change_reason=req.notes,
+        )
+        response = updated.to_detail()
+    else:
+        result = _run_erp_submit(record, tenant_id, req.corrections)
+        updated = _persist_erp_submit(
+            exception_id, tenant_id, record, result, user.sub, req.notes,
+        )
+        response = updated.to_detail()
+
+    if key is not None:
+        _idempotency_store(
+            tenant_id, exception_id, user.sub, key, request_body,
+            response.model_dump(),
+        )
+    return response
+
+
+# ---------------------------------------------------------------------------
 # POST /api/v1/exceptions/resolve — Synchronous resolution
 # ---------------------------------------------------------------------------
 
@@ -972,6 +1129,32 @@ async def cosign_override(
         "exception_id": exception_id,
     }
 
+    if req.approve and pending.get("action") == "SUBMIT_TO_ERP":
+        # ADR-042 §2.2.6 — the parked high-value ERP submit runs now, on the
+        # deterministic graph path, executed under four-eyes (initiator +
+        # cosigner). The recipe applies the operator corrections captured at
+        # initiation; the erp gateway write fires only on a SUCCESS submit.
+        result = _run_erp_submit(record, tenant_id, pending.get("corrections"))
+        cosign_meta = {
+            "cosigned_by": user.sub,
+            "cosigned_at": _utc_now_iso(),
+            "cosign_notes": req.notes,
+            "initiator": pending["initiator"],
+            "initiated_at": pending.get("initiated_at"),
+        }
+        updated = _persist_erp_submit(
+            exception_id, tenant_id, record, result,
+            pending["initiator"], req.notes,
+            extra_resolution={"cosign": cosign_meta},
+        )
+        response = updated.to_detail()
+        if key is not None:
+            _idempotency_store(
+                tenant_id, exception_id, user.sub, key,
+                request_body, response.model_dump(),
+            )
+        return response
+
     if req.approve:
         # Apply the pending override. resolved_by is set to the INITIATOR
         # (they proposed the action); cosigned_by and cosigned_at capture
@@ -1129,6 +1312,15 @@ async def disposition_exception(
             ),
             status_code=422,
         )
+
+    # ADR-042 §2.2.6 — SUBMIT_TO_ERP is an explicit, financially-binding
+    # execution (not a HITL disposition of the agent's recommendation), so it
+    # takes a dedicated path: directed graph re-entry + four-eyes cosign >$10k.
+    if req.action == "SUBMIT_TO_ERP":
+        return _disposition_erp_submit(
+            exception_id, tenant_id, record, req, user, key, request_body,
+        )
+
     # Per-intent reason-tag validation (Phase 5.2 — panel 2026-05-10).
     # The new validator accepts the per-intent curated set OR the
     # legacy `_GLOBAL_REASON_TAGS` set during the transition window

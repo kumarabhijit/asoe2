@@ -52,6 +52,10 @@ class DispositionRequest(BaseModel):
     action: str  # validated against AllowedResolutionAction ∪ {NO_ACTION}
     notes: str  # mandatory (SOX)
     reason_tag: str  # required (Phase 3); validated against AllowedOverrideReasonTag
+    # ADR-042 §2.2.6 — operator corrections to the extracted order, applied by
+    # SubmitToErpRecipe on a SUBMIT_TO_ERP disposition with a before/after audit.
+    # Shape: {"header": {field: value}, "lines": {line_num: {field: value}}}.
+    corrections: Optional[Dict[str, Any]] = None
 
 
 class CosignRequest(BaseModel):

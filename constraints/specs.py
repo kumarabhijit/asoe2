@@ -80,6 +80,9 @@ AllowedResolutionAction = Literal[
     "AUTO_CORRECT",
     "REQUEST_CLARIFICATION",
     "REJECT",
+    # ADR-042 Phase 3 — explicit, financially-binding order-entry ERP submit
+    # (operator disposition → directed graph re-entry; cosign >$10k).
+    "SUBMIT_TO_ERP",
 ]
 
 # Controlled vocabulary for categorizing an override's justification.
