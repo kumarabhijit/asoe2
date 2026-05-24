@@ -312,31 +312,43 @@ Working the post-feature-port backlog. **Landed this pass:**
   a source lock + render-escaping tests (`<script>`/`<img onerror>` → inert)
   prove backend free text is escaped. **SSRF deferred** — no live
   attachment-fetch path exists to allowlist yet.
+- ✓ **#5 delivery idempotency** — `correlation_id` was already covered by
+  `TraceIDMiddleware` (X-Trace-ID end-to-end). Added delivery-level dedup on the
+  reply-send: a deterministic key over (case, recipient, subject, body) — a
+  provider-message-id analog — is ledgered on a successful send and stamped on
+  `resolution_data.reply_sent`; a repeat SEND_REPLY composes (no send), derives
+  the key, and short-circuits if already delivered (audit
+  `EXCEPTION_REPLY_SEND_DEDUPED`). `tests/test_reply_send_idempotency.py`.
+- ✓ **#6 outbox/compensation** — `orchestration/outbox.py`: `apply_effects`
+  records every effect outcome (SUCCESS → committed; failure → needs
+  compensation), surfaced via `pending_compensation()` until `mark_compensated()`.
+  Never-raising; tenant-scoped; reset per test. `tests/test_effect_outbox.py`.
+  (DB-backed outbox table + the auto-reconciliation **worker** are the
+  remaining production follow-on; this is the substrate.)
+- ✓ **#11 automation-bias SLIs** — `reviewer_layer2_open_rate` +
+  `reviewer_decision_dwell_seconds` (+ counters) on `/metrics`, fed by
+  `POST /api/v1/metrics/reviewer-activity`. UI: `CollapsibleSection` reports its
+  first expand via `Layer2OpenContext`; `ExceptionDetailPanel` tracks dwell +
+  layer2-open and reports once per decision. `tests/test_reviewer_activity_metrics.py`
+  + asoe-ui `collapsible_layer2_signal` / `report_reviewer_activity` tests.
+  (Override-rate SLI already existed.)
 
-**Findings (lower remaining scope than thought):**
-- **#5 correlation_id is largely already present** — `TraceIDMiddleware`
-  propagates/generates `X-Trace-ID` end-to-end and the `trace_id` chain runs
-  through GraphState → record → trace. Remaining: **delivery idempotency on the
-  reply-send path** (dedupe `buyer_notification` on a provider message-id) — the
-  `/resolve` idempotency cache already exists.
-
-### Still PENDING
-- **#5** delivery idempotency on send (correlation_id already covered).
-- **#6** outbox/compensation (ERP-OK / reply-fail saga) — most complex.
-- **#11** Layer-2-open rate + decision-dwell telemetry (needs a UI→backend
-  event pipeline; override-rate SLI already exists).
+### Still PENDING (smaller residue)
 - **#10 SSRF** allowlist — lands with the first real attachment-fetch path.
+- **#6** DB-backed outbox table + automatic reconciliation worker.
 - Constraint Graph (deferred per ADR §5b — reuses trace/topology).
 - ADR-042 → Accepted on autonomy-v2 dual-control sign-off.
 
-### Gates status
+### Gates status — DoR safety gates (strategy §6): ALL IMPLEMENTED
 - ✓ `tests/test_inbox_gate_openapi_contract.py` — **GREEN** (Phase 7): all 8
   section schemas exported; xfail marker removed → standing hard gate.
-- DoR safety gates (strategy §6): implemented — **sanitizer**, **autonomy**,
-  #2 (no auto-execute), #3 (SAP re-price cosign), **#4** (calibration), **#7**
-  (SLO histogram), **#8** (gateway circuit breaker), **#9** (disposition hash
-  chain), **#10** (XSS/CSP; SSRF deferred), **S** (sandbox isolation).
-  Remaining — #5 (send idempotency), #6, #11 (Layer-2/dwell).
+- **sanitizer**, **autonomy**, #2 (no auto-execute), #3 (SAP re-price cosign),
+  **#4** (calibration), **#5** (send idempotency; correlation_id), **#6** (outbox
+  + compensation queue), **#7** (SLO histogram), **#8** (gateway circuit breaker),
+  **#9** (disposition hash chain), **#10** (XSS/CSP; SSRF deferred — no fetch
+  path), **#11** (automation-bias: override-rate + Layer-2/dwell), **S** (sandbox
+  isolation). Residue: #10-SSRF + #6-reconciler-worker (need a real fetch path /
+  a background worker — infra, not gate logic).
 
 ## Documents to refer to
 **asoe2**
