@@ -430,6 +430,17 @@ REGISTRY = {
                 result_key="change_analysis",
                 required_for_audit=False,
             ),
+            # ADR-042 Phase 7 — Knowledge Graph tab. Deterministic derived
+            # projection of the case entities (gateways/knowledge_graph, pure).
+            # required_for_audit=False: a derived projection, not a lifecycle
+            # write — when unwired/empty the tab stays structurally omitted.
+            GatewayDependency(
+                gateway_name="knowledge_graph",
+                operation="build",
+                params_from_state={"order_id": "event.order_id"},
+                result_key="knowledge_graph",
+                required_for_audit=False,
+            ),
         ),
         expected_metadata_keys=(
             "composite_confidence",

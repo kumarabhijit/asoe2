@@ -28,11 +28,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from api.schemas import (
     ChangeAnalysis,
+    DraftReply,
+    DraftReplyEdit,
     Edi850Document,
     EntitiesAnalysisData,
     EntityProfile,
     ExtractedEntity,
     ImpactMetrics,
+    KnowledgeGraphPayload,
     OrderEntryExtraction,
     SapDataAnalysisData,
 )
@@ -186,6 +189,62 @@ def compose_change_analysis(
         return ChangeAnalysis(**ctx)
     except (TypeError, ValueError):
         return None
+
+
+def compose_knowledge_graph(
+    record: ExceptionRecord,
+) -> Optional[KnowledgeGraphPayload]:
+    """Project the derived knowledge graph from
+    `enrichment_context["knowledge_graph"]` (the builder producer's read). None
+    when absent, malformed, or empty (no projectable entities → tab omitted;
+    deferrable per ADR-042 §5b). The builder owns construction
+    (`gateways/knowledge_graph.py`); the composer only projects (Guardrail #6)."""
+    ctx = record.enrichment_context.get("knowledge_graph")
+    if not isinstance(ctx, dict) or not ctx.get("nodes"):
+        return None
+    try:
+        return KnowledgeGraphPayload(**ctx)
+    except (TypeError, ValueError):
+        return None
+
+
+def compose_draft_reply(record: ExceptionRecord) -> Optional[DraftReply]:
+    """Project the current AI reply draft from `resolution_data["reply_draft"]`
+    (the ReplyDraftRecipe output a DRAFT_REPLY disposition persisted). None when
+    no draft exists. Flattens the nested `draft` block into the typed contract;
+    the recipe owns generation — the composer only projects (Guardrail #6)."""
+    rd = record.resolution_data or {}
+    ctx = rd.get("reply_draft")
+    if not isinstance(ctx, dict) or not ctx.get("status"):
+        return None
+    draft = ctx.get("draft") if isinstance(ctx.get("draft"), dict) else {}
+    try:
+        edits = [
+            DraftReplyEdit(
+                field=str(e.get("field", "")),
+                before=_opt_str(e.get("before")),
+                after=_opt_str(e.get("after")),
+            )
+            for e in (ctx.get("edits_applied") or [])
+            if isinstance(e, dict)
+        ]
+        return DraftReply(
+            status=ctx["status"],
+            reason=_opt_str(ctx.get("reason")),
+            template_name=_opt_str(draft.get("template_name")),
+            recipient=_opt_str(draft.get("recipient")),
+            subject=_opt_str(draft.get("subject")),
+            body=_opt_str(draft.get("body")),
+            edits_applied=edits,
+            drafted_by=_opt_str(ctx.get("drafted_by")),
+            drafted_at=_opt_str(ctx.get("drafted_at")),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _opt_str(value: Any) -> Optional[str]:
+    return None if value is None else str(value)
 
 
 # ---------------------------------------------------------------------------

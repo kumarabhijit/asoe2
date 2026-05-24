@@ -23,6 +23,7 @@ from contracts.models import GatewayResponse
 from db.repository import TenantConfigRepository as _TenantConfigRepository
 from db.shared import get_shared_adapter
 from gateways.edi850 import build_edi_850
+from gateways.knowledge_graph import build_knowledge_graph
 from gateways.registry import clear_registry, register_gateway
 from gateways.stub import StubGateway
 from gateways.tenant_config import TenantConfigGateway
@@ -73,6 +74,23 @@ _SANDBOX_CHANGE = dict(
         "network": {"dc_routing_ok": True},
         "priority": {"customer_tier": "GOLD", "auto_approve": False},
     },
+)
+
+# ADR-042 Phase 7 — the canned entities the knowledge_graph builder projects.
+# Derived from the same order/customer/SAP context the other producers return.
+_SANDBOX_KG = dict(
+    order_id="0093847612",
+    customer_name="Walmart Stores Inc",
+    customer_bp="300001",
+    line_items=[
+        {"material": "BEV-COLA-12PK", "description": "Cola 12-pack case",
+         "quantity": 480, "uom": "CS"},
+    ],
+    sap={"system": "S4H_PRD", "sap_doc_number": "5100012344",
+         "validation_status": "SO confirmed, ATP OK"},
+    entities=[
+        {"key": "customer_po", "value": "0093847612", "kind": "po"},
+    ],
 )
 
 
@@ -415,6 +433,20 @@ def register_sandbox_gateways() -> None:
                 gateway_name="change_analysis", operation="evaluate",
                 status="SUCCESS",
                 data=evaluate_change(**_SANDBOX_CHANGE),
+            ),
+        },
+    ))
+
+    # ADR-042 Phase 7 — Knowledge Graph builder producer. Deterministic derived
+    # projection of the canned case entities; activates the Knowledge Graph tab
+    # via enrichment_context.knowledge_graph.
+    register_gateway(StubGateway(
+        "knowledge_graph",
+        responses={
+            "build": GatewayResponse(
+                gateway_name="knowledge_graph", operation="build",
+                status="SUCCESS",
+                data=build_knowledge_graph(**_SANDBOX_KG),
             ),
         },
     ))

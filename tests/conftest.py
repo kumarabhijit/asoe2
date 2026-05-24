@@ -5,6 +5,7 @@ import os
 import pytest
 from contracts.models import GatewayResponse, GraphState, OrderEvent
 from gateways.edi850 import build_edi_850
+from gateways.knowledge_graph import build_knowledge_graph
 from gateways.registry import clear_registry, register_gateway
 from gateways.stub import StubGateway
 from gateways.tenant_config import TenantConfigGateway
@@ -53,6 +54,24 @@ _CHANGE = dict(
         "network": {"dc_routing_ok": True},
         "priority": {"customer_tier": "GOLD", "auto_approve": False},
     },
+)
+
+# ADR-042 Phase 7 — canned entities for the knowledge_graph builder stub.
+# Mirrors api/sandbox_gateways.py so the pytest pipeline and the live sandbox
+# project the identical graph.
+_KG = dict(
+    order_id="0093847612",
+    customer_name="Walmart Stores Inc",
+    customer_bp="300001",
+    line_items=[
+        {"material": "BEV-COLA-12PK", "description": "Cola 12-pack case",
+         "quantity": 480, "uom": "CS"},
+    ],
+    sap={"system": "S4H_PRD", "sap_doc_number": "5100012344",
+         "validation_status": "SO confirmed, ATP OK"},
+    entities=[
+        {"key": "customer_po", "value": "0093847612", "kind": "po"},
+    ],
 )
 
 
@@ -502,6 +521,17 @@ def _register_oms_stub():
             ),
         },
     )
+    # ADR-042 Phase 7 — Knowledge Graph builder producer (deterministic).
+    knowledge_graph_stub = StubGateway(
+        "knowledge_graph",
+        responses={
+            "build": GatewayResponse(
+                gateway_name="knowledge_graph", operation="build",
+                status="SUCCESS",
+                data=build_knowledge_graph(**_KG),
+            ),
+        },
+    )
     # ADR-042 Phase 3 — ERP write target for SubmitToErpRecipe's effect.
     erp_stub = StubGateway(
         "erp",
@@ -526,6 +556,7 @@ def _register_oms_stub():
     register_gateway(sap_order_stub)
     register_gateway(edi_850_stub)
     register_gateway(change_analysis_stub)
+    register_gateway(knowledge_graph_stub)
     register_gateway(erp_stub)
     # ADR-029: tenant_config is registered as the real file-backed
     # gateway (not a stub) — it's pure in-process I/O against
