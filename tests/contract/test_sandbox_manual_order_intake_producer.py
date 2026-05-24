@@ -153,12 +153,15 @@ def test_metadata_extra_cannot_override_reserved_routing_fields(
     body = res.json()
     rec = exception_store.get(body["exception_id"], "tenant-a")
     assert rec is not None
-    # The 0.97 request-level confidence wins — the LOW-band override
-    # in metadata_extra was filtered out (otherwise the run would
-    # land in MANUAL_REVIEW_REQUIRED via the LOW_CONFIDENCE_FLAG
-    # branch, not the high-confidence one).
+    # The 0.97 request-level confidence wins — the LOW-band override in
+    # metadata_extra was filtered out. Under ADR-042 DoR #2 both bands land in
+    # MANUAL_REVIEW_REQUIRED (intake never auto-executes), so the routing is
+    # distinguished by the recipe classification, not the terminal status: the
+    # high-confidence band yields ONE_CLICK_APPROVE; the LOW override would have
+    # yielded LOW_CONFIDENCE_FLAG.
     assert rec.intent == "MANUAL_ORDER_INTAKE"
-    assert body["final_status"] == "COMPLETE"
+    assert rec.resolution_data.get("recommended_action") == "ONE_CLICK_APPROVE"
+    assert body["final_status"] == "MANUAL_REVIEW_REQUIRED"
 
 
 def test_route_rejects_outside_sandbox_env(

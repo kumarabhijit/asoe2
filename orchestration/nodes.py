@@ -1247,6 +1247,25 @@ def execute_recipe(state: GraphState) -> GraphState:
         state.final_status = TerminalStatus.COMPLETE
         state.explanation = "Deterministic execution completed successfully."
 
+    # ADR-042 DoR #2 — order intake is adversarially-injectable free-text: the
+    # extraction (and therefore a clean GREEN, sub-$10k classification) can be
+    # crafted by an upstream attacker. The financially-binding ERP submit is
+    # therefore operator-gated — a disposition on /exceptions/{id}/disposition
+    # (ADR-042 §2.2.6), never auto-executed by the graph. A one-click-approve
+    # intake that would otherwise auto-COMPLETE is routed to
+    # MANUAL_REVIEW_REQUIRED so a human authorises the submit. (Reject / block
+    # / review terminals are unaffected.)
+    if (
+        state.final_status == TerminalStatus.COMPLETE
+        and state.intent == Intent.MANUAL_ORDER_INTAKE
+    ):
+        state.final_status = TerminalStatus.MANUAL_REVIEW_REQUIRED
+        state.explanation = (
+            "Order intake classified one-click-approve; the ERP submit is "
+            "operator-gated (ADR-042 §2.2.6 / DoR #2), so the record is routed "
+            "to manual review for human authorisation rather than auto-executed."
+        )
+
     _record(
         state, node="execute_recipe", entered_at=entered_at,
         decision={
