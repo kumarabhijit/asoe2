@@ -580,7 +580,7 @@ def _apply_sqlite_v016(conn: sqlite3.Connection) -> None:
             mime_type   TEXT NOT NULL,
             size_bytes  INTEGER NOT NULL,
             sha256      TEXT NOT NULL,
-            content_b64 TEXT NOT NULL,
+            content     BLOB NOT NULL,
             created_at  TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_email_attachment_case

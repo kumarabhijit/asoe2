@@ -1033,14 +1033,20 @@ class AttachmentRepository:
 
     Dict-based by design — the DB layer stays independent of
     ``gateways.attachment_store`` (which adapts these dicts to/from its
-    ``AttachmentRecord`` DTO). ``content_b64`` is the base64 encoding of the
-    raw attachment bytes (portable across SQLite/Postgres; integrity is the
-    stored ``sha256`` over the raw bytes). All queries are tenant-scoped.
+    ``AttachmentRecord`` DTO). ``content`` is the raw attachment bytes (BYTEA on
+    Postgres, BLOB on SQLite; integrity is the stored ``sha256``). The blob is
+    SELECTed only by ``get`` (single fetch); ``list_for_case`` returns
+    metadata only so listing never drags blobs. All queries are tenant-scoped.
     """
 
     _COLUMNS = (
         "id", "tenant_id", "case_id", "name", "mime_type", "size_bytes",
-        "sha256", "content_b64", "created_at",
+        "sha256", "content", "created_at",
+    )
+    # Metadata projection — everything except the blob, for list reads.
+    _META_COLUMNS = (
+        "id", "tenant_id", "case_id", "name", "mime_type", "size_bytes",
+        "sha256", "created_at",
     )
 
     def __init__(self, adapter=None):
@@ -1051,29 +1057,38 @@ class AttachmentRepository:
             cur.execute(
                 """INSERT INTO email_attachment
                    (id, tenant_id, case_id, name, mime_type, size_bytes,
-                    sha256, content_b64, created_at)
+                    sha256, content, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     rec["id"], rec["tenant_id"], rec.get("case_id"),
                     rec["name"], rec["mime_type"], int(rec["size_bytes"]),
-                    rec["sha256"], rec["content_b64"], rec["created_at"],
+                    rec["sha256"], rec["content"], rec["created_at"],
                 ),
             )
 
     def get(self, tenant_id: str, attachment_id: str) -> Optional[Dict[str, Any]]:
         with self._adapter.cursor(tenant_id) as cur:
             cur.execute(
-                "SELECT * FROM email_attachment WHERE id = ? AND tenant_id = ?",
+                """SELECT id, tenant_id, case_id, name, mime_type, size_bytes,
+                          sha256, content, created_at
+                   FROM email_attachment WHERE id = ? AND tenant_id = ?""",
                 (attachment_id, tenant_id),
             )
             row = cur.fetchone()
-        return _row_to_dict(row, self._COLUMNS) if row is not None else None
+        if row is None:
+            return None
+        rec = _row_to_dict(row, self._COLUMNS)
+        if rec.get("content") is not None:
+            rec["content"] = bytes(rec["content"])  # memoryview (psycopg2) → bytes
+        return rec
 
     def list_for_case(self, tenant_id: str, case_id: str) -> List[Dict[str, Any]]:
         with self._adapter.cursor(tenant_id) as cur:
             cur.execute(
-                """SELECT * FROM email_attachment
+                """SELECT id, tenant_id, case_id, name, mime_type, size_bytes,
+                          sha256, created_at
+                   FROM email_attachment
                    WHERE tenant_id = ? AND case_id = ? ORDER BY created_at""",
                 (tenant_id, case_id),
             )
-            return [_row_to_dict(r, self._COLUMNS) for r in cur.fetchall()]
+            return [_row_to_dict(r, self._META_COLUMNS) for r in cur.fetchall()]

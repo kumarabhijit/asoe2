@@ -7,11 +7,13 @@
 -- attachment is delivered as an external URL that must be retrieved once at
 -- ingestion before being stored here.
 --
--- Content is stored base64-encoded in a TEXT column for adapter portability
--- (identical binding on SQLite and Postgres; integrity is guaranteed by the
--- stored SHA-256 over the raw bytes). A BYTEA/BLOB column is a future
--- optimisation if storage size becomes a concern. Mirrors the in-memory store
--- in gateways/attachment_store.py.
+-- Content is stored as raw bytes in a BYTEA column (no base64 inflation;
+-- integrity is the stored SHA-256 over those bytes). Reads of the attachment
+-- list never SELECT the `content` column — only the single-attachment fetch
+-- does — so listing a case's attachments doesn't drag blobs. Mirrors the
+-- in-memory store in gateways/attachment_store.py. (At real volume the blob
+-- moves to object storage with this table holding only metadata + a URI; the
+-- SSRF-guarded fetch path we kept is exactly that mode.)
 
 CREATE TABLE IF NOT EXISTS email_attachment (
     id          TEXT PRIMARY KEY,
@@ -21,7 +23,7 @@ CREATE TABLE IF NOT EXISTS email_attachment (
     mime_type   TEXT NOT NULL,
     size_bytes  INTEGER NOT NULL,
     sha256      TEXT NOT NULL,
-    content_b64 TEXT NOT NULL,
+    content     BYTEA NOT NULL,
     created_at  TEXT NOT NULL
 );
 

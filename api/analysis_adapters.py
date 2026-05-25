@@ -1428,6 +1428,8 @@ def adapt_email_source(
                 name=str(raw.get("name") or ""),
                 mime_type=str(raw.get("mime_type") or ""),
                 bytes=int(raw.get("bytes") or 0),
+                sha256=raw.get("sha256"),
+                attachment_id=raw.get("attachment_id"),
             ))
         except (TypeError, ValueError):
             continue

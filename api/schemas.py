@@ -706,11 +706,15 @@ class EmailAttachmentManifestEntry(BaseModel):
     """One row in `EmailSourceData.attachment_manifest`.
 
     `name` and `mime_type` are sufficient for the operator to
-    triage what arrived; `bytes` lets the UI render a size hint
-    and lets the audit trail check tampering against the inbound
-    payload. `body_hash` for the email body lives on
-    `EmailSourceData`; per-attachment hashes are out of scope until
-    a real attachment-store gateway lands (Phase F / ADR-036).
+    triage what arrived; `bytes` lets the UI render a size hint.
+    `sha256` is the per-attachment tamper-evidence hash (the
+    analog of `EmailSourceData.body_hash` for the body) — computed
+    over the raw bytes by the attachment store
+    (`gateways/attachment_store.py`). `attachment_id` references the
+    stored blob so the UI can build a download link
+    (GET /cases/{id}/attachments/{attachment_id}). Both are optional:
+    they are None until the attachment is persisted to the store
+    (preview-only before a producer populates them).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -718,6 +722,8 @@ class EmailAttachmentManifestEntry(BaseModel):
     name: str
     mime_type: str
     bytes: int = 0
+    sha256: Optional[str] = None
+    attachment_id: Optional[str] = None
 
 
 class EmailSourceData(BaseModel):

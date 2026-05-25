@@ -41,7 +41,10 @@ def _full_payload() -> dict:
         "subject": "PO submission — stub fixture",
         "body_hash": "0" * 64,
         "attachment_manifest": [
-            {"name": "purchase_order.pdf", "mime_type": "application/pdf", "bytes": 12_345},
+            {
+                "name": "purchase_order.pdf", "mime_type": "application/pdf",
+                "bytes": 12_345, "sha256": "a" * 64, "attachment_id": "att-1",
+            },
             {"name": "ship_to.csv", "mime_type": "text/csv", "bytes": 412},
         ],
         "body_excerpt": "Please process the attached PO. Ship to the Atlanta DC.",
@@ -62,6 +65,12 @@ class TestAdaptEmailSourceHappyPath:
         assert len(result.attachment_manifest) == 2
         assert result.attachment_manifest[0].name == "purchase_order.pdf"
         assert result.attachment_manifest[0].mime_type == "application/pdf"
+        # sha256 (tamper-evidence) + attachment_id (download ref) pass through.
+        assert result.attachment_manifest[0].sha256 == "a" * 64
+        assert result.attachment_manifest[0].attachment_id == "att-1"
+        # Absent on the second entry → None (preview-only until stored).
+        assert result.attachment_manifest[1].sha256 is None
+        assert result.attachment_manifest[1].attachment_id is None
         assert result.attachment_manifest[0].bytes == 12_345
         assert result.body_excerpt == (
             "Please process the attached PO. Ship to the Atlanta DC."

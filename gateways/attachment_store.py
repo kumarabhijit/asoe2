@@ -10,7 +10,9 @@ fetched once at ingestion before being stored here.)
 Storage is pluggable behind a backend (mirroring `orchestration/outbox.py`): the
 in-memory backend is the default (process-local); when `DATABASE_URL` is set the
 DB backend persists to the V016 `email_attachment` table via
-`db.repository.AttachmentRepository`.
+`db.repository.AttachmentRepository`. Content is raw bytes (BYTEA/BLOB, no
+base64 inflation); a list read returns metadata only (content stripped) so it
+never drags blobs — `get_attachment` is the single-blob fetch.
 
 Integrity + safety:
   * a SHA-256 over the raw bytes is computed and stored at ingestion;
@@ -26,7 +28,7 @@ import hashlib
 import logging
 import os
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 from urllib.parse import urlparse
@@ -87,7 +89,12 @@ class _InMemoryBackend:
                 r for r in self._records.values()
                 if r.tenant_id == tenant_id and r.case_id == case_id
             ]
-        return sorted(rows, key=lambda r: r.created_at)
+        # Metadata view (content stripped) — parity with the DB backend, which
+        # never SELECTs the blob on a list. Use get_attachment for the bytes.
+        return [
+            replace(r, content=b"")
+            for r in sorted(rows, key=lambda r: r.created_at)
+        ]
 
     def clear(self) -> None:
         with self._lock:
@@ -102,11 +109,14 @@ class _DbBackend:
 
     @staticmethod
     def _to_record(row: Dict) -> AttachmentRecord:
+        content = row.get("content")
         return AttachmentRecord(
             id=row["id"], tenant_id=row["tenant_id"], case_id=row.get("case_id"),
             name=row["name"], mime_type=row["mime_type"],
             size_bytes=int(row["size_bytes"]), sha256=row["sha256"],
-            content=base64.b64decode(row["content_b64"]), created_at=row["created_at"],
+            # `content` is absent on the metadata-only list projection.
+            content=bytes(content) if content is not None else b"",
+            created_at=row["created_at"],
         )
 
     def put(self, record: AttachmentRecord) -> None:
@@ -114,7 +124,7 @@ class _DbBackend:
             "id": record.id, "tenant_id": record.tenant_id, "case_id": record.case_id,
             "name": record.name, "mime_type": record.mime_type,
             "size_bytes": record.size_bytes, "sha256": record.sha256,
-            "content_b64": base64.b64encode(record.content).decode("ascii"),
+            "content": record.content,
             "created_at": record.created_at,
         })
 
@@ -194,7 +204,11 @@ def get_attachment(tenant_id: str, attachment_id: str) -> Optional[AttachmentRec
 
 
 def list_case_attachments(tenant_id: str, case_id: str) -> List[AttachmentRecord]:
-    """List a case's attachments (tenant-scoped, oldest first)."""
+    """List a case's attachments (tenant-scoped, oldest first).
+
+    Metadata view: the returned records carry empty ``content`` (the blob is
+    not loaded for a list). Call `get_attachment` for the bytes.
+    """
     return _backend.list_for_case(tenant_id, case_id)
 
 

@@ -2293,8 +2293,19 @@
       },
       "EmailAttachmentManifestEntry": {
         "additionalProperties": false,
-        "description": "One row in `EmailSourceData.attachment_manifest`.\n\n`name` and `mime_type` are sufficient for the operator to\ntriage what arrived; `bytes` lets the UI render a size hint\nand lets the audit trail check tampering against the inbound\npayload. `body_hash` for the email body lives on\n`EmailSourceData`; per-attachment hashes are out of scope until\na real attachment-store gateway lands (Phase F / ADR-036).",
+        "description": "One row in `EmailSourceData.attachment_manifest`.\n\n`name` and `mime_type` are sufficient for the operator to\ntriage what arrived; `bytes` lets the UI render a size hint.\n`sha256` is the per-attachment tamper-evidence hash (the\nanalog of `EmailSourceData.body_hash` for the body) \u2014 computed\nover the raw bytes by the attachment store\n(`gateways/attachment_store.py`). `attachment_id` references the\nstored blob so the UI can build a download link\n(GET /cases/{id}/attachments/{attachment_id}). Both are optional:\nthey are None until the attachment is persisted to the store\n(preview-only before a producer populates them).",
         "properties": {
+          "attachment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attachment Id"
+          },
           "bytes": {
             "default": 0,
             "title": "Bytes",
@@ -2307,6 +2318,17 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha256"
           }
         },
         "required": [
@@ -5288,6 +5310,35 @@
         "title": "ScenarioOption",
         "type": "object"
       },
+      "SeedCaseAttachmentRequest": {
+        "additionalProperties": false,
+        "description": "Sandbox attachment ingest. ``content_b64`` is optional \u2014 when omitted a\ndeterministic sample blob is stored so the download path can be exercised\nwithout supplying bytes.",
+        "properties": {
+          "content_b64": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content B64"
+          },
+          "mime_type": {
+            "default": "application/pdf",
+            "title": "Mime Type",
+            "type": "string"
+          },
+          "name": {
+            "default": "sample.pdf",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "title": "SeedCaseAttachmentRequest",
+        "type": "object"
+      },
       "SeedFinancialImpactRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6304,6 +6355,77 @@
         ]
       }
     },
+    "/api/v1/_sandbox/cases/{case_id}/attachments": {
+      "post": {
+        "description": "Dev/demo producer for the attachment store (stand-in for the future\nemail-intelligence-agent / ADR-036 ingestion).\n\nPersists an attachment's bytes under (tenant, case_id) so the production\nread path \u2014 GET /cases/{case_id}/attachments/{attachment_id} \u2014 can be\nexercised end-to-end. Sandbox-only; real ingestion lands with ADR-036.",
+        "operationId": "seed_case_attachment_api_v1__sandbox_cases__case_id__attachments_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeedCaseAttachmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Seed Case Attachment Api V1  Sandbox Cases  Case Id  Attachments Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Seed Case Attachment",
+        "tags": [
+          "sandbox"
+        ]
+      }
+    },
     "/api/v1/_sandbox/seed/financial-impact": {
       "post": {
         "description": "Stamp financial_impact_usd onto an exception's resolution_data.\n\nUsed by the Playwright four-eyes spec to push an existing record\npast HIGH_VALUE_OVERRIDE_THRESHOLD_USD so the next /disposition\ncall stages to PENDING_COSIGN. No new audit event is emitted \u2014\nthis is test fixture wiring, not a SOX-relevant state transition.",
@@ -6784,6 +6906,71 @@
         "summary": "Get Case",
         "tags": [
           "cases"
+        ]
+      }
+    },
+    "/api/v1/cases/{case_id}/attachments/{attachment_id}": {
+      "get": {
+        "operationId": "download_attachment_api_v1_cases__case_id__attachments__attachment_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "attachment_id",
+            "required": true,
+            "schema": {
+              "title": "Attachment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Attachment",
+        "tags": [
+          "attachments"
         ]
       }
     },

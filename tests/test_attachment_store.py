@@ -81,6 +81,17 @@ def test_list_case_attachments_is_case_and_tenant_scoped():
     assert ids == {a.id, b.id}
 
 
+def test_list_returns_metadata_only_get_returns_content():
+    # DB-bloat guard: a list read never carries the blob; get does.
+    rec = store_attachment("t1", "a.pdf", "application/pdf", b"BLOBBYTES", case_id="c1")
+    listed = list_case_attachments("t1", "c1")
+    assert len(listed) == 1
+    assert listed[0].size_bytes == 9          # metadata preserved
+    assert listed[0].sha256 == rec.sha256
+    assert listed[0].content == b""           # blob NOT loaded on list
+    assert get_attachment("t1", rec.id).content == b"BLOBBYTES"
+
+
 # ---------------------------------------------------------------------------
 # DB backend parity (V016 migration + AttachmentRepository on SQLite)
 # ---------------------------------------------------------------------------
