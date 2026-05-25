@@ -19,6 +19,44 @@
 
 ---
 
+## Implementation status (2026-05-24)
+
+The plan in this ADR has been **built and merged** (asoe2 PR #166 + asoe-ui PR #185),
+but the **Status above remains *Proposed* by design** — see the blocker below.
+
+Delivered against the §2.2 scorecard:
+* **Phases 0–7** — complete. All nine prototype tabs ported as deterministic,
+  data-presence-driven sections: AI Analysis / Entities / SAP Data (P2), Order
+  Entry extraction + ERP-submit disposition with cosign>$10k (P3), Draft Reply +
+  Simulate-Inbound backend injector + live WS events (P4), EDI 850 builder +
+  viewer (P5), Change Analysis (recipe-homed, variable-cardinality) (P6),
+  Knowledge Graph + DraftReply schema (P7). All 8 §2.2.1 section schemas are
+  exported; `tests/test_inbox_gate_openapi_contract.py` is now a standing
+  hard gate (xfail marker removed).
+* **Phase 8 + productionization** — every strategy-§6 DoR gate implemented:
+  sanitizer, autonomy vocab (display), #2 no-auto-execute, #3 SAP re-price
+  cosign, #4 calibration, #5 delivery idempotency, #6 effect outbox + DB
+  persistence (`effect_outbox`, V015) + reconciliation worker/scheduler, #7
+  ingest→terminal SLO histogram, #8 gateway circuit breaker, #9 business/
+  disposition audit hash-chain, #10 XSS/CSP + SSRF guard (wired into
+  `gateways/attachment_fetch.py`), #11 automation-bias SLIs, S sandbox isolation.
+
+Deferred — NOT built, by design:
+* **Constraint Graph** — §2.1/§5b direct reuse of `get_pipeline_topology` +
+  `/exceptions/{id}/trace`; the Change Analysis section already renders the
+  constraint data. A dedicated SVG surface is duplicative; revisit on demand.
+* **Real attachment fetcher** — the SSRF guard + `attachment_fetch` gateway +
+  stub are wired and tested; a live fetcher waits on a production attachment store.
+
+**Blocker keeping Status = Proposed:** the strategy doc (§8) ties acceptance to
+the `autonomy_vocab_version` hard gate, which requires **autonomy-v2
+dual-control compliance sign-off**. In this pre-prod project the human approval
+*step* is waived for merge, but the *mechanism* stays intact — so the status is
+not flipped to *Accepted* unilaterally. Flip to *Accepted* once that sign-off
+lands (Phase 8 final item).
+
+---
+
 ## 1. Context
 
 The `AgenticOM_Prototype_NC.html` static prototype contains a rich

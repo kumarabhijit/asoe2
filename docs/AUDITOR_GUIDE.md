@@ -361,6 +361,39 @@ selection.
 
 Implementation: `orchestration/utils.py` → `circuit_breaker()`, thresholds in `contracts/policy.py`
 
+### 8.1 Gateway-tier circuit breaker (DoR #8)
+
+Separate from the per-batch breaker above. A textbook 3-state breaker (CLOSED →
+OPEN → HALF_OPEN) is applied **per `gateway_name`** at the single
+`gateways/executor.py::GatewayExecutor.run` chokepoint, bringing the LLM tier's
+resilience to the infrastructure gateways (email/SAP/OMS/ERP/…). When a gateway
+trips (rolling error-rate or p95-latency over `GATEWAY_CIRCUIT_BREAKER_*`
+thresholds in `contracts/policy.py`), further calls **short-circuit to an
+`UNAVAILABLE` response without invoking the dependency** for a cooldown, then a
+single HALF_OPEN probe closes or re-opens it. Per-gateway metering (calls /
+failures / short-circuits / latency) + a breaker-state gauge render on
+`/api/v1/metrics`. Implementation: `gateways/circuit_breaker.py`.
+
+### 8.2 Attachment-fetch SSRF guard (DoR #10)
+
+`gateways/attachment_fetch.py::AttachmentFetchGateway` validates every outbound
+attachment URL through `hardening/ssrf.py::validate_outbound_url` **before** any
+fetch: allowlist-first (`contracts/policy.ATTACHMENT_FETCH_ALLOWED_HOSTS`),
+HTTPS-only, default-port, no embedded credentials, and rejects any host (literal
+or DNS-resolved) that is non-global (cloud metadata `169.254.169.254`, loopback,
+`localhost`, private ranges). A blocked URL returns `FAILED` and never reaches
+the fetcher.
+
+### 8.3 Effect outbox + compensation (DoR #6)
+
+`orchestration/outbox.py` records every gateway side-effect outcome applied by
+`apply_effects`: a SUCCESS external write is committed; a failure is queued for
+compensation. `reconcile_pending` retries pending failures (delivery-idempotent,
+DoR #5) and escalates after `max_attempts`; the durable `effect_outbox` table
+(migration V015) persists the queue across restarts when `DATABASE_URL` is set.
+Operable via admin `POST /api/v1/outbox/reconcile` or the opt-in scheduler
+(`ASOE_OUTBOX_RECONCILE_INTERVAL_S`).
+
 ---
 
 ## 9. Execution Invariants (Non-Negotiable)
@@ -421,6 +454,23 @@ client-supplied), and `change_reason` (the caller's notes).
 | `EXCEPTION_OVERRIDE_INITIATED` | `/disposition` when chosen ≠ recommended AND `financial_impact_usd >= HIGH_VALUE_OVERRIDE_THRESHOLD_USD` | Lifecycle transitions to `PENDING_COSIGN`. The pending action is stashed on `resolution_data.pending_override` |
 | `EXCEPTION_OVERRIDE_COSIGNED` | `POST /exceptions/{id}/override/cosign` with `approve=true` | Applies the pending override (lifecycle → `RESOLVED`). `new_value` includes both `initiator` and `cosigned_by` |
 | `EXCEPTION_OVERRIDE_REJECTED` | `POST /exceptions/{id}/override/cosign` with `approve=false` | Restores the prior `lifecycle_state` stashed on `pending_override.from_lifecycle_state` |
+
+**ADR-042 Customer-Inbox disposition events.** The order-entry dispositions emit
+their own hash-chained audit rows alongside the events above:
+
+| `policy_key` | Emitted by | Notes |
+|---|---|---|
+| `EXCEPTION_ERP_SUBMITTED` / `EXCEPTION_ERP_SUBMIT_REJECTED` | `SUBMIT_TO_ERP` disposition | The financially-binding order-entry write. `new_value` records the ERP doc, status, and the operator's before/after corrections. ≥$10k stages `PENDING_COSIGN` and the write runs on `/override/cosign` approve (four-eyes, SoD) — materiality from the SAP re-price, not the LLM `financial_impact_usd` (DoR #3). |
+| `EXCEPTION_REPLY_DRAFTED` / `EXCEPTION_REPLY_DRAFT_REJECTED` | `DRAFT_REPLY` disposition | Composes a buyer reply (no send). Records template, recipient, and operator edits. |
+| `EXCEPTION_REPLY_SENT` / `EXCEPTION_REPLY_SEND_FAILED` | `SEND_REPLY` disposition | Fires the `buyer_notification` send; SENT only when the gateway delivered, else FAILED with reason (never masked — Guardrail #5). |
+| `EXCEPTION_REPLY_SEND_DEDUPED` | `SEND_REPLY` (delivery idempotency, DoR #5) | A repeat send of the same reply (case + recipient + content key) is short-circuited — the buyer is delivered to at most once. |
+
+**Business/disposition events are hash-chained (DoR #9).** Every event above —
+not just policy overrides — is written via `exception_store.log_audit_event`,
+so each row carries `prev_hash` + `event_hash = sha256(prev_hash || canonical_json)`.
+`verify_audit_chain(tenant_id)` walks the per-tenant chain and returns the first
+tamper index; the in-memory and DB (`policy_audit_log`, V003 UPDATE/DELETE-reject
+triggers) backends compute the hash identically.
 
 The legacy `EXCEPTION_OVERRIDE`, `EXCEPTION_APPROVE`, and
 `EXCEPTION_REJECT` event types were **retired in Phase 19** along with
@@ -545,9 +595,32 @@ JWT `env` claim is validated against `ASOE_ENV` environment variable on every au
 
 ### 12.5 Trace ID Propagation (§11.4)
 
-Every request/response includes an `X-Trace-ID` header. Client-provided values are propagated unchanged; missing values generate a UUID at the API boundary. The trace ID flows through `ComplianceDecision.trace_id` → `ExecutionLog.trace_id` → `TraceRecord.trace_id` (Execution Invariant #4).
+Every request/response includes an `X-Trace-ID` header. Client-provided values are propagated unchanged; missing values generate a UUID at the API boundary. The trace ID flows through `ComplianceDecision.trace_id` → `ExecutionLog.trace_id` → `TraceRecord.trace_id` (Execution Invariant #4). This is the end-to-end **correlation id** (DoR #5).
 
 Implementation: `api/middleware.py` → `TraceIDMiddleware`.
+
+### 12.6 Security Response Headers + CSP (DoR #10)
+
+Every response (including error pages) carries hardening headers via
+`api/middleware.py::SecurityHeadersMiddleware`: a strict
+`Content-Security-Policy: default-src 'none'` on the JSON API (responses can
+never be coerced into an executable document), plus `X-Content-Type-Options:
+nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, and
+`Cross-Origin-Resource-Policy: same-origin`. The interactive docs (`/docs`,
+`/redoc`) receive a Swagger/ReDoc-compatible CSP instead. Pairs with the
+attachment-fetch SSRF guard (§8.2). On the UI side, backend free-text fields
+(email body, EDI segments, reply drafts) are rendered through React's
+auto-escaping — there is no `dangerouslySetInnerHTML` (CI-locked).
+
+### 12.7 Automation-Bias SLIs (DoR #11)
+
+Beyond the reviewer-override rate (§10 / ADR-039), the system measures whether
+operators actually engage with the evidence before deciding:
+`reviewer_layer2_open_rate` (did they expand Layer-2 evidence?) and a
+`reviewer_decision_dwell_seconds` histogram (time from opening a case to
+acting), exposed on `/api/v1/metrics`. Fed once per decision by the UI via
+`POST /api/v1/metrics/reviewer-activity`. A persistently low Layer-2-open rate
+or near-zero dwell is the rubber-stamping signal auditors watch.
 
 ---
 

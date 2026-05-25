@@ -2693,3 +2693,21 @@ implementation.
       (ADR-038 §6.1)" added — projection table, dominance order,
       `closed_at` semantics, cosign-parked skip, and the HITL
       endpoint → case-effect table. Prior §19.7 renumbered to §19.8.
+
+## ADR-042 — Customer-Inbox Prototype Port (asoe2 #166, merged 2026-05-24)
+
+Backend half of the cross-repo port (frontend = asoe-ui #185). Skill–Shadow–Recipe
+discipline throughout: extraction/EDI/KG are gateways/builders, Change Analysis is
+recipe-homed, the composer is the sole assembler, and every section schema is
+audit-registry/openapi-gated.
+
+- [x] **Phase 0–2** — section schemas + composer adapters; AI Analysis / Entities (`entities_analysis`) / SAP Data (`sap_data_analysis`); `EMAIL_ENTRY` case_type filter
+- [x] **Phase 3** — `OrderExtractionGateway` (constrained-gen + `RecordedGatewayBackend` replay) + `SubmitToErpRecipe` + `SUBMIT_TO_ERP` disposition (Shadow + cosign>$10k from SAP re-price); DoR #1/#2/#3
+- [x] **Phase 4** — `ReplyDraftRecipe` + `DRAFT_REPLY` / `SEND_REPLY` dispositions (buyer_notification gated to a SUCCESS compose) + `reply_drafted` / `reply_sent` WS events
+- [x] **Phase 5** — `gateways/edi850.py::build_edi_850` (pure X12 5010 builder) + `Edi850Document`
+- [x] **Phase 6** — `recipes/ChangeAnalysisRecipe.py` (deterministic, variable-cardinality; thresholds injected, not imported) + `ConstraintEvaluation`/`ConstraintCheck`/`ScenarioOption`/`ChangeDecision`
+- [x] **Phase 7** — `gateways/knowledge_graph.py::build_knowledge_graph` + `KnowledgeGraphPayload`; `DraftReply` schema; **8-section OpenAPI contract gate flipped GREEN** (`test_inbox_gate_openapi_contract.py`, xfail removed); sandbox isolation sentinel
+- [x] **Phase 8 + productionization (DoR gates)** — #4 calibration, #5 delivery idempotency (correlation_id via TraceIDMiddleware), #6 effect outbox + DB persistence (`effect_outbox` V015) + reconciliation worker/scheduler, #7 ingest→terminal SLO histogram, #8 gateway circuit breaker + metering, #9 disposition audit hash-chain, #10 security headers/CSP + SSRF guard (`gateways/attachment_fetch.py`), #11 automation-bias SLIs, field-level contract snapshot
+- [x] **Producers wired** — ManualOrderIntakeRecipe declares the 6 inbox read producers (order_extraction ×2, sap_order, edi_850, change_analysis, knowledge_graph); sandbox + conftest stubs activate the tabs end-to-end
+- [ ] **Constraint Graph** — deferred by ADR §2.1/§5b (reuse `get_pipeline_topology` + `/exceptions/{id}/trace`)
+- [ ] **ADR-042 → Accepted** — blocked on autonomy-v2 dual-control compliance sign-off (Status stays *Proposed*)
