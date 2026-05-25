@@ -43,6 +43,8 @@ from api.schemas import (
     EmailAttachmentManifestEntry,
     EmailOrderEntryAnalysisData,
     EmailOrderEntryFloorStatus,
+    EvidenceAnchor,
+    MatchKey,
     EmailSourceData,
     InboundOrder,
     MOQAnalysisData,
@@ -1394,6 +1396,107 @@ def adapt_email_order_entry(
     return _eoe_from_outputs(synthetic, floor_status)
 
 
+def _normalize_match_text(s: Any) -> str:
+    """Deterministic normalisation for the locate key — collapse runs of
+    whitespace and casefold, so the viewer's literal locate is robust to
+    rendering whitespace differences without becoming a fuzzy search."""
+    return " ".join(str(s).split()).casefold()
+
+
+def compute_match_keys(values: "list[str] | tuple[str, ...]") -> "list[MatchKey]":
+    """Assign each value a deterministic `MatchKey` (ADR-043 §2.4). Values that
+    normalise identically get increasing `occurrence_index` (0, 1, 2 …) in
+    input order, so the viewer can map the Nth identical highlight to the Nth
+    occurrence in the rendered text — the disambiguation for repeated tokens."""
+    seen: Dict[str, int] = {}
+    keys: list[MatchKey] = []
+    for v in values:
+        norm = _normalize_match_text(v)
+        idx = seen.get(norm, 0)
+        seen[norm] = idx + 1
+        keys.append(MatchKey(normalized_text=norm, occurrence_index=idx))
+    return keys
+
+
+_ANCHOR_LABELS: Dict[str, str] = {
+    "po": "PO number", "po_number": "PO number", "order_id": "Order number",
+    "ship_to": "Ship-to", "qty": "Quantity", "quantity": "Quantity",
+    "material": "Material", "invoice": "Invoice number", "date": "Date",
+}
+
+
+def _anchor_label(key: str, kind: str) -> str:
+    if key in _ANCHOR_LABELS:
+        return _ANCHOR_LABELS[key]
+    if kind in _ANCHOR_LABELS:
+        return _ANCHOR_LABELS[kind]
+    base = (key or kind or "evidence").replace("_", " ").strip()
+    return (base[:1].upper() + base[1:]) if base else "Evidence"
+
+
+def build_evidence_anchors(record: ExceptionRecord) -> "list[EvidenceAnchor]":
+    """Project backend-authoritative highlight anchors (ADR-043 §2.2).
+
+    Phase-1: derive one `text_derived` anchor per extracted entity that carries
+    locatable verbatim text (`source_span`, falling back to `value`), bound to
+    the stored attachment's `sha256`/`attachment_id`. No geometry. Returns []
+    when there is no stored attachment to overlay or no locatable evidence — the
+    viewer never draws a highlight against bytes we don't hold.
+    """
+    enrichment = record.enrichment_context or {}
+    src = enrichment.get("email_source_context")
+    if not isinstance(src, dict):
+        return []
+
+    raw_attachments = src.get("attachment_manifest")
+    stored: Optional[Dict[str, Any]] = None
+    if isinstance(raw_attachments, list):
+        for raw in raw_attachments:
+            if isinstance(raw, dict) and raw.get("sha256") and raw.get("attachment_id"):
+                stored = raw
+                break
+    if stored is None:
+        return []
+
+    raw_entities = enrichment.get("extracted_entities")
+    if not isinstance(raw_entities, list):
+        return []
+
+    prepared: list[tuple[str, str, str, str]] = []  # (text, key, kind, ref)
+    for ent in raw_entities:
+        if not isinstance(ent, dict):
+            continue
+        span = ent.get("source_span")
+        value = ent.get("value")
+        text = span if isinstance(span, str) and span.strip() else value
+        if not isinstance(text, str) or not text.strip():
+            continue
+        key = str(ent.get("key") or "")
+        kind = str(ent.get("kind") or "")
+        ref = f"order_entry.{key}" if key else f"entities.{kind or 'value'}"
+        prepared.append((text, key, kind, ref))
+
+    if not prepared:
+        return []
+
+    keys = compute_match_keys([p[0] for p in prepared])
+    sha = str(stored.get("sha256"))
+    att_id = str(stored.get("attachment_id"))
+    anchors: list[EvidenceAnchor] = []
+    for (text, key, kind, ref), mk in zip(prepared, keys):
+        anchors.append(EvidenceAnchor(
+            attachment_id=att_id,
+            anchor_source="text_derived",
+            text=text,
+            match_key=mk,
+            supports_kind="extracted_field",
+            supports_ref=ref,
+            label=_anchor_label(key, kind),
+            source_sha256=sha,
+        ))
+    return anchors
+
+
 def adapt_email_source(
     record: ExceptionRecord,
 ) -> Optional[EmailSourceData]:
@@ -1443,6 +1546,7 @@ def adapt_email_source(
             attachment_manifest=manifest,
             body_excerpt=src.get("body_excerpt"),
             source_email_id=src.get("source_email_id"),
+            evidence_anchors=build_evidence_anchors(record),
         )
     except (TypeError, ValueError):
         return None

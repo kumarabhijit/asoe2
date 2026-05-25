@@ -9,13 +9,6 @@ this pairs with the sandbox/CSP assertions on the asoe-ui side.
 
 from __future__ import annotations
 
-import pytest
-
-pytestmark = pytest.mark.xfail(
-    reason="ADR-043 detect_preview_format lands at CP-C",
-    strict=True,
-)
-
 _PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 _PDF = b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n"
 _JPEG = b"\xff\xd8\xff\xe0\x00\x10JFIF" + b"\x00" * 8

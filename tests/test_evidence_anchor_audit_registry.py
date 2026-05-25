@@ -12,13 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 import yaml
-
-pytestmark = pytest.mark.xfail(
-    reason="ADR-043 EvidenceAnchor registry section lands at CP-C",
-    strict=True,
-)
 
 _REGISTRY_PATH = (
     Path(__file__).resolve().parent.parent

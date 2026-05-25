@@ -17,11 +17,6 @@ from __future__ import annotations
 
 import pytest
 
-pytestmark = pytest.mark.xfail(
-    reason="ADR-043 EvidenceAnchor schema lands at CP-C",
-    strict=True,
-)
-
 
 def _text_anchor(**overrides):
     from api.schemas import EvidenceAnchor, MatchKey

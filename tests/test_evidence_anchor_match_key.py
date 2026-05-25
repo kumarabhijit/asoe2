@@ -8,14 +8,6 @@ occurrence indices, and the key must be stable across calls.
 
 from __future__ import annotations
 
-import pytest
-
-pytestmark = pytest.mark.xfail(
-    reason="ADR-043 compute_match_keys lands at CP-C",
-    strict=True,
-)
-
-
 def test_repeated_value_gets_distinct_occurrence_indices():
     from api.analysis_adapters import compute_match_keys
 

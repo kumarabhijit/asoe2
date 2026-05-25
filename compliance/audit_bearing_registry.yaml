@@ -176,6 +176,75 @@ EmailSourceData:
       Decorative: when absent, the inline EmailSourceSection on the
       detail page is the primary surface; when present, the detail
       page surfaces a "View source email" back-link.
+  evidence_anchors:
+    tier: audit-bearing
+    source: derived
+    rationale: >-
+      Backend-authoritative highlight anchors (ADR-043) the operator
+      authorises against in the attachment preview. Derived from the
+      extracted entities' source_span; each anchor binds to a stored
+      attachment sha256. Audit identity is (attachment_id, source_sha256,
+      text, supports_ref) — decoupled from on-screen position.
+
+EvidenceAnchor:
+  # ADR-043 — one highlight anchor. The audit-authoritative identity is
+  # (attachment_id, source_sha256, text, supports_ref); on-screen position
+  # (page/bbox/confidence) is best-effort and NEVER audit-bearing.
+  attachment_id:
+    tier: audit-bearing
+    source: control
+    rationale: Which stored document the evidence lives in.
+  anchor_source:
+    tier: audit-bearing
+    source: control
+    rationale: >-
+      Provenance-regime discriminator (text_derived | spatial_extracted)
+      so an auditor can tell a Phase-1 text match from a Phase-2 model
+      coordinate.
+  text:
+    tier: audit-bearing
+    source: control
+    rationale: The verbatim evidence the operator authorises against.
+  supports_kind:
+    tier: audit-bearing
+    source: control
+    rationale: >-
+      Closed vocabulary — what the anchor supports (extracted_field /
+      constraint / decision).
+  supports_ref:
+    tier: audit-bearing
+    source: control
+    rationale: The analysis field / decision this evidence backs.
+  source_sha256:
+    tier: audit-bearing
+    source: control
+    rationale: Binds the anchor to exact attachment bytes (tamper evidence).
+  match_key:
+    tier: audit-bearing
+    source: derived
+    rationale: >-
+      Deterministic locate key (normalized_text + occurrence_index) the
+      viewer uses for a pure literal locate — no client-side search.
+  label:
+    tier: contextual
+    source: derived
+    rationale: Human-facing label; regenerable from supports_ref.
+  page:
+    tier: contextual
+    source: derived
+    rationale: >-
+      Best-effort page index (ADR-045 spatial anchors only). Never
+      audit-bearing — position is a convenience, not the evidence.
+  bbox:
+    tier: contextual
+    source: derived
+    rationale: >-
+      Best-effort bounding box (ADR-045 spatial anchors only, verified
+      at runtime). Never audit-bearing.
+  confidence:
+    tier: contextual
+    source: derived
+    rationale: Per-anchor model confidence (ADR-045 spatial anchors only).
 
 EmailOrderEntryAnalysisData:
   # ADR-034 Phase B — email-channel order intake. Floor evidence
@@ -1188,9 +1257,15 @@ summary:
   # 2026-05-24: +4 rows for SapDataAnalysisData (ADR-042 Phase 2 — SAP Data
   # tab). 3 audit-bearing (system, validation_status, order_value_usd),
   # 1 contextual (sap_doc_number). All gateway-sourced (SAP read).
-  total_fields: 164
-  audit_bearing: 122
+  # 2026-05-25: +12 rows for evidence highlighting (ADR-043). +1 on
+  # EmailSourceData (evidence_anchors, audit-bearing) + the EvidenceAnchor
+  # section: 7 audit-bearing (attachment_id, anchor_source, text,
+  # supports_kind, supports_ref, source_sha256, match_key) and 4 contextual
+  # (label — derived; page/bbox/confidence — best-effort position, ADR-045,
+  # never audit-bearing). Net: +8 audit-bearing, +4 contextual.
+  total_fields: 176
+  audit_bearing: 130
   conditional: 7
-  contextual: 35
+  contextual: 39
   backend_gap_fields: 0
   gateway_dependent_fields: 17

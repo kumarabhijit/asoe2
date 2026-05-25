@@ -9,15 +9,9 @@ cardinality: no per-document id may appear as a Prometheus label.
 
 from __future__ import annotations
 
-import pytest
 from fastapi.testclient import TestClient
 
 from api.app import create_app
-
-pytestmark = pytest.mark.xfail(
-    reason="ADR-043 preview/highlight metrics land at CP-C",
-    strict=True,
-)
 
 
 def test_metrics_expose_highlight_and_preview_families_with_bounded_labels():

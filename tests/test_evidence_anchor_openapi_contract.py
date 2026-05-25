@@ -12,13 +12,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
-pytestmark = pytest.mark.xfail(
-    reason="ADR-043 EvidenceAnchor schema exported at CP-C",
-    strict=True,
-)
-
 _OPENAPI = Path(__file__).resolve().parent.parent / "openapi" / "asoe2.openapi.json"
 
 

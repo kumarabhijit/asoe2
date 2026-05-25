@@ -9,14 +9,7 @@ and carrying NO geometry. The UI later only *locates* these — it invents nothi
 
 from __future__ import annotations
 
-import pytest
-
 from api.store import ExceptionRecord
-
-pytestmark = pytest.mark.xfail(
-    reason="ADR-043 build_evidence_anchors lands at CP-C",
-    strict=True,
-)
 
 
 def _record() -> ExceptionRecord:
