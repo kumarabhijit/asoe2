@@ -5,6 +5,7 @@ import os
 import pytest
 from contracts.models import GatewayResponse, GraphState, OrderEvent
 from gateways.attachment_fetch import AttachmentFetchGateway
+from gateways.attachment_store import store_backed_fetcher
 from gateways.edi850 import build_edi_850
 from gateways.knowledge_graph import build_knowledge_graph
 from gateways.registry import clear_registry, register_gateway
@@ -558,7 +559,7 @@ def _register_oms_stub():
     register_gateway(edi_850_stub)
     register_gateway(change_analysis_stub)
     register_gateway(knowledge_graph_stub)
-    register_gateway(AttachmentFetchGateway())
+    register_gateway(AttachmentFetchGateway(fetcher=store_backed_fetcher))
     register_gateway(erp_stub)
     # ADR-029: tenant_config is registered as the real file-backed
     # gateway (not a stub) — it's pure in-process I/O against

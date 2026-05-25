@@ -153,9 +153,12 @@ EmailSourceData:
     source: control
     gateway_dependency: true
     rationale: >-
-      List of (name, mime_type, bytes) for every attachment the
-      extraction pipeline saw. Reviewer authorising a multi-attachment
-      PO needs the manifest to confirm scope.
+      List of (name, mime_type, bytes, sha256, attachment_id) for every
+      attachment the extraction pipeline saw. Reviewer authorising a
+      multi-attachment PO needs the manifest to confirm scope; per-attachment
+      sha256 is the tamper-evidence hash (analog of body_hash) and
+      attachment_id references the stored blob for download
+      (GET /cases/{id}/attachments/{attachment_id}).
   body_excerpt:
     tier: contextual
     source: derived

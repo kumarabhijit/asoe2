@@ -568,6 +568,35 @@ def _apply_sqlite_v015(conn: sqlite3.Connection) -> None:
     logger.info("SQLite schema V015 applied (effect_outbox ledger)")
 
 
+def _apply_sqlite_v016(conn: sqlite3.Connection) -> None:
+    """V016 — email_attachment store (DoR #10 production attachment store)."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS email_attachment (
+            id          TEXT PRIMARY KEY,
+            tenant_id   TEXT NOT NULL,
+            case_id     TEXT,
+            name        TEXT NOT NULL,
+            mime_type   TEXT NOT NULL,
+            size_bytes  INTEGER NOT NULL,
+            sha256      TEXT NOT NULL,
+            content     BLOB NOT NULL,
+            created_at  TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_email_attachment_case
+            ON email_attachment (tenant_id, case_id);
+        CREATE INDEX IF NOT EXISTS idx_email_attachment_tenant_time
+            ON email_attachment (tenant_id, created_at);
+        """
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+        ("V016", datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    logger.info("SQLite schema V016 applied (email_attachment store)")
+
+
 def apply_sqlite(conn: sqlite3.Connection) -> None:
     """Apply the SQLite-compatible schema (V001 + subsequent migrations)."""
     conn.executescript(_SQLITE_SCHEMA)
@@ -595,6 +624,7 @@ def apply_sqlite(conn: sqlite3.Connection) -> None:
     _apply_sqlite_v012(conn)
     _apply_sqlite_v013(conn)
     _apply_sqlite_v015(conn)
+    _apply_sqlite_v016(conn)
 
 
 def apply_postgres(database_url: str) -> None:
@@ -659,6 +689,8 @@ def apply_postgres(database_url: str) -> None:
             ("V012", "V012__case_events.sql", "PostgreSQL schema V012 applied (case_events replay log)"),
             ("V013", "V013__case_locks.sql", "PostgreSQL schema V013 applied (case_locks cross-pod mutex)"),
             ("V014", "V014__order_case_updated_at.sql", "PostgreSQL schema V014 applied (order_case.updated_at)"),
+            ("V015", "V015__effect_outbox.sql", "PostgreSQL schema V015 applied (effect_outbox ledger)"),
+            ("V016", "V016__email_attachment.sql", "PostgreSQL schema V016 applied (email_attachment store)"),
         ):
             cur.execute(
                 "SELECT version FROM schema_migrations WHERE version = %s",

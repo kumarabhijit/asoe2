@@ -46,8 +46,11 @@ Deferred — NOT built, by design:
 * **Constraint Graph** — §2.1/§5b direct reuse of `get_pipeline_topology` +
   `/exceptions/{id}/trace`; the Change Analysis section already renders the
   constraint data. A dedicated SVG surface is duplicative; revisit on demand.
-* **Real attachment fetcher** — the SSRF guard + `attachment_fetch` gateway +
-  stub are wired and tested; a live fetcher waits on a production attachment store.
+* **Real attachment fetcher** — DONE (2026-05-25). The production attachment
+  store is ASOE's own DB (V016 `email_attachment`; SQLite locally / Postgres
+  prod) via `gateways/attachment_store.py`; `store_backed_fetcher` is injected
+  into `AttachmentFetchGateway`, serving stored bytes behind the SSRF host
+  allowlist. No external store dependency.
 
 **Acceptance gate cleared (2026-05-25):** the strategy doc (§8) tied acceptance
 to the `autonomy_vocab_version` hard gate, which required **autonomy-v2

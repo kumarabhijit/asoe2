@@ -34,6 +34,8 @@ Endpoints:
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import os
 from typing import Any, Optional
 
@@ -287,5 +289,63 @@ async def seed_manual_order_intake(
         "event_type": emitted_event_type,
         "emitted_legacy": emitted_legacy,
         "final_status": response.final_status,
+        "ok": True,
+    }
+
+
+class SeedCaseAttachmentRequest(BaseModel):
+    """Sandbox attachment ingest. ``content_b64`` is optional — when omitted a
+    deterministic sample blob is stored so the download path can be exercised
+    without supplying bytes."""
+
+    model_config = ConfigDict(extra="forbid")
+    name: str = "sample.pdf"
+    mime_type: str = "application/pdf"
+    content_b64: Optional[str] = None
+
+
+@router.post(
+    "/_sandbox/cases/{case_id}/attachments",
+    dependencies=[Depends(require_role("analyst", "manager", "admin"))],
+)
+async def seed_case_attachment(
+    case_id: str,
+    req: SeedCaseAttachmentRequest,
+    tenant_id: str = Depends(get_tenant_id),
+    user: AuthenticatedUser = Depends(get_current_user),  # noqa: ARG001
+) -> dict:
+    """Dev/demo producer for the attachment store (stand-in for the future
+    email-intelligence-agent / ADR-036 ingestion).
+
+    Persists an attachment's bytes under (tenant, case_id) so the production
+    read path — GET /cases/{case_id}/attachments/{attachment_id} — can be
+    exercised end-to-end. Sandbox-only; real ingestion lands with ADR-036.
+    """
+    _require_sandbox()
+    # Local import — keeps the attachment store out of the app-boot import graph.
+    from gateways.attachment_store import AttachmentTooLarge, store_attachment  # noqa: PLC0415
+
+    if req.content_b64 is not None:
+        try:
+            content = base64.b64decode(req.content_b64, validate=True)
+        except (ValueError, binascii.Error):
+            raise HTTPException(status_code=400, detail="content_b64 is not valid base64")
+    else:
+        content = f"%PDF-1.4 sandbox attachment for {case_id}\n".encode("utf-8")
+
+    try:
+        rec = store_attachment(
+            tenant_id, req.name, req.mime_type, content, case_id=case_id,
+        )
+    except AttachmentTooLarge as exc:
+        raise HTTPException(status_code=413, detail=str(exc))
+
+    return {
+        "attachment_id": rec.id,
+        "case_id": case_id,
+        "name": rec.name,
+        "mime_type": rec.mime_type,
+        "sha256": rec.sha256,
+        "bytes": rec.size_bytes,
         "ok": True,
     }

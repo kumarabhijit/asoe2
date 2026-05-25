@@ -22,6 +22,7 @@ from api.middleware import SecurityHeadersMiddleware, TraceIDMiddleware
 import os
 
 from api.routes import accounts, auth, cases, exceptions, health, pipeline, policies, workflows, ws
+from api.routes import attachments as _attachments_routes
 from api.routes import config as _config_routes
 from api.routes import duplicate_envelope as _duplicate_envelope_routes
 from api.routes import sandbox as _sandbox_routes
@@ -138,6 +139,7 @@ def create_app() -> FastAPI:
     )
     # ADR-038 Phase H.6 — case-centric read surface (`/cases` UI).
     application.include_router(cases.router, prefix="/api/v1", tags=["cases"])
+    application.include_router(_attachments_routes.router, prefix="/api/v1", tags=["attachments"])
     application.include_router(workflows.router, prefix="/api/v1", tags=["workflows"])
     application.include_router(policies.router, prefix="/api/v1", tags=["policies"])
     application.include_router(accounts.router, prefix="/api/v1", tags=["accounts"])

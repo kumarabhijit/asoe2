@@ -390,6 +390,12 @@ ATTACHMENT_FETCH_ALLOWED_HOSTS: frozenset = frozenset({
 Everything else — and any host resolving to a non-global address — is refused by
 `hardening.ssrf.validate_outbound_url`."""
 
+ATTACHMENT_MAX_BYTES: int = 25 * 1024 * 1024
+"""Maximum size (bytes) of a single attachment the store will persist. Inbound
+attachments above this are rejected at ingestion (`AttachmentTooLarge`) rather
+than stored — a DoS / oversize guard on the email-intake path. 25 MiB matches a
+typical mailbox per-message attachment ceiling; raise per deploy if needed."""
+
 LLM_CALL_TIMEOUT_S: float = 30.0
 """Per-call timeout for an Anthropic SDK request (constrained tool-use
 output is normally <2s; tail latency on cache writes can hit 10s+).

@@ -22,8 +22,10 @@ from hardening.ssrf import SSRFError, validate_outbound_url
 
 GATEWAY_NAME = "attachment_fetch"
 
-# Type of an injected real fetcher: (validated_url) -> response data dict.
-Fetcher = Callable[[str], Dict[str, Any]]
+# Type of an injected real fetcher: (validated_url, request_params) -> response
+# data dict. The fetcher receives the request params so it can source trusted
+# context (e.g. tenant_id) from the caller rather than from the untrusted URL.
+Fetcher = Callable[[str, Dict[str, Any]], Dict[str, Any]]
 
 
 class AttachmentFetchGateway:
@@ -73,7 +75,17 @@ class AttachmentFetchGateway:
 
         # Safe URL — fetch (injected real fetcher, else a deterministic stub).
         if self._fetcher is not None:
-            data = dict(self._fetcher(url))
+            # A real fetcher signals retrieval failures (not-found, timeout,
+            # non-200, oversize) by raising — turn that into an explicit FAILED
+            # rather than letting it crash the pipeline (CLAUDE.md §5: explicit
+            # structured failure, never silent).
+            try:
+                data = dict(self._fetcher(url, params))
+            except Exception as exc:
+                return GatewayResponse(
+                    gateway_name=GATEWAY_NAME, operation=request.operation,
+                    status="FAILED", error=f"attachment fetch failed: {exc}",
+                )
         else:
             data = {
                 "url": url,
