@@ -215,7 +215,9 @@ green-and-honest; the marker is removed when impl lands → strict XPASS forces 
 
 Status legend: ✅🔴 RED gate written (xfail-strict), impl parked · ⬜ to write.
 
-**CP-B — backend RED gates (asoe2, written; all report XFAIL):**
+**CP-B → CP-C — backend gates (asoe2):** gates 1–7 are now **GREEN** (CP-C
+implemented; xfail markers removed — full suite 3225 passed / 7 xfailed); gates
+8–11 remain `xfail(strict)` pending CP-E/CP-F.
 1. ✅🔴 `tests/test_evidence_anchor_contract.py` — `EvidenceAnchor` schema: `anchor_source` discriminator; `text_derived` ⇒ no geometry; closed `supports_kind`; `source_sha256` required; `audit_tuple()` excludes position. Impl **CP-C**.
 2. ✅🔴 `tests/test_evidence_anchor_composer.py` — `build_evidence_anchors` derives one text-derived anchor per field, bound to the attachment sha256, no geometry (Guardrail #6). Impl **CP-C**.
 3. ✅🔴 `tests/test_evidence_anchor_match_key.py` — deterministic `MatchKey`; repeated tokens get distinct `occurrence_index` (the AMBIGUOUS hazard). Impl **CP-C**.
@@ -228,8 +230,10 @@ Status legend: ✅🔴 RED gate written (xfail-strict), impl parked · ⬜ to wr
 10. ✅🔴 `tests/test_document_extraction_verifier.py` — select-not-generate + runtime verifier degrades wrong box to text anchor. Impl **CP-F**.
 11. ✅🔴 `tests/eval/test_spatial_extraction.py` — containment + zero-tolerance page accuracy (IoU diagnostic-only). Impl **CP-F** (`thresholds.yaml` CODEOWNERS).
 
-**CP-B — frontend RED locks (asoe-ui, written; `it.fails` = vitest xfail-strict
-analog; all report *expected-fail* → green; `tsc --noEmit` clean):**
+**CP-B → CP-C — frontend locks (asoe-ui; `it.fails` = vitest xfail-strict analog):**
+The `supports_kind` parity + `EvidenceAnchor` type-surface locks are now **GREEN**
+(CP-C: mirror types + regenerated `generated.ts`; `.fails` removed). The
+caseId-wiring lock stays `it.fails` until CP-D.
 * ✅🔴 `tests/architectural/evidence_supports_kind_parity.test.ts` — closed `supports_kind` vocabulary identical across asoe2↔asoe-ui (model: `test_reason_tag_vocab_parity.test.ts`). Impl **CP-C**.
 * ✅🔴 `tests/architectural/evidence_anchor_type_surface.test.ts` — `EvidenceAnchor` TS type carries the audit-tuple + `anchor_source` discriminator + `match_key`. Impl **CP-C**.
 * ✅🔴 `tests/architectural/email_source_section_caseid_wiring.test.ts` — section receives `caseId` explicitly, never imports `@/lib/api`/`fetch` (D6). Impl **CP-D**.
