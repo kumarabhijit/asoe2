@@ -137,6 +137,26 @@ compliance sign-off; docs updated.
 in dev/low-volume on the in-DB backend *only* with the storage-portability
 contract test already green, so GA is a config flip.
 
+## 7. Implementation status (CP-E)
+
+Landed in `gateways/attachment_store.py` and locked by green contract tests:
+
+* **`ObjectStoreBackend`** — metadata in an index, bytes behind a pluggable
+  `_BlobStore` driver; `get` reconstitutes metadata + blob, `list_for_case` is
+  metadata-only, reads are tenant-scoped. `for_testing()` wires an in-process
+  driver so the **portability contract** (`test_attachment_store_portability.py`)
+  runs without external infra and proves the swap is config-only.
+* **Right-to-erasure** — `erase_attachment` removes bytes + metadata and writes a
+  **PII-free tombstone** (identity + `sha256`, never content or filename);
+  `get_erasure_tombstone` reads it (`test_attachment_erasure_cascade.py`).
+
+**Still open (this ADR's remaining DoD):** a real S3/GCS/MinIO `_BlobStore`
+driver + env-driven backend selection; short-TTL **signed URLs**; retention/TTL
+policy + encryption-at-rest; routing the erasure tombstone into the **audit
+chain** (ADR-023) rather than the in-process registry; and **frozen renditions**
+for ADR-045 geometry. These need real infra / compliance sign-off and are the
+GA-gating follow-ups.
+
 ---
 
 *End of ADR-044.*

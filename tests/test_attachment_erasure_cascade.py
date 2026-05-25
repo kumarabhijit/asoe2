@@ -10,14 +10,7 @@ content of hash X survives; the PII does not.
 
 from __future__ import annotations
 
-import pytest
-
 from gateways.attachment_store import AttachmentRecord, _InMemoryBackend
-
-pytestmark = pytest.mark.xfail(
-    reason="ADR-044 erase_attachment + tombstone land at CP-E",
-    strict=True,
-)
 
 
 def _rec() -> AttachmentRecord:

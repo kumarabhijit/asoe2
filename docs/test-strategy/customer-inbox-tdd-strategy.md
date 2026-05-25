@@ -215,9 +215,10 @@ green-and-honest; the marker is removed when impl lands → strict XPASS forces 
 
 Status legend: ✅🔴 RED gate written (xfail-strict), impl parked · ⬜ to write.
 
-**CP-B → CP-C — backend gates (asoe2):** gates 1–7 are now **GREEN** (CP-C
-implemented; xfail markers removed — full suite 3225 passed / 7 xfailed); gates
-8–11 remain `xfail(strict)` pending CP-E/CP-F.
+**CP-B → CP-C/CP-E — backend gates (asoe2):** gates 1–9 are now **GREEN**
+(CP-C = 1–7; **CP-E = 8–9**: `ObjectStoreBackend` portability + erasure-tombstone;
+full suite 3227 passed / 5 xfailed). Gates 10–11 remain `xfail(strict)` pending
+CP-F (spatial extraction, ADR-045).
 1. ✅🔴 `tests/test_evidence_anchor_contract.py` — `EvidenceAnchor` schema: `anchor_source` discriminator; `text_derived` ⇒ no geometry; closed `supports_kind`; `source_sha256` required; `audit_tuple()` excludes position. Impl **CP-C**.
 2. ✅🔴 `tests/test_evidence_anchor_composer.py` — `build_evidence_anchors` derives one text-derived anchor per field, bound to the attachment sha256, no geometry (Guardrail #6). Impl **CP-C**.
 3. ✅🔴 `tests/test_evidence_anchor_match_key.py` — deterministic `MatchKey`; repeated tokens get distinct `occurrence_index` (the AMBIGUOUS hazard). Impl **CP-C**.
@@ -225,8 +226,8 @@ implemented; xfail markers removed — full suite 3225 passed / 7 xfailed); gate
 5. ✅🔴 `tests/test_evidence_anchor_openapi_contract.py` — `EvidenceAnchor` in `openapi/asoe2.openapi.json` (Py↔TS seam). Impl **CP-C**.
 6. ✅🔴 `tests/test_preview_metrics.py` — `/api/v1/metrics` exposes `highlight_outcome_total` / `preview_render_total` / latency, bounded labels (no `attachment_id`). Impl **CP-C**.
 7. ✅🔴 `tests/test_preview_format_detection.py` — `detect_preview_format` magic-byte allowlist, default-deny, SVG denied, declared-mime ignored. Impl **CP-C**.
-8. ✅🔴 `tests/test_attachment_store_portability.py` — object-store backend matches in-memory semantics (GA precondition). Impl **CP-E**.
-9. ✅🔴 `tests/test_attachment_erasure_cascade.py` — erasure removes bytes, audit tombstone preserved. Impl **CP-E** (compliance).
+8. ✅ `tests/test_attachment_store_portability.py` — `ObjectStoreBackend` matches in-memory semantics (GA precondition). **GREEN (CP-E).**
+9. ✅ `tests/test_attachment_erasure_cascade.py` — erasure removes bytes, PII-free audit tombstone preserved. **GREEN (CP-E).**
 10. ✅🔴 `tests/test_document_extraction_verifier.py` — select-not-generate + runtime verifier degrades wrong box to text anchor. Impl **CP-F**.
 11. ✅🔴 `tests/eval/test_spatial_extraction.py` — containment + zero-tolerance page accuracy (IoU diagnostic-only). Impl **CP-F** (`thresholds.yaml` CODEOWNERS).
 
