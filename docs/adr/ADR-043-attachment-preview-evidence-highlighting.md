@@ -287,6 +287,38 @@ axe + component + mock-preview tests; docs updated.
 This ADR moves to **Accepted** when Phase 1 ships green against the above and the
 security review signs off the inline-render surface.
 
+## 8. Implementation notes (CP-D)
+
+Two refinements made while building the viewer (`asoe-ui` `AttachmentPreview`),
+recorded here so the ADR matches the code:
+
+* **PDF.js renders to a canvas in the app origin, not inside a sandboxed
+  iframe.** §2.1's table said "PDF.js → sandboxed iframe", but highlighting
+  requires PDF.js's *text layer* in the document, and PDF.js is itself the XSS
+  mitigation: it does not execute PDF-embedded JavaScript (`enableScripting`
+  defaults false and the annotation script layer is never enabled). Inert
+  formats need no iframe either — images render via `<img>` from a blob URL,
+  text/CSV via escaped nodes. SVG/HTML/unknown are default-denied to
+  download-only (magic-byte selection, `detectPreviewFormat`). The "sandboxed
+  iframe" mechanism is therefore not used; the safe-parser + default-deny posture
+  is the equivalent control. The PDF.js worker is bundled (no CDN).
+* **Phase-1 "highlight" is the verified safety bar, not pixel overlays on the
+  PDF.** Each anchor's verbatim text is verified at render time against the
+  document text (PDF.js text layer for PDFs; the file itself for text/CSV) and
+  shown as `LOCATED | UNLOCATED | AMBIGUOUS` (UNLOCATED shown as loudly as a
+  hit). Inline marks are drawn for text/CSV; **precise pixel overlays on the PDF
+  canvas are deferred to ADR-045 (spatial)** — they require verified geometry,
+  not a best-effort text position. This keeps the §2.3 invariant intact: the
+  evidence (text + `supports_ref`) is authoritative; on-screen position is
+  best-effort.
+
+Verification status: component logic, `tsc`, and `npm run build` are green;
+**actual PDF.js browser rendering and the Playwright operator journeys are
+CI-gated** (no browser in the authoring environment). The journeys are committed
+as `test.fixme` pending Playwright browsers + a sandbox anchor-seed endpoint
+(`POST /api/v1/_sandbox/seed/email-attachment-anchors`), a tracked CP-D backend
+follow-up.
+
 ---
 
 *End of ADR-043 (Phase 1). Spatial highlighting → ADR-045. Storage & lifecycle → ADR-044.*
