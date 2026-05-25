@@ -203,3 +203,35 @@ While running autonomously the loop MUST:
   Tests for these are written autonomously; the production flip is gated.
 - Checkpoint at each phase boundary with a red/green summary.
 - Never weaken a gate to go green; fix the cause or halt (`FAIL_TO_HUMAN`).
+
+## 10. Attachment preview & evidence highlighting (ADR-043/044/045)
+
+Added 2026-05-25 after the 11-expert review of ADR-043 (joint convergence) and
+the three-way ADR split. Execution sequencing + decisions D1–D12 live in
+`docs/plans/attachment-preview-evidence-rollout.md`; this section records the
+**test-first backlog** under the same contract as §3/§7 (red before code; gates
+landed ahead of impl are `@pytest.mark.xfail(strict=True)` so CI stays
+green-and-honest; the marker is removed when impl lands → strict XPASS forces it).
+
+Status legend: ✅🔴 RED gate written (xfail-strict), impl parked · ⬜ to write.
+
+**CP-B — backend RED gates (asoe2, written; all report XFAIL):**
+1. ✅🔴 `tests/test_evidence_anchor_contract.py` — `EvidenceAnchor` schema: `anchor_source` discriminator; `text_derived` ⇒ no geometry; closed `supports_kind`; `source_sha256` required; `audit_tuple()` excludes position. Impl **CP-C**.
+2. ✅🔴 `tests/test_evidence_anchor_composer.py` — `build_evidence_anchors` derives one text-derived anchor per field, bound to the attachment sha256, no geometry (Guardrail #6). Impl **CP-C**.
+3. ✅🔴 `tests/test_evidence_anchor_match_key.py` — deterministic `MatchKey`; repeated tokens get distinct `occurrence_index` (the AMBIGUOUS hazard). Impl **CP-C**.
+4. ✅🔴 `tests/test_evidence_anchor_audit_registry.py` — `EvidenceAnchor` registered audit-bearing; `page`/`bbox` NOT audit-bearing (D2). Impl **CP-C** (CODEOWNERS).
+5. ✅🔴 `tests/test_evidence_anchor_openapi_contract.py` — `EvidenceAnchor` in `openapi/asoe2.openapi.json` (Py↔TS seam). Impl **CP-C**.
+6. ✅🔴 `tests/test_preview_metrics.py` — `/api/v1/metrics` exposes `highlight_outcome_total` / `preview_render_total` / latency, bounded labels (no `attachment_id`). Impl **CP-C**.
+7. ✅🔴 `tests/test_preview_format_detection.py` — `detect_preview_format` magic-byte allowlist, default-deny, SVG denied, declared-mime ignored. Impl **CP-C**.
+8. ✅🔴 `tests/test_attachment_store_portability.py` — object-store backend matches in-memory semantics (GA precondition). Impl **CP-E**.
+9. ✅🔴 `tests/test_attachment_erasure_cascade.py` — erasure removes bytes, audit tombstone preserved. Impl **CP-E** (compliance).
+10. ✅🔴 `tests/test_document_extraction_verifier.py` — select-not-generate + runtime verifier degrades wrong box to text anchor. Impl **CP-F**.
+11. ✅🔴 `tests/eval/test_spatial_extraction.py` — containment + zero-tolerance page accuracy (IoU diagnostic-only). Impl **CP-F** (`thresholds.yaml` CODEOWNERS).
+
+**CP-B — frontend RED gates (asoe-ui, to write next):**
+* ⬜ `tests/architectural/supports_ref_vocab_parity.test.ts` — Py↔TS `supports_kind` parity (model: `openapi_drift.test.ts` `extractLiteralValues`).
+* ⬜ `tests/architectural/evidence_anchor_no_geometry_phase1.test.ts` — `EvidenceAnchor` TS type carries no `bbox`/`page` in Phase 1 (model: `autonomy_union_parity.test.ts`).
+* ⬜ `tests/architectural/email_source_section_caseid_wiring.test.ts` — section receives `caseId`, never imports `fetch`/`@/lib/api` directly (model: `email_source_section_data_presence.test.ts`).
+* ⬜ `tests/components/attachment_preview_sandbox.test.tsx` — iframe `sandbox` excludes `allow-same-origin`; CSP `connect-src 'none'`; SVG denied (extend `section_xss_escaping.test.tsx`).
+* ⬜ `tests/components/attachment_preview_safety_bar.test.tsx` — LOCATED/UNLOCATED/AMBIGUOUS render; UNLOCATED shown as loudly as a hit; non-dismissable banner.
+* ⬜ `tests/browser/attachment-evidence-verify.spec.ts`, `...-unlocated.spec.ts`, `...-ambiguous.spec.ts`, `highlight-not-authorization.spec.ts` — operator journeys (seed → poll backend → assert UI honesty); needs a `/_sandbox/seed` anchor endpoint. Not runnable locally (no Playwright browsers); CI-gated.
