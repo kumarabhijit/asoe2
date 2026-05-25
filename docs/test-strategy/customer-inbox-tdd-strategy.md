@@ -228,10 +228,19 @@ Status legend: ✅🔴 RED gate written (xfail-strict), impl parked · ⬜ to wr
 10. ✅🔴 `tests/test_document_extraction_verifier.py` — select-not-generate + runtime verifier degrades wrong box to text anchor. Impl **CP-F**.
 11. ✅🔴 `tests/eval/test_spatial_extraction.py` — containment + zero-tolerance page accuracy (IoU diagnostic-only). Impl **CP-F** (`thresholds.yaml` CODEOWNERS).
 
-**CP-B — frontend RED gates (asoe-ui, to write next):**
-* ⬜ `tests/architectural/supports_ref_vocab_parity.test.ts` — Py↔TS `supports_kind` parity (model: `openapi_drift.test.ts` `extractLiteralValues`).
-* ⬜ `tests/architectural/evidence_anchor_no_geometry_phase1.test.ts` — `EvidenceAnchor` TS type carries no `bbox`/`page` in Phase 1 (model: `autonomy_union_parity.test.ts`).
-* ⬜ `tests/architectural/email_source_section_caseid_wiring.test.ts` — section receives `caseId`, never imports `fetch`/`@/lib/api` directly (model: `email_source_section_data_presence.test.ts`).
+**CP-B — frontend RED locks (asoe-ui, written; `it.fails` = vitest xfail-strict
+analog; all report *expected-fail* → green; `tsc --noEmit` clean):**
+* ✅🔴 `tests/architectural/evidence_supports_kind_parity.test.ts` — closed `supports_kind` vocabulary identical across asoe2↔asoe-ui (model: `test_reason_tag_vocab_parity.test.ts`). Impl **CP-C**.
+* ✅🔴 `tests/architectural/evidence_anchor_type_surface.test.ts` — `EvidenceAnchor` TS type carries the audit-tuple + `anchor_source` discriminator + `match_key`. Impl **CP-C**.
+* ✅🔴 `tests/architectural/email_source_section_caseid_wiring.test.ts` — section receives `caseId` explicitly, never imports `@/lib/api`/`fetch` (D6). Impl **CP-D**.
+
+> Note: the "no geometry in Phase 1" invariant is enforced **backend-side** by the
+> `EvidenceAnchor` validator (gate #1 above) — the schema is single with nullable
+> geometry (D4), so a UI type-absence lock would conflict; the Phase-1 *renderer*
+> not consuming geometry is asserted by the CP-D component test instead.
+
+**CP-D — frontend component + journeys (co-located with the component, per the
+project's "no hollow gates for unbuilt features" convention):**
 * ⬜ `tests/components/attachment_preview_sandbox.test.tsx` — iframe `sandbox` excludes `allow-same-origin`; CSP `connect-src 'none'`; SVG denied (extend `section_xss_escaping.test.tsx`).
-* ⬜ `tests/components/attachment_preview_safety_bar.test.tsx` — LOCATED/UNLOCATED/AMBIGUOUS render; UNLOCATED shown as loudly as a hit; non-dismissable banner.
-* ⬜ `tests/browser/attachment-evidence-verify.spec.ts`, `...-unlocated.spec.ts`, `...-ambiguous.spec.ts`, `highlight-not-authorization.spec.ts` — operator journeys (seed → poll backend → assert UI honesty); needs a `/_sandbox/seed` anchor endpoint. Not runnable locally (no Playwright browsers); CI-gated.
+* ⬜ `tests/components/attachment_preview_safety_bar.test.tsx` — LOCATED/UNLOCATED/AMBIGUOUS render; UNLOCATED shown as loudly as a hit; non-dismissable banner; Phase-1 renderer reads no `bbox`/`page`.
+* ⬜ `tests/browser/attachment-evidence-verify.spec.ts`, `...-unlocated.spec.ts`, `...-ambiguous.spec.ts`, `highlight-not-authorization.spec.ts` — operator journeys (seed → poll backend → assert UI honesty); needs a `/_sandbox/seed` anchor endpoint. CI-gated (no Playwright browsers locally).
