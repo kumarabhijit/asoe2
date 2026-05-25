@@ -73,7 +73,17 @@ class AttachmentFetchGateway:
 
         # Safe URL — fetch (injected real fetcher, else a deterministic stub).
         if self._fetcher is not None:
-            data = dict(self._fetcher(url))
+            # A real fetcher signals retrieval failures (not-found, timeout,
+            # non-200, oversize) by raising — turn that into an explicit FAILED
+            # rather than letting it crash the pipeline (CLAUDE.md §5: explicit
+            # structured failure, never silent).
+            try:
+                data = dict(self._fetcher(url))
+            except Exception as exc:
+                return GatewayResponse(
+                    gateway_name=GATEWAY_NAME, operation=request.operation,
+                    status="FAILED", error=f"attachment fetch failed: {exc}",
+                )
         else:
             data = {
                 "url": url,

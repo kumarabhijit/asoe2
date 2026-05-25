@@ -376,9 +376,29 @@ Working the post-feature-port backlog. **Landed this pass:**
 - New lock: `tests/test_autonomy_ladder_v2_migration.py`. ADR-042 flipped to
   **Accepted**; tasks.md updated in both repos.
 
+### Attachment store (2026-05-25) — DONE (closes the #10 SSRF residue)
+- **Production attachment store = ASOE's own DB** (owner-directed): attachments
+  are persisted as content (SQLite locally / Postgres prod) and served from
+  there — no outbound-network dependency on read, so nothing to SSRF on the
+  read path. `gateways/attachment_store.py` (`store_attachment` / `get_attachment`
+  / `list_case_attachments`), backend-pluggable (in-memory default, DB when
+  DATABASE_URL set) mirroring `orchestration/outbox.py`. V016 `email_attachment`
+  table (Postgres SQL + SQLite runner) + `db.repository.AttachmentRepository`.
+  Tenant-scoped, SHA-256 over raw bytes, oversize rejected at ingestion
+  (`policy.ATTACHMENT_MAX_BYTES`, 25 MiB). Content stored base64-in-TEXT for
+  adapter portability (BYTEA is a future optimisation).
+- **Real fetcher wired** into `AttachmentFetchGateway`: `store_backed_fetcher`
+  resolves an SSRF-validated `https://<allowlisted-host>/<tenant>/<id>` manifest
+  URL to the stored bytes; SSRF host-allowlist still runs first (a hostile
+  manifest URL never reaches the store). The gateway now returns FAILED (not a
+  crash) when the fetcher raises (not-found / timeout / non-200). Registered in
+  sandbox + conftest. `tests/test_attachment_store.py` +
+  `tests/test_attachment_fetch_gateway.py`. (`resolve` stays per-request False —
+  no socket is opened for an internal store read; the host is a logical
+  allowlist token.) The SSRF guard remains for any future external-URL
+  ingestion fetch.
+
 ### Still PENDING (only what genuinely cannot be built now)
-- **#10 SSRF** — inject a REAL fetcher into AttachmentFetchGateway (+ resolve=True)
-  once a production attachment store exists (guard + stub are in place).
 - **Constraint Graph** — deliberately NOT built: ADR §2.1/§5b say reuse
   `get_pipeline_topology` + `/exceptions/{id}/trace` and do NOT add a new
   surface; the Phase-6 Change Analysis section already renders the constraint

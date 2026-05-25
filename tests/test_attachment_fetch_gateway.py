@@ -71,3 +71,57 @@ def test_through_executor_blocks_internal_url():
     resp = GatewayExecutor().run(_req("https://10.0.0.5/secret", resolve=False))
     assert resp.status == "FAILED"
     assert "SSRF blocked" in (resp.error or "")
+
+
+def test_fetcher_failure_becomes_failed_not_a_crash():
+    def _boom(_u):
+        raise RuntimeError("upstream 500")
+    gw = AttachmentFetchGateway(allowed_hosts=_ALLOW, fetcher=_boom)
+    resp = gw.execute(_req("https://attachments.acme.example/po/42.pdf"))
+    assert resp.status == "FAILED"
+    assert "attachment fetch failed" in (resp.error or "")
+
+
+# ---------------------------------------------------------------------------
+# Store-backed fetcher — serves real bytes from the DB attachment store, still
+# behind the SSRF host allowlist (DoR #10 live path).
+# ---------------------------------------------------------------------------
+
+class TestStoreBackedFetcher:
+    def setup_method(self):
+        from gateways import attachment_store
+        attachment_store.configure_backend(attachment_store._InMemoryBackend())
+
+    def teardown_method(self):
+        from gateways import attachment_store
+        attachment_store.configure_backend(attachment_store._InMemoryBackend())
+
+    def _gw(self):
+        from gateways.attachment_store import store_backed_fetcher
+        return AttachmentFetchGateway(allowed_hosts=_ALLOW, fetcher=store_backed_fetcher)
+
+    def test_allowlisted_url_serves_stored_bytes(self):
+        from gateways.attachment_store import store_attachment
+        rec = store_attachment("acme", "po.pdf", "application/pdf", b"PDFDATA", case_id="c1")
+        url = f"https://attachments.acme.example/acme/{rec.id}"
+        resp = self._gw().execute(_req(url))
+        assert resp.status == "SUCCESS"
+        assert resp.data["bytes"] == 7
+        assert resp.data["content_type"] == "application/pdf"
+        import base64
+        assert base64.b64decode(resp.data["content_b64"]) == b"PDFDATA"
+
+    def test_missing_attachment_is_failed(self):
+        url = "https://attachments.acme.example/acme/does-not-exist"
+        resp = self._gw().execute(_req(url))
+        assert resp.status == "FAILED"
+        assert "attachment fetch failed" in (resp.error or "")
+
+    def test_offallowlist_host_blocked_before_store_lookup(self):
+        # A hostile manifest URL never reaches the store — SSRF wins first.
+        from gateways.attachment_store import store_attachment
+        rec = store_attachment("acme", "po.pdf", "application/pdf", b"x")
+        url = f"https://evil.example/acme/{rec.id}"
+        resp = self._gw().execute(_req(url))
+        assert resp.status == "FAILED"
+        assert "SSRF blocked" in (resp.error or "")

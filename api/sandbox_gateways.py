@@ -23,6 +23,7 @@ from contracts.models import GatewayResponse
 from db.repository import TenantConfigRepository as _TenantConfigRepository
 from db.shared import get_shared_adapter
 from gateways.attachment_fetch import AttachmentFetchGateway
+from gateways.attachment_store import store_backed_fetcher
 from gateways.edi850 import build_edi_850
 from gateways.knowledge_graph import build_knowledge_graph
 from gateways.registry import clear_registry, register_gateway
@@ -452,9 +453,11 @@ def register_sandbox_gateways() -> None:
         },
     ))
 
-    # DoR #10 — attachment fetch, SSRF-guarded. No network in sandbox: the
-    # gateway validates the URL against the allowlist and returns a stub blob.
-    register_gateway(AttachmentFetchGateway())
+    # DoR #10 — attachment fetch, SSRF-guarded, backed by the DB attachment
+    # store. The gateway validates the URL against the allowlist, then the
+    # store-backed fetcher serves the bytes from our own DB (no outbound
+    # network); a missing attachment returns FAILED.
+    register_gateway(AttachmentFetchGateway(fetcher=store_backed_fetcher))
 
     # ADR-042 Phase 3 — the ERP write target for SubmitToErpRecipe's effect
     # (sales-order create). Stub stands in for the real BAPI/EDI-850 connector.
