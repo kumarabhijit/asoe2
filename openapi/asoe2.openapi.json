@@ -2487,6 +2487,13 @@
             "title": "Body Hash",
             "type": "string"
           },
+          "evidence_anchors": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceAnchor"
+            },
+            "title": "Evidence Anchors",
+            "type": "array"
+          },
           "from_address": {
             "title": "From Address",
             "type": "string"
@@ -2637,6 +2644,100 @@
           "reason"
         ],
         "title": "EscalateRequest",
+        "type": "object"
+      },
+      "EvidenceAnchor": {
+        "additionalProperties": false,
+        "description": "A backend-authoritative highlight anchor (ADR-043 \u00a72.2).\n\nThe composer projects one per extracted evidence field; the viewer *locates*\nand renders it, inventing nothing. The audit-authoritative identity is\n`audit_tuple()` \u2014 `(attachment_id, source_sha256, text, supports_ref)` \u2014\nexplicitly decoupled from on-screen position (ADR-043 \u00a72.3): a best-effort\nbox is never the audit unit. Phase-1 (`text_derived`) anchors carry no\ngeometry; that invariant is enforced by the validator below.",
+        "properties": {
+          "anchor_source": {
+            "enum": [
+              "text_derived",
+              "spatial_extracted"
+            ],
+            "title": "Anchor Source",
+            "type": "string"
+          },
+          "attachment_id": {
+            "title": "Attachment Id",
+            "type": "string"
+          },
+          "bbox": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bbox"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "match_key": {
+            "$ref": "#/components/schemas/MatchKey"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "source_sha256": {
+            "title": "Source Sha256",
+            "type": "string"
+          },
+          "supports_kind": {
+            "enum": [
+              "extracted_field",
+              "constraint",
+              "decision"
+            ],
+            "title": "Supports Kind",
+            "type": "string"
+          },
+          "supports_ref": {
+            "title": "Supports Ref",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "attachment_id",
+          "anchor_source",
+          "text",
+          "match_key",
+          "supports_kind",
+          "supports_ref",
+          "label",
+          "source_sha256"
+        ],
+        "title": "EvidenceAnchor",
         "type": "object"
       },
       "ExceptionDetailResponse": {
@@ -3815,6 +3916,26 @@
           "sku"
         ],
         "title": "MOQAnalysisData",
+        "type": "object"
+      },
+      "MatchKey": {
+        "additionalProperties": false,
+        "description": "Deterministic locate key (ADR-043 \u00a72.4). The backend computes this so the\nviewer does a pure *literal* locate in the rendered text layer \u2014 never a\nclient-side search (Guardrail #6). `occurrence_index` disambiguates repeated\ntokens (the AMBIGUOUS hazard).",
+        "properties": {
+          "normalized_text": {
+            "title": "Normalized Text",
+            "type": "string"
+          },
+          "occurrence_index": {
+            "default": 0,
+            "title": "Occurrence Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "normalized_text"
+        ],
+        "title": "MatchKey",
         "type": "object"
       },
       "OrderComparisonData": {

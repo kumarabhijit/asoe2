@@ -203,3 +203,53 @@ While running autonomously the loop MUST:
   Tests for these are written autonomously; the production flip is gated.
 - Checkpoint at each phase boundary with a red/green summary.
 - Never weaken a gate to go green; fix the cause or halt (`FAIL_TO_HUMAN`).
+
+## 10. Attachment preview & evidence highlighting (ADR-043/044/045)
+
+Added 2026-05-25 after the 11-expert review of ADR-043 (joint convergence) and
+the three-way ADR split. Execution sequencing + decisions D1–D12 live in
+`docs/plans/attachment-preview-evidence-rollout.md`; this section records the
+**test-first backlog** under the same contract as §3/§7 (red before code; gates
+landed ahead of impl are `@pytest.mark.xfail(strict=True)` so CI stays
+green-and-honest; the marker is removed when impl lands → strict XPASS forces it).
+
+Status legend: ✅🔴 RED gate written (xfail-strict), impl parked · ⬜ to write.
+
+**CP-B → CP-C — backend gates (asoe2):** gates 1–7 are now **GREEN** (CP-C
+implemented; xfail markers removed — full suite 3225 passed / 7 xfailed); gates
+8–11 remain `xfail(strict)` pending CP-E/CP-F.
+1. ✅🔴 `tests/test_evidence_anchor_contract.py` — `EvidenceAnchor` schema: `anchor_source` discriminator; `text_derived` ⇒ no geometry; closed `supports_kind`; `source_sha256` required; `audit_tuple()` excludes position. Impl **CP-C**.
+2. ✅🔴 `tests/test_evidence_anchor_composer.py` — `build_evidence_anchors` derives one text-derived anchor per field, bound to the attachment sha256, no geometry (Guardrail #6). Impl **CP-C**.
+3. ✅🔴 `tests/test_evidence_anchor_match_key.py` — deterministic `MatchKey`; repeated tokens get distinct `occurrence_index` (the AMBIGUOUS hazard). Impl **CP-C**.
+4. ✅🔴 `tests/test_evidence_anchor_audit_registry.py` — `EvidenceAnchor` registered audit-bearing; `page`/`bbox` NOT audit-bearing (D2). Impl **CP-C** (CODEOWNERS).
+5. ✅🔴 `tests/test_evidence_anchor_openapi_contract.py` — `EvidenceAnchor` in `openapi/asoe2.openapi.json` (Py↔TS seam). Impl **CP-C**.
+6. ✅🔴 `tests/test_preview_metrics.py` — `/api/v1/metrics` exposes `highlight_outcome_total` / `preview_render_total` / latency, bounded labels (no `attachment_id`). Impl **CP-C**.
+7. ✅🔴 `tests/test_preview_format_detection.py` — `detect_preview_format` magic-byte allowlist, default-deny, SVG denied, declared-mime ignored. Impl **CP-C**.
+8. ✅🔴 `tests/test_attachment_store_portability.py` — object-store backend matches in-memory semantics (GA precondition). Impl **CP-E**.
+9. ✅🔴 `tests/test_attachment_erasure_cascade.py` — erasure removes bytes, audit tombstone preserved. Impl **CP-E** (compliance).
+10. ✅🔴 `tests/test_document_extraction_verifier.py` — select-not-generate + runtime verifier degrades wrong box to text anchor. Impl **CP-F**.
+11. ✅🔴 `tests/eval/test_spatial_extraction.py` — containment + zero-tolerance page accuracy (IoU diagnostic-only). Impl **CP-F** (`thresholds.yaml` CODEOWNERS).
+
+**CP-B → CP-C — frontend locks (asoe-ui; `it.fails` = vitest xfail-strict analog):**
+The `supports_kind` parity + `EvidenceAnchor` type-surface locks are now **GREEN**
+(CP-C: mirror types + regenerated `generated.ts`; `.fails` removed). The
+caseId-wiring lock stays `it.fails` until CP-D.
+* ✅🔴 `tests/architectural/evidence_supports_kind_parity.test.ts` — closed `supports_kind` vocabulary identical across asoe2↔asoe-ui (model: `test_reason_tag_vocab_parity.test.ts`). Impl **CP-C**.
+* ✅🔴 `tests/architectural/evidence_anchor_type_surface.test.ts` — `EvidenceAnchor` TS type carries the audit-tuple + `anchor_source` discriminator + `match_key`. Impl **CP-C**.
+* ✅🔴 `tests/architectural/email_source_section_caseid_wiring.test.ts` — section receives `caseId` explicitly, never imports `@/lib/api`/`fetch` (D6). Impl **CP-D**.
+
+> Note: the "no geometry in Phase 1" invariant is enforced **backend-side** by the
+> `EvidenceAnchor` validator (gate #1 above) — the schema is single with nullable
+> geometry (D4), so a UI type-absence lock would conflict; the Phase-1 *renderer*
+> not consuming geometry is asserted by the CP-D component test instead.
+
+**CP-D — frontend component + journeys (DONE; the caseId-wiring lock is now
+GREEN):** the `AttachmentPreview` component (PDF.js canvas + image + escaped
+text, magic-byte default-deny, safety bar, non-dismissable banner, download) +
+`caseId` threading are built and locally verified (`tsc` + `vitest` 1245 passed +
+`npm run build`).
+* ✅ `tests/lib/preview_format.test.ts` — `detectPreviewFormat` (mirrors the backend).
+* ✅ `tests/lib/evidence_anchor_status.test.ts` — the safety-bar verifier.
+* ✅ `tests/components/attachment_preview.test.tsx` — LOCATED/UNLOCATED/AMBIGUOUS, non-dismissable banner, SVG default-deny, download.
+* ✅ `tests/accessibility/component_sweep.test.tsx` — AttachmentPreview axe case (DoD).
+* ⏸ `tests/browser/attachment-evidence.spec.ts` — 4 operator journeys committed as `test.fixme`; **CI-gated** (no Playwright browsers locally) and pending a sandbox anchor-seed endpoint (`POST /api/v1/_sandbox/seed/email-attachment-anchors`), a tracked CP-D backend follow-up. Actual PDF.js browser-render correctness is likewise CI/browser-verified, per ADR-043 §8.

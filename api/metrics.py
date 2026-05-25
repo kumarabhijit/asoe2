@@ -628,6 +628,113 @@ def render_reviewer_activity_metrics() -> str:
     return "\n".join(lines) + "\n"
 
 
+# ---------------------------------------------------------------------------
+# Attachment-preview & evidence-highlighting SLIs (ADR-043 §2.6). The panel's
+# #1 hazard is a highlight that silently lands wrong; `highlight_outcome_total`
+# (located|unlocated|ambiguous) is the leading indicator that a PDF.js bump
+# broke positioning. Labels are deliberately BOUNDED to {result, mime} — no
+# attachment_id / case_id (cardinality bomb); per-document detail belongs on the
+# structured event/trace, never on a Prometheus label.
+# ---------------------------------------------------------------------------
+
+_PREVIEW_LATENCY_BUCKETS_MS: tuple[float, ...] = (50, 100, 250, 500, 1000, 2500, 5000)
+_HIGHLIGHT_RESULTS = ("located", "unlocated", "ambiguous")
+_PREVIEW_RESULTS = ("ok", "error", "unsupported")
+_PREVIEW_MIMES = ("pdf", "image", "text", "csv", "other")
+
+_preview_lock = _CaseLock()
+_highlight_outcomes: dict[tuple[str, str], int] = _defaultdict(int)  # (result, mime)
+_preview_renders: dict[tuple[str, str], int] = _defaultdict(int)     # (result, mime)
+_preview_latency_buckets: list[int] = [0] * (len(_PREVIEW_LATENCY_BUCKETS_MS) + 1)
+_preview_latency_sum: float = 0.0
+
+
+def _bounded_mime(mime: str) -> str:
+    return mime if mime in _PREVIEW_MIMES else "other"
+
+
+def record_highlight_outcome(*, result: str, mime: str) -> None:
+    """Record one anchor's render outcome (located|unlocated|ambiguous). No-op
+    on an out-of-vocabulary result — never raises into the request path."""
+    if result not in _HIGHLIGHT_RESULTS:
+        return
+    with _preview_lock:
+        _highlight_outcomes[(result, _bounded_mime(mime))] += 1
+
+
+def record_preview_render(*, result: str, mime: str, latency_ms: float) -> None:
+    """Record one attachment preview render + its latency. No-op on a bad
+    result or non-numeric / negative latency."""
+    global _preview_latency_sum
+    if result not in _PREVIEW_RESULTS:
+        return
+    with _preview_lock:
+        _preview_renders[(result, _bounded_mime(mime))] += 1
+        try:
+            ms = float(latency_ms)
+        except (TypeError, ValueError):
+            return
+        if ms != ms or ms < 0:  # NaN or negative
+            return
+        for i, edge in enumerate(_PREVIEW_LATENCY_BUCKETS_MS):
+            if ms <= edge:
+                _preview_latency_buckets[i] += 1
+                break
+        else:
+            _preview_latency_buckets[-1] += 1
+        _preview_latency_sum += ms
+
+
+def reset_preview_metrics() -> None:
+    """Test helper — drop all preview/highlight samples."""
+    global _preview_latency_sum
+    with _preview_lock:
+        _highlight_outcomes.clear()
+        _preview_renders.clear()
+        for i in range(len(_preview_latency_buckets)):
+            _preview_latency_buckets[i] = 0
+        _preview_latency_sum = 0.0
+
+
+def render_preview_metrics() -> str:
+    with _preview_lock:
+        highlights = dict(_highlight_outcomes)
+        renders = dict(_preview_renders)
+        buckets = list(_preview_latency_buckets)
+        latency_sum = _preview_latency_sum
+
+    lines: list[str] = []
+    lines += _help_type(
+        "highlight_outcome_total",
+        "Evidence-highlight render outcomes by result and document type. "
+        "A low located-ratio (or any ambiguous) is the leading signal that "
+        "positioning regressed (ADR-043 §2.6).",
+        "counter",
+    )
+    for (result, mime), count in sorted(highlights.items()):
+        lines.append(_line("highlight_outcome_total", count, labels={"result": result, "mime": mime}))
+
+    lines += _help_type(
+        "preview_render_total",
+        "Attachment preview renders by result and document type.",
+        "counter",
+    )
+    for (result, mime), count in sorted(renders.items()):
+        lines.append(_line("preview_render_total", count, labels={"result": result, "mime": mime}))
+
+    name = "preview_render_latency_ms"
+    lines += _help_type(name, "Attachment preview render latency (ms).", "histogram")
+    cumulative = 0
+    for i, edge in enumerate(_PREVIEW_LATENCY_BUCKETS_MS):
+        cumulative += buckets[i]
+        lines.append(_line(f"{name}_bucket", cumulative, labels={"le": _fmt_le(edge)}))
+    cumulative += buckets[-1]
+    lines.append(_line(f"{name}_bucket", cumulative, labels={"le": "+Inf"}))
+    lines.append(_line(f"{name}_sum", latency_sum))
+    lines.append(_line(f"{name}_count", cumulative))
+    return "\n".join(lines) + "\n"
+
+
 def render_all() -> str:
     """Convenience entrypoint for the route handler."""
     return (
@@ -637,4 +744,5 @@ def render_all() -> str:
         + render_ingest_terminal_histogram()
         + render_gateway_metrics()
         + render_reviewer_activity_metrics()
+        + render_preview_metrics()
     )

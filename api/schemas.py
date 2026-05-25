@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from contracts.models import ExecutedNode, GatewayCallSpan, LifecycleState, OrderEvent
 
@@ -726,6 +726,80 @@ class EmailAttachmentManifestEntry(BaseModel):
     attachment_id: Optional[str] = None
 
 
+# ---------------------------------------------------------------------------
+# Evidence highlighting (ADR-043) — backend-authoritative highlight anchors.
+# ---------------------------------------------------------------------------
+
+EvidenceSupportsKind = Literal["extracted_field", "constraint", "decision"]
+"""Closed vocabulary of what an anchor supports (ADR-043 §2.2). Parity-locked
+across asoe2↔asoe-ui (`tests/architectural/evidence_supports_kind_parity.test.ts`)
+so the UI maps it with a `default` fallback — adding a kind is backend-only."""
+
+EvidenceAnchorSource = Literal["text_derived", "spatial_extracted"]
+"""Discriminator: Phase-1 anchors are `text_derived` (no geometry); Phase-2
+`spatial_extracted` carry verified page/bbox (ADR-045)."""
+
+
+class MatchKey(BaseModel):
+    """Deterministic locate key (ADR-043 §2.4). The backend computes this so the
+    viewer does a pure *literal* locate in the rendered text layer — never a
+    client-side search (Guardrail #6). `occurrence_index` disambiguates repeated
+    tokens (the AMBIGUOUS hazard)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    normalized_text: str
+    occurrence_index: int = 0
+
+
+class EvidenceAnchor(BaseModel):
+    """A backend-authoritative highlight anchor (ADR-043 §2.2).
+
+    The composer projects one per extracted evidence field; the viewer *locates*
+    and renders it, inventing nothing. The audit-authoritative identity is
+    `audit_tuple()` — `(attachment_id, source_sha256, text, supports_ref)` —
+    explicitly decoupled from on-screen position (ADR-043 §2.3): a best-effort
+    box is never the audit unit. Phase-1 (`text_derived`) anchors carry no
+    geometry; that invariant is enforced by the validator below.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    attachment_id: str
+    anchor_source: EvidenceAnchorSource
+    text: str
+    match_key: MatchKey
+    supports_kind: EvidenceSupportsKind
+    supports_ref: str
+    label: str
+    source_sha256: str
+    """Binds the anchor to the exact attachment bytes it overlays — a re-version
+    can never silently re-point an authorised highlight."""
+
+    # Spatial fields — ADR-045. MUST be None when anchor_source == text_derived.
+    page: Optional[int] = None
+    bbox: Optional[List[float]] = None
+    confidence: Optional[float] = None
+
+    @model_validator(mode="after")
+    def _phase1_carries_no_geometry(self) -> "EvidenceAnchor":
+        if self.anchor_source == "text_derived" and (
+            self.page is not None
+            or self.bbox is not None
+            or self.confidence is not None
+        ):
+            raise ValueError(
+                "text_derived anchors carry no geometry (ADR-043 §2.2); "
+                "spatial coordinates require anchor_source='spatial_extracted' "
+                "and the ADR-045 verifier."
+            )
+        return self
+
+    def audit_tuple(self) -> "tuple[str, str, str, str]":
+        """The audit-authoritative identity, decoupled from pixel position."""
+        return (self.attachment_id, self.source_sha256, self.text, self.supports_ref)
+
+
 class EmailSourceData(BaseModel):
     """EmailOrderEntryRecipe → UI `email_source` (ADR-034 Phase G).
 
@@ -772,6 +846,12 @@ class EmailSourceData(BaseModel):
     upstream `email-intelligence-agent` integration (Phase F /
     proposed ADR-036) hasn't shipped — the inline source rendering
     on the detail page is the primary surface."""
+
+    evidence_anchors: List[EvidenceAnchor] = Field(default_factory=list)
+    """Backend-authoritative highlight anchors (ADR-043) the attachment-preview
+    viewer locates and renders. Phase-1 anchors are derived from the extracted
+    entities' `source_span`; the viewer never invents evidence (Guardrail #6).
+    Empty when no attachment is stored or no locatable evidence exists."""
 
 
 class EmailOrderEntryAnalysisData(BaseModel):
