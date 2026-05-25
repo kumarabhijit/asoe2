@@ -11,14 +11,7 @@ generalises it into a parametrised parity sweep over both backends.
 
 from __future__ import annotations
 
-import pytest
-
 from gateways.attachment_store import AttachmentRecord, _InMemoryBackend
-
-pytestmark = pytest.mark.xfail(
-    reason="ADR-044 ObjectStoreBackend lands at CP-E",
-    strict=True,
-)
 
 
 def _rec(i: str = "att-1") -> AttachmentRecord:
