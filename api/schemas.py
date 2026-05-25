@@ -191,8 +191,8 @@ class AutonomyLevelInfo(BaseModel):
 
     `rank` is the degree of automation (higher == more autonomous) under the
     active `autonomy_vocab_version`; the UI orders the ladder by `rank` rather
-    than hardcoding a map (asoe-ui Guardrail #1). Display vocabulary only —
-    not the engine's gating semantics."""
+    than hardcoding a map (asoe-ui Guardrail #1). This is the same vocabulary
+    the engine's gating ladders resolve under (ADR-042 §5 migration complete)."""
 
     level: str
     label: str
@@ -669,7 +669,9 @@ class EdiMismatchAnalysisData(BaseModel):
     sub_type: str
     classification: Literal["HARD_REJECT", "REVIEW", "ESCALATE"]
     recommended_action: str
-    autonomy_level: Literal["L1", "L2", "L3"]
+    # Autonomy vocab v2 (ADR-042 §5). SHIP_TO_MISMATCH resolves to L4 (escalate
+    # to human) under v2 — the full L1-L4 range is admissible.
+    autonomy_level: Literal["L1", "L2", "L3", "L4"]
     expected_value: Any = None
     received_value: Any = None
     notification_template: Optional[str] = None

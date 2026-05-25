@@ -26,10 +26,11 @@ def client() -> TestClient:
 
 
 # Implemented 2026-05-24 — the bounded health-autonomy surface landed (the
-# compliance sign-off gate is waived for pre-production, owner veto). This
-# exposes the v2 display vocabulary for the UI to rank-sort; it does NOT change
-# the policy.py gating ladder (that coherent migration stays separately gated).
-# The xfail marker is removed; this now asserts for real.
+# compliance sign-off gate is waived for pre-production, owner veto). It exposes
+# the v2 autonomy vocabulary for the UI to rank-sort; the policy.py gating
+# ladder has since been migrated to v2 too (ADR-042 §5), so health and the
+# engine now agree under one version. The xfail marker is removed; this asserts
+# for real.
 def test_health_exposes_ranked_autonomy_levels(client) -> None:
     r = client.get("/api/v1/health")
     assert r.status_code == 200

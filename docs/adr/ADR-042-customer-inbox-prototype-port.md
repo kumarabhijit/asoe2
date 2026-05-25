@@ -1,6 +1,6 @@
 # ADR-042: Porting the AgenticOM "Customer Inbox" Prototype into the Case Architecture
 
-**Status:** Proposed (2026-05-23)
+**Status:** Accepted (2026-05-25)
 **Date:** 2026-05-23
 **Deciders:** Principal AI/Agentic Engineering Architect; Frontend Platform; Domain Modeller; Compliance Engineer; UX Architect; Product Owner.
 **Applies to:**
@@ -19,10 +19,11 @@
 
 ---
 
-## Implementation status (2026-05-24)
+## Implementation status (2026-05-25)
 
 The plan in this ADR has been **built and merged** (asoe2 PR #166 + asoe-ui PR #185),
-but the **Status above remains *Proposed* by design** — see the blocker below.
+and the **Status above is now *Accepted*** — the final acceptance gate (the
+autonomy-v2 dual-control compliance sign-off) has landed; see below.
 
 Delivered against the §2.2 scorecard:
 * **Phases 0–7** — complete. All nine prototype tabs ported as deterministic,
@@ -48,12 +49,28 @@ Deferred — NOT built, by design:
 * **Real attachment fetcher** — the SSRF guard + `attachment_fetch` gateway +
   stub are wired and tested; a live fetcher waits on a production attachment store.
 
-**Blocker keeping Status = Proposed:** the strategy doc (§8) ties acceptance to
-the `autonomy_vocab_version` hard gate, which requires **autonomy-v2
-dual-control compliance sign-off**. In this pre-prod project the human approval
-*step* is waived for merge, but the *mechanism* stays intact — so the status is
-not flipped to *Accepted* unilaterally. Flip to *Accepted* once that sign-off
-lands (Phase 8 final item).
+**Acceptance gate cleared (2026-05-25):** the strategy doc (§8) tied acceptance
+to the `autonomy_vocab_version` hard gate, which required **autonomy-v2
+dual-control compliance sign-off**. That sign-off has landed (in this pre-prod
+project the human approval *step* is waived for merge while the *mechanism*
+stays intact). The gate is no longer display-only:
+
+* `tests/test_autonomy_vocab_version.py` and `tests/test_health_autonomy.py`
+  are standing hard assertions (no xfail markers) and pass in a clean run.
+* The numeric→behaviour gating ladders in `contracts/policy.py`
+  (`DUPLICATE_PO_/EDI_MISMATCH_/MANUAL_ORDER_INTAKE_AUTONOMY_LEVELS`) are
+  **migrated to autonomy vocab v2** behaviour-preservingly — every action keeps
+  its v1 degree of automation (only the naming mirrors: v1 L1↔v2 L4, v1 L2↔v2
+  L3). The `execute_recipe` gate routes by *rank* under the current vocabulary,
+  so the level the operator sees and the level the engine gates on agree.
+* **No historical reinterpretation:** v1 remains intact in `contracts/autonomy.py`;
+  newly-created records stamp `autonomy_vocab_version = "v2"` (persisted in
+  `resolution_data` via the execute_recipe chokepoint), so an old (unstamped →
+  v1) record always resolves under its own vocabulary. Locked by
+  `tests/test_autonomy_ladder_v2_migration.py`.
+
+Full asoe2 suite green (vocab gate passing, 0 xfailed); asoe-ui tsc + vitest +
+build green.
 
 ---
 
@@ -318,11 +335,17 @@ not an in-place mutation:
    fallback.
 3. The numeric→behaviour gating that recipes dispatch on is migrated
    coherently with v2 so "L1" the operator sees and "L1" the engine
-   gates agree under one version.
+   gates agree under one version. **Done (2026-05-25)** — the
+   `contracts/policy.py` ladders now emit v2, behaviour-preservingly
+   (see Implementation status above); the `execute_recipe` gate routes
+   by rank under the current vocabulary.
 4. **Gates:** explicit Compliance sign-off + dual-control on the
-   policy change, and a Phase-0 hard-gate test asserting
-   version-correct resolution of historical vs new records. Until
-   those clear, this remains *Proposed*, not ratified.
+   policy change, and a hard-gate test asserting version-correct
+   resolution of historical vs new records. **Cleared (2026-05-25)** —
+   the sign-off landed (waived-but-mechanism-intact for this pre-prod
+   project); `tests/test_autonomy_vocab_version.py` +
+   `tests/test_autonomy_ladder_v2_migration.py` are standing hard gates.
+   This ADR is now **Accepted**.
 
 ## 5b. Other edge cases / open questions
 * **Real constraint data coverage.** The 10 checks depend on

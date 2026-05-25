@@ -67,9 +67,10 @@ _Last updated: 2026-05-24._
 - **Phase 3 — health-autonomy gate → green** ✓ — `/health` serves
   `autonomy_vocab_version` + ranked `allowed_autonomy_levels` ({level,label,rank});
   asoe-ui regen'd types + drives autonomy labels/ordering from health by `rank`
-  (Guardrail #1), hardcoded map demoted to transition fallback. **Display only —
-  policy.py gating ladder NOT migrated (that coherent v2 flip stays separately
-  gated).**
+  (Guardrail #1), hardcoded map demoted to transition fallback. **Update
+  (2026-05-25): the policy.py gating ladder is now migrated to v2 too — the
+  display-only window is closed; see "Autonomy v2 gating-ladder migration"
+  below.**
 - **Phase 3 — ERP-submit safety foundation** ✓:
   - DoR #1 — email/attachment sanitizer wired into the extraction gateway.
   - DoR #2 — order intake never auto-executes; a one-click-approve intake routes
@@ -291,11 +292,11 @@ Full asoe2 suite green (3106 passed); asoe-ui tsc + 1219 vitest + build green.
   (`shadow_llm_reviewer_override_rate_on_downgrades`); **Layer-2-open rate +
   decision dwell** need a UI→backend telemetry pipeline that does not exist yet.
 
-**ADR-042 status stays *Proposed*** (NOT flipped to Accepted): per strategy §8
-the `autonomy_vocab_version` hard gate keeps it Proposed until autonomy-v2
-**dual-control compliance sign-off** — which is *waived-but-mechanism-intact* in
-this pre-prod project, so flipping the status unilaterally would misrepresent the
-compliance gate. Leave the flip to the sign-off step.
+**ADR-042 status — now *Accepted* (2026-05-25).** Per strategy §8 the
+`autonomy_vocab_version` hard gate kept it Proposed until autonomy-v2
+**dual-control compliance sign-off**. That sign-off has landed
+(*waived-but-mechanism-intact* in this pre-prod project); the gate is green in a
+clean run and the gating ladder is migrated (below), so the status is flipped.
 
 ## Productionization audit (2026-05-24) — deferred-gate progress
 Working the post-feature-port backlog. **Landed this pass:**
@@ -362,6 +363,19 @@ Working the post-feature-port backlog. **Landed this pass:**
 - ✓ **#10 SSRF wired** — `gateways/attachment_fetch.AttachmentFetchGateway`
   validates every URL via the guard before fetch (stub blob in sandbox).
 
+### Autonomy v2 gating-ladder migration (2026-05-25) — DONE
+- `contracts/policy.py` ladders (`DUPLICATE_PO_/EDI_MISMATCH_/MANUAL_ORDER_INTAKE_AUTONOMY_LEVELS`)
+  flipped from v1 to **vocab v2**, behaviour-preservingly (each action keeps its
+  v1 degree of automation; only the naming mirrors — v1 L1↔v2 L4, v1 L2↔v2 L3).
+- `orchestration/nodes.py::execute_recipe` gate routes by **rank** under the
+  current vocabulary (rank ≤ 1 → human approval) instead of hardcoded L1/L2, and
+  stamps `autonomy_vocab_version` into the recipe outputs (→ persisted in
+  `resolution_data`). Old, unstamped records resolve under v1 — no historical
+  reinterpretation. `EdiMismatchAnalysisData.autonomy_level` widened to L1–L4
+  (SHIP_TO → L4); OpenAPI + UI types regenerated.
+- New lock: `tests/test_autonomy_ladder_v2_migration.py`. ADR-042 flipped to
+  **Accepted**; tasks.md updated in both repos.
+
 ### Still PENDING (only what genuinely cannot be built now)
 - **#10 SSRF** — inject a REAL fetcher into AttachmentFetchGateway (+ resolve=True)
   once a production attachment store exists (guard + stub are in place).
@@ -369,8 +383,6 @@ Working the post-feature-port backlog. **Landed this pass:**
   `get_pipeline_topology` + `/exceptions/{id}/trace` and do NOT add a new
   surface; the Phase-6 Change Analysis section already renders the constraint
   data. (Not a buildable task — an architectural deferral.)
-- **ADR-042 → Accepted** — compliance-gated on autonomy-v2 dual-control sign-off;
-  must not be flipped unilaterally.
 
 ### Gates status — DoR safety gates (strategy §6): ALL IMPLEMENTED
 - ✓ `tests/test_inbox_gate_openapi_contract.py` — **GREEN** (Phase 7): all 8

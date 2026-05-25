@@ -42,18 +42,22 @@ DUPLICATE_PO_THRESHOLD_REVIEW_REQUIRED: float = 0.70
 DUPLICATE_PO_THRESHOLD_SOFT_FLAG: float = 0.50
 """Composite score at or above which a PO is soft-flagged."""
 
-# Autonomy level per resolution action (spec §3.3).
-# L4 = full autonomy (auto-execute), L3 = act & inform, L2 = recommend
-# (human must approve), L1 = observe only.
+# Autonomy level per resolution action (spec §3.3) — autonomy vocab v2
+# (ADR-042 §5; contracts/autonomy.py): L1 = auto / no human review (most
+# autonomous), L2 = execute & notify, L3 = prepare & await approval, L4 =
+# escalate to human (least autonomous). Migrated from v1 (the mirror ladder)
+# behaviour-preservingly: each action keeps its v1 degree of automation, only
+# the naming flips (v1 L1↔v2 L4, v1 L2↔v2 L3, …). See
+# tests/test_autonomy_ladder_v2_migration.py.
 DUPLICATE_PO_AUTONOMY_LEVELS: dict[str, str] = {
-    "BLOCK_AND_NOTIFY": "L3",
-    "MERGE": "L2",
-    "SUPERSEDE": "L2",
-    "ALLOW_BOTH": "L3",
-    "ESCALATE": "L1",
-    "REQUEST_BUYER_CONFIRMATION": "L2",
+    "BLOCK_AND_NOTIFY": "L2",
+    "MERGE": "L3",
+    "SUPERSEDE": "L3",
+    "ALLOW_BOTH": "L2",
+    "ESCALATE": "L4",
+    "REQUEST_BUYER_CONFIRMATION": "L3",
 }
-"""Maps resolution action → autonomy level for routing decisions."""
+"""Maps resolution action → autonomy level (vocab v2) for routing decisions."""
 
 # ---------------------------------------------------------------------------
 # Mass-update / line-count threshold
@@ -125,13 +129,15 @@ the order is escalated (MANUAL_REVIEW_REQUIRED)."""
 # ---------------------------------------------------------------------------
 
 EDI_MISMATCH_AUTONOMY_LEVELS: dict[str, str] = {
-    "SKU_MISMATCH": "L3",
-    "QTY_MISMATCH": "L2",
-    "UOM_MISMATCH": "L2",
-    "SHIP_TO_MISMATCH": "L1",
+    "SKU_MISMATCH": "L2",
+    "QTY_MISMATCH": "L3",
+    "UOM_MISMATCH": "L3",
+    "SHIP_TO_MISMATCH": "L4",
 }
-"""Maps EDI 850 line-mismatch sub_type → autonomy level. L1 = observe only,
-L2 = recommend (human must approve), L3 = act & inform. PRICE_MISMATCH is
+"""Maps EDI 850 line-mismatch sub_type → autonomy level (vocab v2, ADR-042 §5):
+L1 = auto, L2 = execute & notify, L3 = prepare & await approval, L4 = escalate
+to human. Migrated behaviour-preservingly from v1 (SKU L3→L2, QTY/UOM L2→L3,
+SHIP_TO L1→L4 — same degree of automation, mirror naming). PRICE_MISMATCH is
 absent by design — those events are routed to CONTRACTUAL_CORRECTION /
 PriceAdjustmentRecipe.py at classifier time and never reach this recipe."""
 
@@ -222,24 +228,27 @@ fix may be applied — but only when every validation failure is in the
 auto-correctable allowlist (UOM normalisation, ship-to format, PO-number
 padding). Spec §4 explicitly ties AUTO_CORRECT to confidence ≥ 0.99."""
 
-# Autonomy level per resolution action (spec §5).
-# L4 = full autonomy ("not recommended at launch"), L3 = act & inform,
-# L2 = recommend (human must approve), L1 = observe only.
-# Per ADR-034 §3.5, L4 actions are *demoted to L3 in policy* until the
-# calibration loop (ADR-032) ships graduation signals — so the mapping
-# below contains no L4 entries even though the spec defines an L4 tier.
+# Autonomy level per resolution action (spec §5) — autonomy vocab v2
+# (ADR-042 §5): L1 = auto / no human review (most autonomous), L2 = execute &
+# notify, L3 = prepare & await approval, L4 = escalate to human (least
+# autonomous). Migrated behaviour-preservingly from v1 (mirror naming). Per
+# ADR-034 §3.5 no action graduates to the most-autonomous tier (v2 L1) until
+# the calibration loop (ADR-032) ships graduation signals — so the most
+# autonomous entries here remain at v2 L2 (execute & notify), the v2 image of
+# the v1 "act & inform" (L3) tier.
 MANUAL_ORDER_INTAKE_AUTONOMY_LEVELS: dict[str, str] = {
-    "ONE_CLICK_APPROVE":     "L3",
-    "STANDARD_REVIEW":       "L2",
-    "LOW_CONFIDENCE_FLAG":   "L1",
-    "AUTO_CORRECT":          "L3",
-    "REQUEST_CLARIFICATION": "L2",
-    "ESCALATE":              "L1",
-    "REJECT":                "L1",
+    "ONE_CLICK_APPROVE":     "L2",
+    "STANDARD_REVIEW":       "L3",
+    "LOW_CONFIDENCE_FLAG":   "L4",
+    "AUTO_CORRECT":          "L2",
+    "REQUEST_CLARIFICATION": "L3",
+    "ESCALATE":              "L4",
+    "REJECT":                "L4",
 }
-"""Maps MANUAL_ORDER_INTAKE recommended_action → autonomy level. AUTO_CORRECT
-is intentionally *not* L4 — pending ADR-032 calibration graduation, all
-auto-actions remain at most L3 (act & inform)."""
+"""Maps MANUAL_ORDER_INTAKE recommended_action → autonomy level (vocab v2).
+ONE_CLICK_APPROVE / AUTO_CORRECT sit at v2 L2 (execute & notify), not the most
+autonomous v2 L1 — pending ADR-032 calibration graduation, no action runs with
+no human notification."""
 
 # Legacy name retained as an alias for the back-compat window
 # defined in ADR-034 §6.2 (transitional until 2026-08-12). New

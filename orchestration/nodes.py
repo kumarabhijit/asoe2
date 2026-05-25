@@ -45,6 +45,7 @@ from recipes.registry import get_recipe
 from gateways.executor import GatewayExecutor
 from orchestration.utils import circuit_breaker, compute_discrepancy
 from hardening.explain_mode import build_explain_summary
+from contracts.autonomy import CURRENT_AUTONOMY_VOCAB_VERSION, autonomy_rank
 from contracts.policy import (
     BACK_ORDER_SEVERE_GAP_PCT,
     CREDIT_AUTHORIZED_ROLES,
@@ -1296,10 +1297,25 @@ def execute_recipe(state: GraphState) -> GraphState:
 
     recipe_status = log.outputs.get("status")
 
-    # Autonomy routing takes precedence when present: L1/L2 actions require
-    # human approval regardless of recipe classification status.
+    # Autonomy routing takes precedence when present: the two least-autonomous
+    # tiers (degree-of-automation rank <= 1) require human approval regardless
+    # of recipe classification status. Resolved by *rank* under the current
+    # vocabulary (ADR-042 §5) so the gate stays correct across the v1→v2
+    # migration — under v1 that is L1/L2, under v2 it is L4/L3. A freshly
+    # classified record always emits under the current ladder, so it is stamped
+    # with the current vocab version for audit (an old, unstamped record keeps
+    # its original v1 meaning — no historical reinterpretation).
     autonomy = log.outputs.get("autonomy_level")
-    if autonomy in ("L1", "L2"):
+    requires_human = False
+    if autonomy:
+        log.outputs["autonomy_vocab_version"] = CURRENT_AUTONOMY_VOCAB_VERSION
+        try:
+            requires_human = (
+                autonomy_rank(autonomy, CURRENT_AUTONOMY_VOCAB_VERSION) <= 1
+            )
+        except ValueError:
+            requires_human = False
+    if requires_human:
         state.final_status = TerminalStatus.MANUAL_REVIEW_REQUIRED
         action = log.outputs.get("recommended_action", "")
         state.explanation = (

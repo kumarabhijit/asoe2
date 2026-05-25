@@ -558,7 +558,7 @@
         "type": "object"
       },
       "AutonomyLevelInfo": {
-        "description": "One autonomy tier for the UI to render/sort (ADR-042 \u00a75/\u00a78).\n\n`rank` is the degree of automation (higher == more autonomous) under the\nactive `autonomy_vocab_version`; the UI orders the ladder by `rank` rather\nthan hardcoding a map (asoe-ui Guardrail #1). Display vocabulary only \u2014\nnot the engine's gating semantics.",
+        "description": "One autonomy tier for the UI to render/sort (ADR-042 \u00a75/\u00a78).\n\n`rank` is the degree of automation (higher == more autonomous) under the\nactive `autonomy_vocab_version`; the UI orders the ladder by `rank` rather\nthan hardcoding a map (asoe-ui Guardrail #1). This is the same vocabulary\nthe engine's gating ladders resolve under (ADR-042 \u00a75 migration complete).",
         "properties": {
           "label": {
             "title": "Label",
@@ -2241,7 +2241,8 @@
             "enum": [
               "L1",
               "L2",
-              "L3"
+              "L3",
+              "L4"
             ],
             "title": "Autonomy Level",
             "type": "string"
