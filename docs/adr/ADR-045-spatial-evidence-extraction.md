@@ -168,6 +168,30 @@ frozen-rendition binding (ADR-044); docs updated.
 Graduates to **Accepted** when the eval gate is met on the golden set, the
 provider decision is ratified, and compliance signs off the new provenance.
 
+## 7. Implementation status (CP-F)
+
+Landed in `gateways/document_extraction.py` + `tests/eval/spatial_scorer.py`,
+locked by green contract tests:
+
+* **`select_candidate_box`** — a field may only SELECT a real OCR candidate by
+  id; an out-of-set id raises `ValueError`, so hallucinated geometry is
+  structurally impossible (§2.1).
+* **`verify_anchor_geometry`** — the runtime verifier: a spatial anchor keeps its
+  geometry only if the rendered text under the box matches the anchor text, else
+  it DEGRADES to an ADR-043 text anchor (geometry is `required_for_audit=False`).
+* **`build_spatial_anchor`** — the single mint point: select → construct → verify.
+* **Eval scorers** — `containment` (primary gate) + `page_accuracy`
+  (zero-tolerance); IoU stays diagnostic-only (§2.4).
+
+**Still open (this ADR's remaining DoD — needs a real provider / infra, kept off
+the red-green path per the test strategy):** the actual managed-OCR / self-hosted
+layout provider behind the gateway seam; `RecordedGatewayBackend` fixtures +
+`tests/eval/datasets/extraction_spatial/*.jsonl` + the `thresholds.yaml`
+CODEOWNERS gate; per-page cost guardrail + meter + drift signal; the async
+outbox pipeline keyed on `(sha256, model_id)`; frozen-rendition binding
+(ADR-044); audit-registry rows + compliance sign-off before spatial anchors
+drive an operator view.
+
 ---
 
 *End of ADR-045.*
