@@ -202,21 +202,28 @@ def list_case_attachments(tenant_id: str, case_id: str) -> List[AttachmentRecord
 # Store-backed fetcher for AttachmentFetchGateway
 # ---------------------------------------------------------------------------
 
-def store_backed_fetcher(url: str) -> Dict:
+def store_backed_fetcher(url: str, params: Dict) -> Dict:
     """Resolve an SSRF-validated attachment URL to its stored bytes.
 
-    The system-generated manifest URL encodes the owning tenant and the
-    attachment id in its path: ``https://<allowlisted-host>/<tenant>/<id>``.
-    The host is checked by the gateway's SSRF guard *before* this runs; here we
-    read the bytes from the internal store (no socket is opened, so the URL host
-    is a logical allowlist token, not a live fetch target). Raises
-    `AttachmentFetchError` when the attachment is absent — the gateway turns
-    that into a FAILED response.
+    The attachment id is the last path segment of the manifest URL
+    (``https://<allowlisted-host>/.../<id>``); the host is checked by the
+    gateway's SSRF guard *before* this runs. Crucially, the owning **tenant is
+    taken from the trusted request ``params``**, never from the URL — the
+    manifest URL comes from an untrusted inbound email, so deriving the tenant
+    from it would allow a crafted URL to read another tenant's attachment. The
+    store read is tenant-scoped, so an id alone cannot cross tenants. No socket
+    is opened (the bytes come from the internal store), so the URL host is a
+    logical allowlist token, not a live fetch target. Raises
+    `AttachmentFetchError` on a missing tenant or absent attachment — the
+    gateway turns that into a FAILED response.
     """
+    tenant_id = params.get("tenant_id")
+    if not tenant_id:
+        raise AttachmentFetchError("attachment fetch requires a trusted tenant_id param")
     parts = [p for p in urlparse(url).path.split("/") if p]
-    if len(parts) < 2:
+    if not parts:
         raise AttachmentFetchError(f"malformed attachment url: {url!r}")
-    tenant_id, attachment_id = parts[-2], parts[-1]
+    attachment_id = parts[-1]
     record = get_attachment(tenant_id, attachment_id)
     if record is None:
         raise AttachmentFetchError(
