@@ -11,11 +11,6 @@ from __future__ import annotations
 
 import pytest
 
-pytestmark = pytest.mark.xfail(
-    reason="ADR-045 document_extraction verifier lands at CP-F",
-    strict=True,
-)
-
 
 def _spatial_anchor(**overrides):
     from api.schemas import EvidenceAnchor, MatchKey

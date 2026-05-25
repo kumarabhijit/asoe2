@@ -12,11 +12,6 @@ from __future__ import annotations
 
 import pytest
 
-pytestmark = pytest.mark.xfail(
-    reason="ADR-045 spatial eval scorer lands at CP-F",
-    strict=True,
-)
-
 
 def test_containment_rewards_a_box_that_contains_the_ground_truth():
     from tests.eval.spatial_scorer import containment

@@ -215,10 +215,10 @@ green-and-honest; the marker is removed when impl lands → strict XPASS forces 
 
 Status legend: ✅🔴 RED gate written (xfail-strict), impl parked · ⬜ to write.
 
-**CP-B → CP-C/CP-E — backend gates (asoe2):** gates 1–9 are now **GREEN**
-(CP-C = 1–7; **CP-E = 8–9**: `ObjectStoreBackend` portability + erasure-tombstone;
-full suite 3227 passed / 5 xfailed). Gates 10–11 remain `xfail(strict)` pending
-CP-F (spatial extraction, ADR-045).
+**CP-B → CP-C/CP-E/CP-F — backend gates (asoe2): ALL GREEN.** gates 1–7 (CP-C),
+8–9 (CP-E: `ObjectStoreBackend` portability + erasure-tombstone), 10–11 (CP-F:
+select-not-generate verifier + containment eval). Every test-first gate is now
+implemented — **full suite 3232 passed / 0 xfailed**.
 1. ✅🔴 `tests/test_evidence_anchor_contract.py` — `EvidenceAnchor` schema: `anchor_source` discriminator; `text_derived` ⇒ no geometry; closed `supports_kind`; `source_sha256` required; `audit_tuple()` excludes position. Impl **CP-C**.
 2. ✅🔴 `tests/test_evidence_anchor_composer.py` — `build_evidence_anchors` derives one text-derived anchor per field, bound to the attachment sha256, no geometry (Guardrail #6). Impl **CP-C**.
 3. ✅🔴 `tests/test_evidence_anchor_match_key.py` — deterministic `MatchKey`; repeated tokens get distinct `occurrence_index` (the AMBIGUOUS hazard). Impl **CP-C**.
@@ -228,8 +228,8 @@ CP-F (spatial extraction, ADR-045).
 7. ✅🔴 `tests/test_preview_format_detection.py` — `detect_preview_format` magic-byte allowlist, default-deny, SVG denied, declared-mime ignored. Impl **CP-C**.
 8. ✅ `tests/test_attachment_store_portability.py` — `ObjectStoreBackend` matches in-memory semantics (GA precondition). **GREEN (CP-E).**
 9. ✅ `tests/test_attachment_erasure_cascade.py` — erasure removes bytes, PII-free audit tombstone preserved. **GREEN (CP-E).**
-10. ✅🔴 `tests/test_document_extraction_verifier.py` — select-not-generate + runtime verifier degrades wrong box to text anchor. Impl **CP-F**.
-11. ✅🔴 `tests/eval/test_spatial_extraction.py` — containment + zero-tolerance page accuracy (IoU diagnostic-only). Impl **CP-F** (`thresholds.yaml` CODEOWNERS).
+10. ✅ `tests/test_document_extraction_verifier.py` — select-not-generate + runtime verifier degrades a wrong box to a text anchor. **GREEN (CP-F).**
+11. ✅ `tests/eval/test_spatial_extraction.py` — containment + zero-tolerance page accuracy (IoU diagnostic-only). **GREEN (CP-F).**
 
 **CP-B → CP-C — frontend locks (asoe-ui; `it.fails` = vitest xfail-strict analog):**
 The `supports_kind` parity + `EvidenceAnchor` type-surface locks are now **GREEN**
