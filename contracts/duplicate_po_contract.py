@@ -248,6 +248,11 @@ class DuplicatePORecipeOutput(BaseModel):
     classification: _RECIPE_CLASSIFICATION
     recommended_action: AllowedResolutionAction
     autonomy_level: Optional[_AUTONOMY_LEVEL] = None
+    # Stamped by the orchestration layer (execute_recipe) alongside
+    # autonomy_level so the record self-describes which autonomy vocabulary its
+    # level resolves under (ADR-042 §5). Absent on records that predate the
+    # versioned vocabulary — those resolve under v1.
+    autonomy_vocab_version: Optional[str] = None
     notification_template: Optional[str] = None
     signal_breakdown: Dict[str, float]
     incoming_po_number: str = Field(..., min_length=1)

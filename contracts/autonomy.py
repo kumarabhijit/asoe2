@@ -73,9 +73,10 @@ def allowed_autonomy_levels(
     ``{level, label, rank}`` rows (rank == degree of automation).
 
     Surfaced on ``/health`` so the UI sorts/labels by ``rank`` at runtime
-    instead of hardcoding a map (asoe-ui Guardrail #1). Display-only — this
-    does NOT change the numeric→behaviour gating recipes dispatch on (that
-    coherent v2 migration is separately gated). Fails closed on an unknown
+    instead of hardcoding a map (asoe-ui Guardrail #1). The numeric→behaviour
+    gating ladders in ``contracts/policy.py`` now resolve under this same
+    vocabulary (ADR-042 §5 migration complete), so the level the operator sees
+    and the level the engine gates on agree. Fails closed on an unknown
     version.
     """
     try:

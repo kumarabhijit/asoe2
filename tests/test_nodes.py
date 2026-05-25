@@ -420,8 +420,10 @@ class TestValidateTypesNode:
     def test_edi_mismatch_autonomy_levels_injected(self):
         result = validate_types(self._edi_state())
         al = result.invocation.params["autonomy_levels"]
-        assert al["SKU_MISMATCH"] == "L3"
-        assert al["SHIP_TO_MISMATCH"] == "L1"
+        # Autonomy vocab v2 (ADR-042 §5): SKU=execute&notify (L2),
+        # SHIP_TO=escalate-to-human (L4).
+        assert al["SKU_MISMATCH"] == "L2"
+        assert al["SHIP_TO_MISMATCH"] == "L4"
 
     def test_edi_mismatch_sub_type_passthrough(self):
         for st in ("SKU_MISMATCH", "QTY_MISMATCH", "UOM_MISMATCH", "SHIP_TO_MISMATCH"):
@@ -813,10 +815,13 @@ class TestDuplicatePOExecuteRecipeNode:
 
 
 class TestDuplicatePOAutonomyRouting:
-    """Autonomy levels route L1/L2 to MANUAL_REVIEW_REQUIRED, L3/L4 to COMPLETE."""
+    """Autonomy levels route the two least-autonomous tiers (rank <= 1) to
+    MANUAL_REVIEW_REQUIRED, the rest to COMPLETE. Under vocab v2 (ADR-042 §5)
+    those least-autonomous tiers are L3/L4; the routing is unchanged from v1."""
 
     def test_l2_action_routes_to_manual_review(self):
-        """MERGE (L2) requires human approval → MANUAL_REVIEW_REQUIRED."""
+        """MERGE (v2 L3 — prepare & await approval) requires human approval →
+        MANUAL_REVIEW_REQUIRED."""
         from contracts.policy import DUPLICATE_PO_AUTONOMY_LEVELS
         state = GraphState(event=OrderEvent(
             order_id="PO-AUT01", po_price=100.0, sap_base_price=100.0,
@@ -829,7 +834,7 @@ class TestDuplicatePOAutonomyRouting:
         ))
         state.intent = Intent.DUPLICATE_PO
         state.shadow = _green_shadow()
-        # AUTO_BLOCK + lines differ + no revision → MERGE (L2)
+        # AUTO_BLOCK + lines differ + no revision → MERGE (v2 L3)
         state.invocation = RecipeInvocation(
             recipe_name="DuplicatePORecipe.py",
             params={
@@ -847,11 +852,12 @@ class TestDuplicatePOAutonomyRouting:
         )
         result = execute_recipe(state)
         assert result.execution_log.outputs["recommended_action"] == "MERGE"
-        assert result.execution_log.outputs["autonomy_level"] == "L2"
+        assert result.execution_log.outputs["autonomy_level"] == "L3"
         assert result.final_status == TerminalStatus.MANUAL_REVIEW_REQUIRED
 
     def test_l3_action_routes_to_complete(self):
-        """BLOCK_AND_NOTIFY (L3) auto-executes → COMPLETE (via BLOCKED status)."""
+        """BLOCK_AND_NOTIFY (v2 L2 — execute & notify) auto-executes →
+        COMPLETE (via BLOCKED status)."""
         from contracts.policy import DUPLICATE_PO_AUTONOMY_LEVELS
         state = GraphState(event=OrderEvent(
             order_id="PO-AUT02", po_price=100.0, sap_base_price=100.0,
@@ -864,7 +870,7 @@ class TestDuplicatePOAutonomyRouting:
         ))
         state.intent = Intent.DUPLICATE_PO
         state.shadow = _green_shadow()
-        # AUTO_BLOCK + identical lines + not fulfilled → BLOCK_AND_NOTIFY (L3)
+        # AUTO_BLOCK + identical lines + not fulfilled → BLOCK_AND_NOTIFY (v2 L2)
         state.invocation = RecipeInvocation(
             recipe_name="DuplicatePORecipe.py",
             params={
@@ -882,7 +888,7 @@ class TestDuplicatePOAutonomyRouting:
         )
         result = execute_recipe(state)
         assert result.execution_log.outputs["recommended_action"] == "BLOCK_AND_NOTIFY"
-        assert result.execution_log.outputs["autonomy_level"] == "L3"
+        assert result.execution_log.outputs["autonomy_level"] == "L2"
         # BLOCK_AND_NOTIFY returns status=BLOCKED which maps to TerminalStatus.BLOCKED
         assert result.final_status == TerminalStatus.BLOCKED
 
@@ -910,5 +916,5 @@ class TestDuplicatePOAutonomyRouting:
         )
         result = execute_recipe(state)
         assert "autonomy_level" in result.execution_log.outputs
-        # PASS → ALLOW_BOTH → L3
-        assert result.execution_log.outputs["autonomy_level"] == "L3"
+        # PASS → ALLOW_BOTH → v2 L2 (execute & notify)
+        assert result.execution_log.outputs["autonomy_level"] == "L2"
