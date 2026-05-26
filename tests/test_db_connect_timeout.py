@@ -72,6 +72,20 @@ def test_pathological_env_override_capped_at_ceiling(monkeypatch):
     assert "999999" not in out
 
 
+def test_capping_warns_so_operator_sees_clamp(monkeypatch, caplog):
+    # Review 2 finding: a silent cap leaves the operator thinking their
+    # value took effect. Log a WARNING that names both the requested and
+    # capped value so it surfaces in App Insights / Log Analytics.
+    import logging
+    monkeypatch.setenv("ASOE_POSTGRES_CONNECT_TIMEOUT_S", "300")
+    caplog.set_level(logging.WARNING, logger="asoe.db")
+    _ensure_connect_timeout("postgresql://user:pass@host/db")
+    msgs = " ".join(rec.getMessage() for rec in caplog.records)
+    assert "300" in msgs
+    assert "60" in msgs
+    assert "cap" in msgs.lower()
+
+
 def test_postgres_adapter_applies_timeout(monkeypatch):
     """The adapter constructor must run the URL through the timeout
     helper so a deploy that forgot to set it doesn't hang on outage."""

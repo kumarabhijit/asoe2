@@ -102,7 +102,9 @@ jobs:
       - name: Run Trivy image scan
         if: matrix.image == 'api' || matrix.image == 'core'
         continue-on-error: true
-        uses: aquasecurity/trivy-action@master
+        # Pinned action tag (Review 2 finding) — floating @master would
+        # let a Trivy behaviour change land mid-run unannounced.
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: asoe-${{ matrix.image }}:ci
           format: 'table'

@@ -266,15 +266,25 @@ def _ensure_connect_timeout(url: "Optional[str]") -> "Optional[str]":
     if "connect_timeout=" in url:
         return url
     raw = os.getenv("ASOE_POSTGRES_CONNECT_TIMEOUT_S", "").strip()
+    requested: int | None = None
     try:
         seconds = int(raw) if raw else _DEFAULT_POSTGRES_CONNECT_TIMEOUT_S
         if seconds <= 0:
             seconds = _DEFAULT_POSTGRES_CONNECT_TIMEOUT_S
+        else:
+            requested = seconds
     except ValueError:
         seconds = _DEFAULT_POSTGRES_CONNECT_TIMEOUT_S
     # Cap at the ceiling so a misconfigured deploy can't reintroduce a
-    # multi-minute hang on Postgres outage.
-    seconds = min(seconds, _MAX_POSTGRES_CONNECT_TIMEOUT_S)
+    # multi-minute hang on Postgres outage. Surface the cap in logs so
+    # the operator can see their value was clamped (Review 2 finding).
+    if seconds > _MAX_POSTGRES_CONNECT_TIMEOUT_S:
+        logger.warning(
+            "ASOE_POSTGRES_CONNECT_TIMEOUT_S=%s capped at %ss (ceiling) — "
+            "tighten the override or accept the cap.",
+            requested, _MAX_POSTGRES_CONNECT_TIMEOUT_S,
+        )
+        seconds = _MAX_POSTGRES_CONNECT_TIMEOUT_S
     sep = "&" if "?" in url else "?"
     return f"{url}{sep}connect_timeout={seconds}"
 
