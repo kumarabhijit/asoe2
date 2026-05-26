@@ -806,6 +806,40 @@ class EvidenceAnchor(BaseModel):
         return (self.attachment_id, self.source_sha256, self.text, self.supports_ref)
 
 
+class AttachmentErasureTombstone(BaseModel):
+    """PII-free tombstone for an erased attachment (PARITY-0.5 / ADR-044 §2.4).
+
+    Written into the immutable audit chain (ADR-023) as the ``new_value``
+    of the ``ATTACHMENT_ERASED`` event so a regulator can later verify a
+    deletion happened against content of a specific hash. NEVER add
+    ``content`` or ``name`` fields here — both leak PII. The schema is
+    locked in `compliance/audit_bearing_registry.yaml::AttachmentErasureTombstone`
+    behind the CODEOWNERS gate.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    attachment_id: str
+    tenant_id: str
+    sha256: str
+    """Content hash — survives the bytes so a regulator can prove a
+    decision was made against content of this hash."""
+
+    case_id: Optional[str] = None
+    size_bytes: int
+    mime_type: str
+    erased_at: str
+    """ISO-8601 UTC timestamp of the erasure."""
+
+    erased_by: str
+    """Actor identity — user `sub` for operator-initiated erasures,
+    ``system:retention-sweeper`` (or similar) for scheduled retention sweeps."""
+
+    reason: Optional[str] = None
+    """Free-text reason captured at erasure time (e.g.
+    ``right-to-erasure-request``, ``retention-policy-90d-expired``)."""
+
+
 class EmailSourceData(BaseModel):
     """EmailOrderEntryRecipe → UI `email_source` (ADR-034 Phase G).
 
