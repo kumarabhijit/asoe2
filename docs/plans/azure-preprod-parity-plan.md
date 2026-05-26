@@ -4,7 +4,25 @@
 **Owner:** Platform + Backend + Frontend (joint).
 **Scope:** Bring Azure pre-prod to feature parity with today's Vercel dev
 (mocked-layers) UX, then progressively unlock real-data pre-prod.
-**Next action:** start **PARITY-0** (Phase 0 Foundation).
+
+### PARITY-0 implementation status (2026-05-26)
+
+| Acceptance criterion | Status |
+|---|---|
+| Env-driven gateway dispatch (sandbox / preprod / production) with fail-loud on unknown env | **✓ shipped** (api/preprod_gateways.py + api/production_gateways.py + api/app.py::_register_gateways_for_env) |
+| CORS regex validation at startup (refuse `.*`, refuse SaaS-wildcard) + INFO log of resolved allowlist | **✓ shipped** (api/app.py::_validate_cors_regex; 18 tests) |
+| Postgres `connect_timeout` injected with 60s ceiling | **✓ shipped** (db/connection.py::_ensure_connect_timeout; 9 tests) |
+| VNet + private-Postgres + Blob upgrade path commented into bicep | **✓ shipped** (infra/main.bicep — pure comments, no deploy-shape change) |
+| Image scan + secret-scan + dep-audit CI gates | **✓ shipped, advisory** (.github/workflows/tests.yml pip-audit + gitleaks; docker-build.yml Trivy). Strict promotion is a follow-up PR once baseline is clean. |
+| Non-root container verified in CI | **✓ shipped, strict** (docker-build.yml — fails the build if image runs as root) |
+| Manual secrets-rotation runbook | **✓ shipped** (docs/ops/secrets-rotation.md) |
+| End-to-end inbox-section coverage under ASOE_ENV=preprod | **✓ shipped** (tests/test_preprod_gateway_registration.py — 9 tests; mirrors the sandbox contract) |
+| Deploy + smoke against an Azure tenant | **Pending — platform team action** (the bicep + workflow already exist; just needs an auth'd `scripts/deploy-azure.sh` run) |
+| 4 Playwright journeys against the preprod URLs | **Pending — depends on deploy** |
+| UI seed user logs in, every section populates against deployed backend | **Pending — depends on deploy** |
+
+**Next action after deploy:** start **PARITY-0.5** (audit-chain
+tombstone routing — gates real-tenant data).
 
 ---
 
