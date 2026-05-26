@@ -247,15 +247,58 @@ class PostgresAdapter:
 # Factory
 # ---------------------------------------------------------------------------
 
+_DEFAULT_POSTGRES_CONNECT_TIMEOUT_S = 5
+_MAX_POSTGRES_CONNECT_TIMEOUT_S = 60
+"""Default + ceiling for connect_timeout (seconds) on the Postgres driver
+— PARITY-0 Phase 0a (Azure/SRE review). A Postgres outage with no timeout
+hangs the request for ~30s+ and cascades into readiness-probe failure.
+Overridable via ``ASOE_POSTGRES_CONNECT_TIMEOUT_S``, but capped at 60s so
+a pathological override (operator types 999999) doesn't recreate the
+hang we're guarding against (Review 1 finding)."""
+
+
+def _ensure_connect_timeout(url: "Optional[str]") -> "Optional[str]":
+    """Ensure a postgresql:// URL carries a ``connect_timeout``. No-op on
+    SQLite / empty / None URLs and on URLs that already specify
+    ``connect_timeout`` (operator override wins)."""
+    if not url or not url.startswith(("postgresql:", "postgres:")):
+        return url
+    if "connect_timeout=" in url:
+        return url
+    raw = os.getenv("ASOE_POSTGRES_CONNECT_TIMEOUT_S", "").strip()
+    requested: int | None = None
+    try:
+        seconds = int(raw) if raw else _DEFAULT_POSTGRES_CONNECT_TIMEOUT_S
+        if seconds <= 0:
+            seconds = _DEFAULT_POSTGRES_CONNECT_TIMEOUT_S
+        else:
+            requested = seconds
+    except ValueError:
+        seconds = _DEFAULT_POSTGRES_CONNECT_TIMEOUT_S
+    # Cap at the ceiling so a misconfigured deploy can't reintroduce a
+    # multi-minute hang on Postgres outage. Surface the cap in logs so
+    # the operator can see their value was clamped (Review 2 finding).
+    if seconds > _MAX_POSTGRES_CONNECT_TIMEOUT_S:
+        logger.warning(
+            "ASOE_POSTGRES_CONNECT_TIMEOUT_S=%s capped at %ss (ceiling) — "
+            "tighten the override or accept the cap.",
+            requested, _MAX_POSTGRES_CONNECT_TIMEOUT_S,
+        )
+        seconds = _MAX_POSTGRES_CONNECT_TIMEOUT_S
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}connect_timeout={seconds}"
+
+
 def create_adapter(database_url: Optional[str] = None) -> SQLiteAdapter | PostgresAdapter:
     """Create a database adapter based on DATABASE_URL.
 
     - ``sqlite:///path`` or ``sqlite://:memory:`` → SQLiteAdapter
-    - ``postgresql://...`` → PostgresAdapter
+    - ``postgresql://...`` → PostgresAdapter (connect_timeout injected
+      unless operator-specified — PARITY-0 Phase 0a)
     - No URL → SQLiteAdapter with in-memory database
     """
     url = database_url or os.getenv("DATABASE_URL", "")
     if not url or url.startswith("sqlite"):
         db_path = url.replace("sqlite:///", "").replace("sqlite://", "") or ":memory:"
         return SQLiteAdapter(db_path)
-    return PostgresAdapter(url)
+    return PostgresAdapter(_ensure_connect_timeout(url))

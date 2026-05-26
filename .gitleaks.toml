@@ -1,0 +1,48 @@
+# Gitleaks configuration — secret-scan allowlist for the asoe2 repo.
+#
+# Wired into CI via .github/workflows/tests.yml (the `gitleaks` job).
+# Starts advisory (continue-on-error: true on the job) so PARITY-0
+# isn't blocked on the first run finding false positives; promote
+# both the job AND this config to strict once the baseline is clean.
+#
+# CONTRIBUTOR GUIDANCE: a leak detected in real source / config code
+# is NEVER allowlisted here — rotate the secret and add to history
+# rewriting if needed. This file's only legitimate use is suppressing
+# documented test fixtures, deliberate examples, and bicep placeholder
+# strings that look like secrets but aren't.
+
+title = "asoe2 secret-scan config"
+
+# Use gitleaks' built-in default ruleset as the baseline.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documented test fixtures and bicep placeholders that look like secrets but are intentionally non-secret."
+
+# Files that contain deliberate "this is a placeholder" strings.
+paths = [
+    '''(?i)tests/fixtures/.*''',
+    '''(?i)docs/examples/.*''',
+    # Bicep placeholder defaults — overwritten at deploy time by
+    # scripts/set-secrets.sh. The literal string "placeholder-set-via-
+    # set-secrets-sh" is matched and skipped.
+    '''infra/main\.bicep''',
+]
+
+# Specific non-secret values that scanners flag as high-entropy.
+regexes = [
+    # Bicep placeholder default
+    '''placeholder-set-via-set-secrets-sh''',
+    # The dev JWT secret fallback in api/deps.py — explicit warning
+    # banner says NEVER use in prod; not a real secret.
+    '''asoe-dev-secret-do-not-use-in-production''',
+    # Test JWT secret used by tests/test_auth_env_claim.py
+    '''test-secret-do-not-use''',
+    # Test-only Playwright password
+    '''any-non-empty-password''',
+]
+
+# Specific commit SHAs to skip (use sparingly — prefer fixing the
+# underlying issue + rewriting history if a real secret is committed).
+# commits = [ "abc123..." ]

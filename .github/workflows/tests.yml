@@ -27,15 +27,15 @@
 # generation, not test deps. The dev extra in pyproject.toml is
 # sufficient for the entire test tree.
 #
-# Important: do NOT export ASOE_ENV at the workflow `env:` level.
-# api/deps.py resolves ACCESS_TOKEN_EXPIRE_SECONDS /
-# REFRESH_TOKEN_EXPIRE_SECONDS at *module import* (production
-# defaults: 60 min / 7 days; sandbox: 24 h / 30 days), and several
-# tests (notably tests/test_security.py::TestTokenExpiry) assert
-# the production-default 7-day refresh TTL. tests/conftest.py
-# deliberately sets ASOE_ENV=sandbox per-test via monkeypatch
-# *after* import, so runtime gets sandbox behaviour while the
-# import-time constants stay at production defaults.
+# ASOE_ENV handling at CI time (post PARITY-0 Phase 0b):
+# `tests/conftest.py` now pins ASOE_ENV=sandbox at conftest-import-time
+# so the module-level `app = create_app()` in api/app.py uses the
+# sandbox dispatch path during pytest collection (otherwise it would
+# fail-loud, because production refuses to boot without real-connector
+# wiring). The TTL constants in api/deps.py also resolve under sandbox
+# (24h access / 30d refresh) — tests that assert specific TTLs read
+# REFRESH_TOKEN_EXPIRE_SECONDS / ACCESS_TOKEN_EXPIRE_SECONDS
+# dynamically rather than hardcoding a number, so this is safe.
 name: Tests
 
 on:
@@ -87,3 +87,66 @@ jobs:
 
       - name: Run pytest
         run: pytest -q tests/
+
+  # PARITY-0 Phase 0a — security CI gates (Security review).
+  # Advisory (continue-on-error: true) for the first deploys so PARITY-0
+  # isn't blocked on pre-existing CVEs / detected secrets. Promote to
+  # required (`continue-on-error: false`) in a follow-up PR once the
+  # baseline is clean.
+  pip-audit:
+    name: pip-audit (dependency CVEs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Install package + dev extras
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          pip install -e ".[dev]"
+
+      - name: Run pip-audit (isolated venv)
+        # Audit our project in an ISOLATED venv. Auditing the runner's
+        # shared env drags in system Python packages (dbus-python,
+        # PyGObject, python-apt) that pip-audit can't resolve. Install
+        # editable so `--skip-editable` correctly skips our own
+        # `asoe` distribution. We drop `--strict` because it treats
+        # editable-skip as a failure (conflicts with `--skip-editable`);
+        # the default exit code still surfaces real CVE findings as
+        # job failure → yellow X (continue-on-error: true above).
+        run: |
+          python -m venv /tmp/audit_venv
+          /tmp/audit_venv/bin/python -m pip install --upgrade --quiet pip pip-audit
+          /tmp/audit_venv/bin/python -m pip install --quiet -e ".[dev]"
+          echo "--- audit set (excl. editable) ---"
+          /tmp/audit_venv/bin/python -m pip freeze --exclude-editable \
+            | grep -v -E '^(pip-audit)==' | wc -l
+          echo "--- pip-audit findings ---"
+          /tmp/audit_venv/bin/pip-audit --skip-editable
+
+  gitleaks:
+    name: gitleaks (committed secret scan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # gitleaks needs history to scan past commits
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Pick up the repo's allowlist config — see .gitleaks.toml.
+          # Promote `continue-on-error: false` above (job-level) when the
+          # baseline is clean and the allowlist has been audited.
+          GITLEAKS_CONFIG: .gitleaks.toml

@@ -97,15 +97,23 @@ _SANDBOX_KG = dict(
 
 
 def register_sandbox_gateways() -> None:
-    """Register every stub gateway needed for end-to-end runs.
+    """Register every stub gateway needed for end-to-end runs in sandbox.
 
-    Mirrors tests/conftest.py so live-server runs match the test
-    pipeline. Safe to call multiple times — clears the registry
-    first.
+    Mirrors tests/conftest.py so live-server runs match the test pipeline.
+    Safe to call multiple times — clears the registry first. Env-gated
+    so the function is a no-op outside ``ASOE_ENV=sandbox`` (defence in
+    depth for any caller that bypasses the app-level dispatcher).
     """
     if os.getenv("ASOE_ENV", "production").lower() != "sandbox":
         return
+    _register_all_stub_gateways()
 
+
+def _register_all_stub_gateways() -> None:
+    """The actual stub registration — used by both
+    ``register_sandbox_gateways`` (sandbox env) and
+    ``api.preprod_gateways.register_preprod_gateways`` (preprod env, until
+    Phase 6 real connectors land). No env check here; callers gate the env."""
     clear_registry()
 
     register_gateway(StubGateway(

@@ -74,22 +74,14 @@ class TestSeedFinancialImpact:
         assert r.status_code == 403
 
     def test_sandbox_endpoints_hidden_outside_sandbox_env(self, monkeypatch):
-        """A production-configured app must not expose sandbox routes."""
+        """A production-configured app refuses to boot (PARITY-0 Phase 0b
+        fail-loud) — a strictly stronger guarantee than "sandbox routes
+        return 404 in production": the app never runs there at all until
+        register_production_gateways is wired with real connectors."""
+        import pytest as _pytest
         monkeypatch.setenv("ASOE_ENV", "production")
-        # Re-create app after env change so the include_router guard fires.
-        app = create_app()
-        with TestClient(app, raise_server_exceptions=False) as prod_client:
-            admin = create_test_token(
-                roles=["admin"], org="tenant-a", env="production",
-            )
-            r = prod_client.post(
-                "/api/v1/_sandbox/seed/financial-impact",
-                json={"exception_id": "x", "financial_impact_usd": 1.0},
-                headers=_auth(admin),
-            )
-            assert r.status_code == 404, (
-                "sandbox routes must not be mounted in production"
-            )
+        with _pytest.raises(NotImplementedError):
+            create_app()
 
 
 class TestTenantReset:

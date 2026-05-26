@@ -238,6 +238,79 @@ class _FilesystemBlobStore(_BlobStore):
                 pass
 
 
+def _azure_blob_store():
+    """Real Azure Blob Storage driver (PARITY-2). Lazy-imports
+    ``azure-storage-blob`` + ``azure-identity`` so the core service runs
+    without them installed (the dependencies live in the `[azure]`
+    optional extra). Container/account come from env:
+
+      * ``ASOE_OBJECT_STORE_BUCKET`` — container name
+      * ``ASOE_OBJECT_STORE_ENDPOINT`` — account URL
+        (e.g. ``https://<account>.blob.core.windows.net``)
+
+    Auth: ``DefaultAzureCredential`` — picks up the Container App's
+    managed identity in production, ``az login`` locally, or env-var
+    credentials in CI. No plaintext account keys ever leave Key Vault.
+    """
+    from azure.identity import DefaultAzureCredential  # noqa: PLC0415
+    from azure.storage.blob import BlobServiceClient  # noqa: PLC0415
+
+    container_name = os.environ["ASOE_OBJECT_STORE_BUCKET"]
+    account_url = os.environ["ASOE_OBJECT_STORE_ENDPOINT"]
+    credential = DefaultAzureCredential()
+    service_client = BlobServiceClient(
+        account_url=account_url, credential=credential,
+    )
+    container_client = service_client.get_container_client(container_name)
+
+    class _AzureBlobStore(_BlobStore):
+        def put_blob(self, key: str, data: bytes) -> None:
+            container_client.get_blob_client(key).upload_blob(
+                bytes(data), overwrite=True,
+            )
+
+        def get_blob(self, key: str) -> Optional[bytes]:
+            try:
+                stream = container_client.get_blob_client(key).download_blob()
+                return stream.readall()
+            except Exception as exc:
+                # Lazy-import so the core service doesn't depend on
+                # azure-core just to check this. ResourceNotFoundError
+                # = 404 → None; other exceptions propagate so an outage
+                # is visible rather than silently treated as "missing".
+                try:
+                    from azure.core.exceptions import (  # noqa: PLC0415
+                        ResourceNotFoundError,
+                    )
+                except ImportError:  # pragma: no cover
+                    raise exc
+                if isinstance(exc, ResourceNotFoundError):
+                    return None
+                raise
+
+        def delete_blob(self, key: str) -> None:
+            try:
+                container_client.get_blob_client(key).delete_blob()
+            except Exception as exc:
+                # Idempotent delete: 404 is fine (already gone).
+                try:
+                    from azure.core.exceptions import (  # noqa: PLC0415
+                        ResourceNotFoundError,
+                    )
+                except ImportError:  # pragma: no cover
+                    raise exc
+                if not isinstance(exc, ResourceNotFoundError):
+                    raise
+
+        def clear(self) -> None:
+            # Dev/test convenience only; production lifecycle is
+            # container-level via Storage Account retention policy.
+            for blob in container_client.list_blobs():
+                container_client.get_blob_client(blob.name).delete_blob()
+
+    return _AzureBlobStore()
+
+
 def _s3_blob_store():  # pragma: no cover - live path only (needs boto3 + creds)
     """Real S3/MinIO blob driver behind the env flag (live/nightly path only).
 
@@ -334,6 +407,9 @@ def _object_store_backend() -> "ObjectStoreBackend":
     driver = os.getenv("ASOE_OBJECT_STORE_DRIVER", "filesystem").lower()
     if driver == "s3":
         return ObjectStoreBackend(_s3_blob_store())
+    if driver == "azure":
+        # PARITY-2: Azure Blob Storage backend via managed identity.
+        return ObjectStoreBackend(_azure_blob_store())
     root = os.getenv("ASOE_OBJECT_STORE_PATH", "./.asoe_object_store")
     return ObjectStoreBackend(_FilesystemBlobStore(root))
 
@@ -427,20 +503,33 @@ _erasure_lock = threading.Lock()
 _erasure_tombstones: Dict[tuple, Dict] = {}
 
 
-def erase_attachment(backend, *, tenant_id: str, attachment_id: str) -> Optional[Dict]:
+def erase_attachment(
+    backend,
+    *,
+    tenant_id: str,
+    attachment_id: str,
+    erased_by: Optional[str] = None,
+    reason: Optional[str] = None,
+) -> Optional[Dict]:
     """Erase a stored attachment's bytes + metadata and leave a PII-free
-    tombstone (ADR-044 §2.4).
+    tombstone (ADR-044 §2.4). PARITY-0.5: the tombstone is now ALSO routed
+    into the immutable hash-chained audit log (ADR-023) so the erasure can
+    be proved to a regulator after the fact.
 
-    The tombstone keeps the identity + content **hash** (so the audit trail can
-    still prove a decision was made against content of hash X) but NEVER the
-    content or the filename (which may itself be PII). Production routes the
-    tombstone into the immutable audit chain (ADR-023); this module-level
-    registry is the in-process analog the erasure contract runs against. Returns
-    the tombstone, or None when there was nothing to erase.
+    The tombstone keeps the identity + content **hash** (so the audit trail
+    can still prove a decision was made against content of hash X) but
+    NEVER the content or the filename (which may itself be PII). The
+    in-process `_erasure_tombstones` registry stays as a fast lookup; the
+    audit chain is the source of truth. Returns the tombstone, or None
+    when there was nothing to erase (no spurious audit row in that case).
+
+    ``erased_by`` identifies the actor — a user sub for operator-initiated
+    erasures, a `system:*` sentinel for scheduled retention sweeps. Recorded
+    on the audit row.
     """
     record = backend.get(tenant_id, attachment_id)
-    backend.delete(tenant_id, attachment_id)
     if record is None:
+        # No-op — never write a spurious audit event for a non-existent id.
         return None
     tombstone: Dict = {
         "tenant_id": record.tenant_id,
@@ -450,7 +539,43 @@ def erase_attachment(backend, *, tenant_id: str, attachment_id: str) -> Optional
         "size_bytes": record.size_bytes,
         "mime_type": record.mime_type,
         "erased_at": _now(),
+        "erased_by": erased_by or "system:retention-sweeper",
+        "reason": reason,
     }
+    # Write the audit row FIRST so the chain has the proof of erasure
+    # before the bytes are gone. If the chain write fails (e.g. DB
+    # outage), we don't proceed with the delete — the operator can retry.
+    try:
+        from api.store import exception_store
+        exception_store.log_audit_event(
+            tenant_id=tenant_id,
+            policy_key="ATTACHMENT_ERASED",
+            previous_value={
+                "attachment_id": record.id,
+                "sha256": record.sha256,
+                "case_id": record.case_id,
+                "size_bytes": record.size_bytes,
+                "mime_type": record.mime_type,
+            },
+            new_value=tombstone,
+            changed_by=tombstone["erased_by"],
+            change_reason=reason or "right-to-erasure",
+            # PARITY-0.5 (Review 3): the DB-backed store would otherwise
+            # swallow a DB-write failure and let the byte-delete proceed
+            # without a chain row — the exact "bytes gone, no proof"
+            # state the Compliance review banned. Strict=True re-raises.
+            strict=True,
+        )
+    except Exception:  # pragma: no cover - chain-write failure is a hard stop
+        logger.exception(
+            "erase_attachment: audit-chain write failed for "
+            "tenant=%s attachment=%s — aborting erase to preserve the "
+            "proof-of-erasure invariant; bytes still in place.",
+            tenant_id, attachment_id,
+        )
+        raise
+    # Chain write succeeded — safe to delete the bytes.
+    backend.delete(tenant_id, attachment_id)
     with _erasure_lock:
         _erasure_tombstones[(tenant_id, attachment_id)] = tombstone
     return tombstone
