@@ -1,9 +1,10 @@
 # Azure Pre-Prod ↔ Vercel Dev Parity Plan
 
-**Status:** Draft v2 (2026-05-26 — folded in six expert reviews).
+**Status:** Finalized v3 (2026-05-26 — six expert reviews folded in + all nine open questions resolved).
 **Owner:** Platform + Backend + Frontend (joint).
 **Scope:** Bring Azure pre-prod to feature parity with today's Vercel dev
 (mocked-layers) UX, then progressively unlock real-data pre-prod.
+**Next action:** start **PARITY-0** (Phase 0 Foundation).
 
 ---
 
