@@ -285,6 +285,55 @@ resource pgServer 'Microsoft.DBforPostgreSQL/flexibleServers@2023-12-01-preview'
 
 // Allow all Azure services (Container Apps egress IPs are not stable).
 // For production, replace with VNet integration + private endpoint.
+//
+// ── PARITY-0 Phase 0a — VNet + private-Postgres upgrade path (commented) ──
+// The Azure/SRE review of docs/plans/azure-preprod-parity-plan.md flagged
+// the `0.0.0.0/0` firewall as acceptable for sandbox but NOT for any real-
+// tenant traffic. The upgrade path is:
+//
+//   1. Add a VNet + subnet for the Container App managed env:
+//        resource vnet 'Microsoft.Network/virtualNetworks@2024-01-01' = {
+//          name: '${namePrefix}vnet'
+//          location: location
+//          properties: {
+//            addressSpace: { addressPrefixes: [ '10.10.0.0/16' ] }
+//            subnets: [
+//              { name: 'snet-cae', properties: { addressPrefix: '10.10.1.0/23' } }
+//              { name: 'snet-pe',  properties: {
+//                  addressPrefix: '10.10.4.0/24'
+//                  privateEndpointNetworkPolicies: 'Disabled'
+//              }}
+//            ]
+//          }
+//        }
+//
+//   2. Bind the Managed Environment to the snet-cae subnet
+//      (vnetConfiguration.infrastructureSubnetId).
+//
+//   3. Set Postgres `publicNetworkAccess: 'Disabled'` and add a
+//      private endpoint on snet-pe:
+//        resource pgPe 'Microsoft.Network/privateEndpoints@2024-01-01' = {
+//          name: '${namePrefix}-pg-pe'
+//          location: location
+//          properties: {
+//            subnet: { id: '${vnet.id}/subnets/snet-pe' }
+//            privateLinkServiceConnections: [{
+//              name: 'pg'
+//              properties: {
+//                privateLinkServiceId: pgServer.id
+//                groupIds: [ 'postgresqlServer' ]
+//              }
+//            }]
+//          }
+//        }
+//
+//   4. Delete this firewall rule. Postgres becomes reachable only via the
+//      VNet + private DNS zone.
+//
+// Sequenced for Phase 2 (Azure Blob) and Phase 6 (real connectors): both
+// inherit the VNet automatically once it lands. Tracked as PARITY-0
+// follow-up; Phase 0a ships against the public-endpoint path on synthetic
+// data only.
 resource pgFwAllowAzure 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2023-12-01-preview' = {
   parent: pgServer
   name: 'AllowAllAzureServices'
@@ -293,6 +342,63 @@ resource pgFwAllowAzure 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules
     endIpAddress: '0.0.0.0'
   }
 }
+
+// ── PARITY-0 Phase 0a — Attachment Blob storage (Phase 2 implementation) ──
+// Decision Q6+Q7 (parity plan): preprod single-region (location param
+// above), Standard_LRS replication. Phase 2 lands the real driver
+// (gateways/attachment_store.py::_azure_blob_store) + grants the
+// Container App's managed identity `Storage Blob Data Contributor`.
+//
+// Commented until Phase 2 ships so the current bicep still compiles
+// without azure-storage-blob in the runtime image.
+//
+// param storageAccountName string = '${namePrefix}attachments'
+// param storageContainerName string = 'attachments'
+//
+// resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
+//   name: storageAccountName
+//   location: location
+//   sku: { name: 'Standard_LRS' }   // Decision Q7 — preprod; GA upgrades to GRS
+//   kind: 'StorageV2'
+//   properties: {
+//     accessTier: 'Hot'
+//     allowBlobPublicAccess: false   // private only
+//     minimumTlsVersion: 'TLS1_2'
+//     supportsHttpsTrafficOnly: true
+//     publicNetworkAccess: 'Disabled' // VNet + private endpoint per above
+//     // Compliance review: soft-delete + versioning mandatory before Phase 2 ships.
+//   }
+// }
+//
+// resource storageBlob 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = {
+//   parent: storage
+//   name: 'default'
+//   properties: {
+//     deleteRetentionPolicy: { enabled: true, days: 30 }
+//     containerDeleteRetentionPolicy: { enabled: true, days: 30 }
+//     isVersioningEnabled: true
+//   }
+// }
+//
+// resource storageContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+//   parent: storageBlob
+//   name: storageContainerName
+//   properties: { publicAccess: 'None' }
+// }
+//
+// // Grant the Container App's managed identity Blob Data Contributor.
+// resource storageRbac 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+//   name: guid(storage.id, uami.id, 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
+//   scope: storage
+//   properties: {
+//     roleDefinitionId: subscriptionResourceId(
+//       'Microsoft.Authorization/roleDefinitions',
+//       'ba92f5b4-2d11-453d-a403-e96b0029c9fe' // Storage Blob Data Contributor
+//     )
+//     principalId: uami.properties.principalId
+//     principalType: 'ServicePrincipal'
+//   }
+// }
 
 resource pgDatabase 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2023-12-01-preview' = {
   parent: pgServer
