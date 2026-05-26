@@ -1418,10 +1418,18 @@ def compute_match_keys(values: "list[str] | tuple[str, ...]") -> "list[MatchKey]
     return keys
 
 
+# Operator-facing labels for the closed extracted-field vocabulary. Mirrors the
+# asoe-ui mock map (`src/lib/mock-data/inbox-sections.ts::_ANCHOR_LABELS`) so the
+# real-backend safety bar and the mock-mode safety bar render identical labels
+# for the same field key (canonical-example parity — ADR-043).
 _ANCHOR_LABELS: Dict[str, str] = {
-    "po": "PO number", "po_number": "PO number", "order_id": "Order number",
-    "ship_to": "Ship-to", "qty": "Quantity", "quantity": "Quantity",
-    "material": "Material", "invoice": "Invoice number", "date": "Date",
+    "customer_po": "PO number", "po": "PO number", "po_number": "PO number",
+    "order_ref": "Order number", "order_id": "Order number",
+    "customer": "Customer", "ship_to": "Ship-to",
+    "requested_date": "Requested date", "date": "Date",
+    "material": "Material", "qty": "Quantity", "quantity": "Quantity",
+    "invoice_ref": "Invoice", "invoice": "Invoice number",
+    "issue": "Reported issue", "sender": "Sender", "topic": "Topic",
 }
 
 
