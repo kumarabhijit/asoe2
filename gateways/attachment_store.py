@@ -484,6 +484,11 @@ def erase_attachment(
             new_value=tombstone,
             changed_by=tombstone["erased_by"],
             change_reason=reason or "right-to-erasure",
+            # PARITY-0.5 (Review 3): the DB-backed store would otherwise
+            # swallow a DB-write failure and let the byte-delete proceed
+            # without a chain row — the exact "bytes gone, no proof"
+            # state the Compliance review banned. Strict=True re-raises.
+            strict=True,
         )
     except Exception:  # pragma: no cover - chain-write failure is a hard stop
         logger.exception(

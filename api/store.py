@@ -292,6 +292,8 @@ class ExceptionStore:
         new_value: Any,
         changed_by: str,
         change_reason: Optional[str] = None,
+        *,
+        strict: bool = False,  # noqa: ARG002 - signature parity with DB store
     ) -> None:
         """Record an immutable audit event (SOX compliance).
 
@@ -304,6 +306,11 @@ class ExceptionStore:
         In-memory store: appends to _audit_log list.
         Database store: inserts into policy_audit_log table (hash columns
         to be added in a follow-up migration).
+
+        ``strict`` is accepted for signature parity with the DB-backed
+        variant (PARITY-0.5 / Review 3). The in-memory store can't fail
+        the append silently — a programming error raises naturally — so
+        the flag is a no-op here.
         """
         import hashlib
         import json
@@ -611,6 +618,8 @@ class DatabaseBackedStore:
         new_value: Any,
         changed_by: str,
         change_reason: Optional[str] = None,
+        *,
+        strict: bool = False,
     ) -> None:
         """Record an immutable audit event to policy_audit_log (SOX).
 
@@ -619,6 +628,14 @@ class DatabaseBackedStore:
         called create_override, which incorrectly inserted a stray row
         into policy_overrides for application-level events like
         EXCEPTION_RESOLVED.
+
+        PARITY-0.5 (Review 3): when ``strict=True`` the DB-write failure
+        re-raises. Callers that depend on the audit row being present
+        before another irreversible action proceeds (e.g.,
+        ``erase_attachment`` deleting the bytes) MUST pass
+        ``strict=True`` to preserve the proof-of-erasure invariant.
+        Default ``strict=False`` keeps the existing swallow-and-warn
+        behaviour for non-critical audit events.
         """
         try:
             from db.repository import PolicyRepository
@@ -637,6 +654,11 @@ class DatabaseBackedStore:
                 "Failed to write audit event to DB: %s by %s",
                 policy_key, changed_by,
             )
+            if strict:
+                # PARITY-0.5: a strict caller needs the chain row to be
+                # provable; re-raise so the caller can roll back the
+                # paired action (e.g., abort the byte-delete).
+                raise
 
     def get_audit_log(self, tenant_id: str) -> List[Dict[str, Any]]:
         """Return audit events for a tenant."""

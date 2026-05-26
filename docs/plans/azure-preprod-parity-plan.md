@@ -24,6 +24,18 @@
 **Next action after deploy:** start **PARITY-0.5** (audit-chain
 tombstone routing — gates real-tenant data).
 
+### PARITY-0.5 implementation status (2026-05-26)
+
+| Acceptance criterion | Status |
+|---|---|
+| `erase_attachment` writes the tombstone into `policy_audit_log` BEFORE deleting bytes (proof-of-erasure invariant) | **✓ shipped** (`gateways/attachment_store.py::erase_attachment` — 6 tests) |
+| `GET /api/v1/attachments/{id}/erasure-certificate` returns the chain-proof tombstone | **✓ shipped** (`api/routes/attachments.py::attachment_erasure_certificate` — 6 tests; manager+admin RBAC; tenant-scoped) |
+| `AttachmentErasureTombstone` schema locked in `compliance/audit_bearing_registry.yaml` with CODEOWNERS gate | **✓ shipped** (9 rows added; .github/CODEOWNERS already gates /compliance/) |
+| Audit chain still verifies after multiple erasures | **✓ shipped** (`test_audit_chain_verifies_after_erasure`) |
+| `verify_audit_chain` integration | **✓ shipped** (certificate endpoint runs it inline) |
+| PII-free tombstone invariant (no `content`, no `name`) | **✓ shipped** (registry header + adapter logic + regression test) |
+| Real-tenant data gate cleared | **✓ Phase 0.5 acceptance criteria met** — preprod deploy can now safely accept real-tenant data (with the rest of Phase 1-5 still required for full real-data parity)
+
 ---
 
 ## 0. Why this plan exists

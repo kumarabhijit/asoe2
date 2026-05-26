@@ -155,7 +155,7 @@ async def read_attachment_by_token(token: str) -> Response:
 async def attachment_erasure_certificate(
     attachment_id: str,
     tenant_id: str = Depends(get_tenant_id),
-    user: AuthenticatedUser = Depends(get_current_user),  # noqa: ARG001
+    user: AuthenticatedUser = Depends(get_current_user),
 ) -> dict:
     """Return the tombstone + audit-chain proof for an erased attachment.
 
@@ -183,6 +183,16 @@ async def attachment_erasure_certificate(
         )
     chain_ok, _break_idx = exception_store.verify_audit_chain(tenant_id)
     tombstone = event.get("new_value") or {}
+    # Review 3 finding: a regulator-facing read should leave an
+    # operational trail. INFO so App Insights / Log Analytics captures
+    # who fetched the certificate and when. Phase 8 adds a stricter
+    # CERTIFICATE_FETCHED chain event if regulator policy mandates it.
+    logger.info(
+        "erasure_certificate_fetched tenant=%s attachment_id=%s actor=%s "
+        "audit_event_id=%s chain_verified=%s",
+        tenant_id, attachment_id, getattr(user, "sub", "unknown"),
+        event.get("id"), chain_ok,
+    )
     return {
         "attachment_id": attachment_id,
         "tenant_id": tenant_id,
