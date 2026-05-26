@@ -96,6 +96,10 @@ running with an empty gateway registry (Phase 0b).
 * **[Compliance]** Phase 0a ships only against **synthetic data**
   (sandbox stubs). Real-tenant pre-prod traffic is gated on Phase 0.5
   audit-chain integration landing first.
+* **[Decision Q6+Q7]** Storage region: **East US 2**; replication: **LRS**;
+  bicep `storageAccount.sku.name: 'Standard_LRS'`. (GA upgrades to per-tenant
+  region + GRS.) `infra/main.bicep` Storage Account parameters fixed
+  accordingly.
 * **[Security]** Add a `Phase 0 security review` task: SSRF + XSS audit
   of the attachment download + signed-URL paths against
   `hardening/ssrf.py`; `detect-secrets` (or GitGuardian) pre-commit +
@@ -248,6 +252,14 @@ any real-tenant pre-prod data lands.**
 * `docs/testing/auth-modes.md` — auth-mode matrix (seed vs Entra) for
   dev / Vercel / preprod, with Playwright fixture strategy per mode.
 
+**Decision Q8 — App Registration shape:** **one** App Registration named
+`asoe-ui`, with the following redirect URIs registered up-front:
+* `http://localhost:3000/api/auth/callback/azure-ad` (dev)
+* `http://localhost:3100/api/auth/callback/azure-ad` (Playwright)
+* `https://<vercel-preview-domain>/api/auth/callback/azure-ad` (Vercel)
+* `https://<asoe-ui-preprod>.azurecontainerapps.io/api/auth/callback/azure-ad` (Azure preprod)
+* (Future GA URIs added as deployed.)
+
 **Acceptance criteria:**
 
 * Both providers coexist in the same `authOptions.providers` without
@@ -297,6 +309,14 @@ behind `ASOE_AUTH_MODE=seed`.
   If the new roles strip access to the current page, middleware
   redirects to `/403` rather than silently failing API calls.
 
+**Decision Q1 — tenancy:** App Registration **`signInAudience: 'AzureADMyOrg'`**
+for preprod (single Entra tenant). A GA follow-up ADR will switch to
+`signInAudience: 'AzureADMultipleOrgs'` and add the per-tenant consent
+flow + cross-tenant `iss` validation. Phase 3b must explicitly reject
+tokens whose `iss` claim is from any tenant other than the configured
+preprod tenant (`ASOE_ISSUER_URL`) — this is the gate that contains
+single-tenant blast radius today.
+
 **Acceptance criteria:** v1 criteria plus the three regression tests
 above (cross-tenant iss rejection; revocation; role-downgrade UX).
 
@@ -335,6 +355,11 @@ keys** for JWT vs the attachment capability token.
   every secret + per-deploy override.
 * **[Compliance]** Break-glass recovery key stored in a separate Key
   Vault (different RBAC).
+* **[Decision Q4]** Preprod rotation cadence: **manual operator-triggered**
+  (documented runbook in `docs/ops/secrets-rotation.md`); a Container App
+  revision restart picks up the new secret. **GA follow-up:** a 90-day
+  automated rotation policy via Azure Function callback. Tracked in
+  `docs/plans/ga-preconditions.md` (to be created at GA-readiness).
 
 **Acceptance criteria:** v1 plus:
 
@@ -363,6 +388,12 @@ parallel).
 * **[Azure/SRE]** Log redaction for PII at the structured-logger level
   (`api/observability/`); the Application Insights exporter never sees
   plaintext PII.
+* **[Decision Q5]** Workspace: a **dedicated** Application Insights +
+  Log Analytics workspace for preprod (`asoe-preprod-monitoring`);
+  separate billing + retention from any other org Azure project.
+  Retention: 90 days for App Insights, 30 days for Log Analytics
+  (overridable per query). Bicep parameter `monitoringWorkspaceMode:
+  'dedicated'`.
 
 **Effort:** **M** (2–3 days). **Dependencies:** Phase 0.
 
@@ -410,15 +441,41 @@ Phase 6.1 Graph ─┬─► 6.2 Document Intelligence ─┐
   customer credit fields, addresses outside the field-of-interest,
   before sending. Compliance review gate.
 
+**Decision Q3 — Phase 6.3 SAP environment:** **real S/4HANA preprod
+tenant, read-only credentials** (pending SAP Basis team confirmation).
+Documented fallback: SAP Cloud trial / dev tenant if access is delayed
+past Phase 6.3 spec lock. Either way, Phase 6.3 ships against a
+schema-realistic source, not stubs.
+
+**Decision Q2 — Phase 6.2 model choice:** Azure Document Intelligence
+**prebuilt invoice + custom post-process** (`prebuilt-invoice` model
+pinned via `ASOE_DOCUMENT_EXTRACTION_MODEL_ID`). Phase 7 acceptance on
+the expanded golden set gates any upgrade to custom-extract; if
+upgrade is needed, raise `EXTRACTION_MAX_COST_USD_PER_PAGE` to 0.15
+in the same PR.
+
+**Decision Q9 — shadow-mode acceptance** (codified as
+`tests/eval/shadow_mode_thresholds.yaml`):
+* Audit-bearing fields (declared in `compliance/audit_bearing_registry.yaml`):
+  **0% diff** vs stub — exact match required per field per event.
+* Derived / contextual fields: **≤ 5% diff** — accommodates formatting
+  variance (date strings, free-text descriptions).
+* Optional fields: not gated.
+* Window: **7 consecutive days** of shadow runs with **< 1%**
+  audit-bearing-diff rate before a connector flips to real-only.
+* Per-tenant overrides land as `thresholds.yaml` rows; lowering a
+  threshold needs reviewer sign-off (Integration + Compliance).
+
 **Per-sub-phase acceptance** (beyond replay-passes-green):
 
 * Nightly `-m live` gate green for **7 consecutive days** (schema
-  stable, permissions unchanged).
+  stable, permissions unchanged) — matches the Q9 window.
 * **Latency parity**: real p50 + p99 ≤ 1.2× stub p50.
 * **Failure-rate parity**: real failure rate ≤ stub-equivalent under
   100 injected-fault scenarios (breaker + timeout matrix).
 * **Fixture completeness**: 100% of preprod inbound event types have at
   least one recorded fixture per connector per operation.
+* **Shadow-mode diff**: meets the Q9 thresholds across the 7-day window.
 
 **Effort:** **XL** aggregate; sub-phases **M–L**.
 **Dependencies:** Phase 0 (specifically the fail-loud preprod boot
@@ -611,19 +668,37 @@ a regression test that fails on its parent commit.
 
 ---
 
-## Open questions for sign-off
+## Decisions log (2026-05-26 — all 9 v2 open questions resolved)
 
-| # | Question | Phase | Notes |
-|---|---|---|---|
-| 1 | Single Entra tenant serving multiple ASOE tenants, or one per ASOE tenant? | 3b | Affects App Registration + JWKS validation. Pick single-tenant for preprod. |
-| 2 | AzureDI model: prebuilt invoice + post-process, or custom-extract? | 6.2 / 7 | **Cost-impacts the guardrail** (ML review). Run pricing sim first. |
-| 3 | SAP environment for preprod: sandbox SAP or real S/4HANA? | 6.3 | Affects fixture capture + DPA. |
-| 4 | Key Vault rotation cadence: manual operator trigger acceptable for preprod? | 4 | Per security review, choose: secondary-slot, control-plane warn, or asymmetric keys. |
-| 5 | Application Insights workspace: shared with other Azure projects, or dedicated? | 5 | Affects cost + alert routing. |
-| 6 | Attachment-byte residency: tenant-specific region pinning required? | 2 / 8 | DPIA-driven; gates Storage Account region. |
-| 7 | Geo-replication on Storage Account: enabled? | 2 / 8 | If yes, tombstone must replicate synchronously with the bytes (Compliance). |
-| 8 | Multi-environment OAuth callback strategy: one App Registration with multiple redirect URIs, or one per env? | 3a | Frontend review — needs acceptance test across dev/Vercel/preprod. |
-| 9 | Shadow-mode acceptance: when do we accept that a real connector's diff vs stub is "close enough"? | 6 | Integration review — needs a written rule, not operator gut feel. |
+| # | Question | Phase | **Decision** | Rationale |
+|---|---|---|---|---|
+| 1 | Entra ID tenancy model | 3b | **Single-tenant for preprod; switch the App Registration to multi-tenant for GA.** | Preprod has ~one customer-equivalent; single-tenant is simpler. A documented migration path to multi-tenant is required so the App Registration boundary doesn't have to be torn down at GA. |
+| 2 | AzureDI model choice | 6.2 / 7 | **Start with prebuilt invoice + custom post-process (~$0.01/page); upgrade to custom-extract only if the expanded golden set (Phase 7) shows insufficient accuracy on customer-specific layouts.** | Fastest to ship; cheapest; keeps the existing `EXTRACTION_MAX_COST_USD_PER_PAGE = 0.05` ceiling realistic. Phase 7 acceptance gates the upgrade decision on real data. |
+| 3 | SAP environment for preprod | 6.3 | **Real S/4HANA preprod tenant, read-only credentials** (subject to SAP Basis team confirming access). Fallback if access is delayed: SAP Cloud trial / dev tenant. | Most realistic schema; catches drift early; read-only contains blast radius. |
+| 4 | Key Vault rotation cadence | 4 | **Manual operator-triggered rotation for preprod; 90-day automated policy via Azure Function callback + Container App revision restart is a GA follow-up.** | Standard for preprod; defers automation cost to GA. Soft-delete + purge-protection mandatory from day 1 either way. |
+| 5 | App Insights workspace | 5 | **Dedicated workspace for preprod** (separate billing + retention from other Azure projects). | Clean blast radius; cost is marginal vs the clarity gain. Can fold into a shared org workspace later if FinOps mandates. |
+| 6 | Attachment-byte residency (preprod) | 2 / 8 | **Single region (Azure East US 2), LRS storage for preprod.** | Cheapest; preprod runs synthetic / internal data — no DPA-driven residency yet. |
+| 7 | Storage replication strategy | 2 / 8 | **LRS for preprod; per-tenant region selection + GRS for GA.** Tombstone-replication discipline (Compliance review) lands with GRS. | Right cost-vs-resilience for each phase; GA gate makes the GRS-tombstone story explicit. |
+| 8 | OAuth App Registration strategy | 3a | **One App Registration per logical app (`asoe-ui`); multiple redirect URIs registered (localhost dev, Vercel preview, Azure preprod, future GA URLs).** | Standard SaaS pattern; one App identity per app; adding an environment = adding a URI, not a new registration. |
+| 9 | Shadow-mode acceptance | 6 | **Audit-bearing fields: 0% diff vs stub (exact match). Derived/contextual fields: ≤5% diff. Optional fields: not gated.** Shadow runs **7 consecutive days under 1% audit-bearing diff** before flipping a connector to real-only. | Audit-bearing fields drive SOX attestations — no tolerance there. Contextual fields (formatted dates, free-text descriptions) tolerate cosmetic variance. The 7-day window mirrors the same eval rigor used elsewhere in the codebase. |
+
+These decisions are folded into the relevant phase sections below; see
+each phase for the concrete env-var settings + bicep parameters that
+follow.
+
+---
+
+## Outstanding decisions (none blocking preprod stand-up)
+
+None. All v2 open questions are resolved or have clear expert defaults
+adopted. Two operational dependencies remain to be confirmed by the
+platform team but do not block the plan itself:
+
+* **Q3 confirmation** — SAP Basis team approves read-only access to the
+  preprod S/4HANA tenant. Fallback: SAP Cloud trial tenant + a written
+  note in Phase 6.3 ticket.
+* **GA multi-tenant Entra migration** — out of preprod scope; will be a
+  dedicated ADR when the second customer onboards.
 
 ---
 
