@@ -1,0 +1,65 @@
+# Audit-bearing decorator — grandfather list (PARITY-5).
+#
+# The CI lint at tests/test_otel_audit_bearing.py::TestAuditBearingLint
+# requires every state-mutating route (POST/PUT/PATCH/DELETE) under
+# api/routes/ to be marked with `@audit_bearing(reason=...)`. Routes
+# below are GRANDFATHERED — they predate the lint and have an existing
+# audit trail through other means (auth log, sandbox stub registry,
+# health-check rotation log, …).
+#
+# Adding a NEW route here requires a compliance reviewer sign-off
+# (CODEOWNERS-gated like the audit-bearing registry). For new routes,
+# add the decorator instead — the lint will pass without an entry here.
+#
+# Migration plan: tracked in
+# docs/plans/azure-preprod-parity-plan.md under PARITY-5 follow-ups.
+# Each PR that touches a grandfathered route should migrate it to the
+# decorator (and remove the line here) before merge.
+
+exempt_paths:
+  # ── api/routes/auth.py — auth surface logs through policy_audit_log
+  #    under AUTH_* event types; @audit_bearing would double-record.
+  - /login
+  - /sso/init
+  - /sso/callback
+  - /mfa/verify
+  - /refresh
+
+  # ── api/routes/sandbox.py — synthetic-data fixtures gated to
+  #    sandbox env; not financially binding by construction.
+  - /_sandbox/seed/financial-impact
+  - /_sandbox/tenant/reset
+  - /_sandbox/seed/blob
+  - /_sandbox/seed/inbox
+  - /_sandbox/seed/cases
+
+  # ── api/routes/workflows.py — grandfather; migrate next pass.
+  - /workflows/{workflow_id}/run
+
+  # ── api/routes/policies.py — grandfather.
+  - /policies/{policy_id}
+
+  # ── api/routes/config.py — grandfather.
+  - /config/tenant/{tenant_id}
+  - /config/tenant/{tenant_id}/duplicate_po
+
+  # ── api/routes/attachments.py — grandfather (the erasure path is
+  #    already audit-trailed via gateways/attachment_store.py).
+  - /attachments
+
+  # ── api/routes/health.py — kill-switch + explain-mode toggles are
+  #    operator actions; audit trail goes through the structured log.
+  - /health/kill-switch
+  - /health/explain-mode
+
+  # ── api/routes/exceptions.py — bulk grandfather; migration in
+  #    subsequent PARITY-5 follow-up PRs.
+  - /exceptions/{exception_id}/approve
+  - /exceptions/{exception_id}/reject
+  - /exceptions/{exception_id}/escalate
+  - /exceptions/{exception_id}/resolve
+  - /exceptions/{exception_id}
+  - /exceptions/{exception_id}/override
+  - /exceptions/{exception_id}/override/cosign
+  - /exceptions/{exception_id}/comments
+  - /exceptions/{exception_id}/assign

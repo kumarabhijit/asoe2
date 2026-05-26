@@ -40,6 +40,7 @@ from api.case_events import (
 )
 from api.errors import ASOEError
 from api.metrics import record_cases_returned
+from api.observability.audit_bearing import audit_bearing
 from api.schemas import CaseListResponse, CaseRecordsResponse
 from api.store import case_store, exception_store
 
@@ -456,6 +457,7 @@ HIGH_VALUE_OVERRIDE_THRESHOLD_USD = 10_000.0
     "/cases/{case_id}/override",
     dependencies=[Depends(require_role("manager", "admin"))],
 )
+@audit_bearing(reason="initiates a case-level financial override; SOX")
 async def initiate_case_override(
     case_id: str,
     req: CaseOverrideInitRequest,
@@ -513,6 +515,7 @@ async def initiate_case_override(
     "/cases/{case_id}/override/cosign",
     dependencies=[Depends(require_role("manager", "admin"))],
 )
+@audit_bearing(reason="cosigns a pending case override; financial commit; SOX")
 async def cosign_case_override(
     case_id: str,
     req: CaseCosignRequest,

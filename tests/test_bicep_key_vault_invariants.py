@@ -58,3 +58,25 @@ class TestSeparateSigningKeySecretrefs:
         adding the attachment key."""
         assert "ASOE_JWT_SECRET" in bicep_text
         assert "secretRef: 'asoe-jwt-secret'" in bicep_text
+
+
+class TestAppInsightsInvariants:
+    """PARITY-5 — dedicated monitoring workspace + 90d App Insights retention."""
+
+    def test_app_insights_resource_declared(self, bicep_text: str) -> None:
+        assert "Microsoft.Insights/components@" in bicep_text
+
+    def test_app_insights_90d_retention(self, bicep_text: str) -> None:
+        assert "RetentionInDays: 90" in bicep_text
+
+    def test_log_analytics_30d_retention(self, bicep_text: str) -> None:
+        assert "retentionInDays: 30" in bicep_text
+
+    def test_dedicated_monitoring_workspace_tag(self, bicep_text: str) -> None:
+        """Decision Q5 — dedicated workspace, not shared with other org Azure
+        projects. The tag is the cheapest way to assert intent."""
+        assert "asoe-preprod-monitoring" in bicep_text
+
+    def test_appinsights_connection_string_wired(self, bicep_text: str) -> None:
+        assert "APPLICATIONINSIGHTS_CONNECTION_STRING" in bicep_text
+        assert "appInsights.properties.ConnectionString" in bicep_text

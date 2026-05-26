@@ -235,15 +235,38 @@ resource acrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: logAnalyticsName
   location: location
-  tags: commonTags
+  tags: union(commonTags, {
+    purpose: 'asoe-preprod-monitoring' // PARITY-5 Decision Q5 — dedicated workspace.
+  })
   properties: {
     sku: {
       name: 'PerGB2018'
     }
+    // PARITY-5 — 30d Log Analytics retention per Decision Q5.
     retentionInDays: 30
     features: {
       enableLogAccessUsingOnlyResourcePermissions: true
     }
+  }
+}
+
+// PARITY-5 — Application Insights component pointed at the dedicated
+// Log Analytics workspace above. App Insights retention is 90 days
+// (Decision Q5), longer than the Log Analytics 30d so audit-relevant
+// traces survive a full quarter for SOX evidence requests.
+resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
+  name: '${namePrefix}appinsights'
+  location: location
+  tags: union(commonTags, {
+    purpose: 'asoe-preprod-monitoring'
+  })
+  kind: 'web'
+  properties: {
+    Application_Type: 'web'
+    WorkspaceResourceId: logAnalytics.id
+    RetentionInDays: 90
+    IngestionMode: 'LogAnalytics'
+    DisableIpMasking: false
   }
 }
 
@@ -705,6 +728,11 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (deployContainerApp) 
             { name: 'LANGFUSE_HOST',         value: langfuseHost }
             { name: 'LANGFUSE_PUBLIC_KEY',   secretRef: 'langfuse-public-key' }
             { name: 'LANGFUSE_SECRET_KEY',   secretRef: 'langfuse-secret-key' }
+            // PARITY-5 — wires api/observability/otel.py to the
+            // App Insights ingestion endpoint. When this is unset
+            // (e.g. on Vercel), init_telemetry returns False and the
+            // exporter chain stays cold.
+            { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: appInsights.properties.ConnectionString }
           ]
           probes: [
             {
