@@ -69,6 +69,34 @@ class TestShadowModeRunner:
         assert entries[0].audit_bearing_diffs == {"po_number"}
         assert entries[0].derived_diffs == set()
 
+    def test_runner_distinguishes_none_from_missing(self):
+        """Regression for code-review REAL BUG: dict.get collapses
+        ``key: None`` and missing-key to None, so a real-vs-stub
+        presence diff would silently register as "no diff" if the
+        diff used ``.get`` alone. The Q9 acceptance gate would then
+        pass with the audit-bearing variance silently hidden."""
+        from gateways.shadow_mode import ShadowRunner, get_diff_log
+        get_diff_log().clear()
+
+        def real_call(**kw):
+            return {"po_number": "PO-123", "status": None}
+
+        def stub_call(**kw):
+            return {"po_number": "PO-123"}  # status MISSING, not None
+
+        runner = ShadowRunner(
+            connector="sap_order",
+            operation="validate",
+            audit_bearing_fields={"po_number", "status"},
+        )
+        runner.run(real=real_call, stub=stub_call, params={})
+
+        entries = get_diff_log()
+        assert "status" in entries[0].audit_bearing_diffs, (
+            "presence-of-key diff was silently dropped — Q9 audit log "
+            "would miss a real-vs-stub variance"
+        )
+
     def test_runner_real_failure_does_not_crash(self):
         """Shadow mode is opt-in observability; a real-side failure
         falls back to the stub return so the request still completes
@@ -154,6 +182,26 @@ class TestExtractionDriftAlert:
         assert detect_extraction_drift(
             recent_containments=recent, baseline_containments=baseline,
         ).drift_detected is False
+
+    def test_nan_inputs_treated_as_missing(self):
+        """Regression for code-review MODERATE finding: a NaN sample
+        silently propagates through statistics.median and poisons the
+        comparison (NaN >= 5.0 is False), so NaN inputs would
+        SUPPRESS the alert. We filter NaNs and only alert on real
+        samples; the structured logger flags the missing data
+        separately."""
+        from api.observability.drift_alert import detect_extraction_drift
+
+        nan = float("nan")
+        result = detect_extraction_drift(
+            recent_containments=[nan, nan],
+            baseline_containments=[0.92, 0.93],
+        )
+        # No valid recent samples → treated as missing, no alert.
+        assert result.drift_detected is False
+        # The drop_pp is 0.0 (zeroed when data missing), not NaN.
+        import math
+        assert not math.isnan(result.median_drop_pp)
 
 
 class TestBrierCalibration:

@@ -58,8 +58,19 @@ def get_diff_log() -> List[DiffEntry]:
 
 
 def _diff(real: Dict[str, Any], stub: Dict[str, Any], fields: Set[str]) -> Set[str]:
+    """Per-field diff that distinguishes ``key: None`` from a missing
+    key. ``dict.get`` collapses both to ``None``, so a real return
+    of ``{"status": None}`` and a stub of ``{}`` would silently
+    register as "no diff" — which is exactly the audit-bearing
+    silence the Q9 acceptance check exists to prevent.
+    """
     out: Set[str] = set()
     for f in fields:
+        present_real = f in real
+        present_stub = f in stub
+        if present_real != present_stub:
+            out.add(f)
+            continue
         if real.get(f) != stub.get(f):
             out.add(f)
     return out

@@ -47,7 +47,22 @@ def detect_extraction_drift(
     Empty input arrays return ``drift_detected=False`` — we don't
     alert on missing data; that's the structured-logger's job.
     """
-    if not recent_containments or not baseline_containments:
+    import math
+
+    # Filter NaN samples; a NaN slips through statistics.median and
+    # poisons every downstream comparison (NaN >= 5.0 is False, so
+    # NaN inputs silently SUPPRESS the alert even when calibration
+    # is actually broken). Treat NaN-only inputs as missing data —
+    # the structured logger will flag the gap separately.
+    recent_clean = [
+        float(x) for x in recent_containments
+        if isinstance(x, (int, float)) and not math.isnan(float(x))
+    ]
+    baseline_clean = [
+        float(x) for x in baseline_containments
+        if isinstance(x, (int, float)) and not math.isnan(float(x))
+    ]
+    if not recent_clean or not baseline_clean:
         return DriftVerdict(
             alert_name="extraction-drift",
             drift_detected=False,
@@ -56,8 +71,8 @@ def detect_extraction_drift(
             baseline_median=0.0,
         )
 
-    recent_median = float(statistics.median(recent_containments))
-    baseline_median = float(statistics.median(baseline_containments))
+    recent_median = float(statistics.median(recent_clean))
+    baseline_median = float(statistics.median(baseline_clean))
     drop_pp = (baseline_median - recent_median) * 100.0
 
     drift = drop_pp >= DROP_THRESHOLD_PP
