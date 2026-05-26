@@ -216,6 +216,77 @@ class TestEntraTokenValidation:
             _entra_decode(token)
 
 
+class TestEntraPolicyRejectionDoesNotFallThrough:
+    """A cross-tenant Entra token MUST NOT fall through to HS256
+    validation. Catching all ASOEErrors indiscriminately would let a
+    token rejected for a 403-class policy reason silently re-attempt
+    as a seed token; if it happens to also be a valid HS256 JWT it
+    would succeed.
+
+    Regression for the code-review HIGH finding on
+    api/deps.py::get_current_user.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _entra_mode(self, monkeypatch):
+        monkeypatch.setenv("ASOE_AUTH_MODE", "entra")
+        monkeypatch.setenv(
+            "ASOE_ISSUER_URL",
+            "https://login.microsoftonline.com/tenant-aaa/v2.0",
+        )
+        monkeypatch.setenv("ASOE_CLIENT_ID", "client-asoe")
+        monkeypatch.setenv("ASOE_JWT_SECRET", "shared-test-secret")
+        from api import azure_ad_jwks
+        azure_ad_jwks.reset_cache()
+
+        def fake_fetch(issuer_url):
+            return {"keys": [{"kid": "test-kid", "kty": "RSA", "n": "x", "e": "AQAB"}]}
+
+        monkeypatch.setattr(azure_ad_jwks, "_fetch_jwks_raw", fake_fetch)
+
+        from api import deps
+        monkeypatch.setattr(deps, "_verify_rs256_signature", lambda t, j: True, raising=False)
+
+    @pytest.mark.asyncio
+    async def test_cross_tenant_iss_does_not_fall_through_to_hs256(self, monkeypatch):
+        """A cross-tenant Entra token is rejected with 403. If it ALSO
+        happened to be a valid HS256 token (worst-case crafted attack),
+        the validator must STILL refuse it — not silently authenticate."""
+        from api.deps import get_current_user, _jwt_encode, _get_jwt_secret
+        from api.errors import ASOEError
+
+        # Build a JWT with: (a) Entra-shaped header WITH `kid` (so
+        # _entra_decode picks it up first), (b) a cross-tenant `iss`,
+        # (c) a valid HS256 signature so the seed path WOULD accept it
+        # if we let it fall through.
+        header = {"alg": "RS256", "typ": "JWT", "kid": "test-kid"}
+        body = {
+            "iss": "https://login.microsoftonline.com/tenant-bbb/v2.0",  # WRONG
+            "aud": "client-asoe",
+            "sub": "u-1",
+            "exp": int(time.time()) + 3600,
+            "env": "sandbox",
+            "roles": ["admin"],  # crafted: would expand high perms if accepted
+            "org": "attacker-tenant",
+        }
+        h = _b64url(json.dumps(header).encode())
+        b = _b64url(json.dumps(body).encode())
+        signing_input = f"{h}.{b}"
+        import hashlib, hmac
+        sig = _b64url(
+            hmac.new(
+                _get_jwt_secret().encode(),
+                signing_input.encode(),
+                hashlib.sha256,
+            ).digest()
+        )
+        crafted = f"{signing_input}.{sig}"
+
+        with pytest.raises(ASOEError) as exc:
+            await get_current_user(authorization=f"Bearer {crafted}")
+        assert exc.value.status_code == 403
+
+
 # ---------------------------------------------------------------------------
 # Role mapping (Entra group id → ASOE role)
 # ---------------------------------------------------------------------------

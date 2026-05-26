@@ -385,12 +385,19 @@ async def get_current_user(
     payload: Optional[Dict[str, Any]] = None
 
     # PARITY-3b — when Entra mode is on, validate as an RS256 Entra
-    # token first. On any failure (incl. malformed-as-RS256), fall
-    # through to the HS256 seed path so a mixed rollout still works.
+    # token first. We fall through to the HS256 seed path on
+    # *transport* failures (the token isn't an Entra RS256 token at all)
+    # but NOT on *policy* failures (403 from a cross-tenant `iss` or a
+    # wrong `aud`). Catching all ASOEErrors would let a cross-tenant
+    # token attempt re-validation as HS256 — which silently defeats the
+    # tenant boundary if the token happens to also be a valid seed JWT.
     if _entra_enabled():
         try:
             entra_payload = _entra_decode(token)
-        except ASOEError:
+        except ASOEError as exc:
+            if exc.status_code == 403:
+                # Policy rejection — propagate; do NOT try the HS256 path.
+                raise
             entra_payload = None
         if entra_payload is not None:
             # Project Entra claims into the AuthenticatedUser shape.
