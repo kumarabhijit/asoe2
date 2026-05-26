@@ -17,3 +17,13 @@ extraction:
   field_accuracy_min: 0.95
   # Hallucinated price/qty/SKU == a fabricated order line. Tight by design.
   hallucination_rate_max: 0.02
+# ADR-045 §2.4 — spatial extraction. CONTAINMENT is the primary gate (not IoU);
+# page accuracy is ZERO-tolerance (a wrong-page highlight is a trust-killer).
+# Coordinate-hallucination is reported every run (the runtime verifier keeps it
+# out of production). Confidence ECE guards uncalibrated confidence that gates
+# whether a box shows. Lowering any of these is a deliberate, reviewed change.
+extraction_spatial:
+  containment_min: 0.95
+  page_accuracy_min: 1.0
+  hallucination_rate_max: 0.02
+  ece_max: 0.15

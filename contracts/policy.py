@@ -401,6 +401,30 @@ ATTACHMENT_READ_URL_TTL_SECONDS: int = 300
 Short by design — the token is a single-tuple, expiring read grant, not a
 long-lived URL. This is access-scoping, not byte retention (governance)."""
 
+EXTRACTION_MAX_COST_USD_PER_PAGE: float = 0.05
+"""Per-page cost ceiling for document-AI spatial extraction (ADR-045 §2.5). A
+guardrail that circuit-breaks runaway spend on a managed-OCR / layout provider;
+the cost meter (`api.metrics.record_extraction_cost`) makes spend attributable."""
+
+
+class ExtractionCostExceeded(Exception):
+    """Raised when a document-extraction call's projected $/page exceeds
+    `EXTRACTION_MAX_COST_USD_PER_PAGE` (ADR-045 §2.5)."""
+
+
+def assert_within_page_cost_budget(*, cost_usd: float, pages: int) -> None:
+    """Per-page cost guardrail (ADR-045 §2.5). Raises `ExtractionCostExceeded`
+    when the amortised cost per page exceeds the ceiling — the circuit-break on
+    runaway document-AI spend. `pages` must be positive."""
+    if pages <= 0:
+        raise ValueError("pages must be positive to compute a per-page cost")
+    per_page = cost_usd / pages
+    if per_page > EXTRACTION_MAX_COST_USD_PER_PAGE:
+        raise ExtractionCostExceeded(
+            f"document extraction cost ${per_page:.4f}/page exceeds the "
+            f"${EXTRACTION_MAX_COST_USD_PER_PAGE:.4f}/page guardrail"
+        )
+
 LLM_CALL_TIMEOUT_S: float = 30.0
 """Per-call timeout for an Anthropic SDK request (constrained tool-use
 output is normally <2s; tail latency on cache writes can hit 10s+).

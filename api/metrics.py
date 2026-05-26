@@ -779,6 +779,121 @@ def render_preview_metrics() -> str:
     return "\n".join(lines) + "\n"
 
 
+# ---------------------------------------------------------------------------
+# Spatial document-extraction cost + drift (ADR-045 §2.5). Cost must be
+# attributable (labelled by tenant / provider / model_id), not merely capped by
+# the policy guardrail. The drift series (mean confidence + canary containment,
+# keyed by model_id + prompt_hash) makes a quiet model regression visible
+# between nightly evals. Label cardinality is bounded by the customer × provider
+# × model_id space (not per-document) so this stays Prometheus-safe.
+# ---------------------------------------------------------------------------
+
+_extraction_lock = _CaseLock()
+_extraction_cost_usd: dict[tuple, float] = _defaultdict(float)   # (tenant, provider, model_id)
+_extraction_pages: dict[tuple, int] = _defaultdict(int)          # (tenant, provider, model_id)
+_extraction_conf: dict[tuple, list] = _defaultdict(list)         # (model_id, prompt_hash) -> [conf]
+_extraction_contain: dict[tuple, list] = _defaultdict(list)      # (model_id, prompt_hash) -> [containment]
+
+
+def record_extraction_cost(
+    *, tenant: str, provider: str, model_id: str, pages: int, cost_usd: float,
+) -> None:
+    """Record one document-extraction call's pages + cost. No-op on a negative /
+    non-numeric cost — never raises into the extraction path."""
+    try:
+        cost = float(cost_usd)
+        n_pages = int(pages)
+    except (TypeError, ValueError):
+        return
+    if cost != cost or cost < 0 or n_pages < 0:  # NaN / negative
+        return
+    key = (tenant, provider, model_id)
+    with _extraction_lock:
+        _extraction_cost_usd[key] += cost
+        _extraction_pages[key] += n_pages
+
+
+def record_extraction_drift(
+    *, model_id: str, prompt_hash: str, confidence: float, containment: float,
+) -> None:
+    """Record a per-extraction (or canary) confidence + containment sample for
+    the drift series. No-op on non-numeric input."""
+    try:
+        conf = float(confidence)
+        contain = float(containment)
+    except (TypeError, ValueError):
+        return
+    key = (model_id, prompt_hash)
+    with _extraction_lock:
+        _extraction_conf[key].append(conf)
+        _extraction_contain[key].append(contain)
+
+
+def reset_extraction_metrics() -> None:
+    """Test helper — drop all extraction cost/drift samples."""
+    with _extraction_lock:
+        _extraction_cost_usd.clear()
+        _extraction_pages.clear()
+        _extraction_conf.clear()
+        _extraction_contain.clear()
+
+
+def render_extraction_metrics() -> str:
+    with _extraction_lock:
+        cost = dict(_extraction_cost_usd)
+        pages = dict(_extraction_pages)
+        conf = {k: list(v) for k, v in _extraction_conf.items()}
+        contain = {k: list(v) for k, v in _extraction_contain.items()}
+
+    lines: list[str] = []
+    lines += _help_type(
+        "extraction_cost_usd_total",
+        "Cumulative document-extraction spend, attributable by tenant / provider "
+        "/ model_id (ADR-045 §2.5).",
+        "counter",
+    )
+    for (tenant, provider, model_id), value in sorted(cost.items()):
+        lines.append(_line(
+            "extraction_cost_usd_total", round(value, 6),
+            labels={"tenant": tenant, "provider": provider, "model_id": model_id},
+        ))
+    lines += _help_type(
+        "extraction_pages_total",
+        "Cumulative pages sent to document extraction, by tenant / provider / model_id.",
+        "counter",
+    )
+    for (tenant, provider, model_id), value in sorted(pages.items()):
+        lines.append(_line(
+            "extraction_pages_total", value,
+            labels={"tenant": tenant, "provider": provider, "model_id": model_id},
+        ))
+    lines += _help_type(
+        "extraction_mean_confidence",
+        "Mean per-anchor confidence by model_id / prompt_hash — drift signal "
+        "(ADR-045 §2.5); alert on shift between nightly evals.",
+        "gauge",
+    )
+    for (model_id, prompt_hash), samples in sorted(conf.items()):
+        if samples:
+            lines.append(_line(
+                "extraction_mean_confidence", round(sum(samples) / len(samples), 6),
+                labels={"model_id": model_id, "prompt_hash": prompt_hash},
+            ))
+    lines += _help_type(
+        "extraction_canary_containment",
+        "Mean canary containment by model_id / prompt_hash — drift signal "
+        "(ADR-045 §2.5).",
+        "gauge",
+    )
+    for (model_id, prompt_hash), samples in sorted(contain.items()):
+        if samples:
+            lines.append(_line(
+                "extraction_canary_containment", round(sum(samples) / len(samples), 6),
+                labels={"model_id": model_id, "prompt_hash": prompt_hash},
+            ))
+    return "\n".join(lines) + "\n" if lines else ""
+
+
 def render_all() -> str:
     """Convenience entrypoint for the route handler."""
     return (
@@ -789,4 +904,5 @@ def render_all() -> str:
         + render_gateway_metrics()
         + render_reviewer_activity_metrics()
         + render_preview_metrics()
+        + render_extraction_metrics()
     )
