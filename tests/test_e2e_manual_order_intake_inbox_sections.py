@@ -149,3 +149,19 @@ def test_all_inbox_sections_populated_in_single_record(client):
         if analysis.get(k) is None
     ]
     assert not missing, f"inbox sections missing on a vanilla intake record: {missing}"
+
+
+def test_inbox_record_has_line_items_for_evidence_detail_pane(client):
+    # The "Evidence Detail" pane in the UI (EvidenceGrid.tsx) renders from
+    # `/exceptions/{id}/line-items`. The backend's _project_line_items must
+    # produce at least one row from the event so the pane never silently
+    # shows "—" for an order-bearing inbox record.
+    exc_id = _resolve_manual_intake(client, "LINES")
+    r = client.get(f"/api/v1/exceptions/{exc_id}/line-items", headers=_auth())
+    assert r.status_code == 200, r.text
+    body = r.json()
+    items = body.get("data") if isinstance(body, dict) else body
+    assert isinstance(items, list) and items, (
+        f"line-items must be non-empty for a manual-intake record (UI Evidence "
+        f"Detail pane goes blank otherwise); got: {body!r}"
+    )
