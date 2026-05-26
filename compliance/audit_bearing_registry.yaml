@@ -1270,9 +1270,12 @@ summary:
   # supports_kind, supports_ref, source_sha256, match_key) and 4 contextual
   # (label — derived; page/bbox/confidence — best-effort position, ADR-045,
   # never audit-bearing). Net: +8 audit-bearing, +4 contextual.
-  total_fields: 176
+  # 2026-05-26: +1 contextual on EvidenceAnchor (rendition_hash — frozen-render
+  # basis for spatial geometry, ADR-044 §2.5; position provenance, never the
+  # audit unit).
+  total_fields: 177
   audit_bearing: 130
   conditional: 7
-  contextual: 39
+  contextual: 40
   backend_gap_fields: 0
   gateway_dependent_fields: 17

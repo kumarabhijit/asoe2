@@ -1,6 +1,12 @@
 # ADR-045: Spatial Evidence Extraction (document-AI as candidate proposer)
 
-**Status:** Proposed (2026-05-25)
+**Status:** Accepted — 2026-05-26. The select-not-generate pipeline +
+runtime verifier + degrade-to-text + the `extraction_spatial` eval gate
+(containment / page-accuracy / hallucination / ECE) pass on the golden set in
+replay (`pytest tests/eval -m replay`). The live managed-OCR / self-hosted
+provider and compliance sign-off for the new provenance are **deferred**
+(preprod; the recorded-replay path is the red-green floor and the live provider
+is a nightly `-m live` follow-up). Proposed 2026-05-25.
 **Date:** 2026-05-25
 **Deciders:** Principal AI/Agentic Engineering Architect; ML/Eval lead; Agentic Orchestration; Compliance Engineer (veto); Data Engineering; Platform/SRE; Product Owner.
 **Applies to:**
@@ -183,14 +189,39 @@ locked by green contract tests:
 * **Eval scorers** — `containment` (primary gate) + `page_accuracy`
   (zero-tolerance); IoU stays diagnostic-only (§2.4).
 
-**Still open (this ADR's remaining DoD — needs a real provider / infra, kept off
-the red-green path per the test strategy):** the actual managed-OCR / self-hosted
-layout provider behind the gateway seam; `RecordedGatewayBackend` fixtures +
-`tests/eval/datasets/extraction_spatial/*.jsonl` + the `thresholds.yaml`
-CODEOWNERS gate; per-page cost guardrail + meter + drift signal; the async
-outbox pipeline keyed on `(sha256, model_id)`; frozen-rendition binding
-(ADR-044); audit-registry rows + compliance sign-off before spatial anchors
-drive an operator view.
+## 8. Implementation status (CP-G — Accepted, 2026-05-26)
+
+Landed and green (replay path):
+
+* **`DocumentExtractionGateway`** — proposes an OCR candidate set and associates
+  fields by SELECTION over it (`build_spatial_anchor`: select → construct →
+  verify). Default backend `RecordedDocumentExtractionBackend` (replay; red-green
+  never hits a live model). **Circuit-breaker parity** (OPEN → degrade to no
+  geometry). **Idempotent** keyed on `(sha256, model_id)` (replay → byte-identical
+  anchors).
+* **Eval gate** — recorded fixtures + `tests/eval/datasets/extraction_spatial/`
+  golden set; `spatial_scorer` (containment primary, page-accuracy zero-tolerance,
+  coordinate-hallucination, confidence-ECE; IoU diagnostic-only) wired into a
+  `-m replay` gate against `thresholds.yaml`. (No CODEOWNERS gate this engagement.)
+* **Composer wiring** — `build_evidence_anchors` prefers a VERIFIED spatial anchor
+  bound to the exact bytes, degrading to text anchors on miss/outage (geometry
+  `required_for_audit=False`). Spatial registry rows in place
+  (`page`/`bbox`/`confidence`/`rendition_hash`, all contextual).
+* **Cost & drift** — per-page cost guardrail in `policy.py`
+  (`assert_within_page_cost_budget`) + an attributable cost meter + a drift signal
+  (mean confidence + canary containment by `model_id`/`prompt_hash`) in
+  `api/metrics.py`.
+* **Frozen-rendition binding** — `EvidenceAnchor.rendition_hash` ties geometry to
+  ADR-044's frozen render basis.
+* **Frontend** — PDF.js canvas bbox overlays for verified spatial anchors
+  (`spatialOverlays`), with the text-derived safety bar as the authoritative
+  fallback.
+
+**Deferred (preprod):** the live managed-OCR / self-hosted provider behind the
+seam (nightly `-m live`); the async **outbox** pipeline (extraction is invoked
+out-of-band and is idempotent on `(sha256, model_id)`, but full
+outbox/reconciler wiring + poison-message handling is a follow-up); and
+compliance sign-off for the new provenance.
 
 ---
 
