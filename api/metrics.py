@@ -838,6 +838,22 @@ def reset_extraction_metrics() -> None:
         _extraction_contain.clear()
 
 
+def snapshot_extraction_metrics() -> dict:
+    """Return a read-only snapshot of the extraction metric stores.
+
+    Used by the drift-alert integration (api/observability/drift_alert_integration.py)
+    to evaluate the recent-vs-baseline split without locking the
+    collector for the duration of the comparison.
+    """
+    with _extraction_lock:
+        return {
+            "cost_usd": dict(_extraction_cost_usd),
+            "pages": dict(_extraction_pages),
+            "conf": {k: list(v) for k, v in _extraction_conf.items()},
+            "contain": {k: list(v) for k, v in _extraction_contain.items()},
+        }
+
+
 def render_extraction_metrics() -> str:
     with _extraction_lock:
         cost = dict(_extraction_cost_usd)
