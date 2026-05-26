@@ -69,12 +69,17 @@ class TestTokenExpiry:
         assert payload["exp"] - payload["iat"] == ACCESS_TOKEN_EXPIRE_SECONDS
 
     def test_refresh_token_has_exp_claim(self):
+        # TTL is env-driven (see api/deps.py::_resolve_token_ttls — 30d in
+        # sandbox, 7d otherwise). Assert against the resolved constant
+        # rather than a hardcoded number so the test stays correct under
+        # both env defaults.
+        from api.deps import REFRESH_TOKEN_EXPIRE_SECONDS
         token = create_refresh_token(
             sub="u1", email="u@x.com", name="U", roles=["analyst"], org="t1",
         )
         payload = _jwt_decode(token, _get_jwt_secret())
         assert payload["token_type"] == "refresh"
-        assert payload["exp"] - payload["iat"] == 7 * 24 * 3600
+        assert payload["exp"] - payload["iat"] == REFRESH_TOKEN_EXPIRE_SECONDS
 
     def test_expired_token_rejected(self, client):
         """An expired token should return 401."""
