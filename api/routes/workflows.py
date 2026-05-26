@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 
 from api.deps import get_tenant_id, require_role
 from api.errors import ASOEError
+from api.observability.audit_bearing import audit_bearing
 from api.schemas import WorkflowRequest
 from contracts.models import (
     Intent,
@@ -25,6 +26,7 @@ router = APIRouter()
     "/workflows",
     dependencies=[Depends(require_role("manager", "admin"))],
 )
+@audit_bearing(reason="executes a workflow run; emits resolution events; SOX")
 async def run_workflow(
     req: WorkflowRequest,
     tenant_id: str = Depends(get_tenant_id),

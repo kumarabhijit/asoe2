@@ -33,15 +33,14 @@ exempt_paths:
   - /_sandbox/cases/{case_id}/attachments
   - /_sandbox/seed/email-attachment-anchors
 
-  # ── api/routes/workflows.py — grandfather; migrate next pass.
-  - /workflows
-
-  # ── api/routes/policies.py — grandfather.
-  - /policies/{tenant_id}
-
-  # ── api/routes/config.py — tenant-config layer admin (write paths
-  #    already chain into policy_audit_log via PolicyRepository).
-  - /config/tenants/{tenant_id}/layers/{layer}
+  # ── api/routes/workflows.py — MIGRATED. /workflows now carries
+  #    @audit_bearing(reason="executes a workflow run; emits resolution
+  #    events; SOX").
+  # ── api/routes/policies.py — MIGRATED. /policies/{tenant_id} now
+  #    carries @audit_bearing.
+  # ── api/routes/config.py — MIGRATED. Both PUT and DELETE
+  #    /config/tenants/{tenant_id}/layers/{layer} now carry
+  #    @audit_bearing.
 
   # ── api/routes/attachments.py — signed-URL mint is RBAC-gated +
   #    capability-token-scoped; the byte read itself audits separately.

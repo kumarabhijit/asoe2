@@ -15,6 +15,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends
 
 from api.deps import AuthenticatedUser, get_current_user, require_role
+from api.observability.audit_bearing import audit_bearing
 from api.schemas import PolicyOverrideResponse, PolicyUpdateRequest
 
 router = APIRouter()
@@ -29,6 +30,7 @@ _policy_lock = threading.Lock()
     response_model=PolicyOverrideResponse,
     dependencies=[Depends(require_role("admin"))],
 )
+@audit_bearing(reason="updates tenant policy overrides; SOX (policy_audit_log chain)")
 async def update_policy(
     tenant_id: str,
     req: PolicyUpdateRequest,

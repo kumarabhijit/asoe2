@@ -247,11 +247,17 @@ class TestEntraPolicyRejectionDoesNotFallThrough:
         from api import deps
         monkeypatch.setattr(deps, "_verify_rs256_signature", lambda t, j: True, raising=False)
 
-    @pytest.mark.asyncio
-    async def test_cross_tenant_iss_does_not_fall_through_to_hs256(self, monkeypatch):
+    def test_cross_tenant_iss_does_not_fall_through_to_hs256(self, monkeypatch):
         """A cross-tenant Entra token is rejected with 403. If it ALSO
         happened to be a valid HS256 token (worst-case crafted attack),
-        the validator must STILL refuse it — not silently authenticate."""
+        the validator must STILL refuse it — not silently authenticate.
+
+        Uses ``asyncio.run`` rather than ``@pytest.mark.asyncio`` so
+        the test doesn't require pytest-asyncio (which isn't in the
+        [dev] extras — adding it just to support one test isn't worth
+        the dep weight).
+        """
+        import asyncio
         from api.deps import get_current_user, _jwt_encode, _get_jwt_secret
         from api.errors import ASOEError
 
@@ -283,7 +289,7 @@ class TestEntraPolicyRejectionDoesNotFallThrough:
         crafted = f"{signing_input}.{sig}"
 
         with pytest.raises(ASOEError) as exc:
-            await get_current_user(authorization=f"Bearer {crafted}")
+            asyncio.run(get_current_user(authorization=f"Bearer {crafted}"))
         assert exc.value.status_code == 403
 
 
