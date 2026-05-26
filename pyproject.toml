@@ -6,7 +6,14 @@ requires-python = ">=3.11"
 dependencies = [
   "langgraph>=0.2.0",
   "pydantic>=2.7.0",
-  "fastapi>=0.110.0",
+  # Cap below 0.136.3 — that release was flagged by PyPI advisory
+  # MAL-2026-4750 (Amazon Inspector) for adding an undocumented
+  # `fastar>=0.9.0` typosquat-style dep to its [standard] extra. We pin
+  # bare fastapi (no [standard] extra) so the dep wouldn't activate, but
+  # the 0.136.3 wheel/sdist itself was modified — safer to avoid the
+  # tampered release entirely. Lift the upper bound once a clean
+  # fastapi>=0.136.3 ships and the advisory is withdrawn.
+  "fastapi>=0.110.0,<0.136.3",
   "uvicorn[standard]>=0.29.0",
   "redis>=5.0.0",
   # Compliance: audit-bearing field registry
