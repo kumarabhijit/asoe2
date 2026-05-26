@@ -1,6 +1,12 @@
 # ADR-044: Document Storage & Lifecycle
 
-**Status:** Proposed (2026-05-25)
+**Status:** Accepted (non-governance scope) — 2026-05-26. The storage mechanics
+ship: object-store backend + filesystem/S3 drivers + env-driven selection,
+scoped short-TTL signed reads, DB-backend right-to-erasure delete, and frozen
+renditions. **Data-governance items are explicitly deferred** (preprod, far from
+GA): retention/TTL policy, encryption-at-rest, routing the erasure tombstone
+into the immutable audit chain, and the compliance/CODEOWNERS sign-off gate.
+Proposed 2026-05-25.
 **Date:** 2026-05-25
 **Deciders:** Principal AI/Agentic Engineering Architect; Data Engineering; Compliance Engineer (veto); Security Engineer; Platform/SRE; Product Owner.
 **Applies to:**
@@ -156,6 +162,33 @@ policy + encryption-at-rest; routing the erasure tombstone into the **audit
 chain** (ADR-023) rather than the in-process registry; and **frozen renditions**
 for ADR-045 geometry. These need real infra / compliance sign-off and are the
 GA-gating follow-ups.
+
+## 8. Implementation status (CP-G — Accepted, non-governance scope, 2026-05-26)
+
+The storage mechanics are landed and green:
+
+* **Object-store backend + drivers** — `_FilesystemBlobStore` (infra-free,
+  path-traversal-guarded, atomic writes) and an env-flagged real S3/MinIO driver
+  (`_s3_blob_store`, boto3 lazy-imported, live path only) behind the existing
+  `ObjectStoreBackend`/`_BlobStore` seam; env-driven selection via
+  `ASOE_ATTACHMENT_BACKEND` / `ASOE_OBJECT_STORE_DRIVER`. The
+  storage-portability contract test now runs across the filesystem driver too —
+  the GA swap is a config flip.
+* **Scoped short-TTL read** — `api/attachment_read_token.py` mints an HMAC
+  capability token bound to one `(tenant, case, attachment)` tuple; the
+  RBAC-checked mint endpoint + the token-validated `GET /attachments/read` stream
+  bytes. Unusable after expiry, cannot cross tenants/cases (both tested).
+* **DB right-to-erasure** — `AttachmentRepository.delete` (tenant-scoped) makes
+  `erase_attachment` work on the DB backend; bytes removed, PII-free tombstone
+  retained, audit chain untouched.
+* **Frozen renditions** — `gateways/frozen_rendition.py` freezes a page raster +
+  dpi + renderer_version into a content+basis hash stored in the object store,
+  with the coordinate-validity invariant (`verify_render_basis` raises on a moved
+  basis). `EvidenceAnchor.rendition_hash` binds spatial geometry to it.
+
+**Deferred (governance, out of scope this engagement):** retention/TTL,
+encryption-at-rest, audit-chain tombstone routing, compliance/CODEOWNERS gate.
+These remain GA preconditions and are tracked, not built here.
 
 ---
 

@@ -566,11 +566,21 @@ _ab_decisions: int = 0
 _ab_layer2_opened: int = 0
 _ab_dwell_buckets: list[int] = [0] * (len(_DWELL_BUCKETS_S) + 1)
 _ab_dwell_sum: float = 0.0
+# ADR-043 §2.7 / D12 — decision-quality cohort: scrutiny split by whether an
+# in-document evidence highlight was shown to the operator. Bounded to a 2-way
+# {true,false} label so a *drop* in scrutiny when highlighting is on registers
+# as a regression rather than a speed win.
+_ab_decisions_by_hl: dict[bool, int] = {True: 0, False: 0}
+_ab_layer2_by_hl: dict[bool, int] = {True: 0, False: 0}
 
 
-def record_reviewer_activity(*, dwell_ms: float, layer2_opened: bool) -> None:
+def record_reviewer_activity(
+    *, dwell_ms: float, layer2_opened: bool, highlight_shown: bool = False,
+) -> None:
     """Record one operator decision's automation-bias signals. No-op on a
-    negative / NaN / non-numeric dwell — never raises (DoR #11)."""
+    negative / NaN / non-numeric dwell — never raises (DoR #11). The
+    ``highlight_shown`` cohort (ADR-043 §2.7) lets the Layer-2-open rate be
+    compared with vs without an evidence highlight on screen."""
     global _ab_decisions, _ab_layer2_opened, _ab_dwell_sum
     try:
         dwell_s = float(dwell_ms) / 1000.0
@@ -578,10 +588,13 @@ def record_reviewer_activity(*, dwell_ms: float, layer2_opened: bool) -> None:
         return
     if dwell_s != dwell_s or dwell_s < 0:  # NaN or negative
         return
+    hl = bool(highlight_shown)
     with _ab_lock:
         _ab_decisions += 1
+        _ab_decisions_by_hl[hl] += 1
         if layer2_opened:
             _ab_layer2_opened += 1
+            _ab_layer2_by_hl[hl] += 1
         for i, edge in enumerate(_DWELL_BUCKETS_S):
             if dwell_s <= edge:
                 _ab_dwell_buckets[i] += 1
@@ -600,6 +613,9 @@ def reset_reviewer_activity() -> None:
         for i in range(len(_ab_dwell_buckets)):
             _ab_dwell_buckets[i] = 0
         _ab_dwell_sum = 0.0
+        for k in (True, False):
+            _ab_decisions_by_hl[k] = 0
+            _ab_layer2_by_hl[k] = 0
 
 
 def render_reviewer_activity_metrics() -> str:
@@ -609,12 +625,40 @@ def render_reviewer_activity_metrics() -> str:
         opened = _ab_layer2_opened
         buckets = list(_ab_dwell_buckets)
         dwell_sum = _ab_dwell_sum
+        decisions_by_hl = dict(_ab_decisions_by_hl)
+        layer2_by_hl = dict(_ab_layer2_by_hl)
     lines += _help_type("reviewer_decisions_total", "Operator disposition decisions observed.", "counter")
     lines.append(_line("reviewer_decisions_total", decisions))
     lines += _help_type("reviewer_layer2_opened_total", "Decisions where the operator expanded Layer-2 evidence first.", "counter")
     lines.append(_line("reviewer_layer2_opened_total", opened))
     lines += _help_type("reviewer_layer2_open_rate", "Layer-2-open rate (opened / decisions); low values flag automation bias.", "gauge")
     lines.append(_line("reviewer_layer2_open_rate", round(opened / decisions, 4) if decisions else 0.0))
+    # Decision-quality cohort (ADR-043 §2.7) — decisions + Layer-2-open rate
+    # split by highlight_shown so scrutiny can be A/B-compared.
+    lines += _help_type(
+        "reviewer_decisions_by_highlight_total",
+        "Operator decisions split by whether an evidence highlight was shown "
+        "(ADR-043 §2.7 decision-quality cohort).",
+        "counter",
+    )
+    for shown in (True, False):
+        lines.append(_line(
+            "reviewer_decisions_by_highlight_total", decisions_by_hl[shown],
+            labels={"highlight_shown": "true" if shown else "false"},
+        ))
+    lines += _help_type(
+        "reviewer_layer2_open_rate_by_highlight",
+        "Layer-2-open rate by highlight cohort; a drop under highlight_shown="
+        "true vs false is the automation-bias regression signal (ADR-043 §2.7).",
+        "gauge",
+    )
+    for shown in (True, False):
+        cohort_dec = decisions_by_hl[shown]
+        rate = round(layer2_by_hl[shown] / cohort_dec, 4) if cohort_dec else 0.0
+        lines.append(_line(
+            "reviewer_layer2_open_rate_by_highlight", rate,
+            labels={"highlight_shown": "true" if shown else "false"},
+        ))
     lines += _help_type("reviewer_decision_dwell_seconds", "Time from opening a case to acting on it.", "histogram")
     name = "reviewer_decision_dwell_seconds"
     cumulative = 0
@@ -735,6 +779,121 @@ def render_preview_metrics() -> str:
     return "\n".join(lines) + "\n"
 
 
+# ---------------------------------------------------------------------------
+# Spatial document-extraction cost + drift (ADR-045 §2.5). Cost must be
+# attributable (labelled by tenant / provider / model_id), not merely capped by
+# the policy guardrail. The drift series (mean confidence + canary containment,
+# keyed by model_id + prompt_hash) makes a quiet model regression visible
+# between nightly evals. Label cardinality is bounded by the customer × provider
+# × model_id space (not per-document) so this stays Prometheus-safe.
+# ---------------------------------------------------------------------------
+
+_extraction_lock = _CaseLock()
+_extraction_cost_usd: dict[tuple, float] = _defaultdict(float)   # (tenant, provider, model_id)
+_extraction_pages: dict[tuple, int] = _defaultdict(int)          # (tenant, provider, model_id)
+_extraction_conf: dict[tuple, list] = _defaultdict(list)         # (model_id, prompt_hash) -> [conf]
+_extraction_contain: dict[tuple, list] = _defaultdict(list)      # (model_id, prompt_hash) -> [containment]
+
+
+def record_extraction_cost(
+    *, tenant: str, provider: str, model_id: str, pages: int, cost_usd: float,
+) -> None:
+    """Record one document-extraction call's pages + cost. No-op on a negative /
+    non-numeric cost — never raises into the extraction path."""
+    try:
+        cost = float(cost_usd)
+        n_pages = int(pages)
+    except (TypeError, ValueError):
+        return
+    if cost != cost or cost < 0 or n_pages < 0:  # NaN / negative
+        return
+    key = (tenant, provider, model_id)
+    with _extraction_lock:
+        _extraction_cost_usd[key] += cost
+        _extraction_pages[key] += n_pages
+
+
+def record_extraction_drift(
+    *, model_id: str, prompt_hash: str, confidence: float, containment: float,
+) -> None:
+    """Record a per-extraction (or canary) confidence + containment sample for
+    the drift series. No-op on non-numeric input."""
+    try:
+        conf = float(confidence)
+        contain = float(containment)
+    except (TypeError, ValueError):
+        return
+    key = (model_id, prompt_hash)
+    with _extraction_lock:
+        _extraction_conf[key].append(conf)
+        _extraction_contain[key].append(contain)
+
+
+def reset_extraction_metrics() -> None:
+    """Test helper — drop all extraction cost/drift samples."""
+    with _extraction_lock:
+        _extraction_cost_usd.clear()
+        _extraction_pages.clear()
+        _extraction_conf.clear()
+        _extraction_contain.clear()
+
+
+def render_extraction_metrics() -> str:
+    with _extraction_lock:
+        cost = dict(_extraction_cost_usd)
+        pages = dict(_extraction_pages)
+        conf = {k: list(v) for k, v in _extraction_conf.items()}
+        contain = {k: list(v) for k, v in _extraction_contain.items()}
+
+    lines: list[str] = []
+    lines += _help_type(
+        "extraction_cost_usd_total",
+        "Cumulative document-extraction spend, attributable by tenant / provider "
+        "/ model_id (ADR-045 §2.5).",
+        "counter",
+    )
+    for (tenant, provider, model_id), value in sorted(cost.items()):
+        lines.append(_line(
+            "extraction_cost_usd_total", round(value, 6),
+            labels={"tenant": tenant, "provider": provider, "model_id": model_id},
+        ))
+    lines += _help_type(
+        "extraction_pages_total",
+        "Cumulative pages sent to document extraction, by tenant / provider / model_id.",
+        "counter",
+    )
+    for (tenant, provider, model_id), value in sorted(pages.items()):
+        lines.append(_line(
+            "extraction_pages_total", value,
+            labels={"tenant": tenant, "provider": provider, "model_id": model_id},
+        ))
+    lines += _help_type(
+        "extraction_mean_confidence",
+        "Mean per-anchor confidence by model_id / prompt_hash — drift signal "
+        "(ADR-045 §2.5); alert on shift between nightly evals.",
+        "gauge",
+    )
+    for (model_id, prompt_hash), samples in sorted(conf.items()):
+        if samples:
+            lines.append(_line(
+                "extraction_mean_confidence", round(sum(samples) / len(samples), 6),
+                labels={"model_id": model_id, "prompt_hash": prompt_hash},
+            ))
+    lines += _help_type(
+        "extraction_canary_containment",
+        "Mean canary containment by model_id / prompt_hash — drift signal "
+        "(ADR-045 §2.5).",
+        "gauge",
+    )
+    for (model_id, prompt_hash), samples in sorted(contain.items()):
+        if samples:
+            lines.append(_line(
+                "extraction_canary_containment", round(sum(samples) / len(samples), 6),
+                labels={"model_id": model_id, "prompt_hash": prompt_hash},
+            ))
+    return "\n".join(lines) + "\n" if lines else ""
+
+
 def render_all() -> str:
     """Convenience entrypoint for the route handler."""
     return (
@@ -745,4 +904,5 @@ def render_all() -> str:
         + render_gateway_metrics()
         + render_reviewer_activity_metrics()
         + render_preview_metrics()
+        + render_extraction_metrics()
     )

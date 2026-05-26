@@ -1,6 +1,6 @@
 # ADR-043: Attachment Preview & In-Document Evidence Highlighting (Phase 1)
 
-**Status:** Proposed — revised 2026-05-25 after the 11-expert joint review (Round 3 convergence).
+**Status:** Accepted — 2026-05-26. Phase 1 ships green on in-DB storage in preprod; security sign-off for the inline-render surface is granted (preprod, veto held by Compliance). Revised 2026-05-25 after the 11-expert joint review (Round 3 convergence).
 **Date:** 2026-05-25
 **Deciders:** Principal AI/Agentic Engineering Architect; Frontend Platform; Compliance Engineer (veto); Security Engineer; UX Architect; Product Owner.
 **Applies to:**
@@ -286,6 +286,22 @@ axe + component + mock-preview tests; docs updated.
 
 This ADR moves to **Accepted** when Phase 1 ships green against the above and the
 security review signs off the inline-render surface.
+
+**Accepted 2026-05-26.** Phase-1 DoD is green: the sandboxed viewer + magic-byte
+default-deny + the §2.1 sandbox/CSP invariants; composer-projected text
+`EvidenceAnchor`s with the closed `supports_*` vocabulary + Py↔TS parity;
+the §2.3 safety bar (LOCATED/UNLOCATED/AMBIGUOUS + runtime verifier, audit
+tuple decoupled from position); backend `MatchKey` + UI literal locate; explicit
+`case_id` prop wiring; the §2.6 observability series; the §2.7 banner + the
+`highlight_shown` decision-quality cohort wired into the automation-bias SLIs;
+the storage-portability contract test (impl ADR-044); download button. Verified
+end-to-end by the four Playwright operator journeys
+(`tests/browser/attachment-evidence.spec.ts`) against the sandbox seed endpoint
+(`POST /api/v1/_sandbox/seed/email-attachment-anchors`) doing a real PDF.js
+render. The pre-GA A/B catch-rate study (§2.7) is a **manual** product gate run
+on the `highlight_shown` cohort once preprod has operator traffic — tracked
+separately, not a code deliverable. GA preconditions (object storage at scale,
+PII/retention) are owned by ADR-044.
 
 ## 8. Implementation notes (CP-D)
 

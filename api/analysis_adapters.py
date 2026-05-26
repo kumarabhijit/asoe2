@@ -1418,10 +1418,18 @@ def compute_match_keys(values: "list[str] | tuple[str, ...]") -> "list[MatchKey]
     return keys
 
 
+# Operator-facing labels for the closed extracted-field vocabulary. Mirrors the
+# asoe-ui mock map (`src/lib/mock-data/inbox-sections.ts::_ANCHOR_LABELS`) so the
+# real-backend safety bar and the mock-mode safety bar render identical labels
+# for the same field key (canonical-example parity — ADR-043).
 _ANCHOR_LABELS: Dict[str, str] = {
-    "po": "PO number", "po_number": "PO number", "order_id": "Order number",
-    "ship_to": "Ship-to", "qty": "Quantity", "quantity": "Quantity",
-    "material": "Material", "invoice": "Invoice number", "date": "Date",
+    "customer_po": "PO number", "po": "PO number", "po_number": "PO number",
+    "order_ref": "Order number", "order_id": "Order number",
+    "customer": "Customer", "ship_to": "Ship-to",
+    "requested_date": "Requested date", "date": "Date",
+    "material": "Material", "qty": "Quantity", "quantity": "Quantity",
+    "invoice_ref": "Invoice", "invoice": "Invoice number",
+    "issue": "Reported issue", "sender": "Sender", "topic": "Topic",
 }
 
 
@@ -1482,8 +1490,20 @@ def build_evidence_anchors(record: ExceptionRecord) -> "list[EvidenceAnchor]":
     keys = compute_match_keys([p[0] for p in prepared])
     sha = str(stored.get("sha256"))
     att_id = str(stored.get("attachment_id"))
+
+    # ADR-045 §2.8 — prefer a VERIFIED spatial anchor (geometry bound to a frozen
+    # rendition) when the document-extraction gateway produced one for this field
+    # and it is bound to EXACTLY these bytes; otherwise degrade to the text anchor.
+    # Geometry is never required for audit, so a miss/outage is invisible to the
+    # operator beyond losing the pixel overlay.
+    spatial_by_ref = _verified_spatial_anchors(enrichment, att_id, sha)
+
     anchors: list[EvidenceAnchor] = []
     for (text, key, kind, ref), mk in zip(prepared, keys):
+        spatial = spatial_by_ref.get(ref)
+        if spatial is not None:
+            anchors.append(spatial)
+            continue
         anchors.append(EvidenceAnchor(
             attachment_id=att_id,
             anchor_source="text_derived",
@@ -1495,6 +1515,36 @@ def build_evidence_anchors(record: ExceptionRecord) -> "list[EvidenceAnchor]":
             source_sha256=sha,
         ))
     return anchors
+
+
+def _verified_spatial_anchors(
+    enrichment: Dict[str, Any], attachment_id: str, sha256: str,
+) -> Dict[str, EvidenceAnchor]:
+    """Index the backend-produced spatial anchors by `supports_ref`, keeping only
+    those that are (a) spatial with geometry, and (b) bound to EXACTLY these
+    bytes (attachment_id + source_sha256). A spatial anchor that doesn't bind to
+    the stored bytes can never re-point an authorised highlight (ADR-043 §2.2 /
+    ADR-045 §2.8) — it is dropped so the field degrades to a text anchor."""
+    raw = enrichment.get("spatial_anchors")
+    out: Dict[str, EvidenceAnchor] = {}
+    if not isinstance(raw, list):
+        return out
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        if (
+            item.get("anchor_source") != "spatial_extracted"
+            or item.get("bbox") is None
+            or item.get("attachment_id") != attachment_id
+            or item.get("source_sha256") != sha256
+        ):
+            continue
+        try:
+            anchor = EvidenceAnchor.model_validate(item)
+        except (TypeError, ValueError):
+            continue
+        out[anchor.supports_ref] = anchor
+    return out
 
 
 def adapt_email_source(

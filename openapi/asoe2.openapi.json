@@ -446,6 +446,30 @@
         "title": "AnalysisResponse",
         "type": "object"
       },
+      "AnchorSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "supports_ref": {
+            "title": "Supports Ref",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "label",
+          "supports_ref"
+        ],
+        "title": "AnchorSpec",
+        "type": "object"
+      },
       "AsyncResolveResponse": {
         "description": "POST /api/v1/exceptions/resolve/async \u2014 queued task.",
         "properties": {
@@ -2704,6 +2728,17 @@
               }
             ],
             "title": "Page"
+          },
+          "rendition_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rendition Hash"
           },
           "source_sha256": {
             "title": "Source Sha256",
@@ -5460,6 +5495,60 @@
         "title": "SeedCaseAttachmentRequest",
         "type": "object"
       },
+      "SeedEmailAttachmentAnchorsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "anchors": {
+            "items": {
+              "$ref": "#/components/schemas/AnchorSpec"
+            },
+            "title": "Anchors",
+            "type": "array"
+          },
+          "attachment_mime": {
+            "title": "Attachment Mime",
+            "type": "string"
+          },
+          "attachment_name": {
+            "title": "Attachment Name",
+            "type": "string"
+          },
+          "document_text": {
+            "title": "Document Text",
+            "type": "string"
+          },
+          "from_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Address"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          }
+        },
+        "required": [
+          "document_text",
+          "attachment_name",
+          "attachment_mime",
+          "anchors"
+        ],
+        "title": "SeedEmailAttachmentAnchorsRequest",
+        "type": "object"
+      },
       "SeedFinancialImpactRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6547,6 +6636,68 @@
         ]
       }
     },
+    "/api/v1/_sandbox/seed/email-attachment-anchors": {
+      "post": {
+        "description": "Seed an EMAIL_ENTRY case with a stored attachment whose bytes contain\n``document_text`` and projected text-derived EvidenceAnchors, so the\ncomposer (`adapt_email_source` \u2192 `build_evidence_anchors`) emits located\nanchors with no new business logic (ADR-043 P1.1).",
+        "operationId": "seed_email_attachment_anchors_api_v1__sandbox_seed_email_attachment_anchors_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeedEmailAttachmentAnchorsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Seed Email Attachment Anchors Api V1  Sandbox Seed Email Attachment Anchors Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Seed Email Attachment Anchors",
+        "tags": [
+          "sandbox"
+        ]
+      }
+    },
     "/api/v1/_sandbox/seed/financial-impact": {
       "post": {
         "description": "Stamp financial_impact_usd onto an exception's resolution_data.\n\nUsed by the Playwright four-eyes spec to push an existing record\npast HIGH_VALUE_OVERRIDE_THRESHOLD_USD so the next /disposition\ncall stages to PENDING_COSIGN. No new audit event is emitted \u2014\nthis is test fixture wiring, not a SOX-relevant state transition.",
@@ -6780,6 +6931,47 @@
         "summary": "Get Accounts",
         "tags": [
           "accounts"
+        ]
+      }
+    },
+    "/api/v1/attachments/read": {
+      "get": {
+        "description": "Stream attachment bytes for a valid scoped read token (ADR-044 \u00a72.2).\n\nNo Authorization header: the signed, expiring token is the capability. It is\nbound to a single (tenant, case, attachment) tuple, so it cannot read across\ntenants/cases, and is rejected once expired.",
+        "operationId": "read_attachment_by_token_api_v1_attachments_read_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Attachment By Token",
+        "tags": [
+          "attachments"
         ]
       }
     },
@@ -7090,6 +7282,76 @@
           }
         },
         "summary": "Download Attachment",
+        "tags": [
+          "attachments"
+        ]
+      }
+    },
+    "/api/v1/cases/{case_id}/attachments/{attachment_id}/signed-url": {
+      "post": {
+        "description": "Mint a short-TTL, scoped capability URL for an attachment's bytes\n(ADR-044 \u00a72.2). RBAC + tenant + case-scoped at mint time; the returned URL\nneeds no auth header (the signed token is the capability) and expires.",
+        "operationId": "create_signed_read_url_api_v1_cases__case_id__attachments__attachment_id__signed_url_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "attachment_id",
+            "required": true,
+            "schema": {
+              "title": "Attachment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Signed Read Url Api V1 Cases  Case Id  Attachments  Attachment Id  Signed Url Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Signed Read Url",
         "tags": [
           "attachments"
         ]

@@ -190,6 +190,90 @@ class _InMemoryBlobStore(_BlobStore):
         self._blobs.clear()
 
 
+class _FilesystemBlobStore(_BlobStore):
+    """Local-filesystem blob driver (ADR-044 §2.1) — an infra-free object-store
+    driver usable in tests/dev without cloud creds. Bytes are written under
+    ``root`` keyed by ``<tenant_id>/<attachment_id>``; the key segments are
+    sanitised so a crafted id can't escape the root (path-traversal guard)."""
+
+    def __init__(self, root: str) -> None:
+        self._root = os.path.abspath(root)
+        os.makedirs(self._root, exist_ok=True)
+
+    def _path(self, key: str) -> str:
+        # Flatten the key to a single safe filename: keep [A-Za-z0-9._-], map the
+        # tenant/id separator to "__". Prevents "../" traversal out of root.
+        safe = "".join(
+            c if (c.isalnum() or c in "._-") else "__" for c in key
+        )
+        return os.path.join(self._root, safe)
+
+    def put_blob(self, key: str, data: bytes) -> None:
+        path = self._path(key)
+        # Atomic-ish write: tmp file then rename, so a concurrent reader never
+        # sees a half-written blob.
+        tmp = f"{path}.tmp.{uuid4().hex}"
+        with open(tmp, "wb") as fh:
+            fh.write(bytes(data))
+        os.replace(tmp, path)
+
+    def get_blob(self, key: str) -> Optional[bytes]:
+        try:
+            with open(self._path(key), "rb") as fh:
+                return fh.read()
+        except FileNotFoundError:
+            return None
+
+    def delete_blob(self, key: str) -> None:
+        try:
+            os.remove(self._path(key))
+        except FileNotFoundError:
+            pass
+
+    def clear(self) -> None:
+        for name in os.listdir(self._root):
+            try:
+                os.remove(os.path.join(self._root, name))
+            except (FileNotFoundError, IsADirectoryError):
+                pass
+
+
+def _s3_blob_store():  # pragma: no cover - live path only (needs boto3 + creds)
+    """Real S3/MinIO blob driver behind the env flag (live/nightly path only).
+
+    Lazy-imported so the core service runs without boto3; never exercised on the
+    red-green path. Bucket + optional endpoint (MinIO/S3-compatible) come from
+    env. Mirrors the `_BlobStore` surface exactly so the swap is a config flip
+    locked by the portability contract."""
+    import boto3  # noqa: PLC0415
+
+    bucket = os.environ["ASOE_OBJECT_STORE_BUCKET"]
+    endpoint = os.getenv("ASOE_OBJECT_STORE_ENDPOINT") or None
+    client = boto3.client("s3", endpoint_url=endpoint)
+
+    class _S3BlobStore(_BlobStore):
+        def put_blob(self, key: str, data: bytes) -> None:
+            client.put_object(Bucket=bucket, Key=key, Body=bytes(data))
+
+        def get_blob(self, key: str) -> Optional[bytes]:
+            try:
+                return client.get_object(Bucket=bucket, Key=key)["Body"].read()
+            except client.exceptions.NoSuchKey:
+                return None
+
+        def delete_blob(self, key: str) -> None:
+            client.delete_object(Bucket=bucket, Key=key)
+
+        def clear(self) -> None:
+            # Dev/test convenience only; production lifecycle is bucket policy.
+            paginator = client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=bucket):
+                for obj in page.get("Contents", []):
+                    client.delete_object(Bucket=bucket, Key=obj["Key"])
+
+    return _S3BlobStore()
+
+
 class ObjectStoreBackend:
     """Attachment backend keeping metadata in an index and bytes in an object
     store. `get` reconstitutes the full record (metadata + blob); `list` is
@@ -242,8 +326,30 @@ class ObjectStoreBackend:
             self._blobs.clear()
 
 
+def _object_store_backend() -> "ObjectStoreBackend":
+    """Build an ObjectStoreBackend from the env-selected blob driver (ADR-044
+    §2.1). `filesystem` (default) is the infra-free local driver; `s3` is the
+    live S3/MinIO driver behind the flag. Metadata lives in this backend's
+    in-process index (the DB metadata table is the GA home — out of scope here)."""
+    driver = os.getenv("ASOE_OBJECT_STORE_DRIVER", "filesystem").lower()
+    if driver == "s3":
+        return ObjectStoreBackend(_s3_blob_store())
+    root = os.getenv("ASOE_OBJECT_STORE_PATH", "./.asoe_object_store")
+    return ObjectStoreBackend(_FilesystemBlobStore(root))
+
+
 def _select_backend():
-    if os.getenv("DATABASE_URL", ""):
+    # Explicit backend selection wins (ADR-044 §2.1 env-driven selection).
+    backend = os.getenv("ASOE_ATTACHMENT_BACKEND", "").lower()
+    if backend == "object_store":
+        try:
+            return _object_store_backend()
+        except Exception:  # pragma: no cover - fall back rather than crash boot
+            logger.exception("attachment object-store backend init failed; using in-memory")
+            return _InMemoryBackend()
+    if backend == "memory":
+        return _InMemoryBackend()
+    if backend == "db" or os.getenv("DATABASE_URL", ""):
         try:
             from db.repository import AttachmentRepository
             from db.shared import get_shared_adapter

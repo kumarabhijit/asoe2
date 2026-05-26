@@ -1,0 +1,19 @@
+{
+  "case": "PO_8842",
+  "sha256": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1",
+  "model_id": "recorded-doctr-v0",
+  "prompt_hash": "doctr-candidate-proposer-v0",
+  "page_count": 1,
+  "candidates": [
+    {"candidate_id": 1, "page": 1, "bbox": [0.08, 0.12, 0.52, 0.16], "text": "PO# EML-PO-2026-0042"},
+    {"candidate_id": 2, "page": 1, "bbox": [0.08, 0.20, 0.46, 0.24], "text": "ship to Atlanta DC"},
+    {"candidate_id": 3, "page": 1, "bbox": [0.08, 0.28, 0.40, 0.32], "text": "need by May 24"},
+    {"candidate_id": 4, "page": 1, "bbox": [0.08, 0.36, 0.50, 0.40], "text": "Cola 12pk x 600"}
+  ],
+  "fields": [
+    {"supports_ref": "order_entry.customer_po", "text": "PO# EML-PO-2026-0042", "label": "PO number", "chosen_id": 1, "confidence": 0.98},
+    {"supports_ref": "order_entry.ship_to", "text": "ship to Atlanta DC", "label": "Ship-to", "chosen_id": 2, "confidence": 0.91},
+    {"supports_ref": "order_entry.requested_date", "text": "need by May 24", "label": "Requested date", "chosen_id": 3, "confidence": 0.88},
+    {"supports_ref": "order_entry.material", "text": "Cola 12pk x 600", "label": "Material", "chosen_id": 4, "confidence": 0.85}
+  ]
+}

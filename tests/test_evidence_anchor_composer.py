@@ -95,3 +95,63 @@ def test_no_anchors_without_a_stored_attachment():
         {"name": "x.pdf", "mime_type": "application/pdf", "bytes": 1},
     ]
     assert build_evidence_anchors(rec) == []
+
+
+# ── ADR-045 P2.8 — composer prefers a verified spatial anchor, degrades to text ──
+
+def _spatial_anchor_dict(*, supports_ref, sha="a" * 64, attachment_id="att-1"):
+    return {
+        "attachment_id": attachment_id,
+        "anchor_source": "spatial_extracted",
+        "text": "PO-2026-0042",
+        "match_key": {"normalized_text": "po-2026-0042", "occurrence_index": 0},
+        "supports_kind": "extracted_field",
+        "supports_ref": supports_ref,
+        "label": "PO number",
+        "source_sha256": sha,
+        "page": 1,
+        "bbox": [0.1, 0.1, 0.4, 0.2],
+        "confidence": 0.97,
+        "rendition_hash": "rh-1",
+    }
+
+
+def test_spatial_anchor_overrides_text_when_available_and_bound():
+    from api.analysis_adapters import build_evidence_anchors
+
+    rec = _record()
+    rec.enrichment_context["spatial_anchors"] = [
+        _spatial_anchor_dict(supports_ref="order_entry.po_number"),
+    ]
+    anchors = build_evidence_anchors(rec)
+    po = next(a for a in anchors if a.supports_ref == "order_entry.po_number")
+    assert po.anchor_source == "spatial_extracted"
+    assert po.bbox == [0.1, 0.1, 0.4, 0.2] and po.page == 1
+    assert po.rendition_hash == "rh-1"
+    # Other fields with no spatial anchor stay text-derived (graceful mix).
+    ship = next(a for a in anchors if a.supports_ref == "order_entry.ship_to")
+    assert ship.anchor_source == "text_derived"
+
+
+def test_spatial_anchor_ignored_when_bound_to_different_bytes():
+    # A spatial anchor whose source_sha256 doesn't match the stored attachment
+    # must never re-point a highlight — degrade to the text anchor.
+    from api.analysis_adapters import build_evidence_anchors
+
+    rec = _record()
+    rec.enrichment_context["spatial_anchors"] = [
+        _spatial_anchor_dict(supports_ref="order_entry.po_number", sha="b" * 64),
+    ]
+    po = next(
+        a for a in build_evidence_anchors(rec)
+        if a.supports_ref == "order_entry.po_number"
+    )
+    assert po.anchor_source == "text_derived"
+    assert po.bbox is None
+
+
+def test_missing_spatial_anchors_degrades_to_all_text():
+    from api.analysis_adapters import build_evidence_anchors
+
+    rec = _record()  # no spatial_anchors key at all (outage / not extracted yet)
+    assert all(a.anchor_source == "text_derived" for a in build_evidence_anchors(rec))
