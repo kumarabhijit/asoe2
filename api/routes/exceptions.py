@@ -67,6 +67,7 @@ from api.profile_composer import (
     compose_sap_data_analysis,
 )
 from api.errors import ASOEError
+from api.observability.audit_bearing import audit_bearing
 from api.schemas import (
     AdminReleaseRequest,
     AnalysisResponse,
@@ -1158,6 +1159,7 @@ def _disposition_erp_submit(exception_id, tenant_id, record, req, user, key,
     response_model=ResolveResponse,
     dependencies=[Depends(require_role("analyst", "manager", "admin"))],
 )
+@audit_bearing(reason="commits a recipe-derived exception resolution; SOX")
 async def resolve(
     request: Request,
     req: ResolveRequest,
@@ -1193,6 +1195,7 @@ async def resolve(
     response_model=AsyncResolveResponse,
     dependencies=[Depends(require_role("analyst", "manager", "admin"))],
 )
+@audit_bearing(reason="enqueues recipe-derived resolution; SOX (async sibling of /resolve)")
 async def resolve_async(
     request: Request,
     req: ResolveRequest,
@@ -1358,6 +1361,7 @@ async def get_trace(
     response_model=ExceptionDetailResponse,
     dependencies=[Depends(require_role("manager", "admin"))],
 )
+@audit_bearing(reason="four-eyes cosign of a pending override; commits financial change; SOX")
 async def cosign_override(
     exception_id: str,
     req: CosignRequest,
@@ -1572,6 +1576,7 @@ def _recommended_action_of(record) -> Optional[str]:
     response_model=ExceptionDetailResponse,
     dependencies=[Depends(require_permission("exceptions:approve"))],
 )
+@audit_bearing(reason="changes exception disposition (approve/reject/escalate); SOX")
 async def disposition_exception(
     exception_id: str,
     req: DispositionRequest,
@@ -1827,6 +1832,7 @@ async def disposition_exception(
     response_model=ExceptionDetailResponse,
     dependencies=[Depends(require_permission("exceptions:escalate"))],
 )
+@audit_bearing(reason="escalates exception to admin queue; lifecycle change; SOX")
 async def escalate_exception(
     exception_id: str,
     req: EscalateRequest,
@@ -1932,6 +1938,7 @@ REANALYZE_ELIGIBLE_LIFECYCLES = {
     response_model=ExceptionDetailResponse,
     dependencies=[Depends(require_role("manager", "admin"))],
 )
+@audit_bearing(reason="rebuilds analysis payload; may flip recipe disposition; SOX")
 async def reanalyze_exception(
     exception_id: str,
     req: ReanalyzeRequest,
@@ -2199,6 +2206,7 @@ def _resolve_lifecycle(final_status: Optional[str]) -> str:
     response_model=ExceptionDetailResponse,
     dependencies=[Depends(require_role("analyst", "manager", "admin"))],
 )
+@audit_bearing(reason="operator-challenges a recipe verdict; opens dispute trail; SOX")
 async def challenge_exception(
     exception_id: str,
     req: ChallengeRequest,
@@ -2248,6 +2256,7 @@ async def challenge_exception(
     response_model=ExceptionDetailResponse,
     dependencies=[Depends(require_role("admin"))],
 )
+@audit_bearing(reason="admin-releases a RED-tier-blocked exception; financial; SOX")
 async def admin_release_exception(
     exception_id: str,
     req: AdminReleaseRequest,

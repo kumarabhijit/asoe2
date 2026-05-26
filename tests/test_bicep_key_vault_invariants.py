@@ -80,3 +80,22 @@ class TestAppInsightsInvariants:
     def test_appinsights_connection_string_wired(self, bicep_text: str) -> None:
         assert "APPLICATIONINSIGHTS_CONNECTION_STRING" in bicep_text
         assert "appInsights.properties.ConnectionString" in bicep_text
+
+
+class TestPgBouncerInvariants:
+    """PARITY-6 — PgBouncer must land before Phase 6.3 SAP."""
+
+    def test_pgbouncer_enabled(self, bicep_text: str) -> None:
+        assert "pgbouncer.enabled" in bicep_text
+        # The Azure server-parameter takes string values; ensure we
+        # actually set it true, not false.
+        assert "value: 'true'" in bicep_text
+
+    def test_pgbouncer_transaction_mode(self, bicep_text: str) -> None:
+        """Session mode would defeat the pooling for our async LangGraph
+        workload — transaction mode is the required choice."""
+        assert "pgbouncer.pool_mode" in bicep_text
+        assert "transaction" in bicep_text
+
+    def test_pgbouncer_pool_size_defined(self, bicep_text: str) -> None:
+        assert "pgbouncer.default_pool_size" in bicep_text

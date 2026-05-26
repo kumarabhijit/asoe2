@@ -52,14 +52,10 @@ exempt_paths:
   - /metrics/reviewer-activity
   - /outbox/reconcile
 
-  # ── api/routes/exceptions.py — bulk grandfather. Migration in
-  #    subsequent PARITY-5 follow-up PRs, one per endpoint.
-  - /exceptions/resolve
-  - /exceptions/resolve/async
+  # ── api/routes/exceptions.py — partial migration. Migrated in
+  #    this commit: /resolve, /resolve/async, /disposition,
+  #    /reanalyze, /challenge, /admin-release, /override/cosign,
+  #    /escalate. Remaining grandfather entry is the dry-run
+  #    /resolve/explain endpoint, which returns the would-be
+  #    decision without committing (not audit-bearing by definition).
   - /exceptions/resolve/explain
-  - /exceptions/{exception_id}/disposition
-  - /exceptions/{exception_id}/reanalyze
-  - /exceptions/{exception_id}/challenge
-  - /exceptions/{exception_id}/admin-release
-  - /exceptions/{exception_id}/override/cosign
-  - /exceptions/{exception_id}/escalate

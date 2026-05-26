@@ -460,6 +460,56 @@ resource pgExtensions 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@
   }
 }
 
+// PARITY-6 (Integration review) — Azure-native PgBouncer.
+//
+// MUST land BEFORE the Phase 6.3 SAP sub-phase ships — real SAP
+// fan-out will exhaust the default per-connection pool. Azure
+// Database for PostgreSQL Flexible Server bundles PgBouncer as a
+// server-parameter feature; enable it and switch the application's
+// DATABASE_URL to point at port 6432 (PgBouncer) instead of the
+// default 5432 (Postgres direct).
+//
+// Transaction mode matches the LangGraph-async + per-recipe-request
+// pattern: short-lived connections, no prepared-statement caches
+// across calls. Session mode would defeat the pooling for our
+// workload.
+
+resource pgPgBouncerEnabled 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2023-12-01-preview' = {
+  parent: pgServer
+  name: 'pgbouncer.enabled'
+  properties: {
+    value: 'true'
+    source: 'user-override'
+  }
+}
+
+resource pgPgBouncerMode 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2023-12-01-preview' = {
+  parent: pgServer
+  name: 'pgbouncer.pool_mode'
+  properties: {
+    value: 'transaction'
+    source: 'user-override'
+  }
+  dependsOn: [
+    pgPgBouncerEnabled
+  ]
+}
+
+resource pgPgBouncerDefaultPoolSize 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2023-12-01-preview' = {
+  parent: pgServer
+  name: 'pgbouncer.default_pool_size'
+  properties: {
+    // Conservative default; raise after Phase 6.3 baseline metrics
+    // show real fan-out demand. The B1ms server-side max_connections
+    // is the hard ceiling; PgBouncer multiplexes below it.
+    value: '50'
+    source: 'user-override'
+  }
+  dependsOn: [
+    pgPgBouncerEnabled
+  ]
+}
+
 // ──────────────────────────────────────────────────── Azure Managed Redis
 //
 // Replaces the legacy 'Microsoft.Cache/redis' offering (retiring 2028-09-30
