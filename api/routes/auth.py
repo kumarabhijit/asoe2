@@ -223,6 +223,24 @@ async def refresh(req: RefreshRequest) -> AuthTokenResponse:
             status_code=401,
         )
 
+    # PARITY-3b — refresh-token revocation check. If the operator
+    # signed out, changed their password, or had their role
+    # downgraded mid-session, the jti is on the revocation list and
+    # we MUST refuse to mint a fresh pair.
+    from api import refresh_token_revocation as _rtr
+    jti = payload.get("jti")
+    if jti and _rtr.is_revoked(jti):
+        raise ASOEError(
+            code="INVALID_TOKEN",
+            message="Refresh token has been revoked.",
+            status_code=401,
+        )
+    # Rotation: the OLD jti is now spent and must not be replayed.
+    # The new tokens will carry fresh jtis (added below via the
+    # extra_claims-equivalent path).
+    if jti:
+        _rtr.revoke(jti, reason="rotation")
+
     # Re-issue against the *active* env, not the env the original token
     # carried. If ops promoted the deployment from sandbox to production
     # mid-session the user must re-authenticate; defaulting to a stale

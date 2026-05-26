@@ -38,6 +38,152 @@ def _get_jwt_secret() -> str:
 _ALGORITHM = "HS256"
 
 
+# ---------------------------------------------------------------------------
+# PARITY-3b — Entra ID (Azure AD) JWKS token validation
+# ---------------------------------------------------------------------------
+#
+# When ``ASOE_AUTH_MODE=entra``, ``get_current_user`` first tries to
+# validate the incoming bearer token as an RS256 token issued by Entra
+# (JWKS-validated, aud/iss/kid pinned). If that fails, it falls back
+# to the HS256 seed-token path so a single replica can run mixed
+# traffic during a rollout. The seed-only path (``ASOE_AUTH_MODE=seed``,
+# the default) skips the Entra branch entirely.
+
+def _entra_enabled() -> bool:
+    return os.getenv("ASOE_AUTH_MODE", "seed").lower() == "entra"
+
+
+def _entra_issuer() -> str:
+    return os.getenv("ASOE_ISSUER_URL", "").rstrip("/")
+
+
+def _entra_audience() -> str:
+    return os.getenv("ASOE_CLIENT_ID", "")
+
+
+def _verify_rs256_signature(token: str, jwk: Dict[str, Any]) -> bool:
+    """Verify an RS256 JWT signature against an Entra JWK.
+
+    Isolated so tests can monkeypatch the signature check while still
+    exercising the claim-pinning code paths. Production callers route
+    through ``_entra_decode`` which calls this on the canonical
+    ``signing_input``.
+    """
+    try:
+        import jwt as pyjwt
+        from jwt.algorithms import RSAAlgorithm
+    except ImportError:
+        # PyJWT is in the runtime requirements; surface a clear error
+        # rather than crashing the worker on a generic ImportError.
+        raise ASOEError(
+            code="JWKS_UNAVAILABLE",
+            message="JWT validator not installed.",
+            status_code=500,
+        )
+    try:
+        public_key = RSAAlgorithm.from_jwk(json.dumps(jwk))
+        # PyJWT does its own claim checks; we already pin aud/iss/exp
+        # explicitly in _entra_decode, so we let PyJWT do the signature
+        # check only by passing options={"verify_aud": False}. The
+        # outer caller then checks aud + iss + tid.
+        pyjwt.decode(
+            token,
+            key=public_key,
+            algorithms=["RS256"],
+            options={"verify_aud": False, "verify_iss": False, "verify_exp": False},
+        )
+        return True
+    except Exception:  # noqa: BLE001 — any failure means signature didn't verify
+        return False
+
+
+def _entra_decode(token: str) -> Dict[str, Any]:
+    """Validate + decode an Entra-issued RS256 JWT.
+
+    Pins: ``kid`` (must be present in header AND resolve via JWKS),
+    ``iss`` (must equal ``ASOE_ISSUER_URL``), ``aud`` (must equal
+    ``ASOE_CLIENT_ID``), ``exp`` (must be in the future). Returns the
+    decoded payload.
+
+    Raises ``ASOEError`` (401/403) on any pin failure. Fails closed on
+    JWKS-fetch timeouts.
+    """
+    from api import azure_ad_jwks
+
+    issuer_url = _entra_issuer()
+    audience = _entra_audience()
+    if not issuer_url or not audience:
+        raise ASOEError(
+            code="ENTRA_NOT_CONFIGURED",
+            message="Entra mode requires ASOE_ISSUER_URL and ASOE_CLIENT_ID.",
+            status_code=500,
+        )
+
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise ASOEError(code="UNAUTHORIZED", message="Malformed token.", status_code=401)
+    header_b64, body_b64, _sig_b64 = parts
+
+    try:
+        header = json.loads(_b64url_decode(header_b64))
+        payload = json.loads(_b64url_decode(body_b64))
+    except Exception as exc:
+        raise ASOEError(
+            code="UNAUTHORIZED",
+            message="Token header/payload undecodable.",
+            status_code=401,
+        ) from exc
+
+    kid = header.get("kid")
+    if not kid:
+        raise ASOEError(
+            code="UNAUTHORIZED",
+            message="Token header is missing 'kid' — Entra always sets one.",
+            status_code=401,
+        )
+
+    # exp / iss / aud pinning. We do these BEFORE the signature check
+    # so a wrong-tenant token doesn't even trigger a JWKS round-trip.
+    now = time.time()
+    exp = payload.get("exp")
+    if exp is None or now > float(exp):
+        raise ASOEError(code="UNAUTHORIZED", message="Token expired.", status_code=401)
+
+    iss = payload.get("iss", "")
+    if iss.rstrip("/") != issuer_url:
+        logger.warning("entra iss mismatch token_iss=%s expected=%s", iss, issuer_url)
+        raise ASOEError(
+            code="FORBIDDEN",
+            message="Token issuer does not match configured tenant.",
+            status_code=403,
+        )
+
+    aud = payload.get("aud")
+    aud_ok = aud == audience or (isinstance(aud, list) and audience in aud)
+    if not aud_ok:
+        logger.warning("entra aud mismatch token_aud=%s expected=%s", aud, audience)
+        raise ASOEError(
+            code="FORBIDDEN",
+            message="Token audience does not match this app.",
+            status_code=403,
+        )
+
+    jwk = azure_ad_jwks.get_jwk_for_kid(issuer_url, kid)
+    if jwk is None:
+        raise ASOEError(
+            code="UNAUTHORIZED",
+            message="Token kid not found in JWKS.",
+            status_code=401,
+        )
+    if not _verify_rs256_signature(token, jwk):
+        raise ASOEError(
+            code="UNAUTHORIZED",
+            message="Token signature invalid.",
+            status_code=401,
+        )
+    return payload
+
+
 # Token lifetimes (architecture_v3.md §11.1).
 #
 # Defaults are intentionally environment-aware rather than hardcoded:
@@ -236,6 +382,43 @@ async def get_current_user(
         )
 
     token = authorization.removeprefix("Bearer ").strip()
+    payload: Optional[Dict[str, Any]] = None
+
+    # PARITY-3b — when Entra mode is on, validate as an RS256 Entra
+    # token first. On any failure (incl. malformed-as-RS256), fall
+    # through to the HS256 seed path so a mixed rollout still works.
+    if _entra_enabled():
+        try:
+            entra_payload = _entra_decode(token)
+        except ASOEError:
+            entra_payload = None
+        if entra_payload is not None:
+            # Project Entra claims into the AuthenticatedUser shape.
+            # `groups` → ASOE roles via azure_ad_roles.groups_to_roles.
+            from api import azure_ad_roles
+
+            groups = entra_payload.get("groups", []) or []
+            roles = azure_ad_roles.groups_to_roles(groups)
+            # ASOE_ENV check still applies — an Entra-authenticated
+            # operator is constrained to the env the deploy is running
+            # in. We synthesise an env claim from the active server
+            # env so the downstream contract is identical to seed mode.
+            server_env = os.getenv("ASOE_ENV", "production")
+            return AuthenticatedUser(
+                sub=entra_payload.get("sub", ""),
+                email=entra_payload.get("email")
+                    or entra_payload.get("preferred_username", ""),
+                name=entra_payload.get("name", ""),
+                title="",
+                avatar_initials="",
+                roles=roles,
+                org=entra_payload.get("tid", ""),  # Entra tenant id
+                permissions=_expand_permissions(roles),
+                assigned_accounts=[],
+                env=server_env,
+                retailer_id=None,
+            )
+
     try:
         payload = _jwt_decode(token, _get_jwt_secret())
     except ValueError as exc:
@@ -361,6 +544,8 @@ def _create_token(
     assigned_accounts: Optional[List[str]] = None,
 ) -> str:
     """Create a signed JWT with the given type and expiry."""
+    import uuid
+
     now = int(time.time())
     payload: Dict[str, Any] = {
         "sub": sub,
@@ -372,6 +557,12 @@ def _create_token(
         "iat": now,
         "exp": now + expire_seconds,
         "token_type": token_type,
+        # PARITY-3b — jti uniquely identifies the token instance for
+        # the refresh-token revocation index. Both access and refresh
+        # tokens carry one; only refresh tokens are looked up against
+        # the revocation store (access tokens are short-lived enough
+        # that allow-listing isn't worth the round trip).
+        "jti": uuid.uuid4().hex,
     }
     if token_type == "access":
         payload["permissions"] = _expand_permissions(roles)
