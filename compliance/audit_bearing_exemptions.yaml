@@ -29,37 +29,37 @@ exempt_paths:
   #    sandbox env; not financially binding by construction.
   - /_sandbox/seed/financial-impact
   - /_sandbox/tenant/reset
-  - /_sandbox/seed/blob
-  - /_sandbox/seed/inbox
-  - /_sandbox/seed/cases
+  - /_sandbox/seed/manual-order-intake
+  - /_sandbox/cases/{case_id}/attachments
+  - /_sandbox/seed/email-attachment-anchors
 
   # ── api/routes/workflows.py — grandfather; migrate next pass.
-  - /workflows/{workflow_id}/run
+  - /workflows
 
   # ── api/routes/policies.py — grandfather.
-  - /policies/{policy_id}
+  - /policies/{tenant_id}
 
-  # ── api/routes/config.py — grandfather.
-  - /config/tenant/{tenant_id}
-  - /config/tenant/{tenant_id}/duplicate_po
+  # ── api/routes/config.py — tenant-config layer admin (write paths
+  #    already chain into policy_audit_log via PolicyRepository).
+  - /config/tenants/{tenant_id}/layers/{layer}
 
-  # ── api/routes/attachments.py — grandfather (the erasure path is
-  #    already audit-trailed via gateways/attachment_store.py).
-  - /attachments
+  # ── api/routes/attachments.py — signed-URL mint is RBAC-gated +
+  #    capability-token-scoped; the byte read itself audits separately.
+  - /cases/{case_id}/attachments/{attachment_id}/signed-url
 
-  # ── api/routes/health.py — kill-switch + explain-mode toggles are
-  #    operator actions; audit trail goes through the structured log.
-  - /health/kill-switch
-  - /health/explain-mode
+  # ── api/routes/health.py — operational endpoints; audit trail goes
+  #    through the structured log + reviewer-activity metrics.
+  - /metrics/reviewer-activity
+  - /outbox/reconcile
 
-  # ── api/routes/exceptions.py — bulk grandfather; migration in
-  #    subsequent PARITY-5 follow-up PRs.
-  - /exceptions/{exception_id}/approve
-  - /exceptions/{exception_id}/reject
-  - /exceptions/{exception_id}/escalate
-  - /exceptions/{exception_id}/resolve
-  - /exceptions/{exception_id}
-  - /exceptions/{exception_id}/override
+  # ── api/routes/exceptions.py — bulk grandfather. Migration in
+  #    subsequent PARITY-5 follow-up PRs, one per endpoint.
+  - /exceptions/resolve
+  - /exceptions/resolve/async
+  - /exceptions/resolve/explain
+  - /exceptions/{exception_id}/disposition
+  - /exceptions/{exception_id}/reanalyze
+  - /exceptions/{exception_id}/challenge
+  - /exceptions/{exception_id}/admin-release
   - /exceptions/{exception_id}/override/cosign
-  - /exceptions/{exception_id}/comments
-  - /exceptions/{exception_id}/assign
+  - /exceptions/{exception_id}/escalate

@@ -56,6 +56,52 @@ class TestGatewayTimeouts:
 
         assert 5.0 <= GATEWAY_TIMEOUT_S["sap"] <= 10.0
 
+    def test_executor_consults_per_gateway_budget(self):
+        """Regression for code-review MEDIUM finding: the map is config
+        only if the executor doesn't read it. This test asserts the
+        wiring."""
+        from gateways.executor import GatewayExecutor
+        from contracts.models import GatewayRequest
+        from contracts.policy import GATEWAY_TIMEOUT_S
+        from gateways.registry import register_gateway
+        from gateways.stub import StubGateway
+        from contracts.models import GatewayResponse
+        import time
+
+        # Stub gateway that sleeps long enough to exceed the graph
+        # per-gateway budget (3s) but not the GatewayRequest default
+        # (5s). With wiring the request must TIMEOUT.
+        class SlowGateway:
+            name = "graph"
+
+            def execute(self, request):
+                time.sleep(GATEWAY_TIMEOUT_S["graph"] + 1.0)
+                return GatewayResponse(
+                    gateway_name="graph",
+                    operation=request.operation,
+                    status="SUCCESS",
+                )
+
+        # Wire via register_gateway. Use a low-cost name we'll clean up.
+        from gateways.registry import _GATEWAY_REGISTRY
+        prev = dict(_GATEWAY_REGISTRY)
+        try:
+            _GATEWAY_REGISTRY["graph"] = SlowGateway()
+            executor = GatewayExecutor()
+            req = GatewayRequest(
+                gateway_name="graph",
+                operation="list_messages",
+                params={},
+                trace_id="t-abc",
+                # Use the default 5000ms so the executor SHOULD apply
+                # the 3000ms graph budget.
+            )
+            resp = executor.run(req)
+            assert resp.status == "TIMEOUT"
+        finally:
+            _GATEWAY_REGISTRY.clear()
+            _GATEWAY_REGISTRY.update(prev)
+
 
 class TestShadowModeThresholds:
     """Decision Q9 — shadow-mode acceptance thresholds.
@@ -147,3 +193,45 @@ class TestEgressPIIRedaction:
 
         body = "no pii here"
         assert redact_for_azure_di(body) == body
+
+    def test_grouped_cc_redacted(self):
+        """The classic 4-4-4-4 grouped credit-card format."""
+        from gateways.azure_di_egress_redaction import redact_for_azure_di
+
+        body = "card on file: 4242 4242 4242 4242"
+        out = redact_for_azure_di(body)
+        assert "4242 4242 4242 4242" not in out
+        assert "<redacted-cc>" in out
+
+    def test_contiguous_cc_with_valid_luhn_redacted(self):
+        """A contiguous 16-digit number that passes Luhn IS a CC; redact."""
+        from gateways.azure_di_egress_redaction import redact_for_azure_di
+
+        # 4111111111111111 is a Visa test number that passes Luhn.
+        body = "charge: 4111111111111111"
+        out = redact_for_azure_di(body)
+        assert "4111111111111111" not in out
+
+    def test_innocent_digit_run_not_over_redacted(self):
+        """Regression for code-review HIGH finding: a 13-19-digit
+        sequence that ISN'T a real CC (fails Luhn) MUST NOT be flagged.
+        Over-redaction breaks AzureDI's spatial-extraction anchoring
+        on the redacted spans."""
+        from gateways.azure_di_egress_redaction import redact_for_azure_di
+
+        # Random 16-digit run that almost certainly fails Luhn.
+        body = "order id: 1234567890123456 PO confirmation"
+        out = redact_for_azure_di(body)
+        # 1234567890123456 fails Luhn → not redacted.
+        assert "1234567890123456" in out
+
+    def test_phone_number_list_not_over_redacted(self):
+        """The original loose CC regex matched separator-rich digit
+        sequences like a multi-phone list. The Luhn check prevents this."""
+        from gateways.azure_di_egress_redaction import redact_for_azure_di
+
+        body = "contact list: 415-555-1234, 415-555-5678, 415-555-9012"
+        out = redact_for_azure_di(body)
+        # The phones themselves stay (egress redaction is for financial
+        # PII; phone scrubbing is the log_redaction module's job).
+        assert "415-555-1234" in out

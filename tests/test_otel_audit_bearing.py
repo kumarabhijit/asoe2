@@ -145,6 +145,69 @@ class TestLogRedaction:
 # @audit_bearing (per Phase 5 acceptance criteria).
 # ---------------------------------------------------------------------------
 
+class TestAuditBearingLintRegex:
+    """Code-review followup — the lint must:
+
+      * find multi-line @router.post(\\n  "/path"\\n, ...) decorators
+        (the original single-line regex missed them).
+      * NOT accept a comment containing the substring "audit_bearing"
+        as satisfying the requirement.
+      * accept @audit_bearing both BEFORE and AFTER @router.post
+        (decorator order doesn't matter to FastAPI; the lint must
+        match the runtime semantics).
+    """
+
+    def test_multiline_decorator_detected(self, tmp_path):
+        from api.observability.audit_bearing import scan_routes_for_violations
+
+        src = tmp_path / "routes.py"
+        src.write_text(
+            '@router.post(\n'
+            '    "/multiline-mutator",\n'
+            '    dependencies=[Depends(require_role("admin"))],\n'
+            ')\n'
+            'async def mutates(): ...\n'
+        )
+        violations = scan_routes_for_violations(routes_dir=tmp_path, exempt_paths=set())
+        assert any("/multiline-mutator" in v for v in violations)
+
+    def test_comment_does_not_satisfy_lint(self, tmp_path):
+        from api.observability.audit_bearing import scan_routes_for_violations
+
+        src = tmp_path / "routes.py"
+        src.write_text(
+            '# TODO: should we add audit_bearing here?\n'
+            '@router.post("/no-decorator")\n'
+            'async def mutates(): ...\n'
+        )
+        violations = scan_routes_for_violations(routes_dir=tmp_path, exempt_paths=set())
+        assert any("/no-decorator" in v for v in violations)
+
+    def test_decorator_after_router_accepted(self, tmp_path):
+        from api.observability.audit_bearing import scan_routes_for_violations
+
+        src = tmp_path / "routes.py"
+        src.write_text(
+            '@router.post("/legit")\n'
+            '@audit_bearing(reason="ok")\n'
+            'async def mutates(): ...\n'
+        )
+        violations = scan_routes_for_violations(routes_dir=tmp_path, exempt_paths=set())
+        assert not any("/legit" in v for v in violations)
+
+    def test_decorator_before_router_accepted(self, tmp_path):
+        from api.observability.audit_bearing import scan_routes_for_violations
+
+        src = tmp_path / "routes.py"
+        src.write_text(
+            '@audit_bearing(reason="ok")\n'
+            '@router.post("/legit-rev")\n'
+            'async def mutates(): ...\n'
+        )
+        violations = scan_routes_for_violations(routes_dir=tmp_path, exempt_paths=set())
+        assert not any("/legit-rev" in v for v in violations)
+
+
 class TestAuditBearingLint:
     ROOT = Path(__file__).resolve().parent.parent
     ROUTES_DIR = ROOT / "api" / "routes"
