@@ -253,6 +253,56 @@ EvidenceAnchor:
       computed against (ADR-044 §2.5; ADR-045 spatial anchors only). Position
       provenance, never the audit unit.
 
+AttachmentErasureTombstone:
+  # PARITY-0.5 — the PII-free tombstone routed into the immutable audit
+  # chain (ADR-023) by `gateways.attachment_store.erase_attachment` and
+  # surfaced via GET /attachments/{id}/erasure-certificate. Locked here
+  # so a future change to the tombstone shape requires the
+  # CODEOWNERS-gated review on this file. NEVER add `content` or
+  # `name` fields — both leak PII (the bytes / the original filename).
+  attachment_id:
+    tier: audit-bearing
+    source: control
+    rationale: Identity of the erased document, surviving the bytes.
+  tenant_id:
+    tier: audit-bearing
+    source: control
+    rationale: Tenant boundary the erasure was performed under.
+  sha256:
+    tier: audit-bearing
+    source: control
+    rationale: >-
+      Content hash — preserves the proof a decision was made against
+      content of this hash even after the bytes are gone.
+  case_id:
+    tier: audit-bearing
+    source: control
+    rationale: Case the document was attached to (audit trail coupling).
+  size_bytes:
+    tier: contextual
+    source: derived
+    rationale: Original size of the erased bytes (not PII).
+  mime_type:
+    tier: contextual
+    source: derived
+    rationale: Original MIME type (not PII).
+  erased_at:
+    tier: audit-bearing
+    source: control
+    rationale: Timestamp the erasure completed (UTC ISO-8601).
+  erased_by:
+    tier: audit-bearing
+    source: control
+    rationale: >-
+      Identity of the actor — user sub for operator-initiated erasures,
+      `system:*` sentinel for scheduled retention sweeps.
+  reason:
+    tier: contextual
+    source: control
+    rationale: >-
+      Free-text reason captured at erasure time (e.g.
+      "right-to-erasure-request", "retention-policy-90d-expired").
+
 EmailOrderEntryAnalysisData:
   # ADR-034 Phase B — email-channel order intake. Floor evidence
   # (sender_authorized / customer_resolved / duplicate_po_clear /
@@ -1273,9 +1323,13 @@ summary:
   # 2026-05-26: +1 contextual on EvidenceAnchor (rendition_hash — frozen-render
   # basis for spatial geometry, ADR-044 §2.5; position provenance, never the
   # audit unit).
-  total_fields: 177
-  audit_bearing: 130
+  # 2026-05-26: +9 rows for AttachmentErasureTombstone (PARITY-0.5 — the
+  # PII-free tombstone routed into the audit chain by erase_attachment).
+  # 6 audit-bearing (attachment_id, tenant_id, sha256, case_id, erased_at,
+  # erased_by) + 3 contextual (size_bytes, mime_type, reason).
+  total_fields: 186
+  audit_bearing: 136
   conditional: 7
-  contextual: 40
+  contextual: 43
   backend_gap_fields: 0
   gateway_dependent_fields: 17
