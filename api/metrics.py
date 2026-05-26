@@ -566,11 +566,21 @@ _ab_decisions: int = 0
 _ab_layer2_opened: int = 0
 _ab_dwell_buckets: list[int] = [0] * (len(_DWELL_BUCKETS_S) + 1)
 _ab_dwell_sum: float = 0.0
+# ADR-043 §2.7 / D12 — decision-quality cohort: scrutiny split by whether an
+# in-document evidence highlight was shown to the operator. Bounded to a 2-way
+# {true,false} label so a *drop* in scrutiny when highlighting is on registers
+# as a regression rather than a speed win.
+_ab_decisions_by_hl: dict[bool, int] = {True: 0, False: 0}
+_ab_layer2_by_hl: dict[bool, int] = {True: 0, False: 0}
 
 
-def record_reviewer_activity(*, dwell_ms: float, layer2_opened: bool) -> None:
+def record_reviewer_activity(
+    *, dwell_ms: float, layer2_opened: bool, highlight_shown: bool = False,
+) -> None:
     """Record one operator decision's automation-bias signals. No-op on a
-    negative / NaN / non-numeric dwell — never raises (DoR #11)."""
+    negative / NaN / non-numeric dwell — never raises (DoR #11). The
+    ``highlight_shown`` cohort (ADR-043 §2.7) lets the Layer-2-open rate be
+    compared with vs without an evidence highlight on screen."""
     global _ab_decisions, _ab_layer2_opened, _ab_dwell_sum
     try:
         dwell_s = float(dwell_ms) / 1000.0
@@ -578,10 +588,13 @@ def record_reviewer_activity(*, dwell_ms: float, layer2_opened: bool) -> None:
         return
     if dwell_s != dwell_s or dwell_s < 0:  # NaN or negative
         return
+    hl = bool(highlight_shown)
     with _ab_lock:
         _ab_decisions += 1
+        _ab_decisions_by_hl[hl] += 1
         if layer2_opened:
             _ab_layer2_opened += 1
+            _ab_layer2_by_hl[hl] += 1
         for i, edge in enumerate(_DWELL_BUCKETS_S):
             if dwell_s <= edge:
                 _ab_dwell_buckets[i] += 1
@@ -600,6 +613,9 @@ def reset_reviewer_activity() -> None:
         for i in range(len(_ab_dwell_buckets)):
             _ab_dwell_buckets[i] = 0
         _ab_dwell_sum = 0.0
+        for k in (True, False):
+            _ab_decisions_by_hl[k] = 0
+            _ab_layer2_by_hl[k] = 0
 
 
 def render_reviewer_activity_metrics() -> str:
@@ -609,12 +625,40 @@ def render_reviewer_activity_metrics() -> str:
         opened = _ab_layer2_opened
         buckets = list(_ab_dwell_buckets)
         dwell_sum = _ab_dwell_sum
+        decisions_by_hl = dict(_ab_decisions_by_hl)
+        layer2_by_hl = dict(_ab_layer2_by_hl)
     lines += _help_type("reviewer_decisions_total", "Operator disposition decisions observed.", "counter")
     lines.append(_line("reviewer_decisions_total", decisions))
     lines += _help_type("reviewer_layer2_opened_total", "Decisions where the operator expanded Layer-2 evidence first.", "counter")
     lines.append(_line("reviewer_layer2_opened_total", opened))
     lines += _help_type("reviewer_layer2_open_rate", "Layer-2-open rate (opened / decisions); low values flag automation bias.", "gauge")
     lines.append(_line("reviewer_layer2_open_rate", round(opened / decisions, 4) if decisions else 0.0))
+    # Decision-quality cohort (ADR-043 §2.7) — decisions + Layer-2-open rate
+    # split by highlight_shown so scrutiny can be A/B-compared.
+    lines += _help_type(
+        "reviewer_decisions_by_highlight_total",
+        "Operator decisions split by whether an evidence highlight was shown "
+        "(ADR-043 §2.7 decision-quality cohort).",
+        "counter",
+    )
+    for shown in (True, False):
+        lines.append(_line(
+            "reviewer_decisions_by_highlight_total", decisions_by_hl[shown],
+            labels={"highlight_shown": "true" if shown else "false"},
+        ))
+    lines += _help_type(
+        "reviewer_layer2_open_rate_by_highlight",
+        "Layer-2-open rate by highlight cohort; a drop under highlight_shown="
+        "true vs false is the automation-bias regression signal (ADR-043 §2.7).",
+        "gauge",
+    )
+    for shown in (True, False):
+        cohort_dec = decisions_by_hl[shown]
+        rate = round(layer2_by_hl[shown] / cohort_dec, 4) if cohort_dec else 0.0
+        lines.append(_line(
+            "reviewer_layer2_open_rate_by_highlight", rate,
+            labels={"highlight_shown": "true" if shown else "false"},
+        ))
     lines += _help_type("reviewer_decision_dwell_seconds", "Time from opening a case to acting on it.", "histogram")
     name = "reviewer_decision_dwell_seconds"
     cumulative = 0

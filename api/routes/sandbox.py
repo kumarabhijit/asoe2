@@ -36,8 +36,10 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import os
-from typing import Any, Optional
+from datetime import datetime, timezone
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -347,5 +349,193 @@ async def seed_case_attachment(
         "mime_type": rec.mime_type,
         "sha256": rec.sha256,
         "bytes": rec.size_bytes,
+        "ok": True,
+    }
+
+
+# ---------------------------------------------------------------------------
+# ADR-043 P1.1 — seed an EMAIL_ENTRY case + stored attachment + projected
+# EvidenceAnchors so the preview safety bar shows *located* highlights.
+# Spec: docs/specs/sandbox-attachment-anchor-seed.md. Sandbox-only; a
+# stand-in for the ADR-036 email-intelligence-agent producer. The bytes
+# CONTAIN `document_text` so the rendered text layer is extractable and the
+# composer-derived anchors locate.
+# ---------------------------------------------------------------------------
+
+
+def _mock_pdf_bytes(text: str) -> bytes:
+    """Minimal, openable one-page PDF embedding ``text`` as a text layer.
+
+    Mirrors ``asoe-ui/src/lib/mock-data/attachment-bytes.ts::makeMinimalPdf``
+    (one text run per line, ASCII, valid xref/%%EOF) so the seeded "real"
+    bytes and the UI's mock bytes locate identically. xref offsets are byte
+    offsets computed against the encoded body.
+    """
+    lines = text.split("\n") or [""]
+    safe = [
+        l.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+        for l in (lines if any(lines) else ["Mock attachment"])
+    ]
+    content = "BT /F1 12 Tf 64 720 Td"
+    for i, l in enumerate(safe):
+        content += f" ({l}) Tj" if i == 0 else f" 0 -18 Td ({l}) Tj"
+    content += " ET"
+    content_len = len(content.encode("latin-1", "replace"))
+    objects = [
+        "<</Type /Catalog /Pages 2 0 R>>",
+        "<</Type /Pages /Kids [3 0 R] /Count 1>>",
+        "<</Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        "/Resources <</Font <</F1 5 0 R>>>> /Contents 4 0 R>>",
+        f"<</Length {content_len}>>\nstream\n{content}\nendstream",
+        "<</Type /Font /Subtype /Type1 /BaseFont /Helvetica>>",
+    ]
+    body = "%PDF-1.4\n"
+    offsets: List[int] = []
+    for i, obj in enumerate(objects):
+        offsets.append(len(body.encode("latin-1", "replace")))
+        body += f"{i + 1} 0 obj\n{obj}\nendobj\n"
+    xref = len(body.encode("latin-1", "replace"))
+    body += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n"
+    for off in offsets:
+        body += f"{off:010d} 00000 n \n"
+    body += (
+        f"trailer\n<</Size {len(objects) + 1} /Root 1 0 R>>\n"
+        f"startxref\n{xref}\n%%EOF"
+    )
+    return body.encode("latin-1", "replace")
+
+
+def _seed_bytes(document_text: str, mime_type: str) -> bytes:
+    """Build attachment bytes that contain ``document_text`` for the given
+    MIME so the anchor text is locatable. PDF → embedded text layer;
+    everything else → the raw UTF-8 text (still downloadable; the preview
+    default-denies non-allowlisted types, which is the correct behaviour)."""
+    if mime_type == "application/pdf":
+        return _mock_pdf_bytes(document_text)
+    return document_text.encode("utf-8")
+
+
+class AnchorSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str
+    label: str
+    supports_ref: str
+
+
+class SeedEmailAttachmentAnchorsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    document_text: str
+    attachment_name: str
+    attachment_mime: str
+    anchors: List[AnchorSpec]
+    subject: Optional[str] = None
+    from_address: Optional[str] = None
+
+
+def _create_email_entry_exception(
+    tenant_id: str, *, subject: str, from_address: str,  # noqa: ARG001
+) -> tuple[str, Optional[str]]:
+    """Open an EMAIL_ENTRY case + exception via the normal manual-intake
+    graph path. Returns (exception_id, case_id). Reuses the existing
+    seed-manual-order-intake building blocks so no new business logic is
+    introduced — the case is materialised eagerly for MANUAL_ORDER_INTAKE."""
+    from api.routes.exceptions import (  # noqa: PLC0415
+        _build_order_event,
+        _persist_exception,
+        _publish_task_complete,
+        _resolve_state,
+    )
+    from api.schemas import ResolveRequest  # noqa: PLC0415
+    from contracts.models import GraphState  # noqa: PLC0415
+
+    payload = _build_manual_intake_event_payload(SeedManualOrderIntakeRequest())
+    resolve_req = ResolveRequest.model_validate(payload)
+    event = _build_order_event(resolve_req)
+    state = GraphState(event=event, tenant_id=tenant_id)
+    try:
+        final_state = _resolve_state(state, tenant_id)
+    except Exception as exc:  # pragma: no cover - bubble up like /resolve
+        raise HTTPException(status_code=500, detail=f"graph failure: {exc}")
+    trace_id = final_state.shadow.trace_id if final_state.shadow else None
+    exception_id = _persist_exception(tenant_id, final_state, trace_id)
+    _publish_task_complete(tenant_id, exception_id, trace_id or "", final_state)
+    record = exception_store.get(exception_id, tenant_id)
+    case_id = record.parent_case_id if record else None
+    return exception_id, case_id
+
+
+@router.post(
+    "/_sandbox/seed/email-attachment-anchors",
+    dependencies=[Depends(require_role("manager", "admin"))],
+)
+async def seed_email_attachment_anchors(
+    req: SeedEmailAttachmentAnchorsRequest,
+    tenant_id: str = Depends(get_tenant_id),
+    user: AuthenticatedUser = Depends(get_current_user),  # noqa: ARG001
+) -> dict:
+    """Seed an EMAIL_ENTRY case with a stored attachment whose bytes contain
+    ``document_text`` and projected text-derived EvidenceAnchors, so the
+    composer (`adapt_email_source` → `build_evidence_anchors`) emits located
+    anchors with no new business logic (ADR-043 P1.1)."""
+    _require_sandbox()
+    from gateways.attachment_store import (  # noqa: PLC0415
+        AttachmentTooLarge,
+        store_attachment,
+    )
+
+    subject = req.subject or "Purchase order attached"
+    from_address = req.from_address or "buyer@sandbox.example"
+
+    exception_id, case_id = _create_email_entry_exception(
+        tenant_id, subject=subject, from_address=from_address,
+    )
+    if case_id is None:  # pragma: no cover - manual intake always materialises
+        raise HTTPException(
+            status_code=500, detail="seeded exception has no parent case",
+        )
+
+    content = _seed_bytes(req.document_text, req.attachment_mime)
+    try:
+        rec = store_attachment(
+            tenant_id, req.attachment_name, req.attachment_mime, content,
+            case_id=case_id,
+        )
+    except AttachmentTooLarge as exc:
+        raise HTTPException(status_code=413, detail=str(exc))
+
+    # Stamp enrichment_context so the composer derives located anchors. Merge
+    # (never clobber) the gateway contexts the graph already wrote; only the
+    # email_source_context + extracted_entities keys are (re)set here.
+    record = exception_store.get(exception_id, tenant_id)
+    enrichment = dict(record.enrichment_context or {}) if record else {}
+    enrichment["email_source_context"] = {
+        "from_address": from_address,
+        "received_at": datetime.now(timezone.utc).isoformat(),
+        "subject": subject,
+        "body_hash": hashlib.sha256(req.document_text.encode("utf-8")).hexdigest(),
+        "attachment_manifest": [{
+            "name": req.attachment_name,
+            "mime_type": req.attachment_mime,
+            "bytes": rec.size_bytes,
+            "sha256": rec.sha256,
+            "attachment_id": rec.id,
+        }],
+        "body_excerpt": req.document_text[:240],
+    }
+    enrichment["extracted_entities"] = [
+        {
+            "key": a.supports_ref.rsplit(".", 1)[-1],
+            "value": a.text,
+            "kind": "field",
+            "source_span": a.text,
+        }
+        for a in req.anchors
+    ]
+    exception_store.update(exception_id, tenant_id, enrichment_context=enrichment)
+
+    return {
+        "exception_id": exception_id,
+        "case_id": case_id,
+        "attachment_id": rec.id,
         "ok": True,
     }

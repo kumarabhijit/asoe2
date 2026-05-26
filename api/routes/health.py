@@ -117,6 +117,10 @@ class ReviewerActivityRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     dwell_ms: float = Field(ge=0)
     layer2_opened: bool
+    # ADR-043 §2.7 — whether an in-document evidence highlight was shown for
+    # this decision. Optional (defaults false) so callers that don't render a
+    # preview need no change.
+    highlight_shown: bool = False
 
 
 @router.post(
@@ -127,7 +131,11 @@ class ReviewerActivityRequest(BaseModel):
 )
 async def reviewer_activity(req: ReviewerActivityRequest) -> dict:
     """Record one decision's automation-bias signals (Layer-2-open + dwell)."""
-    record_reviewer_activity(dwell_ms=req.dwell_ms, layer2_opened=req.layer2_opened)
+    record_reviewer_activity(
+        dwell_ms=req.dwell_ms,
+        layer2_opened=req.layer2_opened,
+        highlight_shown=req.highlight_shown,
+    )
     return {"ok": True}
 
 

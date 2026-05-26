@@ -49,6 +49,42 @@ def test_record_increments_decisions_layer2_and_dwell():
     assert "reviewer_decision_dwell_seconds_count 2" in out
 
 
+def test_highlight_shown_cohort_is_tracked_separately():
+    # ADR-043 §2.7 / D12 — the decision-quality signal: scrutiny must be
+    # comparable between decisions where a highlight was shown and where it
+    # wasn't, so a drop in scrutiny under highlighting registers as a
+    # regression, not a win.
+    metrics.record_reviewer_activity(dwell_ms=2000, layer2_opened=True, highlight_shown=True)
+    metrics.record_reviewer_activity(dwell_ms=500, layer2_opened=False, highlight_shown=True)
+    metrics.record_reviewer_activity(dwell_ms=3000, layer2_opened=True, highlight_shown=False)
+    out = metrics.render_reviewer_activity_metrics()
+    # aggregate series unchanged
+    assert "reviewer_decisions_total 3" in out
+    # per-cohort decisions
+    assert 'reviewer_decisions_by_highlight_total{highlight_shown="true"} 2' in out
+    assert 'reviewer_decisions_by_highlight_total{highlight_shown="false"} 1' in out
+    # per-cohort Layer-2-open rate (highlight-shown: 1/2; not-shown: 1/1)
+    assert 'reviewer_layer2_open_rate_by_highlight{highlight_shown="true"} 0.5' in out
+    assert 'reviewer_layer2_open_rate_by_highlight{highlight_shown="false"} 1.0' in out
+
+
+def test_highlight_shown_defaults_false():
+    metrics.record_reviewer_activity(dwell_ms=1000, layer2_opened=True)
+    out = metrics.render_reviewer_activity_metrics()
+    assert 'reviewer_decisions_by_highlight_total{highlight_shown="false"} 1' in out
+
+
+def test_endpoint_accepts_highlight_shown(client: TestClient):
+    res = client.post(
+        "/api/v1/metrics/reviewer-activity",
+        json={"dwell_ms": 1200, "layer2_opened": True, "highlight_shown": True},
+        headers=_auth(),
+    )
+    assert res.status_code == 202, res.text
+    scrape = client.get("/api/v1/metrics").text
+    assert 'reviewer_decisions_by_highlight_total{highlight_shown="true"} 1' in scrape
+
+
 def test_bad_dwell_is_a_safe_noop():
     metrics.record_reviewer_activity(dwell_ms=-5, layer2_opened=True)
     metrics.record_reviewer_activity(dwell_ms=float("nan"), layer2_opened=True)
