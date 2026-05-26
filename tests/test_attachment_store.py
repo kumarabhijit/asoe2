@@ -129,3 +129,38 @@ def test_db_backend_roundtrips_and_survives_fresh_repo(adapter):
         assert get_attachment("t2", rec.id) is None
     finally:
         attachment_store.configure_backend(attachment_store._InMemoryBackend())
+
+
+def test_db_backend_erase_removes_bytes_and_leaves_tombstone(adapter):
+    # ADR-044 P2.3 — AttachmentRepository.delete makes erase_attachment work on
+    # the DB backend: bytes gone, PII-free tombstone retained.
+    from gateways.attachment_store import erase_attachment, get_erasure_tombstone
+
+    backend = attachment_store.db_backend(AttachmentRepository(adapter))
+    attachment_store.configure_backend(backend)
+    try:
+        rec = store_attachment("t1", "po.pdf", "application/pdf", b"PDFBYTES", case_id="c1")
+        assert get_attachment("t1", rec.id) is not None
+
+        tomb = erase_attachment(backend, tenant_id="t1", attachment_id=rec.id)
+
+        assert get_attachment("t1", rec.id) is None       # bytes gone from the DB
+        assert tomb is not None and tomb["sha256"] == rec.sha256
+        assert "content" not in tomb and "name" not in tomb
+        assert get_erasure_tombstone(tenant_id="t1", attachment_id=rec.id) is not None
+    finally:
+        attachment_store.configure_backend(attachment_store._InMemoryBackend())
+
+
+def test_db_backend_delete_is_tenant_scoped(adapter):
+    # A delete keyed on (tenant, id) must not remove another tenant's row.
+    repo = AttachmentRepository(adapter)
+    attachment_store.configure_backend(attachment_store.db_backend(repo))
+    try:
+        a = store_attachment("t1", "a.pdf", "application/pdf", b"A", case_id="c1")
+        repo.delete("t2", a.id)  # wrong tenant — no-op
+        assert get_attachment("t1", a.id) is not None
+        repo.delete("t1", a.id)
+        assert get_attachment("t1", a.id) is None
+    finally:
+        attachment_store.configure_backend(attachment_store._InMemoryBackend())

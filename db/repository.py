@@ -1092,3 +1092,14 @@ class AttachmentRepository:
                 (tenant_id, case_id),
             )
             return [_row_to_dict(r, self._META_COLUMNS) for r in cur.fetchall()]
+
+    def delete(self, tenant_id: str, attachment_id: str) -> None:
+        """Hard-delete the row for right-to-erasure (ADR-044 §2.4). Tenant-scoped
+        so an id alone can't erase another tenant's attachment. The PII-free
+        tombstone is written by ``attachment_store.erase_attachment`` against the
+        record read before this delete — the immutable audit chain is untouched."""
+        with self._adapter.cursor(tenant_id) as cur:
+            cur.execute(
+                "DELETE FROM email_attachment WHERE id = ? AND tenant_id = ?",
+                (attachment_id, tenant_id),
+            )
