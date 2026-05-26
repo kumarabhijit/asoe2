@@ -6923,6 +6923,47 @@
         ]
       }
     },
+    "/api/v1/attachments/read": {
+      "get": {
+        "description": "Stream attachment bytes for a valid scoped read token (ADR-044 \u00a72.2).\n\nNo Authorization header: the signed, expiring token is the capability. It is\nbound to a single (tenant, case, attachment) tuple, so it cannot read across\ntenants/cases, and is rejected once expired.",
+        "operationId": "read_attachment_by_token_api_v1_attachments_read_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Attachment By Token",
+        "tags": [
+          "attachments"
+        ]
+      }
+    },
     "/api/v1/cases": {
       "get": {
         "operationId": "list_cases_api_v1_cases_get",
@@ -7230,6 +7271,76 @@
           }
         },
         "summary": "Download Attachment",
+        "tags": [
+          "attachments"
+        ]
+      }
+    },
+    "/api/v1/cases/{case_id}/attachments/{attachment_id}/signed-url": {
+      "post": {
+        "description": "Mint a short-TTL, scoped capability URL for an attachment's bytes\n(ADR-044 \u00a72.2). RBAC + tenant + case-scoped at mint time; the returned URL\nneeds no auth header (the signed token is the capability) and expires.",
+        "operationId": "create_signed_read_url_api_v1_cases__case_id__attachments__attachment_id__signed_url_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "attachment_id",
+            "required": true,
+            "schema": {
+              "title": "Attachment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Signed Read Url Api V1 Cases  Case Id  Attachments  Attachment Id  Signed Url Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Signed Read Url",
         "tags": [
           "attachments"
         ]
