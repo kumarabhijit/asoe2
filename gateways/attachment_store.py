@@ -238,6 +238,79 @@ class _FilesystemBlobStore(_BlobStore):
                 pass
 
 
+def _azure_blob_store():
+    """Real Azure Blob Storage driver (PARITY-2). Lazy-imports
+    ``azure-storage-blob`` + ``azure-identity`` so the core service runs
+    without them installed (the dependencies live in the `[azure]`
+    optional extra). Container/account come from env:
+
+      * ``ASOE_OBJECT_STORE_BUCKET`` — container name
+      * ``ASOE_OBJECT_STORE_ENDPOINT`` — account URL
+        (e.g. ``https://<account>.blob.core.windows.net``)
+
+    Auth: ``DefaultAzureCredential`` — picks up the Container App's
+    managed identity in production, ``az login`` locally, or env-var
+    credentials in CI. No plaintext account keys ever leave Key Vault.
+    """
+    from azure.identity import DefaultAzureCredential  # noqa: PLC0415
+    from azure.storage.blob import BlobServiceClient  # noqa: PLC0415
+
+    container_name = os.environ["ASOE_OBJECT_STORE_BUCKET"]
+    account_url = os.environ["ASOE_OBJECT_STORE_ENDPOINT"]
+    credential = DefaultAzureCredential()
+    service_client = BlobServiceClient(
+        account_url=account_url, credential=credential,
+    )
+    container_client = service_client.get_container_client(container_name)
+
+    class _AzureBlobStore(_BlobStore):
+        def put_blob(self, key: str, data: bytes) -> None:
+            container_client.get_blob_client(key).upload_blob(
+                bytes(data), overwrite=True,
+            )
+
+        def get_blob(self, key: str) -> Optional[bytes]:
+            try:
+                stream = container_client.get_blob_client(key).download_blob()
+                return stream.readall()
+            except Exception as exc:
+                # Lazy-import so the core service doesn't depend on
+                # azure-core just to check this. ResourceNotFoundError
+                # = 404 → None; other exceptions propagate so an outage
+                # is visible rather than silently treated as "missing".
+                try:
+                    from azure.core.exceptions import (  # noqa: PLC0415
+                        ResourceNotFoundError,
+                    )
+                except ImportError:  # pragma: no cover
+                    raise exc
+                if isinstance(exc, ResourceNotFoundError):
+                    return None
+                raise
+
+        def delete_blob(self, key: str) -> None:
+            try:
+                container_client.get_blob_client(key).delete_blob()
+            except Exception as exc:
+                # Idempotent delete: 404 is fine (already gone).
+                try:
+                    from azure.core.exceptions import (  # noqa: PLC0415
+                        ResourceNotFoundError,
+                    )
+                except ImportError:  # pragma: no cover
+                    raise exc
+                if not isinstance(exc, ResourceNotFoundError):
+                    raise
+
+        def clear(self) -> None:
+            # Dev/test convenience only; production lifecycle is
+            # container-level via Storage Account retention policy.
+            for blob in container_client.list_blobs():
+                container_client.get_blob_client(blob.name).delete_blob()
+
+    return _AzureBlobStore()
+
+
 def _s3_blob_store():  # pragma: no cover - live path only (needs boto3 + creds)
     """Real S3/MinIO blob driver behind the env flag (live/nightly path only).
 
@@ -334,6 +407,9 @@ def _object_store_backend() -> "ObjectStoreBackend":
     driver = os.getenv("ASOE_OBJECT_STORE_DRIVER", "filesystem").lower()
     if driver == "s3":
         return ObjectStoreBackend(_s3_blob_store())
+    if driver == "azure":
+        # PARITY-2: Azure Blob Storage backend via managed identity.
+        return ObjectStoreBackend(_azure_blob_store())
     root = os.getenv("ASOE_OBJECT_STORE_PATH", "./.asoe_object_store")
     return ObjectStoreBackend(_FilesystemBlobStore(root))
 
