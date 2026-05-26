@@ -375,6 +375,37 @@ than the LLM tier (60s vs 5m): infra gateways recover faster than a rate-limited
 model and the read is non-binding evidence enrichment."""
 
 # ---------------------------------------------------------------------------
+# Per-gateway timeout budgets (PARITY-6 — Integration review)
+# ---------------------------------------------------------------------------
+#
+# Each real connector has a distinct latency profile; one global timeout
+# either lets SAP eat the whole request budget or starves Graph. These
+# are the upper-bound per-call timeouts; the GatewayExecutor enforces
+# them and routes a TIMEOUT into the circuit-breaker rate.
+#
+# Sources:
+#   * graph  — Microsoft Graph p95 ~1.5s for a single message read;
+#              3s is 2× p95 with margin for token-refresh.
+#   * sap    — S/4HANA OData p95 ~4-5s under PgBouncer; 8s is 1.6× p95.
+#   * oms    — internal OMS read p95 ~2-3s; 5s comfortably above p95.
+#   * document_extraction — AzureDI prebuilt-invoice p95 ~2.5s
+#              for born-digital; 6s covers multi-page outliers.
+#   * email_intake — sender_auth/resolve_customer reads ~1s; 3s ceiling.
+
+GATEWAY_TIMEOUT_S: dict[str, float] = {
+    "graph": 3.0,
+    "sap": 8.0,
+    "oms": 5.0,
+    "document_extraction": 6.0,
+    "email_intake": 3.0,
+}
+"""Per-gateway request timeout (seconds). Values are upper bounds; a
+circuit-breaker tripping at GATEWAY_CIRCUIT_BREAKER_P95_LATENCY_S (10s)
+catches anything that slips past these. Tune per real-traffic data
+once Phase 6 sub-phases ship; do not raise without a Platform-team
+sign-off."""
+
+# ---------------------------------------------------------------------------
 # Attachment-fetch SSRF allowlist (DoR #10). Hosts the attachment_fetch gateway
 # is permitted to retrieve email attachments from. Allowlist-first: an inbound
 # email cannot point an attachment at an arbitrary (internal) URL. Override per
