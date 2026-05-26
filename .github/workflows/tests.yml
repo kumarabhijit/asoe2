@@ -116,7 +116,11 @@ jobs:
         # --strict fails the job on any vulnerability; combined with
         # continue-on-error above, that produces a yellow X until the
         # follow-up PR flips the gate to required.
-        run: pip-audit --strict
+        # --skip-editable: don't try to look up our own local editable
+        # install (`asoe`) on PyPI — it's not published there and pip-
+        # audit would otherwise fail with "Dependency not found on
+        # PyPI" in --strict mode.
+        run: pip-audit --strict --skip-editable
 
   gitleaks:
     name: gitleaks (committed secret scan)
