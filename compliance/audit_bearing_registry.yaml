@@ -245,6 +245,13 @@ EvidenceAnchor:
     tier: contextual
     source: derived
     rationale: Per-anchor model confidence (ADR-045 spatial anchors only).
+  rendition_hash:
+    tier: contextual
+    source: derived
+    rationale: >-
+      Frozen-rendition basis (raster + dpi + renderer_version) the geometry was
+      computed against (ADR-044 §2.5; ADR-045 spatial anchors only). Position
+      provenance, never the audit unit.
 
 EmailOrderEntryAnalysisData:
   # ADR-034 Phase B — email-channel order intake. Floor evidence

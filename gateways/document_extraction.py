@@ -67,6 +67,7 @@ def verify_anchor_geometry(
             "page": None,
             "bbox": None,
             "confidence": None,
+            "rendition_hash": None,
         }
     )
 
@@ -84,11 +85,13 @@ def build_spatial_anchor(
     label: str,
     source_sha256: str,
     confidence: Optional[float] = None,
+    rendition_hash: Optional[str] = None,
 ) -> EvidenceAnchor:
     """Build a VERIFIED spatial anchor: SELECT a candidate box (never generate
     one), construct the anchor, then run the verifier. Returns a spatial anchor
     when verified, else a degraded text anchor (geometry is not required for
-    audit). This is the single place a spatial anchor is minted.
+    audit). This is the single place a spatial anchor is minted. ``rendition_hash``
+    binds the geometry to the frozen render basis it was computed on (ADR-044 §2.5).
     """
     box = select_candidate_box(candidates, chosen_id)
     anchor = EvidenceAnchor(
@@ -103,6 +106,7 @@ def build_spatial_anchor(
         page=int(box["page"]),
         bbox=[float(x) for x in box["bbox"]],
         confidence=confidence,
+        rendition_hash=rendition_hash,
     )
     return verify_anchor_geometry(anchor, rendered_text_under_box)
 

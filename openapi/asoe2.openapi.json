@@ -2729,6 +2729,17 @@
             ],
             "title": "Page"
           },
+          "rendition_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rendition Hash"
+          },
           "source_sha256": {
             "title": "Source Sha256",
             "type": "string"

@@ -780,6 +780,11 @@ class EvidenceAnchor(BaseModel):
     page: Optional[int] = None
     bbox: Optional[List[float]] = None
     confidence: Optional[float] = None
+    rendition_hash: Optional[str] = None
+    """Frozen-rendition basis the geometry was computed against (ADR-044 §2.5).
+    Spatial anchors only; binds page/bbox to the exact render (raster + dpi +
+    renderer_version) so a re-render under a moved basis can be detected. Never
+    audit-bearing — like page/bbox, position is best-effort."""
 
     @model_validator(mode="after")
     def _phase1_carries_no_geometry(self) -> "EvidenceAnchor":
@@ -787,6 +792,7 @@ class EvidenceAnchor(BaseModel):
             self.page is not None
             or self.bbox is not None
             or self.confidence is not None
+            or self.rendition_hash is not None
         ):
             raise ValueError(
                 "text_derived anchors carry no geometry (ADR-043 §2.2); "
