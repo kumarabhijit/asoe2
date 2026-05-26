@@ -432,7 +432,43 @@ ATTACHMENT_READ_URL_TTL_SECONDS: int = 300
 Short by design — the token is a single-tuple, expiring read grant, not a
 long-lived URL. This is access-scoping, not byte retention (governance)."""
 
-EXTRACTION_MAX_COST_USD_PER_PAGE: float = 0.05
+EXTRACTION_MAX_COST_USD_PER_PAGE: float = 0.05  # noqa: E501  — see below
+
+# ---------------------------------------------------------------------------
+# Retention policy (PARITY-8 — Compliance review)
+# ---------------------------------------------------------------------------
+#
+# Per-tenant TTL configuration. The default applies when a tenant has
+# not been configured explicitly; per-tenant overrides land in
+# ``_TENANT_RETENTION_TTL_DAYS``. The retention sweeper
+# (``api/retention_sweeper.py``) consults ``get_tenant_retention_ttl_days``
+# on every candidate.
+#
+# Values are deliberately conservative for preprod — a 365d default
+# protects against accidental data loss while we wire the per-tenant
+# DPA + residency check pipeline. GA defaults will be tighter per
+# customer contract.
+
+RETENTION_TTL_DAYS_DEFAULT: int = 365
+"""Default retention TTL in days when a tenant has no explicit override.
+Preprod-conservative; GA tightens per-customer contract."""
+
+_TENANT_RETENTION_TTL_DAYS: dict[str, int] = {}
+"""Per-tenant overrides. Populated at deploy time from a Container App
+secret OR a tenant-config gateway pull. The literal here is the
+deploy-default; runtime callers should treat this as immutable per
+process."""
+
+
+def get_tenant_retention_ttl_days(tenant_id: str) -> int:
+    """Return the retention TTL (days) for ``tenant_id``.
+
+    Falls back to ``RETENTION_TTL_DAYS_DEFAULT`` when no per-tenant
+    override is registered. Production deployments populate
+    ``_TENANT_RETENTION_TTL_DAYS`` from the tenant-config gateway at
+    boot time; tests can monkeypatch the dict directly.
+    """
+    return _TENANT_RETENTION_TTL_DAYS.get(tenant_id, RETENTION_TTL_DAYS_DEFAULT)
 """Per-page cost ceiling for document-AI spatial extraction (ADR-045 §2.5). A
 guardrail that circuit-breaks runaway spend on a managed-OCR / layout provider;
 the cost meter (`api.metrics.record_extraction_cost`) makes spend attributable."""
