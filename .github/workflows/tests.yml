@@ -113,14 +113,23 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Run pip-audit
-        # --strict fails the job on any vulnerability; combined with
-        # continue-on-error above, that produces a yellow X until the
-        # follow-up PR flips the gate to required.
-        # --skip-editable: don't try to look up our own local editable
-        # install (`asoe`) on PyPI — it's not published there and pip-
-        # audit would otherwise fail with "Dependency not found on
-        # PyPI" in --strict mode.
-        run: pip-audit --strict --skip-editable
+        # Build a requirements file from the installed env so pip-audit
+        # only walks PyPI-resolvable packages. Two exclusions:
+        #   * our own package (`asoe` — not published to PyPI);
+        #   * system packages picked up from the runner image (e.g.
+        #     `python-apt` on ubuntu-latest) that aren't on PyPI either.
+        # `pip freeze --exclude-editable` removes any editable install
+        # (`pip install -e .`), grep -v handles the non-editable cases.
+        # Then `pip-audit -r` audits the explicit list with --strict so
+        # any CVE on a real PyPI dep fails the (advisory) job.
+        run: |
+          python -m pip freeze --exclude-editable \
+            | grep -v -E '^(asoe|python-apt|pip-audit)==' \
+            > /tmp/audit-requirements.txt
+          echo "--- audit set ---"
+          cat /tmp/audit-requirements.txt
+          echo "--- pip-audit ---"
+          pip-audit --strict -r /tmp/audit-requirements.txt
 
   gitleaks:
     name: gitleaks (committed secret scan)
