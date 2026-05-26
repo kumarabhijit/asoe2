@@ -27,6 +27,12 @@ from api.app import _resolve_cors_config, _validate_cors_regex
     r"^.+$",
     r"https?://.*",       # any URL — no host constraint
     r".*\.example\.com",   # leading wildcard makes it accept anything
+    # SaaS multi-tenant footgun: regex matches the legitimate Vercel
+    # FQDN AND any attacker-controlled Vercel subdomain (Review 1
+    # finding).
+    r"^https?://.*\.vercel\.app$",
+    r"^https://.*\.azurecontainerapps\.io$",
+    r"^https://[\w-]+\.azurewebsites\.net$",
 ])
 def test_validator_rejects_obviously_unsafe_regex(bad_regex):
     with pytest.raises(RuntimeError) as exc_info:

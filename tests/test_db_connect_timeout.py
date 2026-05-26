@@ -61,6 +61,17 @@ def test_invalid_env_override_falls_back_to_default(monkeypatch):
     assert "connect_timeout=5" in out
 
 
+def test_pathological_env_override_capped_at_ceiling(monkeypatch):
+    # Review 1 finding: an operator typo like 999999 must not recreate the
+    # multi-minute hang we're guarding against. The injected timeout is
+    # capped at _MAX_POSTGRES_CONNECT_TIMEOUT_S (60s).
+    monkeypatch.setenv("ASOE_POSTGRES_CONNECT_TIMEOUT_S", "999999")
+    url = "postgresql://user:pass@host:5432/db"
+    out = _ensure_connect_timeout(url)
+    assert "connect_timeout=60" in out
+    assert "999999" not in out
+
+
 def test_postgres_adapter_applies_timeout(monkeypatch):
     """The adapter constructor must run the URL through the timeout
     helper so a deploy that forgot to set it doesn't hang on outage."""

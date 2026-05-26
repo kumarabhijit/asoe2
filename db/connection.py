@@ -248,10 +248,13 @@ class PostgresAdapter:
 # ---------------------------------------------------------------------------
 
 _DEFAULT_POSTGRES_CONNECT_TIMEOUT_S = 5
-"""Default connect_timeout (seconds) for the Postgres driver — PARITY-0
-Phase 0a (Azure/SRE review). A Postgres outage with no timeout otherwise
-hangs the request for ~30s and cascades into readiness-probe failure.
-Overridable via the ``ASOE_POSTGRES_CONNECT_TIMEOUT_S`` env var."""
+_MAX_POSTGRES_CONNECT_TIMEOUT_S = 60
+"""Default + ceiling for connect_timeout (seconds) on the Postgres driver
+— PARITY-0 Phase 0a (Azure/SRE review). A Postgres outage with no timeout
+hangs the request for ~30s+ and cascades into readiness-probe failure.
+Overridable via ``ASOE_POSTGRES_CONNECT_TIMEOUT_S``, but capped at 60s so
+a pathological override (operator types 999999) doesn't recreate the
+hang we're guarding against (Review 1 finding)."""
 
 
 def _ensure_connect_timeout(url: "Optional[str]") -> "Optional[str]":
@@ -269,6 +272,9 @@ def _ensure_connect_timeout(url: "Optional[str]") -> "Optional[str]":
             seconds = _DEFAULT_POSTGRES_CONNECT_TIMEOUT_S
     except ValueError:
         seconds = _DEFAULT_POSTGRES_CONNECT_TIMEOUT_S
+    # Cap at the ceiling so a misconfigured deploy can't reintroduce a
+    # multi-minute hang on Postgres outage.
+    seconds = min(seconds, _MAX_POSTGRES_CONNECT_TIMEOUT_S)
     sep = "&" if "?" in url else "?"
     return f"{url}{sep}connect_timeout={seconds}"
 

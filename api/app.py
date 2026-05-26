@@ -89,12 +89,35 @@ def _resolve_cors_config(env: dict[str, str] | None = None) -> tuple[list[str], 
 
 # Sentinel hosts the regex must NOT match. If the regex would accept these,
 # it's permissive enough that an attacker-controlled domain would slip
-# through — refuse to boot. Pinned to non-routable example domains.
+# through — refuse to boot.
+#
+# Two probe families:
+#   1. Non-routable example.* / .invalid hosts catch unconstrained `.*`
+#      and `https?://.*` patterns.
+#   2. Subdomains of well-known SaaS multi-tenant domains (Vercel,
+#      Azure Container Apps, Azure App Service, Heroku, GitHub Pages,
+#      AWS CloudFront) catch the "wildcard over a shared SaaS host"
+#      footgun — e.g. `^https?://.*\.vercel\.app$` allows ANY Vercel app
+#      to call this API, including an attacker's. The legitimate
+#      preprod URL must be pinned to a specific subdomain, not a TLD
+#      wildcard.
+#
+# A custom domain like `^https://[\w-]+\.preprod\.example\.com$` will
+# legitimately accept `attacker.preprod.example.com` — we can't catch
+# that without knowing operator intent. Documented limitation: the
+# operator owns the customer-domain wildcard surface; we only catch the
+# SaaS multi-tenant gotchas.
 _CORS_PERMISSIVE_PROBES: tuple[str, ...] = (
     "https://attacker.example",
     "https://attacker.example.com",
     "https://anything-random-xyz.example.org",
     "http://evil.invalid",
+    "https://attacker.vercel.app",
+    "https://attacker.azurecontainerapps.io",
+    "https://attacker.azurewebsites.net",
+    "https://attacker.herokuapp.com",
+    "https://attacker.github.io",
+    "https://attacker.cloudfront.net",
 )
 
 

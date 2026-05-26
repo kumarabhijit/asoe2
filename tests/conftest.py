@@ -9,6 +9,14 @@ import os
 # can set ASOE_ENV. Pin the env at conftest-import-time so collection
 # uses the sandbox dispatch path. The per-test fixture still re-pins so
 # tests that monkeypatch ASOE_ENV=preprod/production keep working.
+#
+# WARNING for test authors (Review 1 finding): the module-level
+# `app = create_app()` is now a SANDBOX-flavoured app. Do NOT import it
+# directly in any test that monkeypatches ASOE_ENV — the FastAPI app is
+# already constructed under sandbox and the env change won't re-route
+# its gateway registry. Always re-call `create_app()` fresh after the
+# monkeypatch (or use `importlib.reload(api.app)` if you also need to
+# reset module-level constants like REFRESH_TOKEN_EXPIRE_SECONDS).
 os.environ.setdefault("ASOE_ENV", "sandbox")
 
 import pytest
