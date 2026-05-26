@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
@@ -35,9 +36,46 @@ GATEWAY_NAME = "document_extraction"
 
 
 def _normalize(s: Any) -> str:
-    """Same normalisation as the text-anchor locate key (collapse whitespace +
-    casefold) so the verifier compares like-for-like."""
-    return " ".join(str(s).split()).casefold()
+    """Shared text-normalisation contract — PARITY-7 (ML review).
+
+    Used by:
+      * the spatial verifier when matching anchor text → OCR span
+      * any code path comparing model-extracted text to ground truth
+
+    The contract MUST match AzureDI's pre-OCR normalisation, otherwise
+    the verifier silently degrades to text-only mode on the first
+    document containing a ligature or soft hyphen.
+
+    Steps (order matters):
+      1. NFKC normalisation — composes accents AND expands compatibility
+         ligatures (U+FB01 "ﬁ" → "fi", U+FB02 "ﬂ" → "fl", …).
+      2. Soft-hyphen (U+00AD) stripped — these are invisible line-break
+         hints; AzureDI drops them on extraction.
+      3. Whitespace collapsed to single spaces.
+      4. Casefold for case-insensitive comparison.
+    """
+    import unicodedata
+    if s is None:
+        return ""
+    text = unicodedata.normalize("NFKC", str(s))
+    text = text.replace("­", "")  # soft hyphen
+    text = " ".join(text.split())
+    return text.casefold()
+
+
+def resolve_model_id() -> str:
+    """Return the AzureDI model id this deploy is pinned to.
+
+    Read from ``ASOE_DOCUMENT_EXTRACTION_MODEL_ID``. A model bump
+    requires a deliberate env-var change AND a fresh golden-set rerun
+    (ML review): we never want AzureDI's silent rolling upgrade to
+    move bounding boxes on us mid-quarter.
+
+    Default ``prebuilt-invoice`` is the safe baseline established by
+    Decision Q2 — prebuilt invoice + custom post-process. Phase 7
+    canary acceptance gates any upgrade to custom-extract.
+    """
+    return (os.getenv("ASOE_DOCUMENT_EXTRACTION_MODEL_ID") or "prebuilt-invoice").strip()
 
 
 def select_candidate_box(candidates: Sequence[Dict[str, Any]], chosen_id: int) -> Dict[str, Any]:

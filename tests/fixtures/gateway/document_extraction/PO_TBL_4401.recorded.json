@@ -1,0 +1,83 @@
+{
+  "case": "PO_TBL_4401",
+  "sha256": "d6d6d6d6d6d6d6d6d6d6d6d6d6d6d6d6d6d6d6d6d6d6d6d6d6d6d6d6d6d6d6d6",
+  "model_id": "recorded-doctr-v0",
+  "prompt_hash": "doctr-candidate-proposer-v0",
+  "page_count": 1,
+  "candidates": [
+    {
+      "candidate_id": 1,
+      "page": 1,
+      "bbox": [
+        0.05,
+        0.3,
+        0.95,
+        0.34
+      ],
+      "text": "001  BEV-COLA-12PK  Cola 12pk  480  CS  $8.64  $4147.20"
+    },
+    {
+      "candidate_id": 2,
+      "page": 1,
+      "bbox": [
+        0.05,
+        0.34,
+        0.95,
+        0.38
+      ],
+      "text": "002  BEV-DIET-12PK  Diet Cola 12pk  240  CS  $8.64  $2073.60"
+    },
+    {
+      "candidate_id": 3,
+      "page": 1,
+      "bbox": [
+        0.05,
+        0.38,
+        0.95,
+        0.42
+      ],
+      "text": "003  BEV-SPRT-12PK  Lemon-Lime 12pk  120  CS  $8.64  $1036.80"
+    },
+    {
+      "candidate_id": 4,
+      "page": 1,
+      "bbox": [
+        0.05,
+        0.42,
+        0.95,
+        0.46
+      ],
+      "text": "004  BEV-WATER-24PK  Spring Water 24pk  600  CS  $4.20  $2520.00"
+    }
+  ],
+  "fields": [
+    {
+      "supports_ref": "order_entry.line_001.material",
+      "text": "001  BEV-COLA-12PK  Cola 12pk  480  CS  $8.64  $4147.20",
+      "label": "material",
+      "chosen_id": 1,
+      "confidence": 0.89
+    },
+    {
+      "supports_ref": "order_entry.line_002.material",
+      "text": "002  BEV-DIET-12PK  Diet Cola 12pk  240  CS  $8.64  $2073.60",
+      "label": "material",
+      "chosen_id": 2,
+      "confidence": 0.89
+    },
+    {
+      "supports_ref": "order_entry.line_003.material",
+      "text": "003  BEV-SPRT-12PK  Lemon-Lime 12pk  120  CS  $8.64  $1036.80",
+      "label": "material",
+      "chosen_id": 3,
+      "confidence": 0.89
+    },
+    {
+      "supports_ref": "order_entry.line_004.material",
+      "text": "004  BEV-WATER-24PK  Spring Water 24pk  600  CS  $4.20  $2520.00",
+      "label": "material",
+      "chosen_id": 4,
+      "confidence": 0.89
+    }
+  ]
+}

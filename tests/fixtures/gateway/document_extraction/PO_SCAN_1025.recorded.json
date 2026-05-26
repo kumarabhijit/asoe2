@@ -1,0 +1,65 @@
+{
+  "case": "PO_SCAN_1025",
+  "sha256": "b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3",
+  "model_id": "recorded-doctr-v0",
+  "prompt_hash": "doctr-candidate-proposer-v0",
+  "page_count": 1,
+  "candidates": [
+    {
+      "candidate_id": 1,
+      "page": 1,
+      "bbox": [
+        0.06,
+        0.09,
+        0.3,
+        0.13
+      ],
+      "text": "P.O. #1025"
+    },
+    {
+      "candidate_id": 2,
+      "page": 1,
+      "bbox": [
+        0.06,
+        0.2,
+        0.42,
+        0.24
+      ],
+      "text": "ATTN: Receiving Dock 4"
+    },
+    {
+      "candidate_id": 3,
+      "page": 1,
+      "bbox": [
+        0.06,
+        0.32,
+        0.5,
+        0.36
+      ],
+      "text": "Crackers Salted 16oz x 240"
+    }
+  ],
+  "fields": [
+    {
+      "supports_ref": "order_entry.customer_po",
+      "text": "P.O. #1025",
+      "label": "customer_po",
+      "chosen_id": 1,
+      "confidence": 0.92
+    },
+    {
+      "supports_ref": "order_entry.ship_to",
+      "text": "ATTN: Receiving Dock 4",
+      "label": "ship_to",
+      "chosen_id": 2,
+      "confidence": 0.92
+    },
+    {
+      "supports_ref": "order_entry.material",
+      "text": "Crackers Salted 16oz x 240",
+      "label": "material",
+      "chosen_id": 3,
+      "confidence": 0.92
+    }
+  ]
+}

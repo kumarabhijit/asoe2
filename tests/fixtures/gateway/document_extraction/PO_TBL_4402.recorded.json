@@ -1,0 +1,101 @@
+{
+  "case": "PO_TBL_4402",
+  "sha256": "d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7",
+  "model_id": "recorded-doctr-v0",
+  "prompt_hash": "doctr-candidate-proposer-v0",
+  "page_count": 1,
+  "candidates": [
+    {
+      "candidate_id": 1,
+      "page": 1,
+      "bbox": [
+        0.05,
+        0.35,
+        0.8,
+        0.39
+      ],
+      "text": "Item-1  SNK-PRTZ-8CT  qty=144  unit=$5.20"
+    },
+    {
+      "candidate_id": 2,
+      "page": 1,
+      "bbox": [
+        0.05,
+        0.39,
+        0.8,
+        0.43
+      ],
+      "text": "Item-2  SNK-NUTS-6CT  qty=96   unit=$11.80"
+    },
+    {
+      "candidate_id": 3,
+      "page": 1,
+      "bbox": [
+        0.05,
+        0.43,
+        0.8,
+        0.47
+      ],
+      "text": "Item-3  SNK-MIX-4CT   qty=60   unit=$14.25"
+    },
+    {
+      "candidate_id": 4,
+      "page": 1,
+      "bbox": [
+        0.05,
+        0.47,
+        0.8,
+        0.51
+      ],
+      "text": "Item-4  SNK-CHIP-12CT qty=180  unit=$9.40"
+    },
+    {
+      "candidate_id": 5,
+      "page": 1,
+      "bbox": [
+        0.05,
+        0.51,
+        0.8,
+        0.55
+      ],
+      "text": "Item-5  SNK-POP-16CT  qty=72   unit=$7.60"
+    }
+  ],
+  "fields": [
+    {
+      "supports_ref": "order_entry.line_001.material",
+      "text": "Item-1  SNK-PRTZ-8CT  qty=144  unit=$5.20",
+      "label": "material",
+      "chosen_id": 1,
+      "confidence": 0.89
+    },
+    {
+      "supports_ref": "order_entry.line_002.material",
+      "text": "Item-2  SNK-NUTS-6CT  qty=96   unit=$11.80",
+      "label": "material",
+      "chosen_id": 2,
+      "confidence": 0.89
+    },
+    {
+      "supports_ref": "order_entry.line_003.material",
+      "text": "Item-3  SNK-MIX-4CT   qty=60   unit=$14.25",
+      "label": "material",
+      "chosen_id": 3,
+      "confidence": 0.89
+    },
+    {
+      "supports_ref": "order_entry.line_004.material",
+      "text": "Item-4  SNK-CHIP-12CT qty=180  unit=$9.40",
+      "label": "material",
+      "chosen_id": 4,
+      "confidence": 0.89
+    },
+    {
+      "supports_ref": "order_entry.line_005.material",
+      "text": "Item-5  SNK-POP-16CT  qty=72   unit=$7.60",
+      "label": "material",
+      "chosen_id": 5,
+      "confidence": 0.89
+    }
+  ]
+}

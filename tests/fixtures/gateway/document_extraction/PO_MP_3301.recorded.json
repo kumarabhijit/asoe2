@@ -1,0 +1,83 @@
+{
+  "case": "PO_MP_3301",
+  "sha256": "c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4",
+  "model_id": "recorded-doctr-v0",
+  "prompt_hash": "doctr-candidate-proposer-v0",
+  "page_count": 3,
+  "candidates": [
+    {
+      "candidate_id": 1,
+      "page": 1,
+      "bbox": [
+        0.08,
+        0.06,
+        0.5,
+        0.1
+      ],
+      "text": "PO 3301 (page 1 of 3)"
+    },
+    {
+      "candidate_id": 2,
+      "page": 2,
+      "bbox": [
+        0.08,
+        0.4,
+        0.6,
+        0.44
+      ],
+      "text": "Line 12: BEV-WATER-24PK qty 720"
+    },
+    {
+      "candidate_id": 3,
+      "page": 2,
+      "bbox": [
+        0.08,
+        0.48,
+        0.6,
+        0.52
+      ],
+      "text": "Line 13: BEV-WATER-12PK qty 480"
+    },
+    {
+      "candidate_id": 4,
+      "page": 3,
+      "bbox": [
+        0.55,
+        0.85,
+        0.92,
+        0.9
+      ],
+      "text": "Order Total: $24,820.00"
+    }
+  ],
+  "fields": [
+    {
+      "supports_ref": "order_entry.customer_po",
+      "text": "PO 3301 (page 1 of 3)",
+      "label": "customer_po",
+      "chosen_id": 1,
+      "confidence": 0.93
+    },
+    {
+      "supports_ref": "order_entry.line_012.material",
+      "text": "Line 12: BEV-WATER-24PK qty 720",
+      "label": "material",
+      "chosen_id": 2,
+      "confidence": 0.93
+    },
+    {
+      "supports_ref": "order_entry.line_013.material",
+      "text": "Line 13: BEV-WATER-12PK qty 480",
+      "label": "material",
+      "chosen_id": 3,
+      "confidence": 0.93
+    },
+    {
+      "supports_ref": "order_entry.total",
+      "text": "Order Total: $24,820.00",
+      "label": "total",
+      "chosen_id": 4,
+      "confidence": 0.93
+    }
+  ]
+}
