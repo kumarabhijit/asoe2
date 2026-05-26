@@ -85,9 +85,17 @@ param pgAdminPassword string
 @secure()
 param anthropicApiKey string = 'placeholder-set-via-set-secrets-sh'
 
-@description('JWT secret for ASOE auth. Placeholder until set-secrets.sh is run.')
+@description('JWT secret for ASOE auth (HS256, seed mode). Placeholder until set-secrets.sh is run. PARITY-4: rotated independently of the attachment signing key.')
 @secure()
 param asoeJwtSecret string = 'placeholder-set-via-set-secrets-sh'
+
+@description('Attachment capability-token signing key (api/attachment_read_token.py). PARITY-4: independent of ASOE_JWT_SECRET so rotating attachment-URL signing does NOT invalidate auth tokens. Placeholder until set-secrets.sh is run.')
+@secure()
+param asoeAttachmentSigningKey string = 'placeholder-set-via-set-secrets-sh'
+
+@description('Attachment signing key rotation overlap. When operator rotates ASOE_ATTACHMENT_SIGNING_KEY, the old value is moved here for the overlap window so tokens minted just before rotation still verify until they expire. Empty disables.')
+@secure()
+param asoeAttachmentSigningKeySecondary string = ''
 
 @description('PostgreSQL connection string. Placeholder until set-secrets.sh is run.')
 @secure()
@@ -181,6 +189,9 @@ var uiAppName        = '${namePrefix}ui'
 var uamiName         = '${namePrefix}identity'
 var prometheusAppName = '${namePrefix}prom'
 var grafanaAppName    = '${namePrefix}graf'
+// PARITY-4 — Key Vault. Globally unique (Azure-wide) so we anchor on
+// the namePrefix; the 24-char vault-name cap is the binding constraint.
+var keyVaultName     = take('${namePrefix}kv', 24)
 
 var commonTags = {
   project: 'asoe'
@@ -463,6 +474,66 @@ resource redisDatabase 'Microsoft.Cache/redisEnterprise/databases@2024-10-01' = 
   }
 }
 
+// ────────────────────────────────────────────────────────── Azure Key Vault
+//
+// PARITY-4 (per Decision Q4 + Security/Compliance review):
+//   * RBAC mode — no access policies; least-privilege via role
+//     assignments only.
+//   * Soft-delete + purge protection — 90-day retention so a
+//     mis-clicked delete cannot stem the audit trail or strand a
+//     rotating key.
+//   * Secrets land in Key Vault; Container App pulls via
+//     secretref → Key Vault reference (the secret URI replaces the
+//     literal value at deploy time).
+//
+// First-deploy bootstrap: the secrets are still written to the
+// Container App as literal values from the `@secure()` bicep params
+// (so a fresh deploy stands up without a manual Key Vault round trip);
+// the GA-readiness migration switches the Container App secret
+// `keyVaultUrl` so the literal values are dropped.
+resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
+  name: keyVaultName
+  location: location
+  tags: commonTags
+  properties: {
+    enabledForDeployment: false
+    enabledForTemplateDeployment: false
+    enabledForDiskEncryption: false
+    enableRbacAuthorization: true
+    enableSoftDelete: true
+    softDeleteRetentionInDays: 90
+    enablePurgeProtection: true
+    tenantId: subscription().tenantId
+    sku: {
+      family: 'A'
+      name: 'standard'
+    }
+    publicNetworkAccess: 'Enabled' // first-deploy convenience; GA: lock down to VNet.
+    networkAcls: {
+      defaultAction: 'Allow'
+      bypass: 'AzureServices'
+    }
+  }
+}
+
+// Grant the Container App's UAMI the Key Vault Secrets User role so
+// the Container App can resolve `keyVaultUrl`-style secret refs once
+// they replace the literal `value:` entries above.
+resource kvSecretsUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: keyVault
+  // Role definition id for "Key Vault Secrets User"
+  // (4633458b-17de-408a-b874-0445c86b69e6).
+  name: guid(keyVault.id, uami.id, '4633458b-17de-408a-b874-0445c86b69e6')
+  properties: {
+    principalId: uami.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      '4633458b-17de-408a-b874-0445c86b69e6'
+    )
+  }
+}
+
 // ───────────────────────────────────────── Container Apps Managed Environment
 
 resource cae 'Microsoft.App/managedEnvironments@2024-03-01' = {
@@ -563,6 +634,17 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (deployContainerApp) 
           name: 'asoe-jwt-secret'
           value: asoeJwtSecret
         }
+        // PARITY-4 — separate signing key for attachment capability
+        // tokens (api/attachment_read_token.py). Independently
+        // rotatable from asoe-jwt-secret; see docs/ops/secrets-rotation.md.
+        {
+          name: 'asoe-attachment-signing-key'
+          value: asoeAttachmentSigningKey
+        }
+        {
+          name: 'asoe-attachment-signing-key-secondary'
+          value: asoeAttachmentSigningKeySecondary
+        }
         {
           name: 'database-url'
           value: databaseUrl
@@ -609,6 +691,11 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (deployContainerApp) 
             { name: 'PORT',               value: '8000' }
             { name: 'ANTHROPIC_API_KEY',  secretRef: 'anthropic-api-key' }
             { name: 'ASOE_JWT_SECRET',    secretRef: 'asoe-jwt-secret' }
+            // PARITY-4 — distinct signing key for attachment
+            // capability tokens. Rotating attachment URL signing must
+            // NOT invalidate auth sessions.
+            { name: 'ASOE_ATTACHMENT_SIGNING_KEY', secretRef: 'asoe-attachment-signing-key' }
+            { name: 'ASOE_ATTACHMENT_SIGNING_KEY_SECONDARY', secretRef: 'asoe-attachment-signing-key-secondary' }
             { name: 'DATABASE_URL',       secretRef: 'database-url' }
             { name: 'REDIS_URL',          secretRef: 'redis-url' }
             // LangFuse (observability/langfuse_sink.py) — when all three
