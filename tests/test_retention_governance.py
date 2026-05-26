@@ -77,6 +77,28 @@ class TestResidencyCheck:
             )
         assert exc.value.status_code in (400, 403, 422)
 
+    def test_residency_violation_surfaces_even_when_sweeper_disabled(
+        self, monkeypatch,
+    ):
+        """Regression for the code-review CRITICAL finding: a
+        residency violation MUST surface (422) even when the sweeper
+        is disabled — the diagnostic order should match the
+        blast-radius hierarchy ("wrong region" > "not enabled")."""
+        monkeypatch.delenv("RETENTION_SWEEPER_ENABLED", raising=False)
+        from api.retention_sweeper import RetentionSweeper
+        from api.errors import ASOEError
+
+        sweeper = RetentionSweeper()
+        with pytest.raises(ASOEError) as exc:
+            sweeper.commit_with_residency_check(
+                tenant_id="tenant-eu-strict",
+                tenant_residency_region="eu-west-1",
+                target_storage_region="us-east-2",
+                items=[],
+            )
+        assert exc.value.code == "RESIDENCY_VIOLATION"
+        assert exc.value.status_code == 422
+
     def test_sweeper_accepts_matching_residency(self, monkeypatch):
         # Sweeper is disabled by default; flipping the kill-switch is
         # part of the operator opt-in.

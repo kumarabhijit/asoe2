@@ -96,20 +96,27 @@ def test_spatial_extraction_meets_eval_gate_on_golden_set():
     mean_containment = mean(containments)
     page_acc = page_accuracy(all_preds, all_gold)
     halluc = mean(per_row_halluc) if per_row_halluc else 0.0
-    # PARITY-7 — same per-row aggregation reasoning as halluc above:
-    # confidence_ece pairs preds vs gold via a ref→gold dict, which
-    # collapses on repeated refs across rows. Compute ECE per-row and
-    # weighted-mean by anchor count for the aggregate.
-    per_row_ece: list[tuple[float, int]] = []
-    for row in rows:
-        preds = _predict(row)
-        row_gold = row["fields"]
-        per_row_ece.append(
-            (confidence_ece([p.model_dump() if hasattr(p, "model_dump") else p for p in preds], row_gold),
-             len(preds))
+    # PARITY-7 — ECE is a dataset-level metric (bins of confidence vs
+    # correctness across the full population), not a per-row mean.
+    # The pre-built all_preds / all_gold arrays are index-aligned, so
+    # we can compute correctness without re-pairing by ref — that side-
+    # steps the ref-collision bug in confidence_ece's by_ref dict and
+    # still gives a statistically valid bin-level calibration check.
+    from evals.metrics import expected_calibration_error
+    confidences: list[float] = []
+    correct: list[bool] = []
+    for p, g in zip(all_preds, all_gold):
+        conf = p.get("confidence")
+        bbox = p.get("bbox")
+        if conf is None or bbox is None:
+            continue
+        confidences.append(float(conf))
+        ok = (
+            p.get("page") == g.get("page")
+            and containment(bbox, g["bbox"]) >= 1.0
         )
-    total_anchors = sum(n for _, n in per_row_ece) or 1
-    ece = sum(e * n for e, n in per_row_ece) / total_anchors
+        correct.append(bool(ok))
+    ece = expected_calibration_error(confidences, correct, n_bins=10)
 
     assert mean_containment >= _THRESHOLDS["containment_min"], (
         f"containment {mean_containment:.3f} < {_THRESHOLDS['containment_min']}"

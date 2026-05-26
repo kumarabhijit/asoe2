@@ -151,15 +151,11 @@ class RetentionSweeper:
         defence-in-depth check that fails loud rather than silently
         deleting from the wrong region.
         """
-        if not is_enabled():
-            raise ASOEError(
-                code="RETENTION_SWEEPER_DISABLED",
-                message=(
-                    "Retention sweeper is disabled. Set "
-                    "RETENTION_SWEEPER_ENABLED=true to opt in."
-                ),
-                status_code=403,
-            )
+        # Residency is a system invariant — surface it first even when
+        # the sweeper is disabled. An operator inspecting the error
+        # needs to see "you're about to delete from the wrong region"
+        # before "the sweeper is disabled"; that diagnostic order
+        # matches the blast-radius hierarchy.
         if target_storage_region != tenant_residency_region:
             logger.error(
                 "retention residency violation tenant=%s declared=%s target=%s",
@@ -173,6 +169,15 @@ class RetentionSweeper:
                     f"{tenant_residency_region}."
                 ),
                 status_code=422,
+            )
+        if not is_enabled():
+            raise ASOEError(
+                code="RETENTION_SWEEPER_DISABLED",
+                message=(
+                    "Retention sweeper is disabled. Set "
+                    "RETENTION_SWEEPER_ENABLED=true to opt in."
+                ),
+                status_code=403,
             )
         return CommitResult(
             tenant_id=tenant_id,
