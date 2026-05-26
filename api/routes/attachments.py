@@ -138,3 +138,63 @@ async def read_attachment_by_token(token: str) -> Response:
             status_code=404,
         )
     return _attachment_response(record)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# PARITY-0.5 — erasure certificate endpoint.
+# A regulator (or a disputing customer) can demand proof that a customer
+# document was deleted. The certificate returns the PII-free tombstone
+# alongside the hash-chained audit-event reference; the chain itself
+# (ADR-023) is the tamper-evident proof, not a wet signature.
+# ──────────────────────────────────────────────────────────────────────────
+
+@router.get(
+    "/attachments/{attachment_id}/erasure-certificate",
+    dependencies=[Depends(require_role("manager", "admin"))],
+)
+async def attachment_erasure_certificate(
+    attachment_id: str,
+    tenant_id: str = Depends(get_tenant_id),
+    user: AuthenticatedUser = Depends(get_current_user),  # noqa: ARG001
+) -> dict:
+    """Return the tombstone + audit-chain proof for an erased attachment.
+
+    The PII-free tombstone is fetched from the tenant's audit log (the
+    `ATTACHMENT_ERASED` event the erase routed there in PARITY-0.5).
+    Tenant-scoped: a tenant can never read another tenant's certificate.
+    404 when no erasure has been logged for the attachment id.
+    """
+    from api.store import exception_store
+
+    log = exception_store.get_audit_log(tenant_id)
+    event = next(
+        (
+            e for e in reversed(log)  # most recent erasure wins (idempotent)
+            if e.get("policy_key") == "ATTACHMENT_ERASED"
+            and (e.get("new_value") or {}).get("attachment_id") == attachment_id
+        ),
+        None,
+    )
+    if event is None:
+        raise ASOEError(
+            code="NOT_FOUND",
+            message=f"No erasure certificate found for attachment {attachment_id}.",
+            status_code=404,
+        )
+    chain_ok, _break_idx = exception_store.verify_audit_chain(tenant_id)
+    tombstone = event.get("new_value") or {}
+    return {
+        "attachment_id": attachment_id,
+        "tenant_id": tenant_id,
+        "tombstone": tombstone,
+        "audit_event": {
+            "event_id": event.get("id"),
+            "policy_key": event.get("policy_key"),
+            "event_hash": event.get("event_hash"),
+            "prev_hash": event.get("prev_hash"),
+            "created_at": event.get("created_at"),
+            "changed_by": event.get("changed_by"),
+            "change_reason": event.get("change_reason"),
+        },
+        "chain_verified": chain_ok,
+    }

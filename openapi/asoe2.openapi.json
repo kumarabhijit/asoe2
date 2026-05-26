@@ -6975,6 +6975,67 @@
         ]
       }
     },
+    "/api/v1/attachments/{attachment_id}/erasure-certificate": {
+      "get": {
+        "description": "Return the tombstone + audit-chain proof for an erased attachment.\n\nThe PII-free tombstone is fetched from the tenant's audit log (the\n`ATTACHMENT_ERASED` event the erase routed there in PARITY-0.5).\nTenant-scoped: a tenant can never read another tenant's certificate.\n404 when no erasure has been logged for the attachment id.",
+        "operationId": "attachment_erasure_certificate_api_v1_attachments__attachment_id__erasure_certificate_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attachment_id",
+            "required": true,
+            "schema": {
+              "title": "Attachment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Attachment Erasure Certificate Api V1 Attachments  Attachment Id  Erasure Certificate Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Attachment Erasure Certificate",
+        "tags": [
+          "attachments"
+        ]
+      }
+    },
     "/api/v1/cases": {
       "get": {
         "operationId": "list_cases_api_v1_cases_get",
