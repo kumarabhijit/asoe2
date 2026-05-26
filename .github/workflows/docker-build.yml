@@ -85,7 +85,43 @@ jobs:
           context: .
           file: ${{ matrix.dockerfile }}
           push: false
-          load: false
+          # PARITY-0 Phase 0a (Azure/SRE review): load the api/core images
+          # into the local Docker daemon so trivy can scan them. We skip
+          # inference (continue-on-error matrix entry; image doesn't build
+          # cleanly yet) and ui (built in the asoe-ui repo).
+          load: ${{ matrix.image == 'api' || matrix.image == 'core' }}
           tags: asoe-${{ matrix.image }}:ci
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,scope=${{ matrix.image }},mode=max
+
+      # PARITY-0 Phase 0a security gate: image vulnerability scan
+      # (Security + Azure/SRE review). Trivy fails on CRITICAL/HIGH CVEs
+      # in OS packages + application deps. Advisory for now
+      # (continue-on-error) — promote to required once the baseline is
+      # clean.
+      - name: Run Trivy image scan
+        if: matrix.image == 'api' || matrix.image == 'core'
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: asoe-${{ matrix.image }}:ci
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+          vuln-type: 'os,library'
+
+      # PARITY-0 Phase 0a acceptance #5: non-root container verified at
+      # CI time. Run the image and assert the default user isn't root.
+      # Strict (no continue-on-error) — the Dockerfile.api / .core both
+      # already create + switch to a non-root user, so this must hold.
+      - name: Verify image runs as non-root
+        if: matrix.image == 'api' || matrix.image == 'core'
+        run: |
+          USER_NAME=$(docker run --rm --entrypoint sh asoe-${{ matrix.image }}:ci -c whoami)
+          USER_UID=$(docker run --rm --entrypoint sh asoe-${{ matrix.image }}:ci -c 'id -u')
+          echo "Image runs as user=${USER_NAME} uid=${USER_UID}"
+          if [ "${USER_NAME}" = "root" ] || [ "${USER_UID}" = "0" ]; then
+            echo "::error::Container runs as root — fix Dockerfile.${{ matrix.image }} to USER non-root"
+            exit 1
+          fi
