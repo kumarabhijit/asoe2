@@ -427,20 +427,33 @@ _erasure_lock = threading.Lock()
 _erasure_tombstones: Dict[tuple, Dict] = {}
 
 
-def erase_attachment(backend, *, tenant_id: str, attachment_id: str) -> Optional[Dict]:
+def erase_attachment(
+    backend,
+    *,
+    tenant_id: str,
+    attachment_id: str,
+    erased_by: Optional[str] = None,
+    reason: Optional[str] = None,
+) -> Optional[Dict]:
     """Erase a stored attachment's bytes + metadata and leave a PII-free
-    tombstone (ADR-044 §2.4).
+    tombstone (ADR-044 §2.4). PARITY-0.5: the tombstone is now ALSO routed
+    into the immutable hash-chained audit log (ADR-023) so the erasure can
+    be proved to a regulator after the fact.
 
-    The tombstone keeps the identity + content **hash** (so the audit trail can
-    still prove a decision was made against content of hash X) but NEVER the
-    content or the filename (which may itself be PII). Production routes the
-    tombstone into the immutable audit chain (ADR-023); this module-level
-    registry is the in-process analog the erasure contract runs against. Returns
-    the tombstone, or None when there was nothing to erase.
+    The tombstone keeps the identity + content **hash** (so the audit trail
+    can still prove a decision was made against content of hash X) but
+    NEVER the content or the filename (which may itself be PII). The
+    in-process `_erasure_tombstones` registry stays as a fast lookup; the
+    audit chain is the source of truth. Returns the tombstone, or None
+    when there was nothing to erase (no spurious audit row in that case).
+
+    ``erased_by`` identifies the actor — a user sub for operator-initiated
+    erasures, a `system:*` sentinel for scheduled retention sweeps. Recorded
+    on the audit row.
     """
     record = backend.get(tenant_id, attachment_id)
-    backend.delete(tenant_id, attachment_id)
     if record is None:
+        # No-op — never write a spurious audit event for a non-existent id.
         return None
     tombstone: Dict = {
         "tenant_id": record.tenant_id,
@@ -450,7 +463,38 @@ def erase_attachment(backend, *, tenant_id: str, attachment_id: str) -> Optional
         "size_bytes": record.size_bytes,
         "mime_type": record.mime_type,
         "erased_at": _now(),
+        "erased_by": erased_by or "system:retention-sweeper",
+        "reason": reason,
     }
+    # Write the audit row FIRST so the chain has the proof of erasure
+    # before the bytes are gone. If the chain write fails (e.g. DB
+    # outage), we don't proceed with the delete — the operator can retry.
+    try:
+        from api.store import exception_store
+        exception_store.log_audit_event(
+            tenant_id=tenant_id,
+            policy_key="ATTACHMENT_ERASED",
+            previous_value={
+                "attachment_id": record.id,
+                "sha256": record.sha256,
+                "case_id": record.case_id,
+                "size_bytes": record.size_bytes,
+                "mime_type": record.mime_type,
+            },
+            new_value=tombstone,
+            changed_by=tombstone["erased_by"],
+            change_reason=reason or "right-to-erasure",
+        )
+    except Exception:  # pragma: no cover - chain-write failure is a hard stop
+        logger.exception(
+            "erase_attachment: audit-chain write failed for "
+            "tenant=%s attachment=%s — aborting erase to preserve the "
+            "proof-of-erasure invariant; bytes still in place.",
+            tenant_id, attachment_id,
+        )
+        raise
+    # Chain write succeeded — safe to delete the bytes.
+    backend.delete(tenant_id, attachment_id)
     with _erasure_lock:
         _erasure_tombstones[(tenant_id, attachment_id)] = tombstone
     return tombstone
