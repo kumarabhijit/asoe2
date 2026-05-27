@@ -166,6 +166,12 @@ param deployRetentionSweeperJob bool = false
 @description('PARITY-8 — cron expression for the retention sweeper. Default 02:00 UTC daily; tighten/loosen per operational cadence. Format is standard 5-field cron (minute hour day month weekday).')
 param retentionSweeperCron string = '0 2 * * *'
 
+@description('PARITY-7 followup — gate for the drift-alert forwarder Container Apps Job (scripts/run_drift_forwarder.py). Runs api.observability.drift_alert_integration.evaluate_all_extraction_drift() on a cron schedule and emits a structured extraction-drift log event per detected drift so App Insights / Log Analytics has data for the Azure Monitor alert. Image reuses containerImage. Default off.')
+param deployDriftAlertJob bool = false
+
+@description('PARITY-7 — cron expression for the drift-alert forwarder. Default 06:00 UTC daily; the evaluator splits 50 recent vs 200 baseline samples so a daily run is appropriate for the 7-day rolling window in the parity plan.')
+param driftAlertCron string = '0 6 * * *'
+
 @description('Prometheus container image (built from Dockerfile.prometheus; bakes in ops/observability/prometheus.yml). Placeholder until set-secrets.sh / deploy pipeline overrides.')
 param prometheusImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
 
@@ -1212,6 +1218,79 @@ resource retentionSweeperJob 'Microsoft.App/jobs@2024-03-01' = if (deployRetenti
             // RETENTION_SWEEPER_ENABLED=true` after the dry-run
             // produces an audited plan the operator approves.
             { name: 'RETENTION_SWEEPER_ENABLED', value: 'false' }
+          ]
+        }
+      ]
+    }
+  }
+}
+
+// ──────────────────────────────── Drift-alert forwarder Container Apps Job
+//
+// PARITY-7 followup — on every cron tick, scripts/run_drift_forwarder.py
+// calls evaluate_all_extraction_drift() over the in-process metric
+// snapshot and emits a structured extraction-drift log event per
+// detected drift. The OTel exporter (api/observability/otel.py) forwards
+// the events to App Insights so the Azure Monitor alert on
+// `extraction-drift` has data without an additional ingestion hop.
+//
+// replicaRetryLimit=0 — a failed evaluator does NOT auto-retry; the
+// operator inspects the structured error first (a silent retry on a
+// drift signal masks real-time accuracy regressions).
+
+resource driftAlertJob 'Microsoft.App/jobs@2024-03-01' = if (deployDriftAlertJob) {
+  name: '${namePrefix}-drift-forwarder'
+  location: location
+  tags: commonTags
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${uami.id}': {}
+    }
+  }
+  properties: {
+    environmentId: cae.id
+    workloadProfileName: 'Consumption'
+    configuration: {
+      triggerType: 'Schedule'
+      replicaTimeout: 600  // 10min ceiling — the evaluator is in-process
+      replicaRetryLimit: 0
+      scheduleTriggerConfig: {
+        cronExpression: driftAlertCron
+        parallelism: 1
+        replicaCompletionCount: 1
+      }
+      registries: [
+        {
+          server: '${acrName}.azurecr.io'
+          identity: uami.id
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'drift-forwarder'
+          image: containerImage
+          command: [ 'python' ]
+          args: [ '-m', 'scripts.run_drift_forwarder' ]
+          resources: {
+            cpu: json('0.25')
+            memory: '0.5Gi'
+          }
+          env: [
+            { name: 'ASOE_ENV', value: asoeEnv }
+            // App Insights connection string — same value the API
+            // app uses, so the drift events flow to the same Log
+            // Analytics workspace the rest of preprod uses.
+            { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: appInsights.properties.ConnectionString }
+            // Evaluator window — see scripts/run_drift_forwarder.py
+            // docstring + the parity plan's PARITY-7 §"Drift signal
+            // alert". The defaults match the in-process evaluator's
+            // own defaults; override per deployment if the 7-day
+            // window needs tightening.
+            { name: 'ASOE_DRIFT_RECENT_N', value: '50' }
+            { name: 'ASOE_DRIFT_BASELINE_N', value: '200' }
           ]
         }
       ]
