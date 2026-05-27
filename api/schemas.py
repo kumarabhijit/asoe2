@@ -268,6 +268,10 @@ class ExceptionSummary(BaseModel):
     # round-trip. None on Tier-1 stateless records and pre-Phase-H.3
     # legacy rows.
     parent_case_id: Optional[str] = None
+    # Case & Intent Super-Group surface (requirements §5).
+    # Optional in Phase 2; populated by the Phase 3 classifier wiring.
+    supergroup_code: Optional[str] = None
+    intent_code: Optional[str] = None
     created_at: str
     updated_at: str
 
@@ -304,6 +308,13 @@ class ExceptionDetailResponse(BaseModel):
     # exceptional and the UI throws loudly rather than silently
     # routing to a phantom page.
     parent_case_id: Optional[str] = None
+    # Case & Intent Super-Group surface (requirements §5).
+    # Optional in Phase 2; populated by the Phase 3 classifier wiring.
+    supergroup_code: Optional[str] = None
+    intent_code: Optional[str] = None
+    divergence_reason: Optional[str] = None
+    sap_block_field: Optional[str] = None
+    scope: Optional[str] = None
     resolution_data: Dict[str, Any] = Field(default_factory=dict)
     resolved_by: Optional[str] = None
     resolved_action: Optional[str] = None

@@ -148,6 +148,28 @@ class OrderEvent(BaseModel):
 # clock, the case-source classification, and correlation keys that let
 # incoming events resolve to an existing case via lookup-or-create.
 
+Origin = Literal["CUSTOMER", "API"]
+"""Requirements §3 glossary — intake mechanism (PO sign-off 27-May).
+
+Binary value paired with orthogonal ``source_channel`` (email / EDI /
+portal / phone / fax / CSR-keyed). ``CUSTOMER`` is the customer-initiated
+path (email today, web form / portal later); ``API`` is the SAP-pushed
+block path.
+
+Derived from legacy ``source`` during transition (manual_order ⇒ CUSTOMER,
+automated_order ⇒ API) by ``_default_origin_from_source`` on OrderCase.
+Once Phase 6 cleanup ships, ``source`` is dropped and ``origin`` becomes
+the only carrier."""
+
+
+def infer_origin(source: str) -> "Origin":
+    """Legacy source → new origin mapping. Single arrow per the §10
+    transition table: manual_order ⇒ CUSTOMER, anything else ⇒ API."""
+    if source == "manual_order":
+        return "CUSTOMER"
+    return "API"
+
+
 CaseSource = Literal["manual_order", "automated_order"]
 """ADR-038 §3.1 — Manual = email/phone/fax (CSR reads prose to extract);
 Automated = EDI X12 / portal / API feed / FTP / VMI (no prose to extract).
@@ -302,6 +324,56 @@ class OrderCase(BaseModel):
     # case-level override fires. Mutated atomically through
     # `CaseStore.set_pending_override` / `clear_pending_override`.
     pending_override: Optional["CasePendingOverride"] = None
+
+    # ---- Case & Intent Super-Group requirements (§5, §10) --------------
+    # Additive in Phase 2 step 2: nullable carriers for the new model.
+    # `_default_origin_from_source` (below) populates ``origin`` from
+    # ``source`` when not provided so existing call sites stay green.
+    # `supergroup_code` is populated by the classifier (Phase 3+); until
+    # then it remains None and the DB trigger (V018) no-ops on NULL.
+
+    origin: Optional[Origin] = None
+    """Requirements §5 / §3 glossary — intake mechanism. Auto-derived
+    from ``source`` by the pre-validator when not passed; only after
+    Phase 6 cleanup does this become required and ``source`` get dropped."""
+
+    supergroup_code: Optional[str] = None
+    """Requirements §6 — case-level Intent Super-Group classification.
+    Foreign key to ``case_supergroup.code``. None until classified."""
+
+    predecessor_case_id: Optional[str] = None
+    """Requirements §8.7 — re-block linkage. Set when a previously-resolved
+    API case re-trips on the next latent block; lets reporting join the
+    incident chain."""
+
+    will_miss_rdd: bool = False
+    """Requirements §3.13 — derived flag replacing the (rejected)
+    DELIVERY_DELAY super-group. True when RDD vs current ETA suggests
+    the order will miss its requested delivery date."""
+
+    sla_due_at: Optional[str] = None
+    """Requirements §8.4 — case-instance SLA timestamp, ISO 8601.
+    Computed at case creation from default_sla_for_intent × rdd_urgency
+    × customer_tier × shelf_life. Distinct from ``sla_deadline`` (legacy
+    case-tier-derived); both coexist through Phase 2-3, then sla_deadline
+    is retired."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _default_origin_from_source(cls, data: Any) -> Any:
+        """Derive ``origin`` from legacy ``source`` when caller didn't pass
+        one. Runs before ``_default_case_type_from_source`` so the rest of
+        validation sees both fields populated.
+
+        Mapping (single arrow): manual_order ⇒ CUSTOMER, anything else ⇒ API.
+        Idempotent — re-running on a dict that already has ``origin`` is a
+        no-op. Doesn't touch ``source`` so legacy consumers keep reading
+        it through the transition window."""
+        if not isinstance(data, dict):
+            return data
+        if data.get("origin") is None and data.get("source"):
+            data["origin"] = infer_origin(data["source"])
+        return data
 
     @model_validator(mode="before")
     @classmethod

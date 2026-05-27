@@ -2804,6 +2804,17 @@
             "title": "Created At",
             "type": "string"
           },
+          "divergence_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Divergence Reason"
+          },
           "event_type": {
             "title": "Event Type",
             "type": "string"
@@ -2833,6 +2844,17 @@
               }
             ],
             "title": "Intent"
+          },
+          "intent_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intent Code"
           },
           "lifecycle_state": {
             "$ref": "#/components/schemas/LifecycleState"
@@ -2898,6 +2920,28 @@
             ],
             "title": "Resolved By"
           },
+          "sap_block_field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sap Block Field"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          },
           "selected_recipe": {
             "anyOf": [
               {
@@ -2919,6 +2963,17 @@
               }
             ],
             "title": "Shadow Verdict"
+          },
+          "supergroup_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supergroup Code"
           },
           "tenant_id": {
             "title": "Tenant Id",
@@ -3044,6 +3099,17 @@
             ],
             "title": "Intent"
           },
+          "intent_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intent Code"
+          },
           "lifecycle_state": {
             "$ref": "#/components/schemas/LifecycleState"
           },
@@ -3083,6 +3149,17 @@
               }
             ],
             "title": "Shadow Verdict"
+          },
+          "supergroup_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supergroup Code"
           },
           "tenant_id": {
             "title": "Tenant Id",

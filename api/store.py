@@ -47,6 +47,13 @@ class ExceptionRecord:
         enrichment_context: Optional[Dict[str, Any]] = None,
         parent_case_id: Optional[str] = None,
         sap_block_code: Optional[str] = None,
+        # Case & Intent Super-Group fields (requirements §5).
+        # Optional carriers in Phase 2; populated by Phase 3 classifier wiring.
+        supergroup_code: Optional[str] = None,
+        intent_code: Optional[str] = None,
+        divergence_reason: Optional[str] = None,
+        sap_block_field: Optional[str] = None,
+        scope: Optional[str] = None,
     ):
         self.id = str(uuid4())
         self.tenant_id = tenant_id
@@ -77,6 +84,16 @@ class ExceptionRecord:
         # signal for audit ("SAP reported this exact code"). None on
         # EMAIL_ENTRY-parented records.
         self.sap_block_code: Optional[str] = sap_block_code
+        # Case & Intent Super-Group fields (requirements §5).
+        # `supergroup_code` mirrors the parent OrderCase classification
+        # (strict inheritance per §8.1). `intent_code` is the leaf
+        # routing key from the case_intent lookup. Both nullable in
+        # Phase 2 until the classifier wiring lands in Phase 3.
+        self.supergroup_code: Optional[str] = supergroup_code
+        self.intent_code: Optional[str] = intent_code
+        self.divergence_reason: Optional[str] = divergence_reason
+        self.sap_block_field: Optional[str] = sap_block_field
+        self.scope: Optional[str] = scope
         # Original OrderEvent payload, captured at create time so a later
         # re-analysis can faithfully replay through run_graph(). None for
         # records created before the feature shipped.
@@ -114,6 +131,8 @@ class ExceptionRecord:
             account_id=self.account_id,
             account_name=self.account_name,
             parent_case_id=self.parent_case_id,
+            supergroup_code=self.supergroup_code,
+            intent_code=self.intent_code,
             created_at=self.created_at,
             updated_at=self.updated_at,
         )
@@ -133,6 +152,11 @@ class ExceptionRecord:
             account_name=self.account_name,
             trace_id=self.trace_id,
             parent_case_id=self.parent_case_id,
+            supergroup_code=self.supergroup_code,
+            intent_code=self.intent_code,
+            divergence_reason=self.divergence_reason,
+            sap_block_field=self.sap_block_field,
+            scope=self.scope,
             resolution_data=self.resolution_data,
             resolved_by=self.resolved_by,
             resolved_action=self.resolved_action,
@@ -693,6 +717,14 @@ class DatabaseBackedStore:
         record.reanalysis_history = d.get("reanalysis_history") or []
         record.created_at = d.get("created_at", "")
         record.updated_at = d.get("updated_at", "")
+        # V009 + V018 columns. Optional in Phase 2 (legacy rows are NULL).
+        record.parent_case_id = d.get("parent_case_id")
+        record.sap_block_code = d.get("sap_block_code")
+        record.supergroup_code = d.get("supergroup_code")
+        record.intent_code = d.get("intent_code")
+        record.divergence_reason = d.get("divergence_reason")
+        record.sap_block_field = d.get("sap_block_field")
+        record.scope = d.get("scope")
         return record
 
 
