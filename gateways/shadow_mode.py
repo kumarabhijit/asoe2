@@ -106,6 +106,17 @@ class ShadowRunner:
         # concurrent connector running on another thread can append to
         # the global log between this runner's append and the caller's
         # read, racing the ``[-1]`` lookup.
+        #
+        # SAFETY CONTRACT: ``last_entry`` is safe to read when the
+        # runner instance is **scoped to a single request** (constructed
+        # inside the caller's ``execute()`` path, used once, then
+        # discarded). Reusing a runner across concurrent threads is
+        # explicitly NOT safe — thread A reading ``last_entry`` while
+        # thread B's ``run()`` is mid-execution can see thread B's just-
+        # appended entry (or a stale prior entry). The class docstring's
+        # "re-use is fine" comment refers to sequential reuse, not
+        # concurrent reuse. ``GraphIntakeGateway.execute`` builds a
+        # fresh runner per call for this reason.
         self.last_entry: Optional[DiffEntry] = None
 
     def run(
