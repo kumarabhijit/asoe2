@@ -402,7 +402,8 @@ keys** for JWT vs the attachment capability token.
   (documented runbook in `docs/ops/secrets-rotation.md`); a Container App
   revision restart picks up the new secret. **GA follow-up:** a 90-day
   automated rotation policy via Azure Function callback. Tracked in
-  `docs/plans/ga-preconditions.md` (to be created at GA-readiness).
+  `docs/plans/ga-preconditions.md` (now shipped — tracks every preprod→GA
+  deferral, see that file for the full table).
 
 **Acceptance criteria:** v1 plus:
 

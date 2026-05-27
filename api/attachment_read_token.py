@@ -24,7 +24,7 @@ minted just before the rotation, but new mints use the primary only.
 
 Future work: migrate to ES256/EdDSA so rotation is transparent (a
 single key registry serves both ends without an overlap window).
-Tracked in ``docs/plans/ga-preconditions.md`` (created at GA-readiness).
+Tracked in ``docs/plans/ga-preconditions.md`` row 3.
 """
 
 from __future__ import annotations
