@@ -237,19 +237,17 @@ class GraphIntakeGateway:
             )
 
         # Distinguish "real succeeded" from "real failed → stub fallback".
-        # The diff log carries the real_error; if it's set, the response
-        # came from the stub and the orphan deserves a DLQ row so the
-        # operator dashboard surfaces it.
-        from gateways.shadow_mode import get_diff_log
-        log = get_diff_log()
-        if log:
-            last = log[-1]
-            if last.real_error is not None and last.connector == _CONNECTOR:
-                dead_letter_queue.record(
-                    source="graph", operation=operation, tenant_id=tenant_id,
-                    reason=last.real_error,
-                    payload={"trace_id": request.trace_id},
-                )
+        # Read the runner's own ``last_entry`` rather than
+        # ``get_diff_log()[-1]`` — a concurrent connector on another
+        # thread can append between the runner's append and our read,
+        # racing the ``[-1]`` lookup and mis-attributing the DLQ row.
+        entry = runner.last_entry
+        if entry is not None and entry.real_error is not None:
+            dead_letter_queue.record(
+                source="graph", operation=operation, tenant_id=tenant_id,
+                reason=entry.real_error,
+                payload={"trace_id": request.trace_id},
+            )
 
         return GatewayResponse(
             gateway_name=_CONNECTOR, operation=operation,

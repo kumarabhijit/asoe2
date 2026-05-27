@@ -394,19 +394,37 @@ class DocumentExtractionGateway:
         # PARITY-6.2 / -7 — feed the drift series. Every per-field
         # confidence becomes a drift sample so the
         # `extraction-drift` alert
-        # (`api.observability.drift_alert_integration`) has data; the
-        # containment proxy is the verified-spatial-anchor rate (a
-        # spatial anchor that survives `verify_anchor_geometry` is the
-        # operational definition of containment for this pipeline).
-        # Failures here MUST NOT propagate into the extraction path —
-        # drift recording is observability, not the audit substrate.
+        # (`api.observability.drift_alert_integration`) has data.
+        #
+        # Two containment definitions to keep separate:
+        #   * The PARITY-7 golden-set gate
+        #     (`tests/eval/test_spatial_extraction_gate.py`) measures
+        #     IoU against a hand-labelled ground-truth bbox — the
+        #     accuracy metric.
+        #   * What we feed into the live drift series here is a
+        #     **verification-pass proxy** — the fraction of returned
+        #     anchors that survived `verify_anchor_geometry`. For the
+        #     recorded backend this is ~1.0 by construction; the
+        #     meaningful signal comes from the live AzureDI backend
+        #     where a model bump that silently moves boxes drops the
+        #     verification rate (anchors degrade to text_derived).
+        #
+        # If a recording (live or replayed) carries a `containment`
+        # field — populated by the live backend with the real per-call
+        # IoU when that wiring lands behind the nightly `-m live` mark
+        # — we use that instead so the drift alert is keyed on the
+        # accuracy metric, not the proxy.
         try:
             from api import metrics  # noqa: PLC0415
             prompt_hash = str(recording.get("prompt_hash") or "")
-            verified_total = sum(
-                1 for a in anchors if a.anchor_source == "spatial_extracted"
-            )
-            containment = verified_total / len(anchors) if anchors else 0.0
+            recorded_containment = recording.get("containment")
+            if isinstance(recorded_containment, (int, float)):
+                containment = float(recorded_containment)
+            else:
+                verified_total = sum(
+                    1 for a in anchors if a.anchor_source == "spatial_extracted"
+                )
+                containment = verified_total / len(anchors) if anchors else 0.0
             for a in anchors:
                 if a.confidence is None:
                     continue

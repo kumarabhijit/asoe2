@@ -100,6 +100,13 @@ class ShadowRunner:
         self.operation = operation
         self.audit_bearing_fields = audit_bearing_fields or set()
         self.derived_fields = derived_fields or set()
+        # The DiffEntry recorded by the most recent ``run()`` call.
+        # Callers needing to react to the per-call live-side error must
+        # read this attribute rather than ``get_diff_log()[-1]`` — a
+        # concurrent connector running on another thread can append to
+        # the global log between this runner's append and the caller's
+        # read, racing the ``[-1]`` lookup.
+        self.last_entry: Optional[DiffEntry] = None
 
     def run(
         self,
@@ -148,6 +155,7 @@ class ShadowRunner:
         )
         with _LOCK:
             _LOG.append(entry)
+        self.last_entry = entry
 
         # Return contract: real wins when available; stub is the
         # safety net when real failed. If both failed, surface the

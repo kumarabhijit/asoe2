@@ -175,13 +175,12 @@ class TestCanaryRouting:
         entries = get_diff_log()
         assert len(entries) == 1
         assert entries[0].connector == "email_intake"
-        # auth_method is a derived field; divergence appears in the
-        # derived bucket (or audit bucket, depending on field
-        # classification — the gateway must classify it consistently).
-        assert (
-            "auth_method" in entries[0].audit_bearing_diffs
-            or "auth_method" in entries[0].derived_diffs
-        )
+        # auth_method is classified as derived (see
+        # gateways/msgraph_intake.py::_DERIVED_FIELDS). It must land in
+        # the derived bucket EXACTLY — pin to one bucket so a future
+        # audit-bearing misclassification surfaces here.
+        assert "auth_method" in entries[0].derived_diffs
+        assert "auth_method" not in entries[0].audit_bearing_diffs
 
 
 class TestTerminalFailureGoesToDLQ:

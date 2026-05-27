@@ -49,12 +49,25 @@ def _tenant_ids() -> list[str]:
 def _residency_for(tenant_id: str) -> tuple[str, str]:
     """Return ``(tenant_residency_region, target_storage_region)``.
 
-    Preprod is single-region East US 2 per Decision Q6; both sides
-    return the same value so the residency check passes. GA wires
-    per-tenant residency from the contract-time DPA (tracked in
+    Preprod is single-region per Decision Q6; both sides return the
+    same value so the residency check passes. **Mandatory** —
+    refuses to default a region silently because the residency check
+    in ``commit_with_residency_check`` fires first and a config gap
+    would surface as a confusing ``RESIDENCY_VIOLATION`` after a
+    successful dry-run rather than as a startup failure here.
+
+    Required env: ``ASOE_PREPROD_REGION``. GA wires per-tenant
+    residency from the contract-time DPA (tracked in
     ``docs/plans/ga-preconditions.md`` row 4).
     """
-    region = os.getenv("ASOE_PREPROD_REGION") or "eastus2"
+    region = (os.getenv("ASOE_PREPROD_REGION") or "").strip()
+    if not region:
+        raise RuntimeError(
+            "ASOE_PREPROD_REGION must be set so the retention sweeper "
+            "can run the residency check against a known target region "
+            "(see api/retention_sweeper.commit_with_residency_check). "
+            "Tenant id under consideration: " + tenant_id,
+        )
     return region, region
 
 
