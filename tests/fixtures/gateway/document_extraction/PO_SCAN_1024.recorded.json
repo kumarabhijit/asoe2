@@ -1,0 +1,65 @@
+{
+  "case": "PO_SCAN_1024",
+  "sha256": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+  "model_id": "recorded-doctr-v0",
+  "prompt_hash": "doctr-candidate-proposer-v0",
+  "page_count": 1,
+  "candidates": [
+    {
+      "candidate_id": 1,
+      "page": 1,
+      "bbox": [
+        0.05,
+        0.08,
+        0.45,
+        0.13
+      ],
+      "text": "PURCHASE ORDER 1024-A"
+    },
+    {
+      "candidate_id": 2,
+      "page": 1,
+      "bbox": [
+        0.05,
+        0.22,
+        0.42,
+        0.27
+      ],
+      "text": "Item: BISCUIT-CHOC-24CT"
+    },
+    {
+      "candidate_id": 3,
+      "page": 1,
+      "bbox": [
+        0.05,
+        0.32,
+        0.38,
+        0.37
+      ],
+      "text": "Ship by 06/15/2026"
+    }
+  ],
+  "fields": [
+    {
+      "supports_ref": "order_entry.customer_po",
+      "text": "PURCHASE ORDER 1024-A",
+      "label": "customer_po",
+      "chosen_id": 1,
+      "confidence": 0.92
+    },
+    {
+      "supports_ref": "order_entry.material",
+      "text": "Item: BISCUIT-CHOC-24CT",
+      "label": "material",
+      "chosen_id": 2,
+      "confidence": 0.92
+    },
+    {
+      "supports_ref": "order_entry.requested_date",
+      "text": "Ship by 06/15/2026",
+      "label": "requested_date",
+      "chosen_id": 3,
+      "confidence": 0.92
+    }
+  ]
+}

@@ -13,8 +13,9 @@ vars set via `scripts/set-secrets.sh`.
 
 | Secret | Where it lives | Rotation impact |
 |---|---|---|
-| `ASOE_JWT_SECRET` | Container App env (→ Key Vault after Phase 4) | Invalidates all active access + refresh tokens; users re-login |
-| `ASOE_ATTACHMENT_SIGNING_KEY` | Container App env (→ Key Vault after Phase 4) | Invalidates active attachment signed URLs (short-TTL, ~5min — low impact) |
+| `ASOE_JWT_SECRET` | Container App env (Key Vault from PARITY-4) | Invalidates all active access + refresh tokens; users re-login |
+| `ASOE_ATTACHMENT_SIGNING_KEY` | Container App env (Key Vault from PARITY-4) | Invalidates active attachment signed URLs (short-TTL, ~5min — low impact) |
+| `ASOE_ATTACHMENT_SIGNING_KEY_SECONDARY` | Container App env (Key Vault from PARITY-4) | Holds the previous attachment key during a rotation overlap window so in-flight mints still verify |
 | `ANTHROPIC_API_KEY` (or other LLM provider) | Container App env (→ Key Vault after Phase 4) | First requests after restart re-authenticate; no in-flight impact |
 | `DATABASE_URL` (password rotation) | Container App env (→ Key Vault) | Connection pool re-establishes; brief 5xx burst possible |
 | `LANGFUSE_SECRET_KEY` | Container App env (→ Key Vault) | LangFuse forwarding pauses until restart |
@@ -95,6 +96,67 @@ unexpected behaviour, recover with:
 az keyvault secret recover --vault-name asoe-preprod-kv --name asoe-jwt-secret
 az containerapp revision restart ...
 ```
+
+### Attachment signing key rotation (zero-downtime overlap)
+
+`ASOE_ATTACHMENT_SIGNING_KEY` is rotated independently of
+`ASOE_JWT_SECRET` (PARITY-4). Because attachment-URL signatures are
+short-TTL (~5min), the safe pattern is a small overlap window: move
+the OLD key to the SECONDARY slot, mint new tokens under a fresh
+PRIMARY, wait one TTL window, then clear the secondary.
+
+```bash
+# 1. Mint a new primary; remember the current one for the overlap.
+OLD_KEY=$(az keyvault secret show --vault-name asoe-preprod-kv \
+  --name asoe-attachment-signing-key --query value -o tsv)
+NEW_KEY=$(openssl rand -base64 64 | tr -d '\n')
+
+# 2. Move OLD to the SECONDARY slot, set NEW as PRIMARY.
+az keyvault secret set --vault-name asoe-preprod-kv \
+  --name asoe-attachment-signing-key-secondary --value "$OLD_KEY"
+az keyvault secret set --vault-name asoe-preprod-kv \
+  --name asoe-attachment-signing-key --value "$NEW_KEY"
+
+# 3. Restart so the Container App picks up both secretrefs.
+az containerapp revision restart -n asoe-api -g asoe-preprod-rg --revision latest
+
+# 4. Wait for one ATTACHMENT_READ_URL_TTL_SECONDS window (default 300s)
+#    plus a safety margin so any token minted just before the
+#    rotation expires naturally.
+sleep 600
+
+# 5. Clear the secondary slot.
+az keyvault secret set --vault-name asoe-preprod-kv \
+  --name asoe-attachment-signing-key-secondary --value ""
+az containerapp revision restart -n asoe-api -g asoe-preprod-rg --revision latest
+```
+
+The JWT secret is **never** rotated as part of this flow — they are
+independently keyed by design, so an attachment-key compromise does
+not require users to re-login.
+
+### Key Vault break-glass recovery
+
+If the vault itself is accidentally deleted (or the rotation policy
+mis-fires and disables an active secret), purge-protection blocks the
+60-day window before permanent destruction.
+
+```bash
+# Discover deleted vaults.
+az keyvault list-deleted --query "[?name=='asoe-preprod-kv']"
+
+# Recover the vault (restores all secrets).
+az keyvault recover --name asoe-preprod-kv
+
+# OR recover an individual secret without recovering the whole vault.
+az keyvault secret list-deleted --vault-name asoe-preprod-kv
+az keyvault secret recover --vault-name asoe-preprod-kv --name <secret-name>
+```
+
+Per Security review: the break-glass recovery key (used to bootstrap a
+fresh vault if the primary is unrecoverable) MUST live in a separate
+Key Vault under different RBAC, so a single compromised principal
+cannot purge both.
 
 ## GA follow-up — automated rotation
 

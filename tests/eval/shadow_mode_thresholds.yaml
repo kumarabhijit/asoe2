@@ -1,0 +1,54 @@
+# Shadow-mode acceptance thresholds — Decision Q9 (PARITY-6).
+#
+# When a Phase 6 connector (Graph / SAP / OMS / DocAI) runs in shadow
+# mode (real + stub in parallel, output diffed to a compliance-
+# reviewable log), these thresholds govern when the connector may
+# flip to real-only.
+#
+# Source: docs/plans/azure-preprod-parity-plan.md — Decision Q9.
+#
+# Per-tenant overrides land as additional rows under `per_tenant:`;
+# lowering ANY threshold requires Integration + Compliance reviewer
+# sign-off (CODEOWNERS gate on this file).
+
+# How long the audit-bearing diff rate must stay under the
+# `audit_bearing.max_diff_rate_pct` ceiling before flip is permitted.
+window_days: 7
+
+# Audit-bearing fields (those declared in
+# compliance/audit_bearing_registry.yaml) — exact match required per
+# field per event. The diff RATE across the window must also stay
+# under 1% before a connector flips.
+audit_bearing:
+  max_diff_pct: 0.0
+  max_diff_rate_pct: 1.0
+  reason: |
+    Audit-bearing fields drive SOX attestations. No tolerance there —
+    a single mismatched field is a recordable variance, and the 7-day
+    < 1% diff-rate ceiling caps total exposure across the window.
+
+# Derived / contextual fields (formatted dates, free-text
+# descriptions, calculated totals). Some cosmetic variance is
+# acceptable — date string formats, locale-specific number formats,
+# free-text whitespace differences — but not unbounded.
+derived:
+  max_diff_pct: 5.0
+  reason: |
+    Cosmetic variance is acceptable; substantive divergence is not.
+    5% is the upper bound; per-tenant or per-field overrides may
+    tighten this with Compliance sign-off.
+
+# Optional fields — not gated. Diffs are recorded for visibility but
+# do not block a flip. Operators may opt fields back into the
+# `derived` bucket by listing them under `audit_bearing_overrides`
+# in compliance/audit_bearing_registry.yaml.
+optional:
+  gated: false
+  reason: |
+    Optional fields are advisory by definition; not appropriate as a
+    cutover gate.
+
+# Per-tenant override slots. Add tenant_id keys here when a tenant
+# elects tighter thresholds or has a residency-driven exemption.
+# Empty by default — the global thresholds above apply universally.
+per_tenant: {}

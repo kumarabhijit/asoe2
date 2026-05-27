@@ -1,0 +1,83 @@
+{
+  "case": "PO_9001",
+  "sha256": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+  "model_id": "recorded-doctr-v0",
+  "prompt_hash": "doctr-candidate-proposer-v0",
+  "page_count": 1,
+  "candidates": [
+    {
+      "candidate_id": 1,
+      "page": 1,
+      "bbox": [
+        0.1,
+        0.1,
+        0.38,
+        0.14
+      ],
+      "text": "PO 9001-WMT"
+    },
+    {
+      "candidate_id": 2,
+      "page": 1,
+      "bbox": [
+        0.08,
+        0.18,
+        0.62,
+        0.22
+      ],
+      "text": "deliver to Walmart DC #6024 Bentonville"
+    },
+    {
+      "candidate_id": 3,
+      "page": 1,
+      "bbox": [
+        0.08,
+        0.3,
+        0.58,
+        0.34
+      ],
+      "text": "BEV-COLA-12PK qty 480 CS"
+    },
+    {
+      "candidate_id": 4,
+      "page": 1,
+      "bbox": [
+        0.6,
+        0.3,
+        0.74,
+        0.34
+      ],
+      "text": "$8.64/CS"
+    }
+  ],
+  "fields": [
+    {
+      "supports_ref": "order_entry.customer_po",
+      "text": "PO 9001-WMT",
+      "label": "customer_po",
+      "chosen_id": 1,
+      "confidence": 0.95
+    },
+    {
+      "supports_ref": "order_entry.ship_to",
+      "text": "deliver to Walmart DC #6024 Bentonville",
+      "label": "ship_to",
+      "chosen_id": 2,
+      "confidence": 0.95
+    },
+    {
+      "supports_ref": "order_entry.material",
+      "text": "BEV-COLA-12PK qty 480 CS",
+      "label": "material",
+      "chosen_id": 3,
+      "confidence": 0.95
+    },
+    {
+      "supports_ref": "order_entry.unit_price",
+      "text": "$8.64/CS",
+      "label": "unit_price",
+      "chosen_id": 4,
+      "confidence": 0.95
+    }
+  ]
+}

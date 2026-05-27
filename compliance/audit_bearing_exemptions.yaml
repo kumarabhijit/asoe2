@@ -1,0 +1,60 @@
+# Audit-bearing decorator — grandfather list (PARITY-5).
+#
+# The CI lint at tests/test_otel_audit_bearing.py::TestAuditBearingLint
+# requires every state-mutating route (POST/PUT/PATCH/DELETE) under
+# api/routes/ to be marked with `@audit_bearing(reason=...)`. Routes
+# below are GRANDFATHERED — they predate the lint and have an existing
+# audit trail through other means (auth log, sandbox stub registry,
+# health-check rotation log, …).
+#
+# Adding a NEW route here requires a compliance reviewer sign-off
+# (CODEOWNERS-gated like the audit-bearing registry). For new routes,
+# add the decorator instead — the lint will pass without an entry here.
+#
+# Migration plan: tracked in
+# docs/plans/azure-preprod-parity-plan.md under PARITY-5 follow-ups.
+# Each PR that touches a grandfathered route should migrate it to the
+# decorator (and remove the line here) before merge.
+
+exempt_paths:
+  # ── api/routes/auth.py — auth surface logs through policy_audit_log
+  #    under AUTH_* event types; @audit_bearing would double-record.
+  - /login
+  - /sso/init
+  - /sso/callback
+  - /mfa/verify
+  - /refresh
+
+  # ── api/routes/sandbox.py — synthetic-data fixtures gated to
+  #    sandbox env; not financially binding by construction.
+  - /_sandbox/seed/financial-impact
+  - /_sandbox/tenant/reset
+  - /_sandbox/seed/manual-order-intake
+  - /_sandbox/cases/{case_id}/attachments
+  - /_sandbox/seed/email-attachment-anchors
+
+  # ── api/routes/workflows.py — MIGRATED. /workflows now carries
+  #    @audit_bearing(reason="executes a workflow run; emits resolution
+  #    events; SOX").
+  # ── api/routes/policies.py — MIGRATED. /policies/{tenant_id} now
+  #    carries @audit_bearing.
+  # ── api/routes/config.py — MIGRATED. Both PUT and DELETE
+  #    /config/tenants/{tenant_id}/layers/{layer} now carry
+  #    @audit_bearing.
+
+  # ── api/routes/attachments.py — signed-URL mint is RBAC-gated +
+  #    capability-token-scoped; the byte read itself audits separately.
+  - /cases/{case_id}/attachments/{attachment_id}/signed-url
+
+  # ── api/routes/health.py — operational endpoints; audit trail goes
+  #    through the structured log + reviewer-activity metrics.
+  - /metrics/reviewer-activity
+  - /outbox/reconcile
+
+  # ── api/routes/exceptions.py — partial migration. Migrated in
+  #    this commit: /resolve, /resolve/async, /disposition,
+  #    /reanalyze, /challenge, /admin-release, /override/cosign,
+  #    /escalate. Remaining grandfather entry is the dry-run
+  #    /resolve/explain endpoint, which returns the would-be
+  #    decision without committing (not audit-bearing by definition).
+  - /exceptions/resolve/explain

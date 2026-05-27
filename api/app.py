@@ -230,6 +230,16 @@ def create_app() -> FastAPI:
 
     _register_gateways_for_env(application)
 
+    # PARITY-5 — initialise OpenTelemetry + Azure Monitor exporters.
+    # No-op when APPLICATIONINSIGHTS_CONNECTION_STRING is unset (local
+    # dev, CI, vitest browser flows). Wrapped in a try/except so an
+    # exporter misconfiguration never crashes the worker on startup.
+    try:
+        from api.observability.otel import init_telemetry
+        init_telemetry(app=application)
+    except Exception as exc:  # noqa: BLE001 — observability must not crash worker
+        logger.warning("otel init failed (continuing without telemetry): %s", exc)
+
     return application
 
 

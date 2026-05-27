@@ -1,0 +1,65 @@
+{
+  "case": "PO_MP_3302",
+  "sha256": "c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5",
+  "model_id": "recorded-doctr-v0",
+  "prompt_hash": "doctr-candidate-proposer-v0",
+  "page_count": 3,
+  "candidates": [
+    {
+      "candidate_id": 1,
+      "page": 1,
+      "bbox": [
+        0.05,
+        0.05,
+        0.55,
+        0.1
+      ],
+      "text": "Customer PO# 3302 - 4 pages"
+    },
+    {
+      "candidate_id": 2,
+      "page": 3,
+      "bbox": [
+        0.08,
+        0.25,
+        0.55,
+        0.29
+      ],
+      "text": "SNK-CHIP-BBQ-12CT qty 360"
+    },
+    {
+      "candidate_id": 3,
+      "page": 1,
+      "bbox": [
+        0.05,
+        0.2,
+        0.45,
+        0.24
+      ],
+      "text": "Ship: Kroger Atlanta DC"
+    }
+  ],
+  "fields": [
+    {
+      "supports_ref": "order_entry.customer_po",
+      "text": "Customer PO# 3302 - 4 pages",
+      "label": "customer_po",
+      "chosen_id": 1,
+      "confidence": 0.93
+    },
+    {
+      "supports_ref": "order_entry.material",
+      "text": "SNK-CHIP-BBQ-12CT qty 360",
+      "label": "material",
+      "chosen_id": 2,
+      "confidence": 0.93
+    },
+    {
+      "supports_ref": "order_entry.ship_to",
+      "text": "Ship: Kroger Atlanta DC",
+      "label": "ship_to",
+      "chosen_id": 3,
+      "confidence": 0.93
+    }
+  ]
+}

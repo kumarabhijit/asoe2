@@ -1,0 +1,65 @@
+{
+  "case": "PO_8843",
+  "sha256": "f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2",
+  "model_id": "recorded-doctr-v0",
+  "prompt_hash": "doctr-candidate-proposer-v0",
+  "page_count": 1,
+  "candidates": [
+    {
+      "candidate_id": 1,
+      "page": 1,
+      "bbox": [
+        0.1,
+        0.1,
+        0.42,
+        0.14
+      ],
+      "text": "Reference: PO-2026-8843"
+    },
+    {
+      "candidate_id": 2,
+      "page": 1,
+      "bbox": [
+        0.08,
+        0.18,
+        0.45,
+        0.22
+      ],
+      "text": "Deliver: Costco DC Phoenix"
+    },
+    {
+      "candidate_id": 3,
+      "page": 1,
+      "bbox": [
+        0.08,
+        0.28,
+        0.42,
+        0.32
+      ],
+      "text": "Pretzels Mini 8oz x 192"
+    }
+  ],
+  "fields": [
+    {
+      "supports_ref": "order_entry.customer_po",
+      "text": "Reference: PO-2026-8843",
+      "label": "customer_po",
+      "chosen_id": 1,
+      "confidence": 0.95
+    },
+    {
+      "supports_ref": "order_entry.ship_to",
+      "text": "Deliver: Costco DC Phoenix",
+      "label": "ship_to",
+      "chosen_id": 2,
+      "confidence": 0.95
+    },
+    {
+      "supports_ref": "order_entry.material",
+      "text": "Pretzels Mini 8oz x 192",
+      "label": "material",
+      "chosen_id": 3,
+      "confidence": 0.95
+    }
+  ]
+}

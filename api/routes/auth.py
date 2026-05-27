@@ -223,6 +223,38 @@ async def refresh(req: RefreshRequest) -> AuthTokenResponse:
             status_code=401,
         )
 
+    # PARITY-3b — refresh-token revocation check. If the operator
+    # signed out, changed their password, or had their role
+    # downgraded mid-session, the jti is on the revocation list and
+    # we MUST refuse to mint a fresh pair.
+    #
+    # Tokens minted before PARITY-3b carry no `jti` — the revocation
+    # check is skipped for them and the rotation succeeds (so a
+    # rolling deploy doesn't force every active session to re-login).
+    # We log the absence so an operator investigating "why didn't my
+    # forced-logout invalidate this user?" can see it.
+    from api import refresh_token_revocation as _rtr
+    import logging
+    _refresh_log = logging.getLogger("asoe.api.auth")
+    jti = payload.get("jti")
+    if jti is None:
+        _refresh_log.info(
+            "refresh-token rotation without jti — pre-PARITY-3b token "
+            "sub=%s; revocation cannot be enforced for this session "
+            "until the next mint",
+            payload.get("sub", "?"),
+        )
+    elif _rtr.is_revoked(jti):
+        raise ASOEError(
+            code="INVALID_TOKEN",
+            message="Refresh token has been revoked.",
+            status_code=401,
+        )
+    else:
+        # Rotation: the OLD jti is now spent and must not be replayed.
+        # The new tokens carry fresh jtis (minted by _create_token).
+        _rtr.revoke(jti, reason="rotation")
+
     # Re-issue against the *active* env, not the env the original token
     # carried. If ops promoted the deployment from sandbox to production
     # mid-session the user must re-authenticate; defaulting to a stale

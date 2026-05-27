@@ -88,7 +88,23 @@ class GatewayExecutor:
             )
 
         # --- execute with timeout enforcement (SEC-4) ---
-        timeout_sec = request.timeout_ms / 1000.0
+        #
+        # PARITY-6 — apply the per-gateway timeout budget from
+        # contracts/policy.py::GATEWAY_TIMEOUT_S if the caller didn't
+        # set an explicit (non-default) timeout. The map enforces
+        # per-connector budgets (Graph ~3s, SAP ~8s, OMS ~5s) so a
+        # slow upstream can't burn the whole request budget.
+        from contracts.policy import GATEWAY_TIMEOUT_S
+        per_gateway_budget = GATEWAY_TIMEOUT_S.get(request.gateway_name)
+        # The GatewayRequest default is 5000ms; if a caller explicitly
+        # set a tighter timeout (e.g. recipe-local override), respect
+        # it. Only when the caller is at the default do we tighten to
+        # the per-gateway budget.
+        if per_gateway_budget is not None and request.timeout_ms == 5000:
+            effective_timeout_ms = int(per_gateway_budget * 1000)
+        else:
+            effective_timeout_ms = request.timeout_ms
+        timeout_sec = effective_timeout_ms / 1000.0
         try:
             future = self._pool.submit(gateway.execute, request)
             try:
@@ -101,7 +117,7 @@ class GatewayExecutor:
                     extra={
                         "gateway": request.gateway_name,
                         "operation": request.operation,
-                        "timeout_ms": request.timeout_ms,
+                        "timeout_ms": effective_timeout_ms,
                         "trace_id": request.trace_id,
                     },
                 )
@@ -109,7 +125,7 @@ class GatewayExecutor:
                     gateway_name=request.gateway_name,
                     operation=request.operation,
                     status="TIMEOUT",
-                    error=f"Gateway call exceeded {request.timeout_ms}ms timeout",
+                    error=f"Gateway call exceeded {effective_timeout_ms}ms timeout",
                     duration_ms=elapsed_ms,
                 )
             elapsed_ms = int((time.monotonic() - start) * 1000)

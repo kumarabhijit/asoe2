@@ -36,6 +36,18 @@ tombstone routing — gates real-tenant data).
 | PII-free tombstone invariant (no `content`, no `name`) | **✓ shipped** (registry header + adapter logic + regression test) |
 | Real-tenant data gate cleared | **✓ Phase 0.5 acceptance criteria met** — preprod deploy can now safely accept real-tenant data (with the rest of Phase 1-5 still required for full real-data parity)
 
+### PARITY-3a/3b/4/5/6/7/8 implementation status (2026-05-26)
+
+| Phase | Status |
+|---|---|
+| **PARITY-3a** Frontend NextAuth dual-provider scaffold | **✓ shipped** (`asoe-ui/src/lib/auth.ts`, `src/auth/azure-ad.ts`, `src/components/ui/PreprodIdentityBanner.tsx`, `src/middleware.ts` three-branch, `/403` page, `docs/testing/auth-modes.md`) |
+| **PARITY-3b** Backend Entra JWKS + role mapping | **✓ shipped** (`api/azure_ad_jwks.py` 1h TTL cache + kid-rotation refresh + fail-closed, `api/azure_ad_roles.py` group→role, `api/refresh_token_revocation.py` jti index, `api/deps.py::_entra_decode` with aud/iss/kid/exp pinning, cross-tenant 403 regression test, refresh rotation revokes old jti) |
+| **PARITY-4** Key Vault + separate signing keys | **✓ shipped** (`infra/main.bicep` Key Vault RBAC + 90d soft-delete + purge-protection; `api/attachment_read_token.py` reads ASOE_ATTACHMENT_SIGNING_KEY with SECONDARY rotation slot; `docs/ops/secrets-rotation.md` extended with overlap + break-glass procedures) |
+| **PARITY-5** App Insights + OTel + @audit_bearing | **✓ shipped** (`infra/main.bicep` dedicated workspace + 90d/30d retention; `api/observability/otel.py` opt-in init; `api/observability/audit_bearing.py` decorator + multi-line lint; `compliance/audit_bearing_exemptions.yaml` grandfather list; `api/observability/alerts.py` six pre-defined alerts; `api/observability/log_redaction.py` PII scrubber) |
+| **PARITY-6** Real-connector scaffolding | **✓ scaffolding shipped** (`contracts/policy.py::GATEWAY_TIMEOUT_S` per-gateway budgets wired into `gateways/executor.py`; `api/dead_letter_queue.py` tenant-scoped DLQ; `gateways/azure_di_egress_redaction.py` Luhn-checked CC + SSN + IBAN scrubber; `tests/eval/shadow_mode_thresholds.yaml` Q9 thresholds; `docs/ops/fixture-capture.md` cadence + sanitisation checklist). Real per-connector live wiring is per-sub-phase. |
+| **PARITY-7** Spatial extraction hardening | **✓ shipped** (`gateways/document_extraction.py::_normalize` NFKC + soft-hyphen strip; `resolve_model_id` env-pin; `tests/eval/datasets/extraction_spatial/seed.jsonl` 1→12 rows across born_digital/scanned/multi_page/table_heavy; `tests/eval/thresholds.yaml::per_type` per-doc-type thresholds; eval-gate per-row scorer pairing fix). Live AzureDI wiring + drift alert require real Azure access. |
+| **PARITY-8** Data governance closure | **✓ shipped** (`api/retention_sweeper.py` kill-switch + dry-run + residency-check + identity resolution; `contracts/policy.py::get_tenant_retention_ttl_days` per-tenant TTL; `SCHEDULED_RETENTION_DELETE` audit event type; `compliance/dpia/_template.md` per-tenant DPIA; `docs/ops/erasure-flows.md` Mode A vs Mode B distinction + manual-replay refusal) |
+
 ---
 
 ## 0. Why this plan exists

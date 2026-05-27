@@ -1,0 +1,65 @@
+{
+  "case": "PO_TBL_4403",
+  "sha256": "d8d8d8d8d8d8d8d8d8d8d8d8d8d8d8d8d8d8d8d8d8d8d8d8d8d8d8d8d8d8d8d8",
+  "model_id": "recorded-doctr-v0",
+  "prompt_hash": "doctr-candidate-proposer-v0",
+  "page_count": 1,
+  "candidates": [
+    {
+      "candidate_id": 1,
+      "page": 1,
+      "bbox": [
+        0.06,
+        0.32,
+        0.78,
+        0.36
+      ],
+      "text": "001 | BEV-JUICE-12PK | qty 180 | $9.20"
+    },
+    {
+      "candidate_id": 2,
+      "page": 1,
+      "bbox": [
+        0.06,
+        0.36,
+        0.78,
+        0.4
+      ],
+      "text": "002 | BEV-MILK-4PK  | qty 360 | $14.50"
+    },
+    {
+      "candidate_id": 3,
+      "page": 1,
+      "bbox": [
+        0.06,
+        0.4,
+        0.78,
+        0.44
+      ],
+      "text": "003 | BEV-ALMOND-6PK| qty 120 | $18.75"
+    }
+  ],
+  "fields": [
+    {
+      "supports_ref": "order_entry.line_001.material",
+      "text": "001 | BEV-JUICE-12PK | qty 180 | $9.20",
+      "label": "material",
+      "chosen_id": 1,
+      "confidence": 0.89
+    },
+    {
+      "supports_ref": "order_entry.line_002.material",
+      "text": "002 | BEV-MILK-4PK  | qty 360 | $14.50",
+      "label": "material",
+      "chosen_id": 2,
+      "confidence": 0.89
+    },
+    {
+      "supports_ref": "order_entry.line_003.material",
+      "text": "003 | BEV-ALMOND-6PK| qty 120 | $18.75",
+      "label": "material",
+      "chosen_id": 3,
+      "confidence": 0.89
+    }
+  ]
+}

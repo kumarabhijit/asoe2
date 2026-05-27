@@ -85,9 +85,17 @@ param pgAdminPassword string
 @secure()
 param anthropicApiKey string = 'placeholder-set-via-set-secrets-sh'
 
-@description('JWT secret for ASOE auth. Placeholder until set-secrets.sh is run.')
+@description('JWT secret for ASOE auth (HS256, seed mode). Placeholder until set-secrets.sh is run. PARITY-4: rotated independently of the attachment signing key.')
 @secure()
 param asoeJwtSecret string = 'placeholder-set-via-set-secrets-sh'
+
+@description('Attachment capability-token signing key (api/attachment_read_token.py). PARITY-4: independent of ASOE_JWT_SECRET so rotating attachment-URL signing does NOT invalidate auth tokens. Placeholder until set-secrets.sh is run.')
+@secure()
+param asoeAttachmentSigningKey string = 'placeholder-set-via-set-secrets-sh'
+
+@description('Attachment signing key rotation overlap. When operator rotates ASOE_ATTACHMENT_SIGNING_KEY, the old value is moved here for the overlap window so tokens minted just before rotation still verify until they expire. Empty disables.')
+@secure()
+param asoeAttachmentSigningKeySecondary string = ''
 
 @description('PostgreSQL connection string. Placeholder until set-secrets.sh is run.')
 @secure()
@@ -181,6 +189,9 @@ var uiAppName        = '${namePrefix}ui'
 var uamiName         = '${namePrefix}identity'
 var prometheusAppName = '${namePrefix}prom'
 var grafanaAppName    = '${namePrefix}graf'
+// PARITY-4 — Key Vault. Globally unique (Azure-wide) so we anchor on
+// the namePrefix; the 24-char vault-name cap is the binding constraint.
+var keyVaultName     = take('${namePrefix}kv', 24)
 
 var commonTags = {
   project: 'asoe'
@@ -224,15 +235,38 @@ resource acrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: logAnalyticsName
   location: location
-  tags: commonTags
+  tags: union(commonTags, {
+    purpose: 'asoe-preprod-monitoring' // PARITY-5 Decision Q5 — dedicated workspace.
+  })
   properties: {
     sku: {
       name: 'PerGB2018'
     }
+    // PARITY-5 — 30d Log Analytics retention per Decision Q5.
     retentionInDays: 30
     features: {
       enableLogAccessUsingOnlyResourcePermissions: true
     }
+  }
+}
+
+// PARITY-5 — Application Insights component pointed at the dedicated
+// Log Analytics workspace above. App Insights retention is 90 days
+// (Decision Q5), longer than the Log Analytics 30d so audit-relevant
+// traces survive a full quarter for SOX evidence requests.
+resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
+  name: '${namePrefix}appinsights'
+  location: location
+  tags: union(commonTags, {
+    purpose: 'asoe-preprod-monitoring'
+  })
+  kind: 'web'
+  properties: {
+    Application_Type: 'web'
+    WorkspaceResourceId: logAnalytics.id
+    RetentionInDays: 90
+    IngestionMode: 'LogAnalytics'
+    DisableIpMasking: false
   }
 }
 
@@ -426,6 +460,56 @@ resource pgExtensions 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@
   }
 }
 
+// PARITY-6 (Integration review) — Azure-native PgBouncer.
+//
+// MUST land BEFORE the Phase 6.3 SAP sub-phase ships — real SAP
+// fan-out will exhaust the default per-connection pool. Azure
+// Database for PostgreSQL Flexible Server bundles PgBouncer as a
+// server-parameter feature; enable it and switch the application's
+// DATABASE_URL to point at port 6432 (PgBouncer) instead of the
+// default 5432 (Postgres direct).
+//
+// Transaction mode matches the LangGraph-async + per-recipe-request
+// pattern: short-lived connections, no prepared-statement caches
+// across calls. Session mode would defeat the pooling for our
+// workload.
+
+resource pgPgBouncerEnabled 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2023-12-01-preview' = {
+  parent: pgServer
+  name: 'pgbouncer.enabled'
+  properties: {
+    value: 'true'
+    source: 'user-override'
+  }
+}
+
+resource pgPgBouncerMode 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2023-12-01-preview' = {
+  parent: pgServer
+  name: 'pgbouncer.pool_mode'
+  properties: {
+    value: 'transaction'
+    source: 'user-override'
+  }
+  dependsOn: [
+    pgPgBouncerEnabled
+  ]
+}
+
+resource pgPgBouncerDefaultPoolSize 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2023-12-01-preview' = {
+  parent: pgServer
+  name: 'pgbouncer.default_pool_size'
+  properties: {
+    // Conservative default; raise after Phase 6.3 baseline metrics
+    // show real fan-out demand. The B1ms server-side max_connections
+    // is the hard ceiling; PgBouncer multiplexes below it.
+    value: '50'
+    source: 'user-override'
+  }
+  dependsOn: [
+    pgPgBouncerEnabled
+  ]
+}
+
 // ──────────────────────────────────────────────────── Azure Managed Redis
 //
 // Replaces the legacy 'Microsoft.Cache/redis' offering (retiring 2028-09-30
@@ -460,6 +544,66 @@ resource redisDatabase 'Microsoft.Cache/redisEnterprise/databases@2024-10-01' = 
       aofEnabled: false
       rdbEnabled: false
     }
+  }
+}
+
+// ────────────────────────────────────────────────────────── Azure Key Vault
+//
+// PARITY-4 (per Decision Q4 + Security/Compliance review):
+//   * RBAC mode — no access policies; least-privilege via role
+//     assignments only.
+//   * Soft-delete + purge protection — 90-day retention so a
+//     mis-clicked delete cannot stem the audit trail or strand a
+//     rotating key.
+//   * Secrets land in Key Vault; Container App pulls via
+//     secretref → Key Vault reference (the secret URI replaces the
+//     literal value at deploy time).
+//
+// First-deploy bootstrap: the secrets are still written to the
+// Container App as literal values from the `@secure()` bicep params
+// (so a fresh deploy stands up without a manual Key Vault round trip);
+// the GA-readiness migration switches the Container App secret
+// `keyVaultUrl` so the literal values are dropped.
+resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
+  name: keyVaultName
+  location: location
+  tags: commonTags
+  properties: {
+    enabledForDeployment: false
+    enabledForTemplateDeployment: false
+    enabledForDiskEncryption: false
+    enableRbacAuthorization: true
+    enableSoftDelete: true
+    softDeleteRetentionInDays: 90
+    enablePurgeProtection: true
+    tenantId: subscription().tenantId
+    sku: {
+      family: 'A'
+      name: 'standard'
+    }
+    publicNetworkAccess: 'Enabled' // first-deploy convenience; GA: lock down to VNet.
+    networkAcls: {
+      defaultAction: 'Allow'
+      bypass: 'AzureServices'
+    }
+  }
+}
+
+// Grant the Container App's UAMI the Key Vault Secrets User role so
+// the Container App can resolve `keyVaultUrl`-style secret refs once
+// they replace the literal `value:` entries above.
+resource kvSecretsUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: keyVault
+  // Role definition id for "Key Vault Secrets User"
+  // (4633458b-17de-408a-b874-0445c86b69e6).
+  name: guid(keyVault.id, uami.id, '4633458b-17de-408a-b874-0445c86b69e6')
+  properties: {
+    principalId: uami.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      '4633458b-17de-408a-b874-0445c86b69e6'
+    )
   }
 }
 
@@ -563,6 +707,17 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (deployContainerApp) 
           name: 'asoe-jwt-secret'
           value: asoeJwtSecret
         }
+        // PARITY-4 — separate signing key for attachment capability
+        // tokens (api/attachment_read_token.py). Independently
+        // rotatable from asoe-jwt-secret; see docs/ops/secrets-rotation.md.
+        {
+          name: 'asoe-attachment-signing-key'
+          value: asoeAttachmentSigningKey
+        }
+        {
+          name: 'asoe-attachment-signing-key-secondary'
+          value: asoeAttachmentSigningKeySecondary
+        }
         {
           name: 'database-url'
           value: databaseUrl
@@ -609,6 +764,11 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (deployContainerApp) 
             { name: 'PORT',               value: '8000' }
             { name: 'ANTHROPIC_API_KEY',  secretRef: 'anthropic-api-key' }
             { name: 'ASOE_JWT_SECRET',    secretRef: 'asoe-jwt-secret' }
+            // PARITY-4 — distinct signing key for attachment
+            // capability tokens. Rotating attachment URL signing must
+            // NOT invalidate auth sessions.
+            { name: 'ASOE_ATTACHMENT_SIGNING_KEY', secretRef: 'asoe-attachment-signing-key' }
+            { name: 'ASOE_ATTACHMENT_SIGNING_KEY_SECONDARY', secretRef: 'asoe-attachment-signing-key-secondary' }
             { name: 'DATABASE_URL',       secretRef: 'database-url' }
             { name: 'REDIS_URL',          secretRef: 'redis-url' }
             // LangFuse (observability/langfuse_sink.py) — when all three
@@ -618,6 +778,11 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (deployContainerApp) 
             { name: 'LANGFUSE_HOST',         value: langfuseHost }
             { name: 'LANGFUSE_PUBLIC_KEY',   secretRef: 'langfuse-public-key' }
             { name: 'LANGFUSE_SECRET_KEY',   secretRef: 'langfuse-secret-key' }
+            // PARITY-5 — wires api/observability/otel.py to the
+            // App Insights ingestion endpoint. When this is unset
+            // (e.g. on Vercel), init_telemetry returns False and the
+            // exporter chain stays cold.
+            { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: appInsights.properties.ConnectionString }
           ]
           probes: [
             {

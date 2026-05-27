@@ -41,6 +41,7 @@ from api.deps import (
     get_current_user,
     require_role,
 )
+from api.observability.audit_bearing import audit_bearing
 from contracts.config_events import (
     ConfigChangeEvent,
     policy_key_for_event,
@@ -298,6 +299,7 @@ async def list_layer(
     response_model=TenantConfigRow,
     dependencies=[Depends(require_role("admin"))],
 )
+@audit_bearing(reason="upserts tenant config layer; threads policy_audit_log; SOX")
 async def upsert_layer(
     tenant_id: str,
     layer: str,
@@ -342,6 +344,7 @@ async def upsert_layer(
     response_model=ConfigDeleteResponse,
     dependencies=[Depends(require_role("admin"))],
 )
+@audit_bearing(reason="deletes a tenant config layer; reversal threads audit chain; SOX")
 async def delete_layer(
     tenant_id: str,
     layer: str,

@@ -27,3 +27,25 @@ extraction_spatial:
   page_accuracy_min: 1.0
   hallucination_rate_max: 0.02
   ece_max: 0.15
+  # PARITY-7 — per-document-type acceptance ceilings. Table-heavy and
+  # multi-page documents are noisier; their thresholds are tuned down
+  # to reflect the realistic upper bound of AzureDI's prebuilt-invoice
+  # model on each class. Lowering any of these requires the
+  # compliance CODEOWNERS gate (same as the global thresholds above).
+  #
+  # The Phase 7 acceptance gate flips a connector to real-only only
+  # when EVERY per-type threshold is met across the expanded golden
+  # set (≥10 rows spanning the four types).
+  per_type:
+    born_digital:
+      containment_min: 0.95
+      hallucination_rate_max: 0.02
+    scanned:
+      containment_min: 0.90
+      hallucination_rate_max: 0.03
+    multi_page:
+      containment_min: 0.92
+      hallucination_rate_max: 0.03
+    table_heavy:
+      containment_min: 0.88
+      hallucination_rate_max: 0.04
