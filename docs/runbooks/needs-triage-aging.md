@@ -51,7 +51,22 @@ Every reclassification appends one row to `case_classification_history` (criteri
 
 ## #2 — 48 h auto-age alert (pending wiring)
 
-Target query (drop-in for a scheduled scan):
+Target query (drop-in for a scheduled scan).
+
+**Postgres (prod):**
+
+```sql
+SELECT oc.case_id, oc.tenant_id, oc.opened_at,
+       EXTRACT(EPOCH FROM (now() - oc.opened_at::timestamptz)) / 3600
+           AS hours_in_triage
+FROM order_case oc
+WHERE oc.supergroup_code = 'SG_NEEDS_TRIAGE'
+  AND oc.status NOT IN ('RESOLVED','FAILED','BLOCKED')
+  AND EXTRACT(EPOCH FROM (now() - oc.opened_at::timestamptz)) / 3600 > 48
+ORDER BY hours_in_triage DESC;
+```
+
+**SQLite (local scratch DB / dev):**
 
 ```sql
 SELECT oc.case_id, oc.tenant_id, oc.opened_at,
@@ -75,7 +90,22 @@ The case-store API already supports the read: `case_store.list_by_tenant(tenant_
 
 ## #3 — Weekly Top-10 reasons (pending steward tool)
 
-Target query:
+Target query.
+
+**Postgres (prod):**
+
+```sql
+SELECT reason_text, COUNT(*) AS occurrences
+FROM case_classification_history
+WHERE supergroup_code = 'SG_NEEDS_TRIAGE'
+  AND reason_text IS NOT NULL
+  AND classified_at::timestamptz >= now() - interval '7 days'
+GROUP BY reason_text
+ORDER BY occurrences DESC
+LIMIT 10;
+```
+
+**SQLite (local scratch DB / dev):**
 
 ```sql
 SELECT reason_text, COUNT(*) AS occurrences

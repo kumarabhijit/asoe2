@@ -60,27 +60,54 @@ def _load_raw() -> dict[str, Any]:
     return yaml.safe_load(SEED_PATH.read_text(encoding="utf-8"))
 
 
-def _dump_raw(data: dict[str, Any]) -> None:
-    """Write the YAML back. ``sort_keys=False`` preserves the
-    Steward-curated ordering; ``default_flow_style=False`` keeps the
-    block style the seed uses."""
-    SEED_PATH.write_text(
-        yaml.safe_dump(
-            data, sort_keys=False, default_flow_style=False, allow_unicode=True,
-            width=120,
-        ),
-        encoding="utf-8",
+def _serialise_yaml(data: dict[str, Any]) -> str:
+    """Pure: dict -> YAML string in the seed's canonical block style."""
+    return yaml.safe_dump(
+        data, sort_keys=False, default_flow_style=False, allow_unicode=True,
+        width=120,
     )
 
 
-def _validate_and_regenerate() -> None:
-    """Validate the new state and regenerate constants. If either step
-    fails the YAML is left as-is — the steward's terminal sees the
-    error and reverts manually."""
-    load_yaml()  # raises ValueError on invariant break
-    py_text, ts_text = _generate_constants()
+def _atomic_commit(data: dict[str, Any]) -> None:
+    """Validate the proposed state in-memory + against a temp file,
+    regenerate constants in-memory, and only then atomically swap all
+    three files into place. A failure at any step leaves SEED_PATH +
+    PY_OUT + TS_OUT untouched (review finding #3 — the previous
+    write-then-validate left the repo dirty on validation failure).
+
+    Steps:
+      1. Write the YAML to a sibling temp file.
+      2. Run schema + invariant validation against the temp file.
+      3. Generate the Python + TS constants from the parsed YAML.
+      4. ``os.replace`` the temp file onto SEED_PATH (atomic on POSIX).
+      5. ``write_bytes`` the generated constants (small; non-atomic
+         but only reached after the canonical YAML is committed).
+    """
+    import os
+
+    tmp_yaml = SEED_PATH.with_suffix(".yaml.tmp")
+    tmp_yaml.write_text(_serialise_yaml(data), encoding="utf-8")
+    try:
+        # 2 + 3 — validation is mandatory before the swap.
+        load_yaml(tmp_yaml)
+        py_text, ts_text = _generate_from_path(tmp_yaml)
+    except Exception:
+        tmp_yaml.unlink(missing_ok=True)
+        raise
+    # 4 — atomic rename. After this line the canonical YAML is the new
+    # state; the constants regenerate is the only remaining work.
+    os.replace(tmp_yaml, SEED_PATH)
     PY_OUT.write_bytes(py_text.encode("utf-8"))
     TS_OUT.write_bytes(ts_text.encode("utf-8"))
+
+
+def _generate_from_path(path: Path) -> tuple[str, str]:
+    """Run the constants generator against an explicit YAML path
+    instead of the SEED_PATH default. Mirrors the path-substitution
+    that ``load_yaml(path)`` supports."""
+    data = load_yaml(path)
+    from scripts.generate_taxonomy_constants import _render_python, _render_typescript
+    return _render_python(data), _render_typescript(data)
 
 
 def _safe_relative(p: Path) -> str:
@@ -112,6 +139,27 @@ def add_intent(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+    # SAP block-code ↔ field must co-occur. Without the field the
+    # reconciliation script flags the row as `malformed_in_db`
+    # (docs/runbooks/sap-block-reconciliation.md). Reject at proposal
+    # time so the CLI can't author the exact row the cron is built to
+    # detect (review finding #2).
+    if args.sap_block_code and not args.sap_block_field:
+        print(
+            "error: --sap-block-field is required when --sap-block-code "
+            "is set (the 2-char SAP code is meaningless without the "
+            "SAP table identifier).",
+            file=sys.stderr,
+        )
+        return 2
+    if args.sap_block_field and not args.sap_block_code:
+        print(
+            "error: --sap-block-code is required when --sap-block-field "
+            "is set (a field reference without the code is not a "
+            "reconcilable mapping).",
+            file=sys.stderr,
+        )
+        return 2
 
     new_intent: dict[str, Any] = {
         "code": args.code,
@@ -132,15 +180,13 @@ def add_intent(args: argparse.Namespace) -> int:
     }
     data.setdefault("labels", []).append(label)
 
-    _dump_raw(data)
     try:
-        _validate_and_regenerate()
+        _atomic_commit(data)
     except Exception as exc:
-        print(f"error: proposal failed validation — {exc}", file=sys.stderr)
         print(
-            f"YAML at {SEED_PATH} now reflects the proposed state; "
-            "revert with `git checkout db/seeds/case_taxonomy.yaml` if "
-            "you want to abandon.",
+            f"error: proposal failed validation — {exc}\n"
+            "No files were modified (atomic commit; see "
+            "docs/runbooks/taxonomy-change.md).",
             file=sys.stderr,
         )
         return 3
@@ -185,11 +231,14 @@ def add_supergroup(args: argparse.Namespace) -> int:
         "display_name": args.display_name or _humanise(args.code),
     })
 
-    _dump_raw(data)
     try:
-        _validate_and_regenerate()
+        _atomic_commit(data)
     except Exception as exc:
-        print(f"error: proposal failed validation — {exc}", file=sys.stderr)
+        print(
+            f"error: proposal failed validation — {exc}\n"
+            "No files were modified (atomic commit).",
+            file=sys.stderr,
+        )
         return 3
 
     print(f"added supergroup {args.code} ({args.origin}, sort_order={next_order}).")
@@ -228,11 +277,14 @@ def deprecate_intent(args: argparse.Namespace) -> int:
     if args.replaced_by:
         target["replaced_by_code"] = args.replaced_by
 
-    _dump_raw(data)
     try:
-        _validate_and_regenerate()
+        _atomic_commit(data)
     except Exception as exc:
-        print(f"error: proposal failed validation — {exc}", file=sys.stderr)
+        print(
+            f"error: proposal failed validation — {exc}\n"
+            "No files were modified (atomic commit).",
+            file=sys.stderr,
+        )
         return 3
 
     print(f"deprecated intent {args.code} effective {target['deprecated_at']}.")
@@ -306,7 +358,7 @@ def main(argv: list[str] | None = None) -> int:
                             help="SAP block-reason code (optional).")
     p_add_int.add_argument(
         "--sap-block-field", default=None,
-        choices=[None, "LIFSK", "LIFSP", "FAKSK", "FAKSP", "ABGRU", "CMGST", "Z_CUSTOM"],
+        choices=["LIFSK", "LIFSP", "FAKSK", "FAKSP", "ABGRU", "CMGST", "Z_CUSTOM"],
         help="SAP block-table identifier (required if sap-block-code is set).",
     )
     p_add_int.add_argument("--phase-zero-pending", action="store_true",

@@ -88,6 +88,71 @@ def test_add_intent_rejects_unknown_supergroup(isolated_seed: Path):
     assert rc == 2
 
 
+def test_add_intent_rejects_sap_code_without_field(isolated_seed: Path):
+    """A SAP block code without its table field is the exact shape the
+    reconciliation cron flags as malformed_in_db — reject at the CLI."""
+    rc = steward.main([
+        "add-intent",
+        "--code", "INT_NEW_NO_FIELD",
+        "--supergroup", "SG_BLOCK_PRICING",
+        "--description", "missing sap_block_field",
+        "--sap-block-code", "ZZ",
+    ])
+    assert rc == 2
+
+
+def test_atomic_commit_leaves_files_untouched_on_validation_failure(
+    isolated_seed: Path,
+):
+    """If a proposal is well-formed by the CLI's own checks but the
+    JSON-schema validation in load_yaml fails (e.g. the steward
+    deliberately corrupts the seed via a direct edit on the side and
+    then runs add-intent), no file is mutated. The atomic-commit
+    contract from review finding #3 says the YAML, the Python
+    constants, and the TS constants are untouched on any failure."""
+    import scripts.seed_taxonomy as seed_mod
+    seed_path = seed_mod.SEED_PATH
+    py_path = isolated_seed / "taxonomy_constants.py"
+    ts_path = isolated_seed / "taxonomy.ts"
+    yaml_before = seed_path.read_bytes()
+    py_before = py_path.read_bytes()
+    ts_before = ts_path.read_bytes()
+
+    # Force a validation failure: corrupt the YAML on disk so the
+    # add-intent flow's atomic_commit step fails at load_yaml(tmp).
+    # The CLI reads + re-serialises so the tmp YAML inherits the
+    # corruption, and validation rejects it.
+    raw = seed_path.read_text(encoding="utf-8")
+    # Inject a duplicate supergroup code → invariant violation.
+    seed_path.write_text(
+        raw + "\n  - code: SG_BLOCK_PRICING\n    origin: API\n"
+              "    description: dup for test (10+ chars)\n"
+              "    owner_role: x\n    sort_order: 9999\n",
+        encoding="utf-8",
+    )
+    yaml_corrupted = seed_path.read_bytes()
+
+    rc = steward.main([
+        "add-intent",
+        "--code", "INT_NEW_AFTER_CORRUPT",
+        "--supergroup", "SG_BLOCK_PRICING",
+        "--description", "irrelevant — validation will fail",
+    ])
+    assert rc == 3
+    # The YAML on disk must be the corrupted-by-test state, NOT the
+    # CLI's attempted edit on top. Constants must also be unchanged.
+    assert seed_path.read_bytes() == yaml_corrupted
+    assert py_path.read_bytes() == py_before
+    assert ts_path.read_bytes() == ts_before
+    # And no leftover ``.yaml.tmp`` sibling.
+    tmp = seed_path.with_suffix(".yaml.tmp")
+    assert not tmp.exists()
+
+    # Restore the original YAML so other tests in this module are
+    # unaffected (autouse fixture also restores, but be tidy).
+    seed_path.write_bytes(yaml_before)
+
+
 def test_add_intent_emits_default_label(isolated_seed: Path):
     """Without --display-name the CLI generates a humanised default
     label from the code, so the row immediately renders in the UI."""

@@ -51,11 +51,13 @@ def test_no_subcommand_prints_usage_and_errors():
     assert "usage" in (result.stderr + result.stdout).lower()
 
 
-def test_validate_against_committed_seed_passes():
-    """``validate`` should be clean against the committed state of
-    main. If this fails, either the YAML has drifted from the
-    generated constants (`make taxonomy-gen` not run after a YAML
-    edit) or the seed has an invariant violation."""
+def test_cli_validate_command_clean_on_committed_state():
+    """``python -m scripts.steward_change validate`` is clean against
+    the committed state of main. The pure drift check is locked by
+    ``tests/test_taxonomy_constants_drift.py``; this test additionally
+    locks that the steward CLI surface wires through to the same
+    check (catches an import / argparse regression that breaks the
+    steward's terminal even when the underlying drift test passes)."""
     result = _run("validate")
     assert result.returncode == 0, (
         f"validate failed against committed seed:\n"

@@ -75,8 +75,22 @@ jobs:
 
       - name: Fetch SAP snapshot
         if: steps.snapshot.outputs.skip == 'false'
+        env:
+          # Pass the URL through the env, NEVER interpolate a GHA
+          # expression directly into a `run:` body. A workflow_dispatch
+          # input containing shell metacharacters would otherwise be a
+          # script-injection RCE primitive on the runner under the
+          # job's GITHUB_TOKEN + secrets (review finding #1, BLOCKER).
+          URL: ${{ steps.snapshot.outputs.url }}
         run: |
-          curl -fsSL "${{ steps.snapshot.outputs.url }}" -o /tmp/sap_block_codes.csv
+          # Validate the URL shape before curling — only https URLs
+          # to allow-listable hosts. Belt-and-suspenders on top of
+          # the env-var quoting.
+          if ! printf '%s' "$URL" | grep -Eq '^https://[A-Za-z0-9._/?=&%-]+$'; then
+            echo "::error::SAP snapshot URL is not a clean https URL: refusing to fetch."
+            exit 1
+          fi
+          curl -fsSL "$URL" -o /tmp/sap_block_codes.csv
           # First line is the header — non-empty proves the fetch was
           # not just a 200 with empty body.
           head -1 /tmp/sap_block_codes.csv | grep -q "sap_block_code" || {
