@@ -62,6 +62,7 @@ version = "0.3.2"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "jsonschema" },
     { name = "langgraph" },
     { name = "pydantic" },
     { name = "pyyaml" },
@@ -113,6 +114,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27.0" },
     { name = "huggingface-hub", marker = "extra == 'huggingface'", specifier = ">=0.27.0" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.100.0" },
+    { name = "jsonschema", specifier = ">=4.17.0" },
     { name = "langfuse", marker = "extra == 'langfuse'", specifier = ">=2.0.0" },
     { name = "langgraph", specifier = ">=0.2.0" },
     { name = "ollama", marker = "extra == 'ollama'", specifier = ">=0.4.0" },
