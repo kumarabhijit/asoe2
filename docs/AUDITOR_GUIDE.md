@@ -220,6 +220,35 @@ All gateway operations use typed `GatewayRequest` / `GatewayResponse` models
 with `extra="forbid"`.  Response statuses are constrained to:
 `SUCCESS`, `FAILED`, `TIMEOUT`, `UNAVAILABLE`.
 
+### 4.4 Live-or-stub routing (PARITY-6)
+
+Per-connector live backends ship behind env flags + a canary
+percentage keyed on `case_id`. Each router wraps the existing
+StubGateway so the registry name is preserved (recipes resolve
+unchanged):
+
+| Connector | Driver env | Router class | Live backend |
+|---|---|---|---|
+| `email_intake` (Graph) | `ASOE_EMAIL_INTAKE_DRIVER=graph` | `gateways/msgraph_intake.py::GraphIntakeGateway` | `LiveGraphIntakeBackend` |
+| `document_extraction` (AzureDI) | `ASOE_DOCUMENT_EXTRACTION_BACKEND=live` | `gateways/document_extraction.py::resolve_backend()` | `LiveDocumentIntelligenceBackend` |
+| 7 SAP domains (`sap_order`, `sap_doc`, `sap_contract`, `promotion`, `sap_block`, `sap_customer_master`, `sla_contract`) | `ASOE_SAP_DRIVER=s4hana` | `gateways/sap_live.py::SapDomainGateway` (one instance per domain) | `LiveSapBackend` (shared OData context) |
+| `oms` | `ASOE_OMS_DRIVER=live` | `gateways/oms_live.py::OmsGateway` | `LiveOmsBackend` |
+
+Each router runs the live call through `gateways/shadow_mode.py::ShadowRunner`
+so a (live, stub) diff log accumulates against the Q9 thresholds
+even at 100% canary. Audit-bearing-field diffs (per
+`compliance/audit_bearing_registry.yaml`) must hold at 0% before a
+connector flips to real-only; derived fields tolerate ≤ 5%.
+
+**Dead-letter queue.** Terminal live failures land in
+`api/dead_letter_queue.py` under the operator-facing source name
+(`graph`, `sap`, `oms`, `document_extraction`). The post-recipe-success
+OMS write failure has a distinct contract: when `apply_effects`
+processes an `effect.gateway_name == "oms"` and the response status
+is non-SUCCESS, `gateways/oms_live.record_post_success_orphan` writes
+a `source="oms"` DLQ row carrying the `recipe_run_id` so the
+auditor correlates back to the recipe execution.
+
 ---
 
 ## 5. Multi-Step Workflows (Saga Pattern)
@@ -478,6 +507,26 @@ the per-verb endpoints that produced them. Historical rows carrying
 those keys remain immutable in the chain; new writes use the events
 above.
 
+**PARITY-0.5 / PARITY-8 erasure events.** Two related but distinct
+event types capture attachment-byte erasure, with the audit row
+always written **before** the byte wipe so a regulator can prove the
+deletion even if the bytes themselves are gone:
+
+| `policy_key` | Emitted by | Notes |
+|---|---|---|
+| `ATTACHMENT_ERASED` | `gateways/attachment_store.py::erase_attachment` (operator-triggered erasure) | PII-free tombstone (no `content`, no `name` — locked by `compliance/audit_bearing_registry.yaml`); carries `attachment_id`, `sha256`, `tenant_id`, `case_id`, `size_bytes`, `mime_type`, `erased_at`, `erased_by`, `reason`. Fetchable as a regulator-grade certificate via `GET /api/v1/attachments/{id}/erasure-certificate` (manager+admin only, tenant-scoped). |
+| `SCHEDULED_RETENTION_DELETE` | `api/retention_sweeper.py::commit_with_residency_check` (bulk per-tenant TTL sweep) | Distinct event type so bulk sweeper deletes are distinguishable from operator-triggered erasures in the audit trail. Fires alongside the `ATTACHMENT_ERASED` row written by `erase_attachment` (both are appended atomically — neither can leave the bytes in an indeterminate state). |
+
+The retention sweeper enforces three invariants in this order:
+**residency check first** (a region mismatch surfaces 422
+`RESIDENCY_VIOLATION` even when the sweeper is disabled — the
+blast-radius diagnostic must surface before the operational state),
+**enabled-flag check second** (`RETENTION_SWEEPER_ENABLED=true`
+required), **proof-of-erasure third** (audit row written before
+byte wipe). A failed chain-write aborts the wipe and increments
+`CommitResult.blocked_count` rather than leaving bytes gone with no
+proof.
+
 ### LangFuse Forwarding (Optional)
 
 When `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are set and the `langfuse`
@@ -530,6 +579,57 @@ block graph execution or API responses. Clients can poll
 
 Implementation: `api/events.py` (event schemas), `api/pubsub.py` (pub/sub manager),
 `api/routes/ws.py` (WebSocket hub).
+
+### `@audit_bearing` source-level lint (PARITY-5)
+
+Every state-mutating route under `api/routes/` must carry an
+`@audit_bearing(reason="...")` decorator OR an explicit entry in
+`compliance/audit_bearing_exemptions.yaml` (CODEOWNERS-gated under
+`/compliance/`). The lint at
+`tests/test_otel_audit_bearing.py::TestAuditBearingLint` walks 10
+lines before AND 10 lines after every `@router.post(...)` /
+`@router.put(...)` / etc. for a literal `@audit_bearing(` — comments
+mentioning the word don't satisfy it.
+
+`reason` is required and embedded in the function metadata so an
+auditor can `WHERE audit_bearing_reason == "..."` to find every
+audit-bearing operation of a given class without scanning the
+codebase.
+
+**Currently-decorated SOX-relevant routes** (non-exhaustive):
+
+| Route | Reason category |
+|---|---|
+| `POST /exceptions/resolve`, `/resolve/async`, `/disposition`, `/reanalyze`, `/challenge`, `/admin-release`, `/override/cosign`, `/escalate` | HITL dispositions (Phase 19) |
+| `POST /workflows` | Multi-intent workflow execution |
+| `PUT /policies/{tenant_id}` | Policy override update |
+| `PUT` + `DELETE /config/tenants/{tenant_id}/layers/{layer}` | Tenant config-layer mutations |
+| `POST /cases/{case_id}/attachments/{attachment_id}/signed-url` | Mints a scoped, expiring capability URL granting read access to attachment bytes that may be evidence in a SOX-relevant decision |
+| `POST /metrics/reviewer-activity` | Automation-bias telemetry (Layer-2-open + dwell, DoR #11 — auditor uses to contest a decision the operator never visually inspected) |
+| `POST /outbox/reconcile` | Drains the compensation outbox — materialises real downstream effects (SAP / OMS / EDI writes, DoR #6) |
+
+The exempt list at `compliance/audit_bearing_exemptions.yaml`
+covers (a) the auth surface (logs through `policy_audit_log` under
+`AUTH_*` event types — decorating would double-record) and (b) the
+sandbox-only synthetic-data routes (not financially binding by
+construction).
+
+### Pre-declared alerts catalogue (`api/observability/alerts.py`)
+
+A typed `ALERT_CATALOGUE` exposes the canonical alert names so
+runbooks, dashboards, and on-call tooling reference symbols rather
+than hand-syncing a YAML list. Severity and runbook anchor live on
+each descriptor; thresholds and routing live in Azure Monitor.
+
+| Name | Severity | Trigger |
+|---|---|---|
+| `zero-highlight` | Sev2 | Spatial-overlay containment dropped to zero on a case that previously rendered highlights |
+| `layer2-open-rate` | Sev3 | Operator Layer-2 expansion rate deviates > 2σ from the trailing 7-day median (UX regression detector) |
+| `breaker-open` | Sev1 | A gateway circuit breaker has been open > 5 min (real upstream outage; DLQ accumulating) |
+| `extraction-cost-overrun` | Sev2 | Per-page AzureDI cost > `EXTRACTION_MAX_COST_USD_PER_PAGE` on > 1% of recent calls |
+| `audit-chain-verify-failed` | Sev1 | `verify_audit_chain()` returned False — P0; investigate before any further appends |
+| `retention-sweeper-anomaly` | Sev1 | Sweeper produced a delete count > 10× the trailing 7-day median, OR attempted residency-restricted region delete |
+| `extraction-drift` | Sev3 | 7-day rolling median containment dropped > 5pp on a (`model_id`, `prompt_hash`) tuple. Emitted by `scripts/run_drift_forwarder.py` via the `driftAlertJob` Container Apps Job |
 
 ---
 
