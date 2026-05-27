@@ -9,7 +9,13 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from contracts.models import ExecutedNode, GatewayCallSpan, LifecycleState, OrderEvent
+from contracts.models import (
+    ClassifierType,
+    ExecutedNode,
+    GatewayCallSpan,
+    LifecycleState,
+    OrderEvent,
+)
 
 # Re-exported so OpenAPI consumers see ExecutedNode / GatewayCallSpan
 # under api.schemas. The domain definitions live in contracts/models.py
@@ -1953,7 +1959,14 @@ class ClassificationHistoryEntry(BaseModel):
     Mirrors ``contracts.models.ClassificationEvent`` and the
     ``case_classification_history`` table (V020). Requirements §8.6 —
     surfaces the append-only audit for UI / steward reporting.
+
+    Field-set parity with ``ClassificationEvent`` is locked by
+    ``tests/test_classification_history_shape.py``: an event field
+    that this model doesn't mirror would silently drop data on the
+    wire, so the field sets must remain identical.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     id: str
     case_id: str
@@ -1962,11 +1975,22 @@ class ClassificationHistoryEntry(BaseModel):
     intent_code: Optional[str] = None
     classified_at: str
     classified_by: str
-    classifier_type: str
+    classifier_type: ClassifierType  # Literal["HUMAN","MODEL","RULE"] from contracts
     model_version: Optional[str] = None
     reason_text: Optional[str] = None
     source_event_id: Optional[str] = None
     taxonomy_version: str
+
+    def redact_for_partner(self) -> "ClassificationHistoryEntry":
+        """Return a copy with operator-authored free-text fields blanked.
+
+        Partner-role consumers are external retailers; ``reason_text``
+        is operator-authored free text and may contain internal
+        commercial notes. The redaction is applied at the serializer
+        boundary so partners see the structural audit (who classified
+        when, into what super-group) without the free-text colour.
+        """
+        return self.model_copy(update={"reason_text": None})
 
 
 class ClassificationHistoryResponse(BaseModel):

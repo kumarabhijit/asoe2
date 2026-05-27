@@ -437,11 +437,16 @@ async def list_classification_history(
             message=f"Case {case_id} not found.",
             status_code=404,
         )
-    _ = user  # kept on the dependency for future per-role hardening
     events = case_store.get_classification_history(case_id)
     items = [
         ClassificationHistoryEntry(**event.model_dump()) for event in events
     ]
+    # Partners are external retailers; ``reason_text`` is operator-authored
+    # free text and may carry internal commercial notes ("escalate to VP",
+    # "watchlist customer", etc.). Redact it for the partner role; analysts
+    # / managers / admins / viewers (all internal) see the full row.
+    if "partner" in (user.roles or ()):
+        items = [it.redact_for_partner() for it in items]
     return ClassificationHistoryResponse(items=items, total=len(items))
 
 

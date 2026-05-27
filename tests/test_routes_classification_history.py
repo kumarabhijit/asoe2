@@ -27,6 +27,11 @@ def analyst_token():
     return create_test_token(roles=["analyst"], org="tenant-a")
 
 
+@pytest.fixture()
+def partner_token():
+    return create_test_token(roles=["partner"], org="tenant-a")
+
+
 def _auth(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
@@ -136,6 +141,49 @@ def test_unauthenticated_request_rejected(client):
 # ---------------------------------------------------------------------------
 # Response shape
 # ---------------------------------------------------------------------------
+
+def test_partner_role_sees_redacted_reason_text(client, partner_token):
+    """Partners (external retailers) see the structural audit trail
+    but not operator-authored free text in ``reason_text`` (may
+    contain internal commercial notes)."""
+    case_id = _open(supergroup_code="SG_NEW_ORDER")
+    case_store.update(
+        case_id, supergroup_code="SG_ORDER_CHANGE",
+        classified_by="user:csr-1", classifier_type="HUMAN",
+        reason_text="Escalation risk — internal flag",
+    )
+    r = client.get(
+        f"/api/v1/cases/{case_id}/classification-history",
+        headers=_auth(partner_token),
+    )
+    assert r.status_code == 200
+    items = r.json()["items"]
+    # Every row arrives with reason_text=None for the partner role,
+    # even when the underlying event has a value.
+    assert all(it["reason_text"] is None for it in items)
+    # Structural audit is preserved.
+    assert items[1]["classified_by"] == "user:csr-1"
+    assert items[1]["classifier_type"] == "HUMAN"
+    assert items[1]["supergroup_code"] == "SG_ORDER_CHANGE"
+
+
+def test_analyst_role_sees_reason_text(client, analyst_token):
+    """Internal roles (analyst / manager / admin / viewer) see the
+    full audit trail including reason_text."""
+    case_id = _open(supergroup_code="SG_NEW_ORDER")
+    case_store.update(
+        case_id, supergroup_code="SG_ORDER_CHANGE",
+        classified_by="user:csr-1", classifier_type="HUMAN",
+        reason_text="Escalation risk — internal flag",
+    )
+    r = client.get(
+        f"/api/v1/cases/{case_id}/classification-history",
+        headers=_auth(analyst_token),
+    )
+    assert r.status_code == 200
+    items = r.json()["items"]
+    assert items[1]["reason_text"] == "Escalation risk — internal flag"
+
 
 def test_response_carries_full_audit_shape(client, analyst_token):
     """Every field declared on ClassificationHistoryEntry surfaces in

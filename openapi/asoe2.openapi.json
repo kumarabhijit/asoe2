@@ -961,7 +961,8 @@
         "type": "object"
       },
       "ClassificationHistoryEntry": {
-        "description": "One row of the case's classification audit trail.\n\nMirrors ``contracts.models.ClassificationEvent`` and the\n``case_classification_history`` table (V020). Requirements \u00a78.6 \u2014\nsurfaces the append-only audit for UI / steward reporting.",
+        "additionalProperties": false,
+        "description": "One row of the case's classification audit trail.\n\nMirrors ``contracts.models.ClassificationEvent`` and the\n``case_classification_history`` table (V020). Requirements \u00a78.6 \u2014\nsurfaces the append-only audit for UI / steward reporting.\n\nField-set parity with ``ClassificationEvent`` is locked by\n``tests/test_classification_history_shape.py``: an event field\nthat this model doesn't mirror would silently drop data on the\nwire, so the field sets must remain identical.",
         "properties": {
           "case_id": {
             "title": "Case Id",
@@ -987,6 +988,11 @@
             "type": "string"
           },
           "classifier_type": {
+            "enum": [
+              "HUMAN",
+              "MODEL",
+              "RULE"
+            ],
             "title": "Classifier Type",
             "type": "string"
           },
