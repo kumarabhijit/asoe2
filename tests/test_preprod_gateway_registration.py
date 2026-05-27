@@ -119,6 +119,21 @@ def test_preprod_with_sap_driver_swaps_each_domain_to_router(monkeypatch):
         )
 
 
+def test_preprod_with_oms_driver_swaps_oms_to_router(monkeypatch):
+    """PARITY-6.4 — ``ASOE_OMS_DRIVER=live`` swaps the oms
+    StubGateway through OmsGateway."""
+    monkeypatch.setenv("ASOE_ENV", "preprod")
+    monkeypatch.setenv("ASOE_OMS_DRIVER", "live")
+    monkeypatch.setenv("ASOE_OMS_BASE_URL", "https://stub.example/")
+    monkeypatch.setenv("ASOE_OMS_API_KEY", "stub")
+    registry.clear_registry()
+    from api.preprod_gateways import register_preprod_gateways
+    from gateways.oms_live import OmsGateway
+    register_preprod_gateways()
+    resolved = registry.get_gateway("oms")
+    assert isinstance(resolved, OmsGateway)
+
+
 def test_preprod_resolve_populates_inbox_sections(monkeypatch):
     """The contract from asoe2 #175 (sandbox) must also hold for preprod:
     a vanilla MANUAL_ORDER_INTAKE event through /resolve produces an

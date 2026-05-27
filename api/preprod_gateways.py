@@ -160,3 +160,44 @@ def register_preprod_gateways() -> None:
     _register_all_stub_gateways()
     _maybe_swap_email_intake_for_graph()
     _maybe_swap_sap_domains_for_live()
+    _maybe_swap_oms_for_live()
+
+
+def _maybe_swap_oms_for_live() -> None:
+    """PARITY-6.4 — replace the `oms` StubGateway with `OmsGateway`
+    live-or-stub router when ``ASOE_OMS_DRIVER=live``.
+
+    Reversible by env unset. Last in the swap chain because OMS writes
+    depend on SAP validation (the parity plan §6 sub-phase order):
+    OMS lights up only after the SAP sub-phase has settled.
+    """
+    driver = (os.getenv("ASOE_OMS_DRIVER") or "recorded").strip().lower()
+    if driver != "live":
+        return
+    try:
+        from gateways.oms_live import LiveOmsBackend, OmsGateway
+        from gateways.registry import get_gateway, register_gateway
+    except ImportError as exc:
+        logger.warning(
+            "ASOE_OMS_DRIVER=live requested but live backend imports "
+            "failed (%s) — staying on stub",
+            exc,
+        )
+        return
+    try:
+        existing_stub = get_gateway("oms")
+    except KeyError:
+        logger.warning(
+            "ASOE_OMS_DRIVER=live requested but oms stub not "
+            "registered — skipping live swap",
+        )
+        return
+
+    router = OmsGateway(
+        stub=existing_stub, live_backend_factory=lambda: LiveOmsBackend(),
+    )
+    register_gateway(router)
+    logger.info(
+        "oms gateway routed through OmsGateway "
+        "(canary pct env: ASOE_CANARY_PCT_OMS)",
+    )
