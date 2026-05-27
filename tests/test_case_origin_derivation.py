@@ -89,10 +89,12 @@ def test_tier_rejects_out_of_range():
 
 
 def test_extra_fields_forbidden():
-    """``extra='forbid'`` on the model — typos / removed legacy fields
-    raise at construction rather than silently dropping."""
+    """``extra='forbid'`` on the model — typos raise at construction rather
+    than silently dropping. Uses a generic sentinel so the assertion does
+    not rot if a real future field happens to share the name of a long-dead
+    one."""
     with pytest.raises(Exception):  # ValidationError
         OrderCase(  # type: ignore[call-arg]
             tenant_id="t1", origin="CUSTOMER", source_channel="email",
-            case_type="EMAIL_ENTRY",  # legacy field, dropped in commit 6
+            unknown_field_should_raise="x",
         )

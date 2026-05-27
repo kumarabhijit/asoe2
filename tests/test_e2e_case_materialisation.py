@@ -3,13 +3,13 @@
 End-to-end coverage for the case-resolver wiring in
 ``api/routes/exceptions.py::_persist_exception``. Verifies:
 
-  * Clean Automated event (final_status == COMPLETE) → no case opened;
+  * Clean API event (final_status == COMPLETE) → no case opened;
     record's ``parent_case_id`` is None (T1 stateless path).
-  * Non-clean Automated event (MANUAL_REVIEW_REQUIRED / BLOCKED) →
+  * Non-clean API event (MANUAL_REVIEW_REQUIRED / BLOCKED) →
     case opens; record's ``parent_case_id`` is set; case carries
-    ``source = "automated_order"``.
-  * Manual Order event → case opens eagerly regardless of terminal
-    status; ``source = "manual_order"``.
+    ``origin = "API"``.
+  * CUSTOMER-origin event → case opens eagerly regardless of terminal
+    status; ``origin = "CUSTOMER"``.
   * Multiple non-clean events for the same customer PO → all attach
     to the same case (correlation lookup-or-create works through the
     full e2e path).
@@ -224,9 +224,8 @@ class TestMaterialiseForEvent:
         assert len(case_store.list_by_tenant("t1")) == 1
 
     def test_explicit_source_channel_propagates(self):
-        # Portal-typed order: metadata overrides inference; source is
-        # automated_order (workload-centric criterion per §3.1) and
-        # channel is 'portal'.
+        # Portal-typed order: metadata overrides inference; origin is
+        # API (system-initiated) and channel is 'portal'.
         event = OrderEvent(
             order_id="PORTAL-9", po_price=100.0, sap_base_price=100.0,
             event_type="ORDER_RECEIVED",

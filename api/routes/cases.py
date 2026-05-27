@@ -1,7 +1,8 @@
 """OrderCase read endpoints (ADR-038 Phase H.6).
 
 GET /api/v1/cases          — list cases for the caller's tenant, with
-                              optional source / status filters.
+                              optional origin / supergroup_code / status
+                              filters.
 GET /api/v1/cases/{id}     — fetch a single case.
 
 The case lifecycle is mutated implicitly by the orchestration graph
@@ -43,6 +44,7 @@ from api.metrics import record_cases_returned
 from api.observability.audit_bearing import audit_bearing
 from api.schemas import CaseListResponse, CaseRecordsResponse
 from api.store import case_store, exception_store
+from contracts.models import Origin
 
 logger = logging.getLogger("asoe.api.cases")
 
@@ -108,12 +110,13 @@ def _scope_to_user(cases, user: AuthenticatedUser):
 async def list_cases(
     tenant_id: str = Depends(get_tenant_id),
     user: AuthenticatedUser = Depends(get_current_user),
-    origin: Optional[str] = Query(
+    origin: Optional[Origin] = Query(
         None,
         description=(
             "Filter by case origin (CUSTOMER | API). Requirements §3 "
             "glossary — CUSTOMER drives the Customer Inbox lens; API is "
-            "the SAP-pushed block path."
+            "the SAP-pushed block path. Unknown values rejected at the "
+            "edge by FastAPI (constrained-input gate, CLAUDE.md §3)."
         ),
     ),
     supergroup_code: Optional[str] = Query(

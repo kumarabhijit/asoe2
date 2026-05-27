@@ -1,8 +1,9 @@
-"""Phase 2 — V018 schema verifies columns + triggers were added.
+"""Phase 2 — V018 schema adds Origin / Super-Group fields + triggers.
 
-Covers requirements §5 (model fields) and the additive nature of
-the change: no existing column dropped, deprecated columns kept
-through V018.
+Covers requirements §5 (model fields). Schema state observed here is
+*after* V019 has chained and dropped the legacy ``source`` /
+``case_type`` / ``email_classification`` columns — see
+``tests/test_v019_schema.py`` for the drop assertions.
 """
 
 from __future__ import annotations
@@ -40,7 +41,7 @@ def test_exceptions_has_new_columns(db: sqlite3.Connection):
 
 
 def test_anchor_columns_present(db: sqlite3.Connection):
-    """V009 anchor columns survive V018 alterations."""
+    """V009 anchor columns survive V018 + V019."""
     ex = _cols(db, "exceptions")
     assert "parent_case_id" in ex
     assert "intent" in ex  # legacy column; renamed to intent_code later

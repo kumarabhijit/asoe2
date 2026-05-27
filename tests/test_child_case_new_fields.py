@@ -24,7 +24,7 @@ def _make() -> ChildCase:
     )
 
 
-def test_exception_record_accepts_new_fields():
+def test_child_case_accepts_new_fields():
     rec = _make()
     assert rec.supergroup_code == "SG_BLOCK_PRICING"
     assert rec.intent_code == "INT_PRICE_MISMATCH"

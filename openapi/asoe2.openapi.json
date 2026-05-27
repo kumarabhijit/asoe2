@@ -7118,20 +7118,24 @@
         "operationId": "list_cases_api_v1_cases_get",
         "parameters": [
           {
-            "description": "Filter by case origin (CUSTOMER | API). Requirements \u00a73 glossary \u2014 CUSTOMER drives the Customer Inbox lens; API is the SAP-pushed block path.",
+            "description": "Filter by case origin (CUSTOMER | API). Requirements \u00a73 glossary \u2014 CUSTOMER drives the Customer Inbox lens; API is the SAP-pushed block path. Unknown values rejected at the edge by FastAPI (constrained-input gate, CLAUDE.md \u00a73).",
             "in": "query",
             "name": "origin",
             "required": false,
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "CUSTOMER",
+                    "API"
+                  ],
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter by case origin (CUSTOMER | API). Requirements \u00a73 glossary \u2014 CUSTOMER drives the Customer Inbox lens; API is the SAP-pushed block path.",
+              "description": "Filter by case origin (CUSTOMER | API). Requirements \u00a73 glossary \u2014 CUSTOMER drives the Customer Inbox lens; API is the SAP-pushed block path. Unknown values rejected at the edge by FastAPI (constrained-input gate, CLAUDE.md \u00a73).",
               "title": "Origin"
             }
           },

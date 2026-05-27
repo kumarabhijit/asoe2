@@ -1,12 +1,16 @@
-"""Exception store for the ASOE API.
+"""Child-case store for the ASOE API.
 
-Provides two backends:
+Provides two backends over the ``exceptions`` table (V001):
   - ``ExceptionStore`` — in-memory (default when DATABASE_URL is unset)
   - ``DatabaseBackedStore`` — SQLite or PostgreSQL via ``db/repository.py``
 
-The module-level ``exception_store`` singleton is created at import time
-based on the ``DATABASE_URL`` environment variable. API routes import and
-use this singleton without knowing which backend is active.
+The store classes and the module-level ``exception_store`` singleton are
+named after the underlying DB table (``exceptions``, V001). The row
+class is ``ChildCase`` per the Case & Intent Super-Group requirements
+§3 glossary — the data is a child-of-OrderCase, regardless of where it
+lives on disk. The table name is retained for migration safety.
+
+API routes import the singleton and don't know which backend is active.
 """
 
 from __future__ import annotations
@@ -24,7 +28,7 @@ from contracts.models import STATUS_TO_LIFECYCLE
 
 
 class ChildCase:
-    """In-memory representation of a persisted exception."""
+    """In-memory representation of a child case (DB table: ``exceptions``)."""
 
     def __init__(
         self,

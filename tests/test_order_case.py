@@ -2,12 +2,12 @@
 
 Locks the case primitive's contracts:
   * Pydantic OrderCase model accepts valid inputs and rejects
-    out-of-vocabulary source / status / tier values.
+    out-of-vocabulary origin / status / tier values.
   * CaseStore.lookup_or_create resolves correlation keys per the
     SO → PO → EDI txn → email priority (ADR-038 §6.2).
   * Multi-PO email opens N cases.
-  * Email matching pre-existing Automated case attaches (no new
-    case opened); first event's source/source_channel preserved.
+  * Email matching pre-existing API case attaches (no new
+    case opened); first event's origin / source_channel preserved.
   * Tenant isolation — two tenants with the same correlation key
     do NOT share a case.
   * ChildCase.parent_case_id is wired and defaults to None
@@ -95,11 +95,11 @@ class TestOrderCaseModel:
                 unknown_field="x",  # type: ignore[call-arg]
             )
 
-    def test_invalid_source_rejected(self):
+    def test_invalid_origin_rejected(self):
         with pytest.raises(ValidationError):
             OrderCase(
                 tenant_id="t1",
-                source="not_a_source",  # type: ignore[arg-type]
+                origin="not_an_origin",  # type: ignore[arg-type]
                 source_channel="email",
             )
 
@@ -238,8 +238,8 @@ class TestCaseStoreLookupOrCreate:
             customer_po_number="PO-1234",
             source_email_id="msg-1",
         )
-        # Same case as the EDI run; source stays automated_order
-        # (immutable per ADR-038 §3.1; source_channel could become a
+        # Same case as the EDI run; origin stays API (immutable; an
+        # earlier intake wins the origin/source_channel pair; the field
         # list in a future commit but the V1 model keeps it scalar).
         assert opened is False
         assert email_case.case_id == edi_case.case_id
