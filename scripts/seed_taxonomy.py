@@ -38,13 +38,22 @@ SCHEMA_PATH = REPO_ROOT / "db" / "seeds" / "case_taxonomy.schema.json"
 # Pure loaders / validators
 # ---------------------------------------------------------------------------
 
-def load_yaml(path: Path = SEED_PATH) -> dict[str, Any]:
+def load_yaml(path: Path | None = None) -> dict[str, Any]:
     """Parse and JSON-schema-validate the seed YAML.
+
+    ``path`` resolves to ``SEED_PATH`` at *call* time (not at function
+    definition) so test fixtures that redirect ``SEED_PATH`` via
+    ``monkeypatch`` are honoured.
 
     Validation is mandatory — a malformed seed cannot reach the DB or the
     generated constants. Raises ValueError with a precise location on
     failure.
     """
+    if path is None:
+        # Import-reference (not the captured module-level binding) so a
+        # monkeypatched SEED_PATH is honoured.
+        from scripts import seed_taxonomy as _self
+        path = _self.SEED_PATH
     text = path.read_text(encoding="utf-8")
     data = yaml.safe_load(text)
     _validate(data)
