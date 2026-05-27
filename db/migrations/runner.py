@@ -997,6 +997,63 @@ def _apply_sqlite_v019(conn: sqlite3.Connection) -> None:
     logger.info("SQLite schema V019 applied (dropped deprecated case columns)")
 
 
+def _apply_sqlite_v020(conn: sqlite3.Connection) -> None:
+    """V020 — case_classification_history (append-only audit trail).
+
+    Mirrors V020__case_classification_history.sql. SQLite triggers use
+    RAISE(ABORT, ...) instead of plpgsql RAISE EXCEPTION; behaviour is
+    identical — UPDATE and DELETE on this table are rejected.
+    """
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS case_classification_history (
+            id                TEXT PRIMARY KEY,
+            case_id           TEXT NOT NULL REFERENCES order_case(case_id),
+            child_case_id     TEXT REFERENCES exceptions(id),
+            supergroup_code   TEXT NOT NULL REFERENCES case_supergroup(code),
+            intent_code       TEXT REFERENCES case_intent(code),
+            classified_at     TEXT NOT NULL,
+            classified_by     TEXT NOT NULL,
+            classifier_type   TEXT NOT NULL
+                CHECK (classifier_type IN ('HUMAN','MODEL','RULE')),
+            model_version     TEXT,
+            reason_text       TEXT,
+            source_event_id   TEXT,
+            taxonomy_version  TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_case_classification_history_case_time
+            ON case_classification_history (case_id, classified_at);
+        CREATE INDEX IF NOT EXISTS idx_case_classification_history_child_time
+            ON case_classification_history (child_case_id, classified_at);
+        CREATE INDEX IF NOT EXISTS idx_case_classification_history_classifier
+            ON case_classification_history (classifier_type, classified_at);
+
+        DROP TRIGGER IF EXISTS tg_cch_no_update;
+        CREATE TRIGGER tg_cch_no_update
+        BEFORE UPDATE ON case_classification_history
+        BEGIN
+            SELECT RAISE(ABORT, 'case_classification_history is append-only; UPDATE rejected');
+        END;
+
+        DROP TRIGGER IF EXISTS tg_cch_no_delete;
+        CREATE TRIGGER tg_cch_no_delete
+        BEFORE DELETE ON case_classification_history
+        BEGIN
+            SELECT RAISE(ABORT, 'case_classification_history is append-only; DELETE rejected');
+        END;
+        """
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+        ("V020", datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    logger.info(
+        "SQLite schema V020 applied (case_classification_history append-only)",
+    )
+
+
 def apply_sqlite(conn: sqlite3.Connection) -> None:
     """Apply the SQLite-compatible schema (V001 + subsequent migrations)."""
     conn.executescript(_SQLITE_SCHEMA)
@@ -1029,6 +1086,7 @@ def apply_sqlite(conn: sqlite3.Connection) -> None:
     _apply_sqlite_v017(conn)
     _apply_sqlite_v018(conn)
     _apply_sqlite_v019(conn)
+    _apply_sqlite_v020(conn)
 
 
 def apply_postgres(database_url: str) -> None:
@@ -1098,6 +1156,7 @@ def apply_postgres(database_url: str) -> None:
             ("V017", "V017__case_taxonomy.sql", "PostgreSQL schema V017 applied (case taxonomy lookup tables)"),
             ("V018", "V018__case_origin_supergroup.sql", "PostgreSQL schema V018 applied (case origin + supergroup_code + leaf intent_code)"),
             ("V019", "V019__drop_legacy_case_columns.sql", "PostgreSQL schema V019 applied (dropped deprecated case columns)"),
+            ("V020", "V020__case_classification_history.sql", "PostgreSQL schema V020 applied (case classification history append-only)"),
         ):
             cur.execute(
                 "SELECT version FROM schema_migrations WHERE version = %s",
