@@ -960,6 +960,124 @@
         "title": "ChangeItem",
         "type": "object"
       },
+      "ClassificationHistoryEntry": {
+        "description": "One row of the case's classification audit trail.\n\nMirrors ``contracts.models.ClassificationEvent`` and the\n``case_classification_history`` table (V020). Requirements \u00a78.6 \u2014\nsurfaces the append-only audit for UI / steward reporting.",
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "child_case_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Child Case Id"
+          },
+          "classified_at": {
+            "title": "Classified At",
+            "type": "string"
+          },
+          "classified_by": {
+            "title": "Classified By",
+            "type": "string"
+          },
+          "classifier_type": {
+            "title": "Classifier Type",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "intent_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intent Code"
+          },
+          "model_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Version"
+          },
+          "reason_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Text"
+          },
+          "source_event_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Event Id"
+          },
+          "supergroup_code": {
+            "title": "Supergroup Code",
+            "type": "string"
+          },
+          "taxonomy_version": {
+            "title": "Taxonomy Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "case_id",
+          "supergroup_code",
+          "classified_at",
+          "classified_by",
+          "classifier_type",
+          "taxonomy_version"
+        ],
+        "title": "ClassificationHistoryEntry",
+        "type": "object"
+      },
+      "ClassificationHistoryResponse": {
+        "description": "GET /api/v1/cases/{case_id}/classification-history.\n\nReturns the case's full audit trail in append order (oldest first).\n``total`` is the row count; callers paginate client-side today (the\nexpected depth is single-digit for the audit window).",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ClassificationHistoryEntry"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "default": 0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "title": "ClassificationHistoryResponse",
+        "type": "object"
+      },
       "ComparisonLineItem": {
         "additionalProperties": false,
         "properties": {
@@ -7496,6 +7614,65 @@
         "summary": "Create Signed Read Url",
         "tags": [
           "attachments"
+        ]
+      }
+    },
+    "/api/v1/cases/{case_id}/classification-history": {
+      "get": {
+        "description": "Return the case's full classification audit trail in append order.\n\nRequirements \u00a78.6: every classification or reclassification event\nappends exactly one row stamped with the taxonomy version in effect\nat the time. The audit is append-only on both sides (in-memory and\nV020 DB triggers). Reads are open to any role that can see the case.",
+        "operationId": "list_classification_history_api_v1_cases__case_id__classification_history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassificationHistoryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Classification History",
+        "tags": [
+          "cases"
         ]
       }
     },

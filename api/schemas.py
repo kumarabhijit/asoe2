@@ -1945,3 +1945,37 @@ class CaseRecordsResponse(BaseModel):
             "PolicyHitBadge distinguishes the two visually."
         ),
     )
+
+
+class ClassificationHistoryEntry(BaseModel):
+    """One row of the case's classification audit trail.
+
+    Mirrors ``contracts.models.ClassificationEvent`` and the
+    ``case_classification_history`` table (V020). Requirements §8.6 —
+    surfaces the append-only audit for UI / steward reporting.
+    """
+
+    id: str
+    case_id: str
+    child_case_id: Optional[str] = None
+    supergroup_code: str
+    intent_code: Optional[str] = None
+    classified_at: str
+    classified_by: str
+    classifier_type: str
+    model_version: Optional[str] = None
+    reason_text: Optional[str] = None
+    source_event_id: Optional[str] = None
+    taxonomy_version: str
+
+
+class ClassificationHistoryResponse(BaseModel):
+    """GET /api/v1/cases/{case_id}/classification-history.
+
+    Returns the case's full audit trail in append order (oldest first).
+    ``total`` is the row count; callers paginate client-side today (the
+    expected depth is single-digit for the audit window).
+    """
+
+    items: List[ClassificationHistoryEntry] = Field(default_factory=list)
+    total: int = 0

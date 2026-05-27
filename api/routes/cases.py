@@ -42,7 +42,12 @@ from api.case_events import (
 from api.errors import ASOEError
 from api.metrics import record_cases_returned
 from api.observability.audit_bearing import audit_bearing
-from api.schemas import CaseListResponse, CaseRecordsResponse
+from api.schemas import (
+    CaseListResponse,
+    CaseRecordsResponse,
+    ClassificationHistoryEntry,
+    ClassificationHistoryResponse,
+)
 from api.store import case_store, exception_store
 from contracts.models import Origin
 
@@ -400,6 +405,44 @@ async def list_case_records(
         total=len(records),
         aggregated_policy_hits=aggregated,
     )
+
+
+# ---------------------------------------------------------------------------
+# Classification audit trail (requirements §8.6, acceptance criterion #9)
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/cases/{case_id}/classification-history",
+    response_model=ClassificationHistoryResponse,
+    dependencies=[Depends(require_role(
+        "analyst", "manager", "admin", "viewer", "partner",
+    ))],
+)
+async def list_classification_history(
+    case_id: str,
+    tenant_id: str = Depends(get_tenant_id),
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> ClassificationHistoryResponse:
+    """Return the case's full classification audit trail in append order.
+
+    Requirements §8.6: every classification or reclassification event
+    appends exactly one row stamped with the taxonomy version in effect
+    at the time. The audit is append-only on both sides (in-memory and
+    V020 DB triggers). Reads are open to any role that can see the case.
+    """
+    case = case_store.get(case_id)
+    if case is None or case.tenant_id != tenant_id:
+        raise ASOEError(
+            code="NOT_FOUND",
+            message=f"Case {case_id} not found.",
+            status_code=404,
+        )
+    _ = user  # kept on the dependency for future per-role hardening
+    events = case_store.get_classification_history(case_id)
+    items = [
+        ClassificationHistoryEntry(**event.model_dump()) for event in events
+    ]
+    return ClassificationHistoryResponse(items=items, total=len(items))
 
 
 # ---------------------------------------------------------------------------
