@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient
 
 from api.app import create_app
 from api.deps import create_test_token
-from api.store import ExceptionRecord, case_store, exception_store
+from api.store import ChildCase, case_store, exception_store
 
 
 # ---------------------------------------------------------------------------
@@ -101,11 +101,11 @@ def _attach_child(
     order_id: str,
     parent_case_id: str,
     account_id: str | None = None,
-) -> ExceptionRecord:
-    """Inject a child ExceptionRecord with the fields the in-memory
+) -> ChildCase:
+    """Inject a child ChildCase with the fields the in-memory
     `create()` shorthand omits (`account_id`). Mirrors what the live
     persistence path produces in orchestration."""
-    record = ExceptionRecord(
+    record = ChildCase(
         tenant_id=tenant_id,
         order_id=order_id,
         event_type="EDI_850_PRICE_MISMATCH",

@@ -22,7 +22,7 @@ Invariants:
 
 Per CLAUDE.md guardrails: the cache is a transport-layer
 optimisation. It never invents intent values — it reads them
-straight from the persisted ``ExceptionRecord.intent`` field via
+straight from the persisted ``ChildCase.intent`` field via
 the existing store. The OrderCase model is unchanged
 (``extra="forbid"``); the cache feeds the **response dict** in
 ``api/routes/cases.py``.

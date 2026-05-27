@@ -25,10 +25,10 @@ from unittest.mock import patch
 import pytest
 
 from api.analysis_composer import ComposedAnalysis, compose
-from api.store import ExceptionRecord
+from api.store import ChildCase
 
 
-def _make_record(**overrides) -> ExceptionRecord:
+def _make_record(**overrides) -> ChildCase:
     defaults = dict(
         tenant_id="t-test",
         order_id="ORD-001",
@@ -36,7 +36,7 @@ def _make_record(**overrides) -> ExceptionRecord:
         trace_id="trace-1",
     )
     defaults.update(overrides)
-    return ExceptionRecord(**defaults)
+    return ChildCase(**defaults)
 
 
 def test_compose_returns_empty_when_no_adapter_registered():

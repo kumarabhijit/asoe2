@@ -489,8 +489,8 @@ class TestBackfill:
 
     def test_backfill_skips_records_with_no_original_event(self):
         # Direct-construct without the original_event payload.
-        from api.store import ExceptionRecord
-        record = ExceptionRecord(
+        from api.store import ChildCase
+        record = ChildCase(
             tenant_id="t1",
             order_id="PO-X",
             event_type="UNKNOWN",

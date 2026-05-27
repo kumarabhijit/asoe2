@@ -9,11 +9,11 @@ from __future__ import annotations
 
 from api.profile_composer import compose_knowledge_graph
 from api.schemas import AnalysisResponse, KnowledgeGraphPayload
-from api.store import ExceptionRecord
+from api.store import ChildCase
 from gateways.knowledge_graph import build_knowledge_graph
 
 
-def _record(**overrides) -> ExceptionRecord:
+def _record(**overrides) -> ChildCase:
     base = dict(
         tenant_id="acme-corp", order_id="SO-1", event_type="MANUAL_ORDER_INTAKE",
         trace_id="tr-1", intent="MANUAL_ORDER_INTAKE",
@@ -21,7 +21,7 @@ def _record(**overrides) -> ExceptionRecord:
         resolution_data={},
     )
     base.update(overrides)
-    return ExceptionRecord(**base)
+    return ChildCase(**base)
 
 
 _CTX = build_knowledge_graph(

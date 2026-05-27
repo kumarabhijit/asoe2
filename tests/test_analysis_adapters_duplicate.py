@@ -21,7 +21,7 @@ Invariants:
 from __future__ import annotations
 
 from api.analysis_adapters import adapt_duplicate, adapt_order_comparison
-from api.store import ExceptionRecord
+from api.store import ChildCase
 
 
 def _record(
@@ -31,8 +31,8 @@ def _record(
     original_event=None,
     selected_recipe="DuplicatePORecipe.py",
     intent="DUPLICATE_PO",
-) -> ExceptionRecord:
-    return ExceptionRecord(
+) -> ChildCase:
+    return ChildCase(
         tenant_id="t1",
         order_id="PO-DUP-001",
         event_type="EDI_850_DUPLICATE_PO",

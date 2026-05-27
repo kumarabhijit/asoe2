@@ -11,7 +11,7 @@ Two layers:
      {id}`` covering 200 / 404 (not found) / 404 (wrong intent) /
      409 (envelope incomplete) and RBAC gating.
 
-The composer reads from ``ExceptionRecord``-shaped objects via
+The composer reads from ``ChildCase``-shaped objects via
 duck-typed attribute access, so unit tests construct minimal stubs
 rather than exercising the full pipeline.
 """
@@ -39,7 +39,7 @@ from api.duplicate_envelope import (
 
 
 class _RecordStub:
-    """Duck-typed stand-in for ``ExceptionRecord`` — composer reads
+    """Duck-typed stand-in for ``ChildCase`` — composer reads
     attributes, not the full class."""
 
     def __init__(

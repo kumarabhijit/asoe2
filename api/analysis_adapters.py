@@ -64,7 +64,7 @@ from api.schemas import (
     TrimPlanLine,
     WarehouseInfo,
 )
-from api.store import ExceptionRecord
+from api.store import ChildCase
 from contracts.policy import (
     BACK_ORDER_SEVERE_GAP_PCT,
     DELIVERY_DELAY_MINOR_DAYS,
@@ -138,7 +138,7 @@ def _phr_from_outputs(
         return None
 
 
-def adapt_price_hold(record: ExceptionRecord) -> Optional[PriceHoldAnalysisData]:
+def adapt_price_hold(record: ChildCase) -> Optional[PriceHoldAnalysisData]:
     """Project a PriceHoldReleaseRecipe resolution into PriceHoldAnalysisData.
 
     Three source paths, in order of preference:
@@ -207,7 +207,7 @@ def _edi_from_outputs(
         return None
 
 
-def adapt_edi_mismatch(record: ExceptionRecord) -> Optional[EdiMismatchAnalysisData]:
+def adapt_edi_mismatch(record: ChildCase) -> Optional[EdiMismatchAnalysisData]:
     """Project an EdiMismatchRecipe resolution into EdiMismatchAnalysisData.
 
     Same three-path structure as `adapt_price_hold`:
@@ -340,7 +340,7 @@ def _delivery_delay_from_outputs(
 
 
 def adapt_delivery_delay(
-    record: ExceptionRecord,
+    record: ChildCase,
 ) -> Optional[DeliveryDelayAnalysisData]:
     """Project a DeliveryDelayResolutionRecipe resolution into
     DeliveryDelayAnalysisData.
@@ -479,7 +479,7 @@ def _overmax_from_outputs(
         return None
 
 
-def adapt_overmax(record: ExceptionRecord) -> Optional[OverMaxAnalysisData]:
+def adapt_overmax(record: ChildCase) -> Optional[OverMaxAnalysisData]:
     """Project an OverMaxTrimRecipe resolution into OverMaxAnalysisData.
 
     Three-path lookup mirroring the other adapters: recipe output,
@@ -595,7 +595,7 @@ def _moq_from_outputs(
         return None
 
 
-def adapt_moq(record: ExceptionRecord) -> Optional[MOQAnalysisData]:
+def adapt_moq(record: ChildCase) -> Optional[MOQAnalysisData]:
     """Project an MOQRoundUpRecipe resolution into MOQAnalysisData.
 
     Three-path lookup. at_risk surfaces the recipe's `uplift_value`
@@ -712,7 +712,7 @@ def _pallet_from_outputs(
         return None
 
 
-def adapt_pallet(record: ExceptionRecord) -> Optional[PalletAnalysisData]:
+def adapt_pallet(record: ChildCase) -> Optional[PalletAnalysisData]:
     """Project a PalletAlignmentRecipe resolution into PalletAnalysisData.
 
     Recipe is shadow-gated YELLOW for any non-conforming pallet, so
@@ -805,7 +805,7 @@ def _order_snapshot(payload: Optional[Dict[str, Any]]) -> Optional[OrderSnapshot
 
 
 def _synthesize_duplicate_outputs(
-    record: ExceptionRecord, matched: Dict[str, Any],
+    record: ChildCase, matched: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Run DuplicatePORecipe synthetically to fill recipe-output fields
     on the explain / shadow-gated path. The recipe is pure (no side
@@ -835,7 +835,7 @@ def _synthesize_duplicate_outputs(
         return {}
 
 
-def adapt_duplicate(record: ExceptionRecord) -> Optional[DuplicateDetectionData]:
+def adapt_duplicate(record: ChildCase) -> Optional[DuplicateDetectionData]:
     """Project DuplicatePORecipe into DuplicateDetectionData.
 
     Two source bags:
@@ -914,7 +914,7 @@ def _comparison_order(
 
 
 def adapt_order_comparison(
-    record: ExceptionRecord,
+    record: ChildCase,
 ) -> Optional[OrderComparisonData]:
     """Synthesise side-by-side comparison from `matched_po_details`.
 
@@ -960,7 +960,7 @@ def adapt_order_comparison(
 # fixtures in tests/conftest.py register StubGateway responses that
 # mirror this shape.
 
-def adapt_price(record: ExceptionRecord) -> Optional[PriceAnalysisData]:
+def adapt_price(record: ChildCase) -> Optional[PriceAnalysisData]:
     """Project PriceAdjustmentRecipe into PriceAnalysisData.
 
     Four source bags:
@@ -1135,7 +1135,7 @@ def _resolution_option(payload: Dict[str, Any]) -> Optional[ResolutionOption]:
         return None
 
 
-def _synthesize_back_order_outputs(record: ExceptionRecord) -> Dict[str, Any]:
+def _synthesize_back_order_outputs(record: ChildCase) -> Dict[str, Any]:
     """Run BackOrderResolutionRecipe synthetically on the explain /
     shadow-gated path. Recipe is pure — no side effects."""
     event = record.original_event or {}
@@ -1161,7 +1161,7 @@ def _synthesize_back_order_outputs(record: ExceptionRecord) -> Dict[str, Any]:
         return {}
 
 
-def adapt_back_order(record: ExceptionRecord) -> Optional[BackOrderAnalysisData]:
+def adapt_back_order(record: ChildCase) -> Optional[BackOrderAnalysisData]:
     """Project BackOrderResolutionRecipe into BackOrderAnalysisData.
 
     Three source bags:
@@ -1242,7 +1242,7 @@ def adapt_back_order(record: ExceptionRecord) -> Optional[BackOrderAnalysisData]
 
 
 def _floor_status_from_record(
-    record: ExceptionRecord,
+    record: ChildCase,
 ) -> EmailOrderEntryFloorStatus:
     """Project the four "non-disable-able floor" booleans into the
     typed Pydantic model.
@@ -1317,7 +1317,7 @@ def _eoe_from_outputs(
 
 
 def adapt_email_order_entry(
-    record: ExceptionRecord,
+    record: ChildCase,
 ) -> Optional[EmailOrderEntryAnalysisData]:
     """Project an EmailOrderEntryRecipe resolution into
     EmailOrderEntryAnalysisData (ADR-034 Phase B).
@@ -1442,7 +1442,7 @@ def _anchor_label(key: str, kind: str) -> str:
     return (base[:1].upper() + base[1:]) if base else "Evidence"
 
 
-def build_evidence_anchors(record: ExceptionRecord) -> "list[EvidenceAnchor]":
+def build_evidence_anchors(record: ChildCase) -> "list[EvidenceAnchor]":
     """Project backend-authoritative highlight anchors (ADR-043 §2.2).
 
     Phase-1: derive one `text_derived` anchor per extracted entity that carries
@@ -1548,7 +1548,7 @@ def _verified_spatial_anchors(
 
 
 def adapt_email_source(
-    record: ExceptionRecord,
+    record: ChildCase,
 ) -> Optional[EmailSourceData]:
     """Project the email source-of-truth substrate (ADR-034 Phase G).
 
@@ -1609,7 +1609,7 @@ def adapt_email_source(
 # (Pydantic model, adapter function, registry row) and the UI section
 # picks it up via the data-presence pattern.
 ANALYSIS_ADAPTERS: Dict[
-    str, Tuple[str, Callable[[ExceptionRecord], Any]]
+    str, Tuple[str, Callable[[ChildCase], Any]]
 ] = {
     "PriceHoldReleaseRecipe.py": ("price_hold_analysis", adapt_price_hold),
     "EdiMismatchRecipe.py": ("edi_mismatch_analysis", adapt_edi_mismatch),
@@ -1643,7 +1643,7 @@ ANALYSIS_ADAPTERS: Dict[
 # drives both `duplicate_detection` (primary) and `order_comparison`
 # (secondary, registry rationale: "same attestation target").
 SECONDARY_ANALYSIS_ADAPTERS: Dict[
-    str, Tuple[Tuple[str, Callable[[ExceptionRecord], Any]], ...]
+    str, Tuple[Tuple[str, Callable[[ChildCase], Any]], ...]
 ] = {
     "DuplicatePORecipe.py": (
         ("order_comparison", adapt_order_comparison),
@@ -1682,7 +1682,7 @@ INTENT_TO_RECIPE_NAME: Dict[str, str] = {
 }
 
 
-def resolve_adapter_key(record: ExceptionRecord) -> Optional[str]:
+def resolve_adapter_key(record: ChildCase) -> Optional[str]:
     """Pick the registry key for this record: selected_recipe first,
     intent→recipe fallback second. Keeps the shadow-gated case
     (selected_recipe=None) in scope for projection."""

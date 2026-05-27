@@ -1,9 +1,9 @@
-"""Pillar 1 tests — GraphState / ExceptionRecord / _persist_exception
+"""Pillar 1 tests — GraphState / ChildCase / _persist_exception
 carry enrichment_context from graph execution to the audit trail.
 
 Invariants (post-V004 single-bag semantics):
   * GraphState.enrichment_context defaults to {} and is dict-typed.
-  * ExceptionRecord.enrichment_context defaults to {} when omitted.
+  * ChildCase.enrichment_context defaults to {} when omitted.
   * `_persist_exception` captures state.enrichment_context verbatim;
     there is no fallback to state.resolved_data — gateway results
     land in enrichment_context directly via resolve_dependencies.
@@ -16,7 +16,7 @@ Invariants (post-V004 single-bag semantics):
 from __future__ import annotations
 
 from contracts.models import GraphState, OrderEvent
-from api.store import ExceptionRecord, exception_store
+from api.store import ChildCase, exception_store
 
 
 def _minimal_event() -> OrderEvent:
@@ -51,9 +51,9 @@ class TestGraphStateEnrichmentContext:
         assert "foo" not in state.enrichment_context
 
 
-class TestExceptionRecordEnrichmentContext:
+class TestChildCaseEnrichmentContext:
     def test_defaults_to_empty_dict(self):
-        record = ExceptionRecord(
+        record = ChildCase(
             tenant_id="t1", order_id="ORD-1",
             event_type="GENERIC", trace_id="trace-1",
         )
@@ -61,7 +61,7 @@ class TestExceptionRecordEnrichmentContext:
 
     def test_captures_payload_verbatim(self):
         payload = {"contract_ref": "CNT-42", "warehouse": {"plant": "DC-2"}}
-        record = ExceptionRecord(
+        record = ChildCase(
             tenant_id="t1", order_id="ORD-1",
             event_type="GENERIC", trace_id="trace-1",
             enrichment_context=payload,
@@ -69,7 +69,7 @@ class TestExceptionRecordEnrichmentContext:
         assert record.enrichment_context == payload
 
     def test_empty_when_omitted(self):
-        record = ExceptionRecord(
+        record = ChildCase(
             tenant_id="t1", order_id="ORD-1",
             event_type="GENERIC", trace_id="trace-1",
             enrichment_context=None,

@@ -23,7 +23,7 @@ from api.schemas import ExceptionDetailResponse, ExceptionSummary
 from contracts.models import STATUS_TO_LIFECYCLE
 
 
-class ExceptionRecord:
+class ChildCase:
     """In-memory representation of a persisted exception."""
 
     def __init__(
@@ -171,7 +171,7 @@ class ExceptionStore:
     """Thread-safe in-memory exception store."""
 
     def __init__(self) -> None:
-        self._records: Dict[str, ExceptionRecord] = {}
+        self._records: Dict[str, ChildCase] = {}
         self._traces: Dict[str, Dict[str, Any]] = {}  # exception_id → trace data
         self._lock = threading.Lock()
 
@@ -201,9 +201,9 @@ class ExceptionStore:
         divergence_reason: Optional[str] = None,
         sap_block_field: Optional[str] = None,
         scope: Optional[str] = None,
-    ) -> ExceptionRecord:
+    ) -> ChildCase:
         lifecycle = STATUS_TO_LIFECYCLE.get(final_status or "", "INGESTED")
-        record = ExceptionRecord(
+        record = ChildCase(
             tenant_id=tenant_id,
             order_id=order_id,
             event_type=event_type,
@@ -227,7 +227,7 @@ class ExceptionStore:
             self._records[record.id] = record
         return record
 
-    def get(self, exception_id: str, tenant_id: str) -> Optional[ExceptionRecord]:
+    def get(self, exception_id: str, tenant_id: str) -> Optional[ChildCase]:
         with self._lock:
             record = self._records.get(exception_id)
         if record and record.tenant_id == tenant_id:
@@ -241,7 +241,7 @@ class ExceptionStore:
         intent: Optional[str] = None,
         limit: int = 50,
         cursor: Optional[str] = None,
-    ) -> tuple[List[ExceptionRecord], Optional[str], bool]:
+    ) -> tuple[List[ChildCase], Optional[str], bool]:
         with self._lock:
             records = [
                 r for r in self._records.values()
@@ -271,7 +271,7 @@ class ExceptionStore:
 
     def list_by_case(
         self, tenant_id: str, case_id: str,
-    ) -> List[ExceptionRecord]:
+    ) -> List[ChildCase]:
         """ADR-038 Phase H.6 — children-of-case lookup for the
         ``/api/v1/cases/*`` partner-scope helper. The case itself
         carries no ``account_id``; scope is derived from its
@@ -282,7 +282,7 @@ class ExceptionStore:
                 if r.tenant_id == tenant_id and r.parent_case_id == case_id
             ]
 
-    def update(self, exception_id: str, tenant_id: str, **fields) -> Optional[ExceptionRecord]:
+    def update(self, exception_id: str, tenant_id: str, **fields) -> Optional[ChildCase]:
         with self._lock:
             record = self._records.get(exception_id)
             if not record or record.tenant_id != tenant_id:
@@ -306,7 +306,7 @@ class ExceptionStore:
         exception_id: str,
         tenant_id: str,
         entry: Dict[str, Any],
-    ) -> Optional[ExceptionRecord]:
+    ) -> Optional[ChildCase]:
         """Append an immutable entry to the reanalysis_history list.
 
         Entries are append-only — callers must not mutate existing entries.
@@ -528,7 +528,7 @@ class DatabaseBackedStore:
         divergence_reason: Optional[str] = None,
         sap_block_field: Optional[str] = None,
         scope: Optional[str] = None,
-    ) -> ExceptionRecord:
+    ) -> ChildCase:
         # Verdict Pillar 1: `enrichment_context` is persisted to a
         # dedicated JSONB column (V004). The repository serialises
         # to JSONB (Postgres) / JSON TEXT (SQLite) alongside
@@ -561,7 +561,7 @@ class DatabaseBackedStore:
         record.parent_case_id = parent_case_id
         return record
 
-    def get(self, exception_id: str, tenant_id: str) -> Optional[ExceptionRecord]:
+    def get(self, exception_id: str, tenant_id: str) -> Optional[ChildCase]:
         row = self._exceptions.get(exception_id, tenant_id)
         if not row:
             return None
@@ -574,7 +574,7 @@ class DatabaseBackedStore:
         intent: Optional[str] = None,
         limit: int = 50,
         cursor: Optional[str] = None,
-    ) -> tuple[List[ExceptionRecord], Optional[str], bool]:
+    ) -> tuple[List[ChildCase], Optional[str], bool]:
         rows, next_cursor, has_more = self._exceptions.list(
             tenant_id=tenant_id, status=status, intent=intent,
             limit=limit, cursor=cursor,
@@ -584,7 +584,7 @@ class DatabaseBackedStore:
 
     def list_by_case(
         self, tenant_id: str, case_id: str,
-    ) -> List[ExceptionRecord]:
+    ) -> List[ChildCase]:
         """Return all child exception records linked to a case.
 
         ADR-038 Phase H.6 — used by `/api/v1/cases/*` to derive
@@ -597,7 +597,7 @@ class DatabaseBackedStore:
         records = [self._dict_to_record(r) for r in rows]
         return [r for r in records if r.parent_case_id == case_id]
 
-    def update(self, exception_id: str, tenant_id: str, **fields) -> Optional[ExceptionRecord]:
+    def update(self, exception_id: str, tenant_id: str, **fields) -> Optional[ChildCase]:
         row = self._exceptions.update(exception_id, tenant_id, **fields)
         if not row:
             return None
@@ -608,7 +608,7 @@ class DatabaseBackedStore:
         exception_id: str,
         tenant_id: str,
         entry: Dict[str, Any],
-    ) -> Optional[ExceptionRecord]:
+    ) -> Optional[ChildCase]:
         """Append an entry to the reanalysis_history JSON column."""
         current = self._exceptions.get(exception_id, tenant_id)
         if not current:
@@ -719,8 +719,8 @@ class DatabaseBackedStore:
         except Exception:
             return []
 
-    def _dict_to_record(self, d: Dict[str, Any]) -> ExceptionRecord:
-        record = ExceptionRecord.__new__(ExceptionRecord)
+    def _dict_to_record(self, d: Dict[str, Any]) -> ChildCase:
+        record = ChildCase.__new__(ChildCase)
         record.id = d["id"]
         record.tenant_id = d["tenant_id"]
         record.order_id = d["order_id"]

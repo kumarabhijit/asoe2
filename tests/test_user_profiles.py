@@ -6,7 +6,7 @@ Covers:
 - api/routes/auth.py: login, /me with new profile fields
 - api/routes/exceptions.py: account_id scoping on exception list
 - api/deps.py: JWT claims round-trip (title, avatar_initials, assigned_accounts)
-- api/store.py: account_id on ExceptionRecord round-trip
+- api/store.py: account_id on ChildCase round-trip
 """
 
 from __future__ import annotations

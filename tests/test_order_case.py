@@ -10,7 +10,7 @@ Locks the case primitive's contracts:
     case opened); first event's source/source_channel preserved.
   * Tenant isolation — two tenants with the same correlation key
     do NOT share a case.
-  * ExceptionRecord.parent_case_id is wired and defaults to None
+  * ChildCase.parent_case_id is wired and defaults to None
     for Tier-1 stateless records.
 """
 
@@ -19,7 +19,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from api.store import CaseStore, ExceptionRecord, case_store
+from api.store import CaseStore, ChildCase, case_store
 from contracts.models import OrderCase
 
 
@@ -399,15 +399,15 @@ class TestCaseStoreCRUD:
 
 
 # ---------------------------------------------------------------------------
-# ExceptionRecord.parent_case_id wiring
+# ChildCase.parent_case_id wiring
 # ---------------------------------------------------------------------------
 
 
-class TestExceptionRecordParentCaseId:
+class TestChildCaseParentCaseId:
     def test_default_is_none_for_tier_1(self):
         """Tier-1 stateless records (clean Automated) carry None
         parent_case_id per ADR-038 §7.2."""
-        record = ExceptionRecord(
+        record = ChildCase(
             tenant_id="t1",
             order_id="SO-1",
             event_type="EDI_850_PRICE_MISMATCH",
@@ -422,7 +422,7 @@ class TestExceptionRecordParentCaseId:
             source_channel="email",
             customer_po_number="PO-1234",
         )
-        record = ExceptionRecord(
+        record = ChildCase(
             tenant_id="t1",
             order_id="PO-1234",
             event_type="EMAIL_ORDER_ENTRY_REQUEST",

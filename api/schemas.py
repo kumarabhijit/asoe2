@@ -1915,7 +1915,7 @@ class CaseRecordsResponse(BaseModel):
     (Phase 28.5.x §28.5 follow-up).
 
     `items` is the list of `ExceptionDetail`-shaped child records
-    attached to the case (`ExceptionRecord.parent_case_id == case_id`).
+    attached to the case (`ChildCase.parent_case_id == case_id`).
     The UI's CaseDetailPanel uses this both to render the stack of
     per-event sections and to aggregate `aggregated_policy_hits` into
     the L1/L2 PolicyHitBadge surface (ADR-039 §4.5).

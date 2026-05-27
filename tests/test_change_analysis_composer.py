@@ -10,12 +10,12 @@ from __future__ import annotations
 
 from api.profile_composer import compose_change_analysis
 from api.schemas import AnalysisResponse, ChangeAnalysis
-from api.store import ExceptionRecord
+from api.store import ChildCase
 from contracts.policy import HIGH_VALUE_OVERRIDE_THRESHOLD_USD
 from recipes.ChangeAnalysisRecipe import evaluate_change
 
 
-def _record(**overrides) -> ExceptionRecord:
+def _record(**overrides) -> ChildCase:
     base = dict(
         tenant_id="acme-corp", order_id="SO-1", event_type="MANUAL_ORDER_INTAKE",
         trace_id="tr-1", intent="MANUAL_ORDER_INTAKE",
@@ -23,7 +23,7 @@ def _record(**overrides) -> ExceptionRecord:
         resolution_data={},
     )
     base.update(overrides)
-    return ExceptionRecord(**base)
+    return ChildCase(**base)
 
 
 _CTX = evaluate_change(

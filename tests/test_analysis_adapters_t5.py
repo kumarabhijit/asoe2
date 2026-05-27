@@ -22,14 +22,14 @@ from api.analysis_adapters import (
     adapt_moq,
     adapt_overmax,
 )
-from api.store import ExceptionRecord
+from api.store import ChildCase
 
 
 def _record(
     *, recipe, intent, enrichment_context=None, resolution_data=None,
     original_event=None,
-) -> ExceptionRecord:
-    return ExceptionRecord(
+) -> ChildCase:
+    return ChildCase(
         tenant_id="t1",
         order_id="ORD-T5",
         event_type="GENERIC",

@@ -17,11 +17,11 @@ Cases:
 from __future__ import annotations
 
 from api.analysis_adapters import adapt_email_source
-from api.store import ExceptionRecord
+from api.store import ChildCase
 
 
-def _record(*, enrichment_context=None) -> ExceptionRecord:
-    return ExceptionRecord(
+def _record(*, enrichment_context=None) -> ChildCase:
+    return ChildCase(
         tenant_id="t1",
         order_id="EML-PO-2026-0042",
         event_type="EMAIL_ORDER_ENTRY_REQUEST",

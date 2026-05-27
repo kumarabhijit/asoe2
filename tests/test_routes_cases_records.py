@@ -54,7 +54,7 @@ def _seed_case_with_children(
     tenant_id: str,
     children: list[tuple[str, list[str]]],
 ) -> str:
-    """Helper: create a case + N child ExceptionRecords + traces.
+    """Helper: create a case + N child ChildCases + traces.
 
     Each entry in `children` is `(order_id, policy_hits)`. Returns
     the case_id.

@@ -124,8 +124,8 @@ class TestCli:
     def test_emits_artifact(self, tmp_path):
         # Seed an in-memory record carrying an LLM verdict so the
         # script has something to chew on.
-        from api.store import ExceptionRecord
-        rec = ExceptionRecord(
+        from api.store import ChildCase
+        rec = ChildCase(
             tenant_id="tenant-a",
             order_id="PO-1",
             event_type="EDI_850_PRICE_MISMATCH",
@@ -137,7 +137,7 @@ class TestCli:
                 "recommended_action": "BLOCK_DUPLICATE",
                 # The script reads the LLM verdict via the
                 # `shadow.llm_shadow_verdict` path on `to_detail`,
-                # but our in-memory ExceptionRecord doesn't carry
+                # but our in-memory ChildCase doesn't carry
                 # the persistent shadow. We pin it via
                 # resolution_data.shadow which the iterator falls
                 # back to when the record's shadow attribute is

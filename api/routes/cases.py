@@ -57,7 +57,7 @@ def _scope_to_user(cases, user: AuthenticatedUser):
     """Apply assigned-accounts / partner-retailer scoping to the case list.
 
     Cases don't carry ``account_id`` directly, so we derive scope from
-    the child ``ExceptionRecord`` rows that share the case's
+    the child ``ChildCase`` rows that share the case's
     ``parent_case_id``. A case is in scope when at least one of its
     children is in scope. Cases with no children yet (just-opened
     Manual Orders before any event lands) fall back to the case's
@@ -335,7 +335,7 @@ async def get_case(
 # "Attached records" stack and the aggregated `policyHits` surface
 # the L1-vs-L2 PolicyHitBadge section consumes. The endpoint reads
 # from the existing `exception_store.list_by_case` join key
-# (`ExceptionRecord.parent_case_id`); no new persistence is needed.
+# (`ChildCase.parent_case_id`); no new persistence is needed.
 #
 # RBAC inherits from `_scope_to_user` — a caller who can read the
 # parent case can read its children. Partner / assigned-account
@@ -380,7 +380,7 @@ async def list_case_records(
     # across refetches (PolicyHitBadge keys on the string itself —
     # an unstable order would re-mount every badge on every event).
     # The policy hits live on the persisted trace
-    # (`shadow_policy_hits`), not on ExceptionRecord itself, so we
+    # (`shadow_policy_hits`), not on ChildCase itself, so we
     # walk traces for each child.
     seen: set[str] = set()
     aggregated: list[str] = []

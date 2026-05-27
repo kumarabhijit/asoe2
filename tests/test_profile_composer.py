@@ -19,7 +19,7 @@ from api.profile_composer import (
     compose_impact_metrics,
     compose_narrative,
 )
-from api.store import ExceptionRecord
+from api.store import ChildCase
 
 
 # ---------------------------------------------------------------------------
@@ -27,7 +27,7 @@ from api.store import ExceptionRecord
 # ---------------------------------------------------------------------------
 
 def _record(**overrides):
-    """Build an ExceptionRecord with sensible defaults."""
+    """Build an ChildCase with sensible defaults."""
     base = dict(
         tenant_id="acme-corp",
         order_id="SO-TEST-001",
@@ -41,7 +41,7 @@ def _record(**overrides):
         resolution_data={},
     )
     base.update(overrides)
-    return ExceptionRecord(**base)
+    return ChildCase(**base)
 
 
 # ---------------------------------------------------------------------------

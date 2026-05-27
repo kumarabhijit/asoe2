@@ -340,7 +340,7 @@ def materialise_for_event(
 
     Returns the case (existing or newly opened) when the event
     materialises one; None otherwise. The harness uses the returned
-    case's ``case_id`` to populate ``ExceptionRecord.parent_case_id``.
+    case's ``case_id`` to populate ``ChildCase.parent_case_id``.
     """
     if not should_materialise(event, final_status):
         return None
