@@ -1982,15 +1982,28 @@ class ClassificationHistoryEntry(BaseModel):
     taxonomy_version: str
 
     def redact_for_partner(self) -> "ClassificationHistoryEntry":
-        """Return a copy with operator-authored free-text fields blanked.
+        """Return a copy with internal-only fields blanked for the
+        partner (external retailer) audience.
 
-        Partner-role consumers are external retailers; ``reason_text``
-        is operator-authored free text and may contain internal
-        commercial notes. The redaction is applied at the serializer
-        boundary so partners see the structural audit (who classified
-        when, into what super-group) without the free-text colour.
+        Redacts three fields whose values may carry internal info:
+          * ``reason_text`` — operator-authored free text (commercial
+            notes, escalation flags).
+          * ``classified_by`` — replaced with a coarse role token
+            (``internal:human``, ``internal:model``, ``internal:rule``)
+            so the partner sees who-shape but not internal user IDs /
+            email addresses.
+          * ``model_version`` — internal model build identifier.
+
+        The structural audit (case_id, supergroup_code, intent_code,
+        classified_at, classifier_type, taxonomy_version) is preserved
+        so the partner can still verify the audit trail's shape.
         """
-        return self.model_copy(update={"reason_text": None})
+        coarse_who = f"internal:{self.classifier_type.lower()}"
+        return self.model_copy(update={
+            "reason_text": None,
+            "classified_by": coarse_who,
+            "model_version": None,
+        })
 
 
 class ClassificationHistoryResponse(BaseModel):

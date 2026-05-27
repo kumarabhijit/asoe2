@@ -35,6 +35,7 @@ def test_matched_codes_produce_empty_drift():
     assert report.matched_count == 2
     assert report.new_in_sap == []
     assert report.stale_in_db == []
+    assert report.malformed_in_db == []
     assert report.has_drift is False
 
 
@@ -61,6 +62,39 @@ def test_stale_code_in_db_surfaces():
     assert report.matched_count == 1
     assert len(report.stale_in_db) == 1
     assert report.stale_in_db[0][0] == "INT_GHOST"
+
+
+def test_malformed_db_row_surfaces_separately():
+    """A case_intent row with sap_block_code set but sap_block_field
+    NULL is unreconcilable; surface it as malformed_in_db so the
+    Steward can fix the seed (review finding #4)."""
+    sap = [SapBlockCode("01", "LIFSK")]
+    db = [
+        ("INT_A", "01", "LIFSK"),
+        ("INT_HALF_BAKED", "Z9", None),  # missing field
+    ]
+    report = reconcile(sap, db)
+    assert report.matched_count == 1
+    assert len(report.malformed_in_db) == 1
+    assert report.malformed_in_db[0] == ("INT_HALF_BAKED", "Z9")
+    assert report.has_drift is True
+    # The malformed row does NOT also show up as stale.
+    assert all(s[0] != "INT_HALF_BAKED" for s in report.stale_in_db)
+
+
+def test_db_rows_with_null_sap_block_code_ignored():
+    """CUSTOMER intents / sentinels have no sap_block_code — they're
+    out of scope for SAP reconciliation."""
+    sap: list[SapBlockCode] = []
+    db = [
+        ("INT_CUSTOMER", None, None),
+        ("INT_SENTINEL", None, None),
+    ]
+    report = reconcile(sap, db)
+    assert report.matched_count == 0
+    assert report.malformed_in_db == []
+    assert report.stale_in_db == []
+    assert report.has_drift is False
 
 
 def test_same_code_different_field_treated_as_distinct():
@@ -113,6 +147,32 @@ def test_load_sap_snapshot_rejects_missing_columns(tmp_path: Path):
     snapshot = tmp_path / "bad.csv"
     snapshot.write_text("sap_block_code\n01\n", encoding="utf-8")
     with pytest.raises(ValueError, match="missing required columns"):
+        load_sap_snapshot(snapshot)
+
+
+def test_load_sap_snapshot_rejects_invalid_sap_block_field(tmp_path: Path):
+    """A snapshot row whose sap_block_field is not in the allowed set
+    (typo, e.g. ``LIFSL`` for ``LIFSK``) must raise. Otherwise the
+    drift report would falsely surface the typo as a 'new' code AND
+    mark the valid mapping as 'stale' (review finding #5)."""
+    snapshot = tmp_path / "typo.csv"
+    snapshot.write_text(
+        "sap_block_code,sap_block_field,description\n"
+        "01,LIFSL,Typo — meant LIFSK\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="LIFSL"):
+        load_sap_snapshot(snapshot)
+
+
+def test_load_sap_snapshot_rejects_empty_block_code(tmp_path: Path):
+    snapshot = tmp_path / "blank.csv"
+    snapshot.write_text(
+        "sap_block_code,sap_block_field,description\n"
+        ",LIFSK,empty code\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="empty sap_block_code"):
         load_sap_snapshot(snapshot)
 
 
@@ -184,10 +244,11 @@ def test_main_without_drift_flag_returns_zero_even_on_drift(
 # Report formatting
 # ---------------------------------------------------------------------------
 
-def test_format_report_includes_new_and_stale_sections():
+def test_format_report_includes_new_stale_and_malformed_sections():
     report = ReconciliationReport(
         new_in_sap=[SapBlockCode("ZP", "LIFSK", "Pricing pending")],
         stale_in_db=[("INT_GHOST", "99", "FAKSK")],
+        malformed_in_db=[("INT_HALF_BAKED", "Z9")],
         matched_count=3,
     )
     text = format_report(report)
@@ -195,3 +256,5 @@ def test_format_report_includes_new_and_stale_sections():
     assert "ZP" in text
     assert "Pricing pending" in text
     assert "INT_GHOST" in text
+    assert "INT_HALF_BAKED" in text
+    assert "malformed" in text.lower()

@@ -339,6 +339,18 @@ class ExceptionStore:
                 "intent_code" in fields
                 and fields["intent_code"] != record.intent_code
             )
+            # Pre-mutation validation: reject reclassify-to-NULL on
+            # supergroup_code (unclassifying is not a meaningful
+            # transition; the NULL state is "never classified", set
+            # only at create time). Raise BEFORE mutating so a failed
+            # call leaves the record untouched (review finding #3).
+            if sg_changed and fields.get("supergroup_code") is None:
+                raise ValueError(
+                    f"ExceptionStore.update(exception_id={exception_id}): "
+                    "cannot reclassify supergroup_code to NULL "
+                    "(unclassifying is not a valid transition; "
+                    "requirements §8.6)."
+                )
             if (sg_changed or intent_changed):
                 if not classified_by or not classifier_type:
                     raise ValueError(
@@ -571,12 +583,17 @@ class DatabaseBackedStore:
 
     def __init__(self, database_url: str) -> None:
         from db.connection import create_adapter
-        from db.repository import ExceptionRepository, TraceRepository
+        from db.repository import (
+            ClassificationHistoryRepository,
+            ExceptionRepository,
+            TraceRepository,
+        )
 
         self._adapter = create_adapter(database_url)
         self._adapter.apply_schema()
         self._exceptions = ExceptionRepository(self._adapter)
         self._traces = TraceRepository(self._adapter)
+        self._classification_history = ClassificationHistoryRepository(self._adapter)
 
     def clear(self) -> None:
         # For testing: delete all records
@@ -705,6 +722,15 @@ class DatabaseBackedStore:
             "intent_code" in fields
             and fields["intent_code"] != current.get("intent_code")
         )
+        # Pre-mutation validation: reject reclassify-to-NULL on
+        # supergroup_code (mirrors ExceptionStore.update).
+        if sg_changed and fields.get("supergroup_code") is None:
+            raise ValueError(
+                f"DatabaseBackedStore.update(exception_id={exception_id}): "
+                "cannot reclassify supergroup_code to NULL "
+                "(unclassifying is not a valid transition; "
+                "requirements §8.6)."
+            )
         if (sg_changed or intent_changed):
             if not classified_by or not classifier_type:
                 raise ValueError(
@@ -721,7 +747,10 @@ class DatabaseBackedStore:
         if (sg_changed or intent_changed) and record.parent_case_id:
             assert classified_by is not None
             assert classifier_type is not None
-            case_store._record_for_child(
+            # DB-backed path writes to case_classification_history (V020)
+            # directly. The earlier silent no-op via _record_for_child was
+            # a real audit-loss bug (review finding #2).
+            self._classification_history.create(
                 case_id=record.parent_case_id,
                 child_case_id=exception_id,
                 supergroup_code=record.supergroup_code,
@@ -731,6 +760,8 @@ class DatabaseBackedStore:
                 model_version=model_version,
                 reason_text=reason_text,
                 source_event_id=source_event_id,
+                taxonomy_version=TAXONOMY_VERSION,
+                tenant_id=tenant_id,
             )
         return record
 
@@ -1231,14 +1262,14 @@ class CaseStore:
         *,
         case_id: str,
         child_case_id: str,
-        supergroup_code: Optional[str],
+        supergroup_code: str,
         intent_code: Optional[str],
         classified_by: str,
         classifier_type: str,
         model_version: Optional[str] = None,
         reason_text: Optional[str] = None,
         source_event_id: Optional[str] = None,
-    ) -> Optional[ClassificationEvent]:
+    ) -> ClassificationEvent:
         """Append a child-level ClassificationEvent.
 
         Called from ``ExceptionStore.update`` when a child's
@@ -1247,23 +1278,21 @@ class CaseStore:
         leaf-validity DB trigger guarantees it matches the parent's SG
         under STRICT inheritance, so the audit row is consistent).
 
-        Returns ``None`` and is a no-op when the case is unknown — the
-        DB-backed path may have a case that the in-memory CaseStore
-        doesn't mirror, in which case the V020 trigger captures the
-        audit at the DB layer. (Phase-5 follow-up will lift CaseStore
-        to a true mirror; for now this method is tolerant.)
+        Raises ``KeyError`` if the case isn't in the in-memory CaseStore.
+        The earlier silent no-op was a real audit-loss bug — for the
+        DB-backed flow the caller (``DatabaseBackedStore.update``) writes
+        to the V020 ``case_classification_history`` table directly via
+        ``ClassificationHistoryRepository`` and never reaches here.
         """
-        if supergroup_code is None:
-            # Cannot persist a NULL supergroup_code on the event (the
-            # contract is non-null). The reclassify-to-NULL transition
-            # is upstream of the audit boundary; reject explicitly.
-            raise ValueError(
-                "Cannot record classification event with NULL supergroup_code; "
-                "reclassify the child to a valid super-group first."
-            )
         with self._lock:
             if case_id not in self._cases:
-                return None
+                raise KeyError(
+                    f"_record_for_child: case_id {case_id!r} not in the "
+                    "in-memory CaseStore. The in-memory path requires the "
+                    "case to be present; the DB-backed path writes to "
+                    "case_classification_history directly and must not "
+                    "reach this method."
+                )
             return self._record_classification_locked(
                 case_id=case_id,
                 supergroup_code=supergroup_code,

@@ -131,10 +131,11 @@ def test_child_reclassification_requires_classifier_kwargs():
         )
 
 
-def test_orphan_child_reclassification_does_not_crash():
+def test_orphan_child_reclassification_with_kwargs_succeeds():
     """A child without a parent_case_id (legacy / Tier-1 stateless)
-    can be reclassified — the audit step is skipped silently because
-    there is no case to attach the event to."""
+    can be reclassified when classifier kwargs are supplied — the
+    audit-row append step is skipped because there is no parent case
+    to attach the event to, but the reclassification itself proceeds."""
     exception_store.clear()
     orphan = exception_store.create(
         tenant_id="t1", order_id="SO-ORPHAN-1",
@@ -144,8 +145,55 @@ def test_orphan_child_reclassification_does_not_crash():
         intent_code="INT_PRICE_MISMATCH",
     )
     assert orphan.parent_case_id is None
-    exception_store.update(
+    updated = exception_store.update(
         orphan.id, tenant_id="t1",
         intent_code="INT_MASS_PRICING_ERROR",
         classified_by="user:csr-1", classifier_type="HUMAN",
     )
+    assert updated is not None
+    assert updated.intent_code == "INT_MASS_PRICING_ERROR"
+
+
+def test_orphan_child_reclassification_still_requires_kwargs():
+    """Even on orphan children the kwarg-required gate fires: a
+    reclassification must be attributable regardless of whether the
+    audit row can ultimately be persisted (locks finding #8 from the
+    Phase-5 review — the gate must not depend on parent_case_id)."""
+    exception_store.clear()
+    orphan = exception_store.create(
+        tenant_id="t1", order_id="SO-ORPHAN-2",
+        event_type="EDI_850_PRICE_MISMATCH",
+        trace_id="trace-orphan-2",
+        supergroup_code="SG_BLOCK_PRICING",
+        intent_code="INT_PRICE_MISMATCH",
+    )
+    assert orphan.parent_case_id is None
+    with pytest.raises(ValueError, match="classified_by"):
+        exception_store.update(
+            orphan.id, tenant_id="t1",
+            intent_code="INT_MASS_PRICING_ERROR",
+        )
+
+
+def test_reclassify_to_null_supergroup_rejected_pre_mutation():
+    """NULL is the 'never classified' state set only at create time.
+    A reclassify-to-NULL attempt must fail BEFORE mutating the record
+    (locks finding #3 from the Phase-5 review — partial-state bug)."""
+    case, child = _open_case_with_child()
+    sg_before = child.supergroup_code
+    intent_before = child.intent_code
+    updated_at_before = child.updated_at
+
+    with pytest.raises(ValueError, match="NULL"):
+        exception_store.update(
+            child.id, tenant_id="t1",
+            supergroup_code=None,
+            classified_by="user:csr-1", classifier_type="HUMAN",
+        )
+
+    # The record must be untouched: same supergroup, same intent,
+    # same updated_at (no partial mutation).
+    refreshed = exception_store._records[child.id]
+    assert refreshed.supergroup_code == sg_before
+    assert refreshed.intent_code == intent_before
+    assert refreshed.updated_at == updated_at_before

@@ -16,6 +16,10 @@
 
 CREATE TABLE IF NOT EXISTS case_classification_history (
     id                  TEXT PRIMARY KEY,
+    -- ADR-028 Guard-rail 4: every row carries tenant_id so cross-tenant
+    -- queries are application-layer filtered. Inherited from the parent
+    -- ``order_case.tenant_id`` at write time.
+    tenant_id           TEXT NOT NULL,
     case_id             TEXT NOT NULL REFERENCES order_case(case_id),
     -- NULL for parent-level (case) reclassifications; populated for any
     -- per-child reclassification.
@@ -40,6 +44,8 @@ CREATE TABLE IF NOT EXISTS case_classification_history (
 
 CREATE INDEX IF NOT EXISTS idx_case_classification_history_case_time
     ON case_classification_history (case_id, classified_at);
+CREATE INDEX IF NOT EXISTS idx_case_classification_history_tenant_time
+    ON case_classification_history (tenant_id, classified_at);
 CREATE INDEX IF NOT EXISTS idx_case_classification_history_child_time
     ON case_classification_history (child_case_id, classified_at)
     WHERE child_case_id IS NOT NULL;

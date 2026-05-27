@@ -1008,6 +1008,7 @@ def _apply_sqlite_v020(conn: sqlite3.Connection) -> None:
         """
         CREATE TABLE IF NOT EXISTS case_classification_history (
             id                TEXT PRIMARY KEY,
+            tenant_id         TEXT NOT NULL,
             case_id           TEXT NOT NULL REFERENCES order_case(case_id),
             child_case_id     TEXT REFERENCES exceptions(id),
             supergroup_code   TEXT NOT NULL REFERENCES case_supergroup(code),
@@ -1024,6 +1025,8 @@ def _apply_sqlite_v020(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_case_classification_history_case_time
             ON case_classification_history (case_id, classified_at);
+        CREATE INDEX IF NOT EXISTS idx_case_classification_history_tenant_time
+            ON case_classification_history (tenant_id, classified_at);
         CREATE INDEX IF NOT EXISTS idx_case_classification_history_child_time
             ON case_classification_history (child_case_id, classified_at);
         CREATE INDEX IF NOT EXISTS idx_case_classification_history_classifier

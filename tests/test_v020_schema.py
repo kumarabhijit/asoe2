@@ -40,6 +40,7 @@ def _make_case(conn: sqlite3.Connection, *, supergroup: str = "SG_NEW_ORDER",
 def _insert_history(
     conn: sqlite3.Connection, *,
     case_id: str,
+    tenant_id: str = "t1",
     supergroup_code: str = "SG_NEW_ORDER",
     intent_code: str | None = "INT_MANUAL_ORDER_INTAKE",
     child_case_id: str | None = None,
@@ -52,13 +53,13 @@ def _insert_history(
     conn.execute(
         """
         INSERT INTO case_classification_history (
-            id, case_id, child_case_id, supergroup_code, intent_code,
-            classified_at, classified_by, classifier_type,
+            id, tenant_id, case_id, child_case_id, supergroup_code,
+            intent_code, classified_at, classified_by, classifier_type,
             taxonomy_version
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (row_id, case_id, child_case_id, supergroup_code, intent_code,
-         now, classified_by, classifier_type, taxonomy_version),
+        (row_id, tenant_id, case_id, child_case_id, supergroup_code,
+         intent_code, now, classified_by, classifier_type, taxonomy_version),
     )
     conn.commit()
     return row_id
@@ -76,8 +77,8 @@ def test_v020_recorded(db: sqlite3.Connection):
 def test_table_exists_with_expected_columns(db: sqlite3.Connection):
     cur = db.execute("PRAGMA table_info(case_classification_history)")
     cols = {row[1] for row in cur.fetchall()}
-    assert {"id", "case_id", "child_case_id", "supergroup_code", "intent_code",
-            "classified_at", "classified_by", "classifier_type",
+    assert {"id", "tenant_id", "case_id", "child_case_id", "supergroup_code",
+            "intent_code", "classified_at", "classified_by", "classifier_type",
             "model_version", "reason_text", "source_event_id",
             "taxonomy_version"}.issubset(cols)
 
@@ -176,12 +177,12 @@ def test_insert_or_replace_on_existing_row_blocked(db: sqlite3.Connection):
         db.execute(
             """
             INSERT OR REPLACE INTO case_classification_history (
-                id, case_id, supergroup_code, intent_code,
+                id, tenant_id, case_id, supergroup_code, intent_code,
                 classified_at, classified_by, classifier_type,
                 taxonomy_version
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (row_id, case_id, "SG_NEW_ORDER", "INT_MANUAL_ORDER_INTAKE",
+            (row_id, "t1", case_id, "SG_NEW_ORDER", "INT_MANUAL_ORDER_INTAKE",
              now, "attacker", "HUMAN", "fake-version"),
         )
         db.commit()
@@ -198,12 +199,12 @@ def test_plain_insert_with_duplicate_id_fails(db: sqlite3.Connection):
         db.execute(
             """
             INSERT INTO case_classification_history (
-                id, case_id, supergroup_code, intent_code,
+                id, tenant_id, case_id, supergroup_code, intent_code,
                 classified_at, classified_by, classifier_type,
                 taxonomy_version
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (row_id, case_id, "SG_NEW_ORDER", "INT_MANUAL_ORDER_INTAKE",
+            (row_id, "t1", case_id, "SG_NEW_ORDER", "INT_MANUAL_ORDER_INTAKE",
              now, "attacker", "HUMAN", "fake-version"),
         )
         db.commit()

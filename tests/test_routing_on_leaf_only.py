@@ -143,51 +143,49 @@ def test_intent_to_recipe_registry_mapping(
 
 
 # ---------------------------------------------------------------------------
-# Functional invariance: dispatch ignores supergroup_code (criterion #7)
+# Introspection lock: the dispatch entrypoint has no super-group input
+# (acceptance criterion #7)
 # ---------------------------------------------------------------------------
+#
+# An earlier version of this file held a "functional invariance" test
+# that called a single-arg dispatch helper twice with identical inputs
+# and asserted equal output — a tautology. The honest lock is
+# introspective: the actual dispatch function in
+# ``orchestration/nodes.py`` (``select_recipe`` / ``propose_recipe``)
+# must accept no ``supergroup``-flavoured parameter. A future commit
+# that adds one fails here.
 
-def _dispatch_recipe(intent_code: str) -> str | None:
-    """Mirror the dispatch logic that ``orchestration/nodes.py::propose_recipe``
-    uses: walk the registry and return the recipe whose ``allowed_intents``
-    contains the leaf intent. Returns ``None`` if no recipe matches."""
-    for spec in REGISTRY.values():
-        if intent_code in spec.allowed_intents:
-            return spec.name
-    return None
 
+def test_select_recipe_signature_has_no_supergroup_parameter():
+    """``orchestration/nodes.py::select_recipe`` consumes ``GraphState``
+    and that state object must not surface ``supergroup_code`` as a
+    direct dispatch input. The static source-scan above already
+    rejects any read of ``supergroup_code`` in routing layers; this
+    test pins the function signature too."""
+    import inspect
 
-@pytest.mark.parametrize("intent_code", [
-    "CONTRACTUAL_CORRECTION",
-    "CREDIT_BLOCK",
-    "DUPLICATE_PO",
-])
-@pytest.mark.parametrize("supergroup_pair", [
-    ("SG_BLOCK_PRICING", "SG_NEEDS_TRIAGE"),
-    ("SG_NEW_ORDER", "SG_BLOCK_CREDIT"),
-    ("SG_ORDER_CHANGE", "SG_BLOCK_ORDER_INTEGRITY"),
-])
-def test_dispatch_is_invariant_to_supergroup(
-    intent_code: str, supergroup_pair: tuple[str, str],
-):
-    """Acceptance criterion #7 — the recipe a leaf intent resolves to
-    must not change when you flip the case's super-group. We exercise
-    the actual dispatch function (``_dispatch_recipe`` mirrors
-    ``orchestration/nodes.py::propose_recipe``) and prove the output
-    is the same for two synthetic super-group contexts.
+    from orchestration.nodes import select_recipe
 
-    A future commit that adds a ``case.supergroup_code``-conditional
-    branch to dispatch fails here loudly."""
-    sg_a, sg_b = supergroup_pair
-    # The dispatch function deliberately takes only the leaf intent;
-    # if a future version takes more, the test should be updated to
-    # pass both super-groups and assert the result is identical.
-    recipe_a = _dispatch_recipe(intent_code)
-    recipe_b = _dispatch_recipe(intent_code)
-    assert recipe_a == recipe_b, (
-        f"Recipe selection drifted between supergroup contexts "
-        f"({sg_a!r} vs {sg_b!r}) for intent {intent_code!r}: "
-        f"{recipe_a!r} vs {recipe_b!r}"
+    sig = inspect.signature(select_recipe)
+    bad = [
+        name for name in sig.parameters
+        if "supergroup" in name.lower()
+    ]
+    assert not bad, (
+        f"select_recipe() must not accept supergroup-flavoured params; "
+        f"found {bad}"
     )
-    assert recipe_a is not None, (
-        f"Dispatch should resolve a recipe for {intent_code!r}"
-    )
+
+
+def test_recipe_spec_namespace_has_no_supergroup_attribute():
+    """No instance of ``RecipeSpec`` in the registry carries a
+    supergroup-flavoured attribute via runtime introspection (defence
+    in depth on top of test_recipe_spec_has_no_supergroup_field which
+    only looks at declared dataclass fields)."""
+    for name, spec in REGISTRY.items():
+        attrs = {a for a in dir(spec) if not a.startswith("_")}
+        bad = {a for a in attrs if "supergroup" in a.lower()}
+        assert not bad, (
+            f"{name}: RecipeSpec instance carries supergroup-flavoured "
+            f"attribute(s): {bad}"
+        )

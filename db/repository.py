@@ -371,6 +371,117 @@ class TraceRepository:
 
 
 # ---------------------------------------------------------------------------
+# Classification History Repository (V020)
+# ---------------------------------------------------------------------------
+
+
+class ClassificationHistoryRepository:
+    """Append-only writer for ``case_classification_history`` (V020).
+
+    The table's UPDATE/DELETE/TRUNCATE/INSERT-OR-REPLACE triggers reject
+    every mutation path; this repository only writes INSERTs. Reads
+    surface the audit trail for the
+    ``GET /api/v1/cases/{id}/classification-history`` endpoint when the
+    DB-backed store is active.
+
+    Requirements: docs/specs/case-intent-supergroup-requirements.md §8.6,
+    acceptance criterion #9.
+    """
+
+    _COLUMNS = (
+        "id", "tenant_id", "case_id", "child_case_id", "supergroup_code",
+        "intent_code", "classified_at", "classified_by", "classifier_type",
+        "model_version", "reason_text", "source_event_id",
+        "taxonomy_version",
+    )
+
+    def __init__(self, adapter=None):
+        self._adapter = adapter or create_adapter()
+
+    def create(
+        self,
+        *,
+        tenant_id: str,
+        case_id: str,
+        supergroup_code: str,
+        classified_by: str,
+        classifier_type: str,
+        intent_code: Optional[str] = None,
+        child_case_id: Optional[str] = None,
+        model_version: Optional[str] = None,
+        reason_text: Optional[str] = None,
+        source_event_id: Optional[str] = None,
+        taxonomy_version: str = "",
+    ) -> Dict[str, Any]:
+        """Append one classification event. ``taxonomy_version`` must be
+        passed by the caller (read from the active YAML at app boot).
+        ``tenant_id`` is required (ADR-028 Guard-rail 4 — every audit row
+        carries tenant_id for cross-tenant query filtering).
+        Returns the inserted row as a dict for the call-site to log."""
+        if not tenant_id:
+            raise ValueError("tenant_id is required (ADR-028 Guard-rail 4).")
+        if not supergroup_code:
+            raise ValueError(
+                "supergroup_code is required on a classification event."
+            )
+        if classifier_type not in ("HUMAN", "MODEL", "RULE"):
+            raise ValueError(
+                f"classifier_type must be HUMAN | MODEL | RULE, got "
+                f"{classifier_type!r}"
+            )
+        if not taxonomy_version:
+            raise ValueError(
+                "taxonomy_version must be non-empty (read from the active "
+                "YAML at app boot)."
+            )
+        row_id = _uuid()
+        now = _now()
+        with self._adapter.cursor(tenant_id) as cur:
+            cur.execute(
+                """
+                INSERT INTO case_classification_history (
+                    id, tenant_id, case_id, child_case_id, supergroup_code,
+                    intent_code, classified_at, classified_by,
+                    classifier_type, model_version, reason_text,
+                    source_event_id, taxonomy_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    row_id, tenant_id, case_id, child_case_id, supergroup_code,
+                    intent_code, now, classified_by, classifier_type,
+                    model_version, reason_text, source_event_id,
+                    taxonomy_version,
+                ),
+            )
+        return {
+            "id": row_id, "tenant_id": tenant_id, "case_id": case_id,
+            "child_case_id": child_case_id, "supergroup_code": supergroup_code,
+            "intent_code": intent_code, "classified_at": now,
+            "classified_by": classified_by, "classifier_type": classifier_type,
+            "model_version": model_version, "reason_text": reason_text,
+            "source_event_id": source_event_id,
+            "taxonomy_version": taxonomy_version,
+        }
+
+    def list_by_case(
+        self, case_id: str, tenant_id: str,
+    ) -> List[Dict[str, Any]]:
+        """Return all history rows for a case in append order, scoped
+        to ``tenant_id`` (ADR-028 cross-tenant filter)."""
+        with self._adapter.cursor(tenant_id) as cur:
+            cur.execute(
+                f"""
+                SELECT {", ".join(self._COLUMNS)}
+                FROM case_classification_history
+                WHERE tenant_id = ? AND case_id = ?
+                ORDER BY classified_at, id
+                """,
+                (tenant_id, case_id),
+            )
+            return [_row_to_dict(r, self._COLUMNS) for r in cur.fetchall()]
+
+
+# ---------------------------------------------------------------------------
 # Policy Repository
 # ---------------------------------------------------------------------------
 
