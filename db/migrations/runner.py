@@ -597,6 +597,171 @@ def _apply_sqlite_v016(conn: sqlite3.Connection) -> None:
     logger.info("SQLite schema V016 applied (email_attachment store)")
 
 
+def _seed_taxonomy_postgres(cur: Any, data: dict[str, Any]) -> None:
+    """Idempotent Postgres seed loader for V017.
+
+    Mirrors scripts.seed_taxonomy.load_taxonomy_sqlite but uses %s
+    parameters and Postgres ON CONFLICT syntax. Kept inline (rather than
+    in scripts/) so the migration runner is self-contained and does not
+    depend on shell execution of the script.
+    """
+    today = datetime.now(timezone.utc).date().isoformat()
+
+    for sg in data["supergroups"]:
+        cur.execute(
+            """
+            INSERT INTO case_supergroup
+                (code, origin, description, owner_role, is_active,
+                 effective_from, deprecated_at, replaced_by_code, sort_order, version)
+            VALUES (%s, %s, %s, %s, TRUE, %s, %s, %s, %s, 1)
+            ON CONFLICT (code) DO UPDATE SET
+                origin = EXCLUDED.origin,
+                description = EXCLUDED.description,
+                owner_role = EXCLUDED.owner_role,
+                sort_order = EXCLUDED.sort_order,
+                deprecated_at = EXCLUDED.deprecated_at,
+                replaced_by_code = EXCLUDED.replaced_by_code,
+                version = case_supergroup.version + 1
+            """,
+            (
+                sg["code"], sg["origin"], sg["description"], sg["owner_role"],
+                today, sg.get("deprecated_at"), sg.get("replaced_by_code"),
+                sg["sort_order"],
+            ),
+        )
+
+    for intent in data["intents"]:
+        cur.execute(
+            """
+            INSERT INTO case_intent
+                (code, supergroup_code, description, sap_block_code, sap_block_field,
+                 sap_sales_org, is_active, effective_from, deprecated_at, replaced_by_code)
+            VALUES (%s, %s, %s, %s, %s, %s, TRUE, %s, %s, %s)
+            ON CONFLICT (code) DO UPDATE SET
+                supergroup_code = EXCLUDED.supergroup_code,
+                description = EXCLUDED.description,
+                sap_block_code = EXCLUDED.sap_block_code,
+                sap_block_field = EXCLUDED.sap_block_field,
+                sap_sales_org = EXCLUDED.sap_sales_org,
+                deprecated_at = EXCLUDED.deprecated_at,
+                replaced_by_code = EXCLUDED.replaced_by_code
+            """,
+            (
+                intent["code"], intent["supergroup_code"], intent["description"],
+                intent.get("sap_block_code"), intent.get("sap_block_field"),
+                intent.get("sap_sales_org"), today,
+                intent.get("deprecated_at"), intent.get("replaced_by_code"),
+            ),
+        )
+        cur.execute(
+            """
+            INSERT INTO supergroup_intent_allowed
+                (supergroup_code, intent_code, effective_from, deprecated_at)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (supergroup_code, intent_code) DO UPDATE SET
+                deprecated_at = EXCLUDED.deprecated_at
+            """,
+            (
+                intent["supergroup_code"], intent["code"], today,
+                intent.get("deprecated_at"),
+            ),
+        )
+
+    for label in data["labels"]:
+        cur.execute(
+            """
+            INSERT INTO intent_label
+                (code, domain, locale, display_name, description)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (code, domain, locale) DO UPDATE SET
+                display_name = EXCLUDED.display_name,
+                description = EXCLUDED.description
+            """,
+            (
+                label["code"], label["domain"], label.get("locale", "en"),
+                label["display_name"], label.get("description"),
+            ),
+        )
+
+
+def _apply_sqlite_v017(conn: sqlite3.Connection) -> None:
+    """V017 — Case & Intent Super-Group taxonomy lookup tables.
+
+    Mirrors V017__case_taxonomy.sql. Seeds rows by delegating to
+    ``scripts.seed_taxonomy.load_taxonomy_sqlite`` so the YAML at
+    ``db/seeds/case_taxonomy.yaml`` is the single source of truth on
+    both Postgres and SQLite. Plan §3, decision D1.
+    """
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS case_supergroup (
+            code              TEXT PRIMARY KEY,
+            origin            TEXT NOT NULL CHECK (origin IN ('CUSTOMER','API','BOTH')),
+            description       TEXT NOT NULL,
+            owner_role        TEXT NOT NULL,
+            is_active         INTEGER NOT NULL DEFAULT 1,
+            effective_from    TEXT NOT NULL,
+            deprecated_at     TEXT,
+            replaced_by_code  TEXT REFERENCES case_supergroup(code),
+            sort_order        INTEGER NOT NULL DEFAULT 0,
+            version           INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE INDEX IF NOT EXISTS idx_case_supergroup_origin_active
+            ON case_supergroup (origin, is_active);
+
+        CREATE TABLE IF NOT EXISTS case_intent (
+            code              TEXT PRIMARY KEY,
+            supergroup_code   TEXT NOT NULL REFERENCES case_supergroup(code),
+            description       TEXT NOT NULL,
+            sap_block_code    TEXT,
+            sap_block_field   TEXT
+                CHECK (sap_block_field IS NULL OR sap_block_field IN
+                       ('LIFSK','LIFSP','FAKSK','FAKSP','ABGRU','CMGST','Z_CUSTOM')),
+            sap_sales_org     TEXT,
+            is_active         INTEGER NOT NULL DEFAULT 1,
+            effective_from    TEXT NOT NULL,
+            deprecated_at     TEXT,
+            replaced_by_code  TEXT REFERENCES case_intent(code)
+        );
+        CREATE INDEX IF NOT EXISTS idx_case_intent_supergroup
+            ON case_intent (supergroup_code, is_active);
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_case_intent_sap_block_active
+            ON case_intent (sap_block_code, COALESCE(sap_sales_org, ''))
+            WHERE sap_block_code IS NOT NULL AND is_active = 1;
+
+        CREATE TABLE IF NOT EXISTS supergroup_intent_allowed (
+            supergroup_code   TEXT NOT NULL REFERENCES case_supergroup(code),
+            intent_code       TEXT NOT NULL REFERENCES case_intent(code),
+            effective_from    TEXT NOT NULL,
+            deprecated_at     TEXT,
+            PRIMARY KEY (supergroup_code, intent_code)
+        );
+
+        CREATE TABLE IF NOT EXISTS intent_label (
+            code              TEXT NOT NULL,
+            domain            TEXT NOT NULL CHECK (domain IN ('SUPERGROUP','INTENT')),
+            locale            TEXT NOT NULL DEFAULT 'en',
+            display_name      TEXT NOT NULL,
+            description       TEXT,
+            PRIMARY KEY (code, domain, locale)
+        );
+        CREATE INDEX IF NOT EXISTS idx_intent_label_locale
+            ON intent_label (locale, domain);
+        """
+    )
+    # Seed rows from the YAML SoT. Import here to keep the runner
+    # importable even when scripts/ is not on sys.path during early test
+    # collection.
+    from scripts.seed_taxonomy import load_taxonomy_sqlite, load_yaml
+    load_taxonomy_sqlite(conn, load_yaml())
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+        ("V017", datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    logger.info("SQLite schema V017 applied (case taxonomy lookup tables + seed)")
+
+
 def apply_sqlite(conn: sqlite3.Connection) -> None:
     """Apply the SQLite-compatible schema (V001 + subsequent migrations)."""
     conn.executescript(_SQLITE_SCHEMA)
@@ -625,6 +790,7 @@ def apply_sqlite(conn: sqlite3.Connection) -> None:
     _apply_sqlite_v013(conn)
     _apply_sqlite_v015(conn)
     _apply_sqlite_v016(conn)
+    _apply_sqlite_v017(conn)
 
 
 def apply_postgres(database_url: str) -> None:
@@ -691,6 +857,7 @@ def apply_postgres(database_url: str) -> None:
             ("V014", "V014__order_case_updated_at.sql", "PostgreSQL schema V014 applied (order_case.updated_at)"),
             ("V015", "V015__effect_outbox.sql", "PostgreSQL schema V015 applied (effect_outbox ledger)"),
             ("V016", "V016__email_attachment.sql", "PostgreSQL schema V016 applied (email_attachment store)"),
+            ("V017", "V017__case_taxonomy.sql", "PostgreSQL schema V017 applied (case taxonomy lookup tables)"),
         ):
             cur.execute(
                 "SELECT version FROM schema_migrations WHERE version = %s",
@@ -706,6 +873,12 @@ def apply_postgres(database_url: str) -> None:
                 (version,),
             )
             logger.info(log_msg)
+            # V017 schema is DDL-only; seed rows are loaded from the YAML
+            # SoT so Postgres and SQLite stay byte-identical (D1).
+            if version == "V017":
+                from scripts.seed_taxonomy import load_yaml
+                _seed_taxonomy_postgres(cur, load_yaml())
+                logger.info("PostgreSQL V017 taxonomy seed loaded from YAML")
 
         conn.commit()
     except Exception:

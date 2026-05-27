@@ -1,0 +1,351 @@
+# Case & Intent Super-Group taxonomy — Steward source of truth.
+#
+# This file is the *single* source of truth for the case taxonomy. Loaders
+# write it to the DB (case_supergroup, case_intent, supergroup_intent_allowed,
+# intent_label). Generators emit Python and TS constants from it. Both must
+# remain byte-stable for a given content.
+#
+# Steward workflow: edit this file, run `make taxonomy-check`, open PR.
+#
+# Requirements: docs/specs/case-intent-supergroup-requirements.md (§6, §7).
+# Implementation plan: docs/plans/case-intent-supergroup-implementation-plan.md (§3, D1).
+#
+# NOTE: sap_block_code / sap_block_field values below are PLACEHOLDERS for
+# the Phase 0 data-mining sprint. Real values come from a 90-day extract of
+# VBAK/VBAP/VBUK × TVLST/TVFST/TVAGT joined to actual block frequency.
+# Mark `phase_zero_pending: true` on rows whose mapping is provisional.
+
+version: "2026-05-27-v1"
+
+# ---------------------------------------------------------------------------
+# Supergroups (parent-level classification). PO sign-off: §4 Q4 (API list) +
+# §3.5 (CUSTOMER list). 8 + 12 = 20 active rows.
+# ---------------------------------------------------------------------------
+supergroups:
+  # ---- API origin (SAP blocked orders) ----
+  - code: SG_BLOCK_PRICING
+    origin: API
+    description: "SAP block: pricing condition missing/expired, manual price override pending, contract pricing mismatch, mass pricing error."
+    owner_role: pricing_ops
+    sort_order: 10
+  - code: SG_BLOCK_CREDIT
+    origin: API
+    description: "SAP block: credit limit exceeded, watchlist hold, deduction dispute hold, payment-terms mismatch."
+    owner_role: credit_ops
+    sort_order: 20
+  - code: SG_BLOCK_AVAILABILITY
+    origin: API
+    description: "SAP block: ATP shortage, allocation exceeded, MOQ violation, OVER_MAX, back-order required, substitution required."
+    owner_role: supply_chain
+    sort_order: 30
+  - code: SG_BLOCK_MASTER_DATA
+    origin: API
+    description: "SAP block: ship-to invalid, partner role missing, customer hierarchy issue, material status (discontinued / pre-launch / sample-only)."
+    owner_role: master_data
+    sort_order: 40
+  - code: SG_BLOCK_LOGISTICS
+    origin: API
+    description: "SAP block: pallet rounding, broken-pallet handling fee, truck constraint, hazmat segregation, route/calendar issue, delivery-window appointment."
+    owner_role: warehouse_ops
+    sort_order: 50
+  - code: SG_BLOCK_COMPLIANCE
+    origin: API
+    description: "SAP block: tax / VAT-ID missing, customs / export licence hold, hazmat regulatory, country-of-origin documentation."
+    owner_role: compliance_ops
+    sort_order: 60
+  - code: SG_BLOCK_ORDER_INTEGRITY
+    origin: API
+    description: "SAP block: duplicate PO, EDI mismatch (850 vs SAP), incomplete sales doc, contractual correction needed."
+    owner_role: cs_ops
+    sort_order: 70
+  - code: SG_BLOCK_UNMAPPED
+    origin: API
+    description: "Reserved. Auto-assigned when SAP returns a block code not in case_intent.sap_block_code. Triggers P2 ops alert; mapping SLA = 1 business day."
+    owner_role: data_steward
+    sort_order: 999
+
+  # ---- CUSTOMER origin (customer-initiated intake) ----
+  - code: SG_NEW_ORDER
+    origin: CUSTOMER
+    description: "New customer purchase order received."
+    owner_role: cs_ops
+    sort_order: 110
+  - code: SG_ORDER_CHANGE
+    origin: CUSTOMER
+    description: "Modification to an existing order (qty, date, SKU, ship-to)."
+    owner_role: cs_ops
+    sort_order: 120
+  - code: SG_ORDER_STATUS_INQUIRY
+    origin: CUSTOMER
+    description: "Where-is-my-order: status, tracking, ETA questions."
+    owner_role: cs_ops
+    sort_order: 130
+  - code: SG_SHIPMENT_DISCREPANCY
+    origin: CUSTOMER
+    description: "Short-ship, over-ship, damaged-in-transit, missing shipment / POD."
+    owner_role: cs_ops
+    sort_order: 140
+  - code: SG_RETURN_RGA
+    origin: CUSTOMER
+    description: "Return authorisation, RGA / RMA, recall reconciliation."
+    owner_role: cs_ops
+    sort_order: 150
+  - code: SG_LOGISTICS_CHANGE
+    origin: CUSTOMER
+    description: "Ship-to address change, routing change, delivery-window change, carrier change request."
+    owner_role: cs_ops
+    sort_order: 160
+  - code: SG_BILLING_DISPUTE
+    origin: CUSTOMER
+    description: "Invoice dispute, payment-terms dispute, freight charge dispute, deduction reconciliation."
+    owner_role: ar_ops
+    sort_order: 170
+  - code: SG_DOCUMENTATION
+    origin: CUSTOMER
+    description: "COA, MSDS, tax / exempt certificate, customs paperwork, sample request."
+    owner_role: cs_ops
+    sort_order: 180
+  - code: SG_COMPLAINT_SERVICE
+    origin: CUSTOMER
+    description: "Service-level complaint (response time, wrong information given, missed callback)."
+    owner_role: cs_ops
+    sort_order: 190
+  - code: SG_COMPLAINT_PRODUCT
+    origin: CUSTOMER
+    description: "Product-quality complaint, recall trigger, food-safety report."
+    owner_role: quality_ops
+    sort_order: 200
+  - code: SG_EDI_ESCALATION
+    origin: CUSTOMER
+    description: "Customer reports EDI failure (850/855/810) — escalation path when the API channel itself is broken."
+    owner_role: edi_ops
+    sort_order: 210
+  - code: SG_NEEDS_TRIAGE
+    origin: CUSTOMER
+    description: "Cannot classify on intake. Subject to §8.2 forcing functions: hard-block at close, 48h auto-age, weekly Top-10, <3% per-CSR target."
+    owner_role: data_steward
+    sort_order: 998
+
+# ---------------------------------------------------------------------------
+# Intents (leaf-level routing key). PO sign-off: §6.4 initial seed.
+# Phase 0 data mining may add more leaves; subtractions require PO approval.
+# ---------------------------------------------------------------------------
+intents:
+  # --- SG_BLOCK_PRICING ---
+  - code: INT_PRICE_MISMATCH
+    supergroup_code: SG_BLOCK_PRICING
+    description: "Order price does not match the contract / condition record."
+    sap_block_code: null
+    sap_block_field: LIFSK
+    phase_zero_pending: true
+  - code: INT_MASS_PRICING_ERROR
+    supergroup_code: SG_BLOCK_PRICING
+    description: "Bulk pricing condition error affecting many orders simultaneously."
+    sap_block_code: null
+    sap_block_field: LIFSK
+    phase_zero_pending: true
+  - code: INT_PRICE_HOLD_RELEASE
+    supergroup_code: SG_BLOCK_PRICING
+    description: "Manual price hold pending pricing analyst release."
+    sap_block_code: null
+    sap_block_field: LIFSK
+    phase_zero_pending: true
+  # --- SG_BLOCK_CREDIT ---
+  - code: INT_CREDIT_BLOCK
+    supergroup_code: SG_BLOCK_CREDIT
+    description: "Credit limit exceeded; release requires credit ops decision (VKM1 in SAP)."
+    sap_block_code: null
+    sap_block_field: CMGST
+    phase_zero_pending: true
+  # --- SG_BLOCK_AVAILABILITY ---
+  - code: INT_BACK_ORDER
+    supergroup_code: SG_BLOCK_AVAILABILITY
+    description: "Insufficient stock on the requested delivery date; back-order is one of several resolution paths."
+    sap_block_code: null
+    sap_block_field: LIFSP
+    phase_zero_pending: true
+  - code: INT_OVER_MAX
+    supergroup_code: SG_BLOCK_AVAILABILITY
+    description: "Order quantity exceeds the customer's allocation or maximum permitted quantity."
+    sap_block_code: null
+    sap_block_field: LIFSP
+    phase_zero_pending: true
+  - code: INT_MIN_ORDER_QTY
+    supergroup_code: SG_BLOCK_AVAILABILITY
+    description: "Order quantity below the minimum order quantity policy."
+    sap_block_code: null
+    sap_block_field: LIFSP
+    phase_zero_pending: true
+  # --- SG_BLOCK_LOGISTICS ---
+  - code: INT_PALLET_CONFIG
+    supergroup_code: SG_BLOCK_LOGISTICS
+    description: "Order quantity does not round to a pallet TI/HI; order-builder must adjust."
+    sap_block_code: null
+    sap_block_field: LIFSP
+    phase_zero_pending: true
+  - code: INT_BROKEN_PALLET
+    supergroup_code: SG_BLOCK_LOGISTICS
+    description: "Quantity rounds but violates handling policy (broken-pallet fee, WMS pick rule, customer DC receive rule)."
+    sap_block_code: null
+    sap_block_field: LIFSP
+    phase_zero_pending: true
+  - code: INT_DELIVERY_DELAY
+    supergroup_code: SG_BLOCK_LOGISTICS
+    description: "Order will miss requested delivery date. Symptom-level; root cause classified separately. Demoted from supergroup per §3.13."
+    sap_block_code: null
+    sap_block_field: LIFSP
+    phase_zero_pending: true
+  # --- SG_BLOCK_ORDER_INTEGRITY ---
+  - code: INT_DUPLICATE_PO
+    supergroup_code: SG_BLOCK_ORDER_INTEGRITY
+    description: "Customer PO number matches an order already in the system."
+    sap_block_code: null
+    sap_block_field: ABGRU
+    phase_zero_pending: true
+  - code: INT_EDI_MISMATCH
+    supergroup_code: SG_BLOCK_ORDER_INTEGRITY
+    description: "Inbound EDI 850 disagrees with the SAP sales doc (price, qty, ship-to, dates)."
+    sap_block_code: null
+    sap_block_field: ABGRU
+    phase_zero_pending: true
+  - code: INT_CONTRACTUAL_CORRECTION
+    supergroup_code: SG_BLOCK_ORDER_INTEGRITY
+    description: "Order needs adjustment to align with the customer contract or agreement."
+    sap_block_code: null
+    sap_block_field: ABGRU
+    phase_zero_pending: true
+  # --- SG_BLOCK_UNMAPPED ---
+  - code: INT_UNMAPPED_PENDING_TAXONOMY
+    supergroup_code: SG_BLOCK_UNMAPPED
+    description: "Reserved leaf for cases whose SAP block code has no current mapping. Steward decision SLA = 1 business day."
+    sap_block_code: null
+    sap_block_field: null
+  # --- SG_NEW_ORDER ---
+  - code: INT_MANUAL_ORDER_INTAKE
+    supergroup_code: SG_NEW_ORDER
+    description: "Net-new customer order received via the customer intake path."
+    sap_block_code: null
+    sap_block_field: null
+  # --- SG_NEEDS_TRIAGE ---
+  - code: INT_UNKNOWN
+    supergroup_code: SG_NEEDS_TRIAGE
+    description: "Reserved leaf for cases the classifier cannot place. Closure-blocking per §8.2."
+    sap_block_code: null
+    sap_block_field: null
+
+# ---------------------------------------------------------------------------
+# English display labels (default locale). Other locales are added by
+# regional OM leads in separate YAMLs under db/seeds/labels/ (Phase 4).
+# ---------------------------------------------------------------------------
+labels:
+  # --- Supergroup labels ---
+  - code: SG_BLOCK_PRICING
+    domain: SUPERGROUP
+    display_name: "Pricing Block"
+  - code: SG_BLOCK_CREDIT
+    domain: SUPERGROUP
+    display_name: "Credit Hold"
+  - code: SG_BLOCK_AVAILABILITY
+    domain: SUPERGROUP
+    display_name: "Availability / Allocation"
+  - code: SG_BLOCK_MASTER_DATA
+    domain: SUPERGROUP
+    display_name: "Master Data Issue"
+  - code: SG_BLOCK_LOGISTICS
+    domain: SUPERGROUP
+    display_name: "Logistics Block"
+  - code: SG_BLOCK_COMPLIANCE
+    domain: SUPERGROUP
+    display_name: "Compliance / Regulatory"
+  - code: SG_BLOCK_ORDER_INTEGRITY
+    domain: SUPERGROUP
+    display_name: "Order Integrity"
+  - code: SG_BLOCK_UNMAPPED
+    domain: SUPERGROUP
+    display_name: "Unmapped Block (Steward Queue)"
+  - code: SG_NEW_ORDER
+    domain: SUPERGROUP
+    display_name: "New Order"
+  - code: SG_ORDER_CHANGE
+    domain: SUPERGROUP
+    display_name: "Order Change"
+  - code: SG_ORDER_STATUS_INQUIRY
+    domain: SUPERGROUP
+    display_name: "Order Status Inquiry"
+  - code: SG_SHIPMENT_DISCREPANCY
+    domain: SUPERGROUP
+    display_name: "Shipment Discrepancy"
+  - code: SG_RETURN_RGA
+    domain: SUPERGROUP
+    display_name: "Return / RGA"
+  - code: SG_LOGISTICS_CHANGE
+    domain: SUPERGROUP
+    display_name: "Logistics Change"
+  - code: SG_BILLING_DISPUTE
+    domain: SUPERGROUP
+    display_name: "Billing / Payment Dispute"
+  - code: SG_DOCUMENTATION
+    domain: SUPERGROUP
+    display_name: "Documentation Request"
+  - code: SG_COMPLAINT_SERVICE
+    domain: SUPERGROUP
+    display_name: "Service Complaint"
+  - code: SG_COMPLAINT_PRODUCT
+    domain: SUPERGROUP
+    display_name: "Product Quality Complaint"
+  - code: SG_EDI_ESCALATION
+    domain: SUPERGROUP
+    display_name: "EDI Failure Escalation"
+  - code: SG_NEEDS_TRIAGE
+    domain: SUPERGROUP
+    display_name: "Needs Triage"
+
+  # --- Intent labels ---
+  - code: INT_PRICE_MISMATCH
+    domain: INTENT
+    display_name: "Pricing Discrepancy"
+  - code: INT_MASS_PRICING_ERROR
+    domain: INTENT
+    display_name: "Mass Pricing Error"
+  - code: INT_PRICE_HOLD_RELEASE
+    domain: INTENT
+    display_name: "Price Hold Release"
+  - code: INT_CREDIT_BLOCK
+    domain: INTENT
+    display_name: "Credit Block"
+  - code: INT_BACK_ORDER
+    domain: INTENT
+    display_name: "Back-Order"
+  - code: INT_OVER_MAX
+    domain: INTENT
+    display_name: "Over-Max Quantity"
+  - code: INT_MIN_ORDER_QTY
+    domain: INTENT
+    display_name: "Min Order Quantity Violation"
+  - code: INT_PALLET_CONFIG
+    domain: INTENT
+    display_name: "Pallet Configuration"
+  - code: INT_BROKEN_PALLET
+    domain: INTENT
+    display_name: "Broken Pallet Handling"
+  - code: INT_DELIVERY_DELAY
+    domain: INTENT
+    display_name: "Delivery Delay"
+  - code: INT_DUPLICATE_PO
+    domain: INTENT
+    display_name: "Duplicate PO"
+  - code: INT_EDI_MISMATCH
+    domain: INTENT
+    display_name: "EDI Mismatch"
+  - code: INT_CONTRACTUAL_CORRECTION
+    domain: INTENT
+    display_name: "Contractual Correction"
+  - code: INT_UNMAPPED_PENDING_TAXONOMY
+    domain: INTENT
+    display_name: "Unmapped (Pending Taxonomy)"
+  - code: INT_MANUAL_ORDER_INTAKE
+    domain: INTENT
+    display_name: "Manual Order Intake"
+  - code: INT_UNKNOWN
+    domain: INTENT
+    display_name: "Unknown (Needs Triage)"
