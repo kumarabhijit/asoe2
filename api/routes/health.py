@@ -111,6 +111,7 @@ from pydantic import BaseModel, ConfigDict, Field  # noqa: E402
 
 from api.deps import require_role  # noqa: E402
 from api.metrics import record_reviewer_activity  # noqa: E402
+from api.observability.audit_bearing import audit_bearing  # noqa: E402
 
 
 class ReviewerActivityRequest(BaseModel):
@@ -128,6 +129,12 @@ class ReviewerActivityRequest(BaseModel):
     status_code=status.HTTP_202_ACCEPTED,
     include_in_schema=False,
     dependencies=[Depends(require_role("analyst", "manager", "admin"))],
+)
+@audit_bearing(
+    reason="records the automation-bias telemetry (Layer-2-open + dwell) "
+           "tied to a reviewer's decision; auditor uses this to detect "
+           "rubber-stamping patterns and contest a decision that the "
+           "operator never visually inspected (DoR #11)",
 )
 async def reviewer_activity(req: ReviewerActivityRequest) -> dict:
     """Record one decision's automation-bias signals (Layer-2-open + dwell)."""
@@ -154,6 +161,12 @@ from orchestration.outbox import reconcile_pending  # noqa: E402
     "/outbox/reconcile",
     include_in_schema=False,
     dependencies=[Depends(require_role("admin"))],
+)
+@audit_bearing(
+    reason="drains the compensation outbox — retries pending gateway "
+           "effects (SAP writes, OMS writes, EDI emissions) and escalates "
+           "exhausted ones; every retry materialises a real downstream "
+           "side-effect that the audit trail must attribute (DoR #6)",
 )
 async def outbox_reconcile(tenant_id: str = Depends(get_tenant_id)) -> dict:
     """Run one reconciliation pass over this tenant's compensation queue."""

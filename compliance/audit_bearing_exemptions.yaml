@@ -42,14 +42,18 @@ exempt_paths:
   #    /config/tenants/{tenant_id}/layers/{layer} now carry
   #    @audit_bearing.
 
-  # ── api/routes/attachments.py — signed-URL mint is RBAC-gated +
-  #    capability-token-scoped; the byte read itself audits separately.
-  - /cases/{case_id}/attachments/{attachment_id}/signed-url
-
-  # ── api/routes/health.py — operational endpoints; audit trail goes
-  #    through the structured log + reviewer-activity metrics.
-  - /metrics/reviewer-activity
-  - /outbox/reconcile
+  # ── api/routes/attachments.py — MIGRATED (PARITY-5 followup).
+  #    /cases/{case_id}/attachments/{attachment_id}/signed-url now
+  #    carries @audit_bearing(reason="mints a scoped, expiring
+  #    capability URL granting read access to attachment bytes that
+  #    may be evidence in a SOX-relevant financial decision; …").
+  # ── api/routes/health.py — MIGRATED (PARITY-5 followup). Both
+  #    /metrics/reviewer-activity and /outbox/reconcile now carry
+  #    @audit_bearing. reviewer-activity is the rubber-stamping
+  #    detector (Layer-2-open + dwell — auditor uses it to contest
+  #    a decision the operator never visually inspected, DoR #11);
+  #    outbox/reconcile materialises real downstream effects on every
+  #    drain (SAP / OMS / EDI writes — DoR #6).
 
   # ── api/routes/exceptions.py — partial migration. Migrated in
   #    this commit: /resolve, /resolve/async, /disposition,
