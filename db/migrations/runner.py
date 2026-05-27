@@ -478,6 +478,60 @@ def _apply_sqlite_v008(conn: sqlite3.Connection) -> None:
     )
 
 
+def _apply_sqlite_v009(conn: sqlite3.Connection) -> None:
+    """V009 — order_case parent entity + parent_case_id on exceptions.
+
+    Folded into the SQLite path so V018 (which alters order_case) has a
+    table to alter on both backends. Mirrors V009__order_case.sql with
+    the same column shape; CHECK constraints kept as code-level
+    invariants to match V005's deliberate avoidance of the enum-CHECK
+    pattern.
+    """
+    if not _sqlite_table_exists(conn, "order_case"):
+        conn.executescript(
+            """
+            CREATE TABLE order_case (
+                case_id                  TEXT PRIMARY KEY,
+                tenant_id                TEXT NOT NULL,
+                customer_id              TEXT,
+                source                   TEXT NOT NULL,
+                source_channel           TEXT NOT NULL,
+                customer_po_number       TEXT,
+                sales_order_id           TEXT,
+                edi_transaction_id       TEXT,
+                source_email_id          TEXT,
+                opened_at                TEXT NOT NULL,
+                closed_at                TEXT,
+                status                   TEXT NOT NULL DEFAULT 'OPEN_AGENT_PROCESSING',
+                sla_deadline             TEXT,
+                tier                     INTEGER NOT NULL DEFAULT 2,
+                working_memory_summary   TEXT,
+                last_compaction_at       TEXT,
+                bundle_version_at_open   TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_order_case_tenant
+                ON order_case (tenant_id);
+            CREATE INDEX IF NOT EXISTS idx_order_case_status
+                ON order_case (status);
+            CREATE INDEX IF NOT EXISTS idx_order_case_sla
+                ON order_case (sla_deadline);
+            """
+        )
+    if not _sqlite_column_exists(conn, "exceptions", "parent_case_id"):
+        conn.execute(
+            "ALTER TABLE exceptions ADD COLUMN parent_case_id TEXT REFERENCES order_case(case_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_exception_parent_case ON exceptions (parent_case_id)"
+        )
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+        ("V009", datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    logger.info("SQLite schema V009 applied (order_case parent entity)")
+
+
 def _apply_sqlite_v012(conn: sqlite3.Connection) -> None:
     """V012 — case_events replay log (ADR-038 Phase H.5)."""
     conn.executescript(
@@ -762,6 +816,163 @@ def _apply_sqlite_v017(conn: sqlite3.Connection) -> None:
     logger.info("SQLite schema V017 applied (case taxonomy lookup tables + seed)")
 
 
+def _apply_sqlite_v018(conn: sqlite3.Connection) -> None:
+    """V018 — case origin + supergroup_code + leaf intent_code.
+
+    Mirrors V018__case_origin_supergroup.sql. Adds nullable columns to
+    order_case and exceptions, the app_config table, and the inheritance
+    + leaf-validity triggers. Backfill of legacy data and NOT NULL
+    transitions land in a later migration so this one is reversible.
+
+    SQLite trigger differences vs Postgres:
+      - Logic inlined in CREATE TRIGGER (no CREATE FUNCTION).
+      - Uses RAISE(ABORT, ...) in place of plpgsql RAISE EXCEPTION.
+      - The Postgres `BEFORE UPDATE OF column` form is not supported;
+        the WHEN clause filters to the relevant change.
+    """
+    # 1. app_config
+    if not _sqlite_table_exists(conn, "app_config"):
+        conn.executescript(
+            """
+            CREATE TABLE app_config (
+                key         TEXT PRIMARY KEY,
+                value       TEXT NOT NULL,
+                description TEXT,
+                updated_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            """
+        )
+    conn.execute(
+        """
+        INSERT INTO app_config (key, value, description)
+        VALUES ('inheritance_mode_customer', 'STRICT',
+                'v1 default. Steward may set to RELAXED per §8.1 with no code deploy.')
+        ON CONFLICT (key) DO NOTHING
+        """
+    )
+
+    # 2. order_case columns
+    for col, ddl in (
+        ("origin",              "ALTER TABLE order_case ADD COLUMN origin TEXT CHECK (origin IS NULL OR origin IN ('CUSTOMER','API'))"),
+        ("supergroup_code",     "ALTER TABLE order_case ADD COLUMN supergroup_code TEXT REFERENCES case_supergroup(code)"),
+        ("predecessor_case_id", "ALTER TABLE order_case ADD COLUMN predecessor_case_id TEXT REFERENCES order_case(case_id)"),
+        ("will_miss_rdd",       "ALTER TABLE order_case ADD COLUMN will_miss_rdd INTEGER NOT NULL DEFAULT 0"),
+        ("sla_due_at",          "ALTER TABLE order_case ADD COLUMN sla_due_at TEXT"),
+    ):
+        if not _sqlite_column_exists(conn, "order_case", col):
+            conn.execute(ddl)
+
+    # 3. exceptions columns
+    for col, ddl in (
+        ("supergroup_code",   "ALTER TABLE exceptions ADD COLUMN supergroup_code TEXT REFERENCES case_supergroup(code)"),
+        ("divergence_reason", "ALTER TABLE exceptions ADD COLUMN divergence_reason TEXT"),
+        ("intent_code",       "ALTER TABLE exceptions ADD COLUMN intent_code TEXT REFERENCES case_intent(code)"),
+        ("sap_block_field",   "ALTER TABLE exceptions ADD COLUMN sap_block_field TEXT CHECK (sap_block_field IS NULL OR sap_block_field IN ('LIFSK','LIFSP','FAKSK','FAKSP','ABGRU','CMGST','Z_CUSTOM'))"),
+        ("scope",             "ALTER TABLE exceptions ADD COLUMN scope TEXT CHECK (scope IS NULL OR scope IN ('HEADER','ITEM'))"),
+    ):
+        if not _sqlite_column_exists(conn, "exceptions", col):
+            conn.execute(ddl)
+
+    # 4. + 5. Triggers (inheritance + leaf validity), unified as inline SQLite.
+    # One trigger per (event × column-filter). We collapse the inheritance
+    # logic into a single CASE chain that RAISEs on the first violated rule.
+    conn.executescript(
+        """
+        DROP TRIGGER IF EXISTS tg_child_supergroup_inheritance_ins;
+        CREATE TRIGGER tg_child_supergroup_inheritance_ins
+        BEFORE INSERT ON exceptions
+        WHEN NEW.parent_case_id IS NOT NULL
+         AND NEW.supergroup_code IS NOT NULL
+         AND NEW.supergroup_code !=
+             COALESCE((SELECT supergroup_code FROM order_case
+                       WHERE case_id = NEW.parent_case_id), NEW.supergroup_code)
+        BEGIN
+            SELECT CASE
+                WHEN (SELECT origin FROM order_case WHERE case_id = NEW.parent_case_id) = 'API'
+                    THEN RAISE(ABORT, 'API child cases cannot diverge from parent supergroup')
+                WHEN COALESCE((SELECT value FROM app_config
+                               WHERE key = 'inheritance_mode_customer'), 'STRICT') = 'STRICT'
+                    THEN RAISE(ABORT, 'CUSTOMER child cases cannot diverge under STRICT inheritance')
+                WHEN NEW.divergence_reason IS NULL
+                    THEN RAISE(ABORT, 'divergence_reason required under RELAXED mode when supergroup differs')
+            END;
+        END;
+
+        DROP TRIGGER IF EXISTS tg_child_supergroup_inheritance_upd;
+        CREATE TRIGGER tg_child_supergroup_inheritance_upd
+        BEFORE UPDATE ON exceptions
+        WHEN NEW.parent_case_id IS NOT NULL
+         AND NEW.supergroup_code IS NOT NULL
+         AND NEW.supergroup_code != COALESCE(OLD.supergroup_code, '')
+         AND NEW.supergroup_code !=
+             COALESCE((SELECT supergroup_code FROM order_case
+                       WHERE case_id = NEW.parent_case_id), NEW.supergroup_code)
+        BEGIN
+            SELECT CASE
+                WHEN (SELECT origin FROM order_case WHERE case_id = NEW.parent_case_id) = 'API'
+                    THEN RAISE(ABORT, 'API child cases cannot diverge from parent supergroup')
+                WHEN COALESCE((SELECT value FROM app_config
+                               WHERE key = 'inheritance_mode_customer'), 'STRICT') = 'STRICT'
+                    THEN RAISE(ABORT, 'CUSTOMER child cases cannot diverge under STRICT inheritance')
+                WHEN NEW.divergence_reason IS NULL
+                    THEN RAISE(ABORT, 'divergence_reason required under RELAXED mode when supergroup differs')
+            END;
+        END;
+
+        DROP TRIGGER IF EXISTS tg_child_leaf_validity_ins;
+        CREATE TRIGGER tg_child_leaf_validity_ins
+        BEFORE INSERT ON exceptions
+        WHEN NEW.intent_code IS NOT NULL AND NEW.supergroup_code IS NOT NULL
+        BEGIN
+            SELECT CASE
+                WHEN NOT EXISTS (
+                    SELECT 1 FROM supergroup_intent_allowed
+                    WHERE supergroup_code = NEW.supergroup_code
+                      AND intent_code = NEW.intent_code
+                      AND (deprecated_at IS NULL OR deprecated_at > date('now'))
+                )
+                THEN RAISE(ABORT, 'leaf intent not allowed under supergroup per supergroup_intent_allowed')
+            END;
+        END;
+
+        DROP TRIGGER IF EXISTS tg_child_leaf_validity_upd;
+        CREATE TRIGGER tg_child_leaf_validity_upd
+        BEFORE UPDATE ON exceptions
+        WHEN NEW.intent_code IS NOT NULL AND NEW.supergroup_code IS NOT NULL
+         AND (NEW.intent_code != COALESCE(OLD.intent_code, '')
+              OR NEW.supergroup_code != COALESCE(OLD.supergroup_code, ''))
+        BEGIN
+            SELECT CASE
+                WHEN NOT EXISTS (
+                    SELECT 1 FROM supergroup_intent_allowed
+                    WHERE supergroup_code = NEW.supergroup_code
+                      AND intent_code = NEW.intent_code
+                      AND (deprecated_at IS NULL OR deprecated_at > date('now'))
+                )
+                THEN RAISE(ABORT, 'leaf intent not allowed under supergroup per supergroup_intent_allowed')
+            END;
+        END;
+
+        CREATE INDEX IF NOT EXISTS idx_order_case_supergroup
+            ON order_case (supergroup_code);
+        CREATE INDEX IF NOT EXISTS idx_order_case_origin
+            ON order_case (origin);
+        CREATE INDEX IF NOT EXISTS idx_exceptions_intent_code
+            ON exceptions (intent_code);
+        CREATE INDEX IF NOT EXISTS idx_exceptions_supergroup
+            ON exceptions (supergroup_code);
+        """
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+        ("V018", datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    logger.info(
+        "SQLite schema V018 applied (case origin + supergroup_code + leaf intent_code)"
+    )
+
+
 def apply_sqlite(conn: sqlite3.Connection) -> None:
     """Apply the SQLite-compatible schema (V001 + subsequent migrations)."""
     conn.executescript(_SQLITE_SCHEMA)
@@ -786,11 +997,13 @@ def apply_sqlite(conn: sqlite3.Connection) -> None:
     _apply_sqlite_v006(conn)
     _apply_sqlite_v007(conn)
     _apply_sqlite_v008(conn)
+    _apply_sqlite_v009(conn)
     _apply_sqlite_v012(conn)
     _apply_sqlite_v013(conn)
     _apply_sqlite_v015(conn)
     _apply_sqlite_v016(conn)
     _apply_sqlite_v017(conn)
+    _apply_sqlite_v018(conn)
 
 
 def apply_postgres(database_url: str) -> None:
@@ -858,6 +1071,7 @@ def apply_postgres(database_url: str) -> None:
             ("V015", "V015__effect_outbox.sql", "PostgreSQL schema V015 applied (effect_outbox ledger)"),
             ("V016", "V016__email_attachment.sql", "PostgreSQL schema V016 applied (email_attachment store)"),
             ("V017", "V017__case_taxonomy.sql", "PostgreSQL schema V017 applied (case taxonomy lookup tables)"),
+            ("V018", "V018__case_origin_supergroup.sql", "PostgreSQL schema V018 applied (case origin + supergroup_code + leaf intent_code)"),
         ):
             cur.execute(
                 "SELECT version FROM schema_migrations WHERE version = %s",
