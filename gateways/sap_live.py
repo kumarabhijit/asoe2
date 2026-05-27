@@ -221,7 +221,18 @@ class SapDomainGateway:
             dead_letter_queue.record(
                 source=_DLQ_SOURCE, operation=operation, tenant_id=tenant_id,
                 reason=f"both real and stub failed: {type(exc).__name__}",
-                payload={"trace_id": request.trace_id, "connector": self._connector},
+                payload={
+                    "trace_id": request.trace_id,
+                    # `connector` is the legacy field; `domain` is the
+                    # operator-dashboard pivot key so the dashboard can
+                    # group by upstream system (source="sap") AND
+                    # filter by SAP domain (order, doc, contract, …)
+                    # without parsing the operation name. Both fields
+                    # carry the same value today; a future schema
+                    # evolution could rename `connector` → `domain`.
+                    "connector": self._connector,
+                    "domain": self._connector,
+                },
             )
             return GatewayResponse(
                 gateway_name=self._connector, operation=operation,
@@ -233,7 +244,18 @@ class SapDomainGateway:
             dead_letter_queue.record(
                 source=_DLQ_SOURCE, operation=operation, tenant_id=tenant_id,
                 reason=entry.real_error,
-                payload={"trace_id": request.trace_id, "connector": self._connector},
+                payload={
+                    "trace_id": request.trace_id,
+                    # `connector` is the legacy field; `domain` is the
+                    # operator-dashboard pivot key so the dashboard can
+                    # group by upstream system (source="sap") AND
+                    # filter by SAP domain (order, doc, contract, …)
+                    # without parsing the operation name. Both fields
+                    # carry the same value today; a future schema
+                    # evolution could rename `connector` → `domain`.
+                    "connector": self._connector,
+                    "domain": self._connector,
+                },
             )
 
         return GatewayResponse(

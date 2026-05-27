@@ -210,6 +210,10 @@ class TestTerminalFailureGoesToDLQ:
         # SAP-driven orphan together.
         assert entries[0].source == "sap"
         assert entries[0].operation == "lookup"
+        # The orphan payload carries `domain` so the operator dashboard
+        # can pivot on (upstream system, SAP domain) without parsing
+        # the operation name. Code-review MEDIUM finding.
+        assert entries[0].payload["domain"] == "sap_contract"
 
 
 class TestLiveBackendSurface:

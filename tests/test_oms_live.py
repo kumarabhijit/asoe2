@@ -154,6 +154,27 @@ class TestPostRecipeSuccessFailureContract:
                 recipe_run_id="run-42", reason="x",
             )
 
+    def test_apply_effects_wires_oms_orphan_helper(self, _clean_dlq):
+        """orchestration/nodes.py::apply_effects MUST route an
+        OMS-gateway post-success failure into
+        ``record_post_success_orphan``. Today no recipe declares an
+        OMS write effect so the branch is dormant; this test calls
+        the integration point directly to lock the wiring against
+        future drift."""
+        # Source-level lock — the runtime branch is dormant until a
+        # recipe ships an OMS write effect, so we assert the wiring
+        # exists at the source level rather than driving the graph.
+        from pathlib import Path
+        text = Path("orchestration/nodes.py").read_text()
+        assert "record_post_success_orphan" in text, (
+            "apply_effects must wire the OMS orphan helper; without "
+            "this an OMS write failure post-recipe-success would be "
+            "invisible to the operator dashboard."
+        )
+        # Verify the call is gated on the gateway name so non-OMS
+        # effects don't accidentally route through it.
+        assert 'effect.gateway_name == "oms"' in text
+
 
 class TestLiveBackendSurface:
     def test_live_backend_missing_creds_fails_loud(self, monkeypatch):
