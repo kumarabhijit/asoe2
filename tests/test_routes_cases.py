@@ -186,7 +186,10 @@ class TestList:
             customer_po_number="PO-1", origin="CUSTOMER",
             source_channel="email",
         )
-        case_store.update(email_case.case_id, supergroup_code="SG_NEW_ORDER")
+        case_store.update(
+            email_case.case_id, supergroup_code="SG_NEW_ORDER",
+            classified_by="user:lead-1", classifier_type="HUMAN",
+        )
         _open_case(customer_po_number="PO-2", origin="API")
         r = client.get(
             "/api/v1/cases?supergroup_code=SG_NEW_ORDER",

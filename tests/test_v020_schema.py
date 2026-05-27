@@ -162,3 +162,62 @@ def test_taxonomy_version_stamped(db: sqlite3.Connection):
         (case_id,),
     ).fetchone()
     assert row[0] == "2026-05-27-v1"
+
+
+def test_insert_or_replace_on_existing_row_blocked(db: sqlite3.Connection):
+    """SQLite's ``INSERT OR REPLACE`` silently bypasses BEFORE DELETE
+    when the conflict resolution discards the existing row — verified
+    locally. The dedicated ``tg_cch_no_replace`` BEFORE INSERT trigger
+    catches this path."""
+    case_id = _make_case(db)
+    row_id = _insert_history(db, case_id=case_id)
+    now = datetime.now(timezone.utc).isoformat()
+    with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+        db.execute(
+            """
+            INSERT OR REPLACE INTO case_classification_history (
+                id, case_id, supergroup_code, intent_code,
+                classified_at, classified_by, classifier_type,
+                taxonomy_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (row_id, case_id, "SG_NEW_ORDER", "INT_MANUAL_ORDER_INTAKE",
+             now, "attacker", "HUMAN", "fake-version"),
+        )
+        db.commit()
+
+
+def test_plain_insert_with_duplicate_id_fails(db: sqlite3.Connection):
+    """Sanity: a plain INSERT (without OR REPLACE) with a duplicate
+    PK fails — either via PRIMARY KEY or via our no-replace trigger;
+    either way the original row survives."""
+    case_id = _make_case(db)
+    row_id = _insert_history(db, case_id=case_id)
+    now = datetime.now(timezone.utc).isoformat()
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute(
+            """
+            INSERT INTO case_classification_history (
+                id, case_id, supergroup_code, intent_code,
+                classified_at, classified_by, classifier_type,
+                taxonomy_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (row_id, case_id, "SG_NEW_ORDER", "INT_MANUAL_ORDER_INTAKE",
+             now, "attacker", "HUMAN", "fake-version"),
+        )
+        db.commit()
+    # Confirm the original row survived.
+    cur = db.execute(
+        "SELECT COUNT(*) FROM case_classification_history WHERE id = ?",
+        (row_id,),
+    )
+    assert cur.fetchone()[0] == 1
+
+
+def test_no_replace_trigger_present(db: sqlite3.Connection):
+    cur = db.execute(
+        "SELECT name FROM sqlite_master WHERE type='trigger' "
+        "AND name = 'tg_cch_no_replace'"
+    )
+    assert cur.fetchone() is not None

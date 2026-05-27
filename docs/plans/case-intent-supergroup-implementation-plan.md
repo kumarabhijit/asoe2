@@ -210,7 +210,7 @@ Acceptance criteria covered after Phase 2: **#1, #2, #3, #4, #6, #8, #11, #12.**
 
 | Path | Purpose |
 |---|---|
-| `db/migrations/V019__case_classification_history.sql` | Creates `case_classification_history` table per requirements §8.6. Restricts UPDATE/DELETE to the `ops_steward` DB role only (via REVOKE + GRANT). Adds trigger writing one row on every `order_case.supergroup_code` change and every `exceptions.intent_code` change. Trigger captures the active taxonomy version via a session-local setting set by the app at boot. |
+| `db/migrations/V020__case_classification_history.sql` | Creates `case_classification_history` table per requirements §8.6. **V020 not V019** — V019 was assigned to the legacy-column drop migration earlier in Phase 2. Postgres triggers (`tg_cch_no_update`, `tg_cch_no_delete`, `tg_cch_no_truncate`) block all mutation paths; SQLite mirror uses equivalent `BEFORE` triggers. `REVOKE UPDATE, DELETE, TRUNCATE` from the app role is documented in the SQL comment as the defence-in-depth layer applied per environment by the deploy pipeline (not by this migration, since role names vary). |
 | `tests/test_case_classification_history.py` | One classification → exactly one history row. Reclassification → second row, both readable in order. App role `app_user` cannot UPDATE/DELETE (Postgres permission test). Taxonomy version stamped correctly. Criterion #9. |
 | `tests/test_needs_triage_close_block.py` | Case with `supergroup_code='SG_NEEDS_TRIAGE'` rejects transition to any RESOLVED state. After reclassification to a real supergroup, RESOLVED is accepted. Criterion #5. |
 | `tests/test_needs_triage_age_alert.py` | Case in NEEDS_TRIAGE > 48h surfaces in the steward dashboard query. |

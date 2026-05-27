@@ -21,10 +21,14 @@ def store() -> CaseStore:
     return CaseStore()
 
 
-def _open(store: CaseStore) -> str:
+def _open(store: CaseStore, *, supergroup_code: str | None = "SG_NEW_ORDER") -> str:
+    """Helper — opens a CUSTOMER-origin case. By default carries a
+    supergroup_code at intake (the realistic path; auto-writes one
+    history row). Pass ``supergroup_code=None`` to open without
+    classification."""
     case, _ = store.lookup_or_create(
         tenant_id="t1", origin="CUSTOMER", source_channel="email",
-        customer_po_number="PO-1", supergroup_code="SG_NEW_ORDER",
+        customer_po_number="PO-1", supergroup_code=supergroup_code,
     )
     return case.case_id
 
@@ -50,12 +54,13 @@ def test_record_returns_event(store: CaseStore):
 
 
 def test_history_returns_empty_for_unclassified_case(store: CaseStore):
-    case_id = _open(store)
+    """An intake without a supergroup_code does not auto-write a row."""
+    case_id = _open(store, supergroup_code=None)
     assert store.get_classification_history(case_id) == []
 
 
 def test_record_appends_to_history(store: CaseStore):
-    case_id = _open(store)
+    case_id = _open(store, supergroup_code=None)
     store.record_classification(
         case_id, supergroup_code="SG_NEW_ORDER",
         intent_code="INT_MANUAL_ORDER_INTAKE",
@@ -68,7 +73,7 @@ def test_record_appends_to_history(store: CaseStore):
 
 def test_reclassification_appends_not_overwrites(store: CaseStore):
     """Acceptance criterion #9 — every reclassification is a new row."""
-    case_id = _open(store)
+    case_id = _open(store, supergroup_code=None)
     store.record_classification(
         case_id, supergroup_code="SG_NEW_ORDER",
         intent_code="INT_MANUAL_ORDER_INTAKE",
@@ -111,7 +116,7 @@ def test_unknown_case_raises(store: CaseStore):
 # ---------------------------------------------------------------------------
 
 def test_human_classifier_type_accepted(store: CaseStore):
-    case_id = _open(store)
+    case_id = _open(store, supergroup_code=None)
     e = store.record_classification(
         case_id, supergroup_code="SG_NEW_ORDER",
         classified_by="user:csr-1", classifier_type="HUMAN",
@@ -120,7 +125,7 @@ def test_human_classifier_type_accepted(store: CaseStore):
 
 
 def test_model_classifier_carries_model_version(store: CaseStore):
-    case_id = _open(store)
+    case_id = _open(store, supergroup_code=None)
     e = store.record_classification(
         case_id, supergroup_code="SG_NEW_ORDER",
         intent_code="INT_MANUAL_ORDER_INTAKE",
@@ -164,7 +169,7 @@ def test_invalid_classifier_type_rejected(store: CaseStore):
 def test_returned_history_list_is_a_copy(store: CaseStore):
     """Callers cannot mutate the in-memory store by mutating the
     returned list."""
-    case_id = _open(store)
+    case_id = _open(store, supergroup_code=None)
     store.record_classification(
         case_id, supergroup_code="SG_NEW_ORDER",
         intent_code="INT_MANUAL_ORDER_INTAKE",
@@ -190,9 +195,102 @@ def test_event_model_rejects_extra_fields():
 def test_child_case_id_optional_for_parent_level_events(store: CaseStore):
     """A reclassification of the case itself (no concurrent child
     relabel) leaves ``child_case_id`` as None."""
-    case_id = _open(store)
+    case_id = _open(store, supergroup_code=None)
     e = store.record_classification(
         case_id, supergroup_code="SG_ORDER_CHANGE",
         classified_by="user:lead-1", classifier_type="HUMAN",
     )
     assert e.child_case_id is None
+
+
+# ---------------------------------------------------------------------------
+# Auto-recording on intake (lookup_or_create) and update
+# ---------------------------------------------------------------------------
+
+def test_lookup_or_create_writes_intake_event_when_supergroup_set(
+    store: CaseStore,
+):
+    """Acceptance criterion #9 at the intake boundary — opening a case
+    with a supergroup_code appends one ClassificationEvent. Without an
+    explicit classifier, defaults are ``RULE`` / ``system:case_intake``
+    (the deterministic SAP-block-code mapping is the typical intake)."""
+    case, opened = store.lookup_or_create(
+        tenant_id="t1", origin="API", source_channel="edi_x12_850",
+        sales_order_id="SO-AUTO-1",
+        supergroup_code="SG_BLOCK_PRICING",
+        intent_code="INT_PRICE_MISMATCH",
+    )
+    assert opened is True
+    history = store.get_classification_history(case.case_id)
+    assert len(history) == 1
+    assert history[0].supergroup_code == "SG_BLOCK_PRICING"
+    assert history[0].intent_code == "INT_PRICE_MISMATCH"
+    assert history[0].classifier_type == "RULE"
+    assert history[0].classified_by == "system:case_intake"
+
+
+def test_lookup_or_create_respects_explicit_classifier(store: CaseStore):
+    """A CUSTOMER intake that ran a MODEL classifier upstream passes
+    its own classifier_type and classified_by; the audit row reflects
+    that, not the RULE default."""
+    case, _ = store.lookup_or_create(
+        tenant_id="t1", origin="CUSTOMER", source_channel="email",
+        customer_po_number="PO-MODEL-1",
+        supergroup_code="SG_NEW_ORDER",
+        intent_code="INT_MANUAL_ORDER_INTAKE",
+        classified_by="system:email_classifier",
+        classifier_type="MODEL",
+    )
+    history = store.get_classification_history(case.case_id)
+    assert history[0].classifier_type == "MODEL"
+    assert history[0].classified_by == "system:email_classifier"
+
+
+def test_lookup_or_create_no_supergroup_no_event(store: CaseStore):
+    """Opening without supergroup_code (pre-classifier) does not write
+    a placeholder row — the audit captures classifications, not
+    case-creations."""
+    case, _ = store.lookup_or_create(
+        tenant_id="t1", origin="API", source_channel="edi_x12_850",
+        sales_order_id="SO-NO-SG-1",
+    )
+    assert store.get_classification_history(case.case_id) == []
+
+
+def test_update_supergroup_writes_event(store: CaseStore):
+    """Reclassification via update() appends one history row atomically
+    with the state mutation."""
+    case_id = _open(store)
+    history_before = len(store.get_classification_history(case_id))
+    store.update(
+        case_id, supergroup_code="SG_ORDER_CHANGE",
+        classified_by="user:csr-1", classifier_type="HUMAN",
+        reason_text="Customer clarified — was an order change",
+    )
+    history_after = store.get_classification_history(case_id)
+    assert len(history_after) == history_before + 1
+    new_event = history_after[-1]
+    assert new_event.supergroup_code == "SG_ORDER_CHANGE"
+    assert new_event.classifier_type == "HUMAN"
+    assert new_event.reason_text == "Customer clarified — was an order change"
+
+
+def test_update_supergroup_to_same_value_no_event(store: CaseStore):
+    """An update() with supergroup_code unchanged is not a
+    reclassification — no audit row appended."""
+    case_id = _open(store)  # opens with SG_NEW_ORDER (one row written)
+    history_before = len(store.get_classification_history(case_id))
+    store.update(
+        case_id, supergroup_code="SG_NEW_ORDER",
+        classified_by="user:csr-1", classifier_type="HUMAN",
+    )
+    assert len(store.get_classification_history(case_id)) == history_before
+
+
+def test_update_without_supergroup_no_classifier_needed(store: CaseStore):
+    """Updates that don't touch supergroup_code stay simple — no
+    audit kwargs required."""
+    case_id = _open(store)
+    store.update(case_id, status="OPEN_AWAITING_HUMAN")  # no classifier kwargs
+    # History from intake remains; no new row appended.
+    assert len(store.get_classification_history(case_id)) == 1

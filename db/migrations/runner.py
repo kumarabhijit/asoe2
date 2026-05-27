@@ -1042,6 +1042,20 @@ def _apply_sqlite_v020(conn: sqlite3.Connection) -> None:
         BEGIN
             SELECT RAISE(ABORT, 'case_classification_history is append-only; DELETE rejected');
         END;
+
+        -- SQLite quirk: ``INSERT OR REPLACE`` removes the conflicting row
+        -- *without* firing BEFORE DELETE (verified locally). Without this
+        -- guard, an attacker holding INSERT privilege could overwrite an
+        -- existing audit row by issuing ``INSERT OR REPLACE``. The BEFORE
+        -- INSERT trigger fires for all insert paths (including OR REPLACE),
+        -- so it catches the conflict before the silent-delete happens.
+        DROP TRIGGER IF EXISTS tg_cch_no_replace;
+        CREATE TRIGGER tg_cch_no_replace
+        BEFORE INSERT ON case_classification_history
+        WHEN EXISTS (SELECT 1 FROM case_classification_history WHERE id = NEW.id)
+        BEGIN
+            SELECT RAISE(ABORT, 'case_classification_history is append-only; INSERT OR REPLACE on existing row rejected');
+        END;
         """
     )
     conn.execute(

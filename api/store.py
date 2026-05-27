@@ -31,14 +31,21 @@ from contracts._generated.taxonomy_constants import (
 from contracts.models import STATUS_TO_LIFECYCLE, ClassificationEvent
 
 
-class NeedsTriageCloseBlocked(ValueError):
+# Statuses that count as "case closed" for the NEEDS_TRIAGE forcing
+# function (requirements §8.2). Today the spec names only "RESOLVED"
+# — declared as a set so a future closed-like status (e.g. RESOLVED_
+# WITH_OVERRIDE) is one place to add it.
+_RESOLVED_LIKE: frozenset[str] = frozenset({"RESOLVED"})
+
+
+class NeedsTriageCloseBlocked(Exception):
     """Raised when a case in ``SG_NEEDS_TRIAGE`` is asked to RESOLVE.
 
     Requirements §8.2 forcing function #1 — hard-block at close.
-    Subclasses ``ValueError`` so existing exception handlers that
-    catch validation errors keep working, while callers that want
-    to handle the case specifically (e.g. surface a "reclassify
-    first" UI message) can ``except NeedsTriageCloseBlocked``.
+    Inherits from ``Exception`` directly (not ``ValueError``): the
+    failure is structural, not a value-validation error, and callers
+    must handle it explicitly rather than catching a broader
+    ValueError net (CLAUDE.md §5 — failures are explicit).
     """
 
 
@@ -869,6 +876,9 @@ class CaseStore:
         sla_deadline: Optional[str] = None,
         bundle_version_at_open: Optional[str] = None,
         supergroup_code: Optional[str] = None,
+        intent_code: Optional[str] = None,
+        classified_by: str = "system:case_intake",
+        classifier_type: str = "RULE",
     ) -> tuple["OrderCase", bool]:
         """Resolve an inbound event to a case (existing or new).
 
@@ -876,6 +886,14 @@ class CaseStore:
         a new case was opened on this call. ADR-038 §6.2 multi-PO note:
         callers split a multi-PO email into N invocations of this
         method (one per PO); each opens or attaches to its own case.
+
+        Audit trail (requirements §8.6, criterion #9): when a new case
+        is opened with ``supergroup_code`` set, exactly one
+        ``ClassificationEvent`` row is appended to ``_history``. The
+        intake path defaults are ``classifier_type='RULE'``,
+        ``classified_by='system:case_intake'`` — overridable by the
+        caller when the intake path itself ran a classifier (MODEL) or
+        a human (HUMAN) chose the value.
         """
         existing = self.find_by_correlation(
             tenant_id,
@@ -922,6 +940,19 @@ class CaseStore:
                 edi_transaction_id=edi_transaction_id,
                 source_email_id=source_email_id,
             )
+            # Audit trail: record the intake classification so criterion
+            # #9 is satisfied at the data-store boundary. No-op when the
+            # case opened without a supergroup_code (Phase 5 will fill
+            # those in via a later record_classification call once the
+            # classifier wires through).
+            if supergroup_code is not None:
+                self._record_classification_locked(
+                    case_id=case.case_id,
+                    supergroup_code=supergroup_code,
+                    intent_code=intent_code,
+                    classified_by=classified_by,
+                    classifier_type=classifier_type,
+                )
             return case, True
 
     def _register_correlations_locked(
@@ -964,7 +995,18 @@ class CaseStore:
     def get(self, case_id: str) -> Optional["OrderCase"]:
         return self._cases.get(case_id)
 
-    def update(self, case_id: str, **fields: Any) -> "OrderCase":
+    def update(
+        self,
+        case_id: str,
+        *,
+        classified_by: Optional[str] = None,
+        classifier_type: Optional[str] = None,
+        intent_code_classification: Optional[str] = None,
+        model_version: Optional[str] = None,
+        reason_text: Optional[str] = None,
+        source_event_id: Optional[str] = None,
+        **fields: Any,
+    ) -> "OrderCase":
         """Apply field updates and return the updated case.
 
         Pydantic model is recreated via `model_copy(update=...)` so
@@ -981,6 +1023,22 @@ class CaseStore:
         the case first. Raises ``NeedsTriageCloseBlocked`` so the
         failure is explicit (CLAUDE.md §5: "Explicit failure is
         correct behavior").
+
+        Audit trail (requirements §8.6, criterion #9): an update that
+        touches ``supergroup_code`` is a reclassification event.
+        Callers MUST pass ``classified_by`` and ``classifier_type``
+        kwargs in that case; the method appends one
+        ``ClassificationEvent`` row to the in-memory audit trail
+        atomically with the state mutation. Updates that don't touch
+        ``supergroup_code`` are pure field updates and don't require
+        the audit kwargs.
+
+        Confidence gate: when ``classifier_type='MODEL'`` is used here
+        or in ``record_classification``, the caller must have already
+        verified that the model's confidence is ≥ 0.85 per
+        requirements §8.3. The gate is enforced at the call site
+        (skills/intent_classifier.py, Phase 5) — this store does not
+        re-check.
         """
         with self._lock:
             existing = self._cases.get(case_id)
@@ -988,7 +1046,21 @@ class CaseStore:
                 raise KeyError(f"Unknown case_id: {case_id}")
             target_status = fields.get("status", existing.status)
             target_sg = fields.get("supergroup_code", existing.supergroup_code)
-            if target_status == "RESOLVED" and target_sg == SG_NEEDS_TRIAGE:
+            sg_is_reclassified = (
+                "supergroup_code" in fields
+                and fields["supergroup_code"] != existing.supergroup_code
+            )
+            # Audit-kwarg requirement: every change to supergroup_code
+            # must be attributable.
+            if sg_is_reclassified:
+                if not classified_by or not classifier_type:
+                    raise ValueError(
+                        f"update(case_id={case_id}) changes supergroup_code "
+                        "but did not supply classified_by + classifier_type; "
+                        "every reclassification must be attributable "
+                        "(requirements §8.6)."
+                    )
+            if target_status in _RESOLVED_LIKE and target_sg == SG_NEEDS_TRIAGE:
                 raise NeedsTriageCloseBlocked(
                     f"Case {case_id} is in SG_NEEDS_TRIAGE and cannot be "
                     "RESOLVED without reclassification (requirements §8.2)."
@@ -1000,9 +1072,54 @@ class CaseStore:
                 }
             updated = existing.model_copy(update=fields)
             self._cases[case_id] = updated
+            if sg_is_reclassified:
+                # classifier_type / classified_by are guaranteed non-None
+                # by the guard above; appease the type checker.
+                assert classified_by is not None
+                assert classifier_type is not None
+                self._record_classification_locked(
+                    case_id=case_id,
+                    supergroup_code=updated.supergroup_code or "",
+                    intent_code=intent_code_classification,
+                    classified_by=classified_by,
+                    classifier_type=classifier_type,
+                    model_version=model_version,
+                    reason_text=reason_text,
+                    source_event_id=source_event_id,
+                )
             return updated
 
     # ----- classification audit (requirements §8.6) -----------------
+
+    def _record_classification_locked(
+        self,
+        *,
+        case_id: str,
+        supergroup_code: str,
+        intent_code: Optional[str],
+        classified_by: str,
+        classifier_type: str,
+        child_case_id: Optional[str] = None,
+        model_version: Optional[str] = None,
+        reason_text: Optional[str] = None,
+        source_event_id: Optional[str] = None,
+    ) -> ClassificationEvent:
+        """Internal: append a ClassificationEvent. Caller already holds
+        ``self._lock`` and has confirmed case_id exists."""
+        event = ClassificationEvent(
+            case_id=case_id,
+            child_case_id=child_case_id,
+            supergroup_code=supergroup_code,
+            intent_code=intent_code,
+            classified_by=classified_by,
+            classifier_type=classifier_type,
+            model_version=model_version,
+            reason_text=reason_text,
+            source_event_id=source_event_id,
+            taxonomy_version=TAXONOMY_VERSION,
+        )
+        self._history.setdefault(case_id, []).append(event)
+        return event
 
     def record_classification(
         self,
@@ -1019,28 +1136,30 @@ class CaseStore:
     ) -> ClassificationEvent:
         """Append one ClassificationEvent row to the audit trail.
 
-        Raises ``KeyError`` if the case is unknown. The recording is
-        append-only — there is no public path to mutate or remove an
-        event once recorded (mirrors the DB-level append-only triggers
-        on ``case_classification_history`` from V020).
+        Use this when the classification event happens *out-of-band*
+        from a CaseStore.update / lookup_or_create call — e.g. the
+        steward writes a corrective row, or a Phase 5 classifier batch
+        records its own MODEL events. For inline classifications,
+        prefer the ``classified_by`` / ``classifier_type`` kwargs on
+        ``update`` / ``lookup_or_create``, which write the event
+        atomically with the state mutation.
+
+        Raises ``KeyError`` if the case is unknown.
         """
         with self._lock:
             if case_id not in self._cases:
                 raise KeyError(f"Unknown case_id: {case_id}")
-            event = ClassificationEvent(
+            return self._record_classification_locked(
                 case_id=case_id,
-                child_case_id=child_case_id,
                 supergroup_code=supergroup_code,
                 intent_code=intent_code,
                 classified_by=classified_by,
                 classifier_type=classifier_type,
+                child_case_id=child_case_id,
                 model_version=model_version,
                 reason_text=reason_text,
                 source_event_id=source_event_id,
-                taxonomy_version=TAXONOMY_VERSION,
             )
-            self._history.setdefault(case_id, []).append(event)
-            return event
 
     def get_classification_history(
         self, case_id: str,
