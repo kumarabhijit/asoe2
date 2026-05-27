@@ -94,6 +94,31 @@ def test_preprod_with_graph_driver_swaps_email_intake_to_router(monkeypatch):
     )
 
 
+def test_preprod_with_sap_driver_swaps_each_domain_to_router(monkeypatch):
+    """PARITY-6.3 — ``ASOE_SAP_DRIVER=s4hana`` replaces each of the
+    seven SAP StubGateways with a ``SapDomainGateway`` live-or-stub
+    router. Registry names preserved so existing recipe dependencies
+    resolve unchanged."""
+    monkeypatch.setenv("ASOE_ENV", "preprod")
+    monkeypatch.setenv("ASOE_SAP_DRIVER", "s4hana")
+    monkeypatch.setenv("ASOE_SAP_HOST", "https://stub.example/")
+    monkeypatch.setenv("ASOE_SAP_USER", "stub")
+    monkeypatch.setenv("ASOE_SAP_PASSWORD", "stub")
+    registry.clear_registry()
+    from api.preprod_gateways import register_preprod_gateways
+    from gateways.sap_live import SapDomainGateway
+    register_preprod_gateways()
+    for connector in (
+        "sap_order", "sap_doc", "sap_contract", "promotion",
+        "sap_block", "sap_customer_master", "sla_contract",
+    ):
+        resolved = registry.get_gateway(connector)
+        assert isinstance(resolved, SapDomainGateway), (
+            f"ASOE_SAP_DRIVER=s4hana must route {connector} through "
+            f"SapDomainGateway"
+        )
+
+
 def test_preprod_resolve_populates_inbox_sections(monkeypatch):
     """The contract from asoe2 #175 (sandbox) must also hold for preprod:
     a vanilla MANUAL_ORDER_INTAKE event through /resolve produces an
