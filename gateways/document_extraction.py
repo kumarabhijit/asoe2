@@ -232,6 +232,81 @@ class RecordedDocumentExtractionBackend:
         return rec
 
 
+class LiveDocumentIntelligenceBackend:
+    """PARITY-6.2 — Azure Document Intelligence live backend.
+
+    Wires AzureDI behind the same ``propose(source_sha256, hint)``
+    contract the ``RecordedDocumentExtractionBackend`` satisfies, so
+    ``DocumentExtractionGateway`` swaps backends with a config flip.
+
+    Constructor reads:
+      * ``ASOE_DOCUMENT_INTELLIGENCE_ENDPOINT`` — AzureDI account URL
+        (e.g. ``https://<account>.cognitiveservices.azure.com/``).
+      * ``ASOE_DOCUMENT_INTELLIGENCE_KEY`` — AzureDI account key
+        (or Managed Identity via DefaultAzureCredential when the
+        key env is unset and ``ASOE_DOCUMENT_INTELLIGENCE_USE_MI=1``).
+
+    The actual HTTP transport (``azure-ai-documentintelligence`` SDK
+    or raw REST) lands behind the nightly ``-m live`` mark; the
+    red-green path uses the recorded backend, so ``propose()`` here
+    raises ``NotImplementedError`` to make accidental live calls loud
+    on the deterministic path.
+    """
+
+    def __init__(self) -> None:
+        endpoint = (os.getenv("ASOE_DOCUMENT_INTELLIGENCE_ENDPOINT") or "").strip()
+        key = (os.getenv("ASOE_DOCUMENT_INTELLIGENCE_KEY") or "").strip()
+        use_mi = (os.getenv("ASOE_DOCUMENT_INTELLIGENCE_USE_MI") or "").strip().lower() in {
+            "1", "true", "yes",
+        }
+        if not endpoint:
+            raise RuntimeError(
+                "LiveDocumentIntelligenceBackend requires "
+                "ASOE_DOCUMENT_INTELLIGENCE_ENDPOINT",
+            )
+        if not key and not use_mi:
+            raise RuntimeError(
+                "LiveDocumentIntelligenceBackend requires "
+                "ASOE_DOCUMENT_INTELLIGENCE_KEY or "
+                "ASOE_DOCUMENT_INTELLIGENCE_USE_MI=1",
+            )
+        self._endpoint = endpoint
+        self._key = key
+        self._use_mi = use_mi
+        self._model_id = resolve_model_id()
+
+    @property
+    def model_id(self) -> str:
+        return self._model_id
+
+    def propose(
+        self, *, source_sha256: str, hint: Mapping[str, Any],
+    ) -> dict:  # pragma: no cover - live path only, behind -m live mark
+        raise NotImplementedError(
+            "LiveDocumentIntelligenceBackend.propose: live HTTP transport "
+            "runs only against the nightly -m live mark; the red-green "
+            "path uses RecordedDocumentExtractionBackend.",
+        )
+
+
+def resolve_backend() -> Any:
+    """Build the document-extraction backend per env.
+
+    * ``ASOE_DOCUMENT_EXTRACTION_BACKEND=live`` →
+      :class:`LiveDocumentIntelligenceBackend`. Refuses to construct
+      without ``ASOE_DOCUMENT_INTELLIGENCE_ENDPOINT`` +
+      ``ASOE_DOCUMENT_INTELLIGENCE_KEY`` (or
+      ``ASOE_DOCUMENT_INTELLIGENCE_USE_MI=1``).
+    * Default (``recorded`` or unset) →
+      :class:`RecordedDocumentExtractionBackend`. Reversible-by-env per
+      the parity plan §"Rollback / safety net".
+    """
+    driver = (os.getenv("ASOE_DOCUMENT_EXTRACTION_BACKEND") or "recorded").strip().lower()
+    if driver == "live":
+        return LiveDocumentIntelligenceBackend()
+    return RecordedDocumentExtractionBackend()
+
+
 class DocumentExtractionGateway:
     """Mints verified spatial EvidenceAnchors from an OCR candidate set
     (ADR-045 §2.3). SELECT-not-generate + runtime verify via `build_spatial_anchor`.
@@ -315,6 +390,51 @@ class DocumentExtractionGateway:
 
         with self._lock:
             self._cache[cache_key] = [a.model_copy(deep=True) for a in anchors]
+
+        # PARITY-6.2 / -7 — feed the drift series. Every per-field
+        # confidence becomes a drift sample so the
+        # `extraction-drift` alert
+        # (`api.observability.drift_alert_integration`) has data.
+        #
+        # Two containment definitions to keep separate:
+        #   * The PARITY-7 golden-set gate
+        #     (`tests/eval/test_spatial_extraction_gate.py`) measures
+        #     IoU against a hand-labelled ground-truth bbox — the
+        #     accuracy metric.
+        #   * What we feed into the live drift series here is a
+        #     **verification-pass proxy** — the fraction of returned
+        #     anchors that survived `verify_anchor_geometry`. For the
+        #     recorded backend this is ~1.0 by construction; the
+        #     meaningful signal comes from the live AzureDI backend
+        #     where a model bump that silently moves boxes drops the
+        #     verification rate (anchors degrade to text_derived).
+        #
+        # If a recording (live or replayed) carries a `containment`
+        # field — populated by the live backend with the real per-call
+        # IoU when that wiring lands behind the nightly `-m live` mark
+        # — we use that instead so the drift alert is keyed on the
+        # accuracy metric, not the proxy.
+        try:
+            from api import metrics  # noqa: PLC0415
+            prompt_hash = str(recording.get("prompt_hash") or "")
+            recorded_containment = recording.get("containment")
+            if isinstance(recorded_containment, (int, float)):
+                containment = float(recorded_containment)
+            else:
+                verified_total = sum(
+                    1 for a in anchors if a.anchor_source == "spatial_extracted"
+                )
+                containment = verified_total / len(anchors) if anchors else 0.0
+            for a in anchors:
+                if a.confidence is None:
+                    continue
+                metrics.record_extraction_drift(
+                    model_id=model_id, prompt_hash=prompt_hash,
+                    confidence=float(a.confidence), containment=containment,
+                )
+        except Exception:  # noqa: BLE001
+            logger.debug("drift metric record failed; ignored", exc_info=True)
+
         return anchors
 
 
@@ -324,5 +444,7 @@ __all__: List[str] = [
     "verify_anchor_geometry",
     "build_spatial_anchor",
     "RecordedDocumentExtractionBackend",
+    "LiveDocumentIntelligenceBackend",
+    "resolve_backend",
     "DocumentExtractionGateway",
 ]

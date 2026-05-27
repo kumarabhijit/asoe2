@@ -66,6 +66,74 @@ def test_app_boot_under_preprod_env_registers_gateways(monkeypatch):
     assert "email_intake" in registry.registered_gateways()
 
 
+def test_preprod_with_graph_driver_swaps_email_intake_to_router(monkeypatch):
+    """PARITY-6.1 — ``ASOE_EMAIL_INTAKE_DRIVER=graph`` replaces the
+    ``email_intake`` StubGateway with the ``GraphIntakeGateway`` live-
+    or-stub router. The registry name is preserved so existing recipe
+    dependencies resolve unchanged; the routing decision is per-request
+    (canary % + driver env) so this test only locks the swap, not the
+    per-call routing (covered by tests/test_msgraph_intake.py)."""
+    monkeypatch.setenv("ASOE_ENV", "preprod")
+    monkeypatch.setenv("ASOE_EMAIL_INTAKE_DRIVER", "graph")
+    # The live backend requires Graph creds; provide stubs so the
+    # factory doesn't refuse to construct. The router only calls the
+    # factory on the first request that's canary-eligible — this test
+    # never makes a request, so the creds are only needed for type
+    # safety when the factory eventually runs.
+    monkeypatch.setenv("ASOE_GRAPH_TENANT_ID", "tenant-stub")
+    monkeypatch.setenv("ASOE_GRAPH_CLIENT_ID", "client-stub")
+    monkeypatch.setenv("ASOE_GRAPH_CLIENT_SECRET", "secret-stub")
+    registry.clear_registry()
+    from api.preprod_gateways import register_preprod_gateways
+    from gateways.msgraph_intake import GraphIntakeGateway
+    register_preprod_gateways()
+    resolved = registry.get_gateway("email_intake")
+    assert isinstance(resolved, GraphIntakeGateway), (
+        "ASOE_EMAIL_INTAKE_DRIVER=graph must route email_intake through "
+        "the live-or-stub router"
+    )
+
+
+def test_preprod_with_sap_driver_swaps_each_domain_to_router(monkeypatch):
+    """PARITY-6.3 — ``ASOE_SAP_DRIVER=s4hana`` replaces each of the
+    seven SAP StubGateways with a ``SapDomainGateway`` live-or-stub
+    router. Registry names preserved so existing recipe dependencies
+    resolve unchanged."""
+    monkeypatch.setenv("ASOE_ENV", "preprod")
+    monkeypatch.setenv("ASOE_SAP_DRIVER", "s4hana")
+    monkeypatch.setenv("ASOE_SAP_HOST", "https://stub.example/")
+    monkeypatch.setenv("ASOE_SAP_USER", "stub")
+    monkeypatch.setenv("ASOE_SAP_PASSWORD", "stub")
+    registry.clear_registry()
+    from api.preprod_gateways import register_preprod_gateways
+    from gateways.sap_live import SapDomainGateway
+    register_preprod_gateways()
+    for connector in (
+        "sap_order", "sap_doc", "sap_contract", "promotion",
+        "sap_block", "sap_customer_master", "sla_contract",
+    ):
+        resolved = registry.get_gateway(connector)
+        assert isinstance(resolved, SapDomainGateway), (
+            f"ASOE_SAP_DRIVER=s4hana must route {connector} through "
+            f"SapDomainGateway"
+        )
+
+
+def test_preprod_with_oms_driver_swaps_oms_to_router(monkeypatch):
+    """PARITY-6.4 — ``ASOE_OMS_DRIVER=live`` swaps the oms
+    StubGateway through OmsGateway."""
+    monkeypatch.setenv("ASOE_ENV", "preprod")
+    monkeypatch.setenv("ASOE_OMS_DRIVER", "live")
+    monkeypatch.setenv("ASOE_OMS_BASE_URL", "https://stub.example/")
+    monkeypatch.setenv("ASOE_OMS_API_KEY", "stub")
+    registry.clear_registry()
+    from api.preprod_gateways import register_preprod_gateways
+    from gateways.oms_live import OmsGateway
+    register_preprod_gateways()
+    resolved = registry.get_gateway("oms")
+    assert isinstance(resolved, OmsGateway)
+
+
 def test_preprod_resolve_populates_inbox_sections(monkeypatch):
     """The contract from asoe2 #175 (sandbox) must also hold for preprod:
     a vanilla MANUAL_ORDER_INTAKE event through /resolve produces an

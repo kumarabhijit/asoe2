@@ -17,10 +17,132 @@ caller's mistake, not a silent failure here.
 from __future__ import annotations
 
 import logging
+import os
 
 from api.sandbox_gateways import _register_all_stub_gateways
 
 logger = logging.getLogger("asoe.api.preprod_gateways")
+
+
+def _maybe_swap_email_intake_for_graph() -> None:
+    """PARITY-6.1 — replace the `email_intake` StubGateway with the
+    `GraphIntakeGateway` live-or-stub router when
+    ``ASOE_EMAIL_INTAKE_DRIVER=graph``.
+
+    The router preserves the registry name ``email_intake`` so existing
+    recipe ``GatewayDependency`` rows resolve unchanged. Default driver
+    (``recorded`` or unset) leaves the StubGateway in place — fully
+    reversible by clearing the env var per the parity plan's Rollback /
+    safety net §.
+    """
+    driver = (os.getenv("ASOE_EMAIL_INTAKE_DRIVER") or "recorded").strip().lower()
+    if driver != "graph":
+        return
+    try:
+        from gateways.msgraph_intake import (
+            GraphIntakeGateway,
+            LiveGraphIntakeBackend,
+        )
+        from gateways.registry import get_gateway, register_gateway
+    except ImportError as exc:
+        logger.warning(
+            "ASOE_EMAIL_INTAKE_DRIVER=graph requested but live backend "
+            "imports failed (%s) — staying on stub",
+            exc,
+        )
+        return
+    try:
+        existing_stub = get_gateway("email_intake")
+    except KeyError:
+        logger.warning(
+            "ASOE_EMAIL_INTAKE_DRIVER=graph requested but no email_intake "
+            "stub registered — skipping live swap",
+        )
+        return
+
+    def _factory():
+        return LiveGraphIntakeBackend()
+
+    router = GraphIntakeGateway(
+        stub=existing_stub, live_backend_factory=_factory,
+    )
+    register_gateway(router)
+    logger.info(
+        "email_intake gateway routed through GraphIntakeGateway "
+        "(canary pct env: ASOE_CANARY_PCT_EMAIL_INTAKE)",
+    )
+
+
+_SAP_DOMAINS = (
+    "sap_order",
+    "sap_doc",
+    "sap_contract",
+    "promotion",
+    "sap_block",
+    "sap_customer_master",
+    "sla_contract",
+)
+
+
+def _maybe_swap_sap_domains_for_live() -> None:
+    """PARITY-6.3 — replace the seven SAP StubGateways with
+    `SapDomainGateway` live-or-stub routers when
+    ``ASOE_SAP_DRIVER=s4hana``.
+
+    Each domain preserves its registry name so recipe
+    ``GatewayDependency`` rows resolve unchanged. Default driver
+    (``recorded`` or unset) leaves the seven StubGateways in place —
+    fully reversible by clearing the env var per the parity plan's
+    Rollback / safety net §. Live backend factory is shared across
+    the seven wrappers so the OData / OAuth context is amortised.
+    """
+    driver = (os.getenv("ASOE_SAP_DRIVER") or "recorded").strip().lower()
+    if driver != "s4hana":
+        return
+    try:
+        from gateways.sap_live import LiveSapBackend, SapDomainGateway
+        from gateways.registry import get_gateway, register_gateway
+    except ImportError as exc:
+        logger.warning(
+            "ASOE_SAP_DRIVER=s4hana requested but live backend imports "
+            "failed (%s) — staying on stubs",
+            exc,
+        )
+        return
+
+    # Build the live backend once and reuse it across the seven
+    # wrappers (shared OAuth / OData context).
+    _shared_backend: list = [None]  # closure-captured single slot
+
+    def _factory():
+        if _shared_backend[0] is None:
+            _shared_backend[0] = LiveSapBackend()
+        return _shared_backend[0]
+
+    swapped: list[str] = []
+    for connector in _SAP_DOMAINS:
+        try:
+            stub = get_gateway(connector)
+        except KeyError:
+            logger.warning(
+                "ASOE_SAP_DRIVER=s4hana requested but %s stub not "
+                "registered — skipping live swap for this domain",
+                connector,
+            )
+            continue
+        router = SapDomainGateway(
+            connector=connector, stub=stub,
+            live_backend_factory=_factory,
+        )
+        register_gateway(router)
+        swapped.append(connector)
+
+    if swapped:
+        logger.info(
+            "SAP domains routed through SapDomainGateway: %s "
+            "(canary pct env: ASOE_CANARY_PCT_SAP)",
+            ", ".join(swapped),
+        )
 
 
 def register_preprod_gateways() -> None:
@@ -36,3 +158,46 @@ def register_preprod_gateways() -> None:
         "(Phase 6 will replace these with real connectors)",
     )
     _register_all_stub_gateways()
+    _maybe_swap_email_intake_for_graph()
+    _maybe_swap_sap_domains_for_live()
+    _maybe_swap_oms_for_live()
+
+
+def _maybe_swap_oms_for_live() -> None:
+    """PARITY-6.4 — replace the `oms` StubGateway with `OmsGateway`
+    live-or-stub router when ``ASOE_OMS_DRIVER=live``.
+
+    Reversible by env unset. Last in the swap chain because OMS writes
+    depend on SAP validation (the parity plan §6 sub-phase order):
+    OMS lights up only after the SAP sub-phase has settled.
+    """
+    driver = (os.getenv("ASOE_OMS_DRIVER") or "recorded").strip().lower()
+    if driver != "live":
+        return
+    try:
+        from gateways.oms_live import LiveOmsBackend, OmsGateway
+        from gateways.registry import get_gateway, register_gateway
+    except ImportError as exc:
+        logger.warning(
+            "ASOE_OMS_DRIVER=live requested but live backend imports "
+            "failed (%s) — staying on stub",
+            exc,
+        )
+        return
+    try:
+        existing_stub = get_gateway("oms")
+    except KeyError:
+        logger.warning(
+            "ASOE_OMS_DRIVER=live requested but oms stub not "
+            "registered — skipping live swap",
+        )
+        return
+
+    router = OmsGateway(
+        stub=existing_stub, live_backend_factory=lambda: LiveOmsBackend(),
+    )
+    register_gateway(router)
+    logger.info(
+        "oms gateway routed through OmsGateway "
+        "(canary pct env: ASOE_CANARY_PCT_OMS)",
+    )

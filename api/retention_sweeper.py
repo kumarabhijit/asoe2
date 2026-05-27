@@ -142,6 +142,7 @@ class RetentionSweeper:
         tenant_residency_region: str,
         target_storage_region: str,
         items: List[SweepCandidate],
+        sweeper_identity: str = "system:service-principal",
     ) -> CommitResult:
         """Commit the deletes after a residency check.
 
@@ -150,6 +151,18 @@ class RetentionSweeper:
         shouldn't be there in the first place; this is the
         defence-in-depth check that fails loud rather than silently
         deleting from the wrong region.
+
+        Each candidate that resolves to an extant attachment is wiped
+        via ``gateways.attachment_store.erase_attachment`` (which
+        preserves the PARITY-0.5 proof-of-erasure invariant: audit row
+        written BEFORE byte wipe). The bulk sweeper additionally writes
+        a distinct ``SCHEDULED_RETENTION_DELETE`` audit event so the
+        audit trail differentiates sweeper-initiated deletes from
+        operator-triggered erasures.
+
+        Candidates whose ``attachment_id`` no longer resolves (already
+        erased, race with another sweeper) DO NOT increment
+        ``deleted_count`` and DO NOT write a spurious audit row.
         """
         # Residency is a system invariant — surface it first even when
         # the sweeper is disabled. An operator inspecting the error
@@ -179,9 +192,67 @@ class RetentionSweeper:
                 ),
                 status_code=403,
             )
+
+        # Lazy imports — the sweeper module is import-cheap; the audit
+        # + store deps only land when an actual commit fires.
+        from api.store import exception_store  # noqa: PLC0415
+        from gateways import attachment_store as _store  # noqa: PLC0415
+        from gateways.attachment_store import erase_attachment  # noqa: PLC0415
+
+        deleted = 0
+        blocked = 0
+        for candidate in items:
+            try:
+                tombstone = erase_attachment(
+                    _store._backend,  # active backend selected at module init
+                    tenant_id=candidate.tenant_id,
+                    attachment_id=candidate.attachment_id,
+                    erased_by=sweeper_identity,
+                    reason=candidate.reason,
+                )
+            except Exception:  # noqa: BLE001 — chain-write failure
+                # erase_attachment aborts on a chain-write failure to
+                # preserve the proof-of-erasure invariant. Surface that
+                # as "blocked" so the operator sees the orphan in the
+                # CommitResult and can retry.
+                logger.exception(
+                    "retention sweeper: erase failed tenant=%s attachment=%s",
+                    candidate.tenant_id, candidate.attachment_id,
+                )
+                blocked += 1
+                continue
+            if tombstone is None:
+                # No-op — the attachment was already gone. Don't write
+                # a SCHEDULED_RETENTION_DELETE row for a non-event.
+                continue
+            deleted += 1
+            # Distinct sweeper-attribution row alongside the
+            # ATTACHMENT_ERASED tombstone written by erase_attachment.
+            # The chain handles both writes; verify_audit_chain
+            # remains intact across either ordering.
+            exception_store.log_audit_event(
+                tenant_id=candidate.tenant_id,
+                policy_key=SCHEDULED_RETENTION_DELETE_EVENT,
+                previous_value={
+                    "attachment_id": candidate.attachment_id,
+                    "sha256": candidate.sha256,
+                    "ttl_days_applied": candidate.ttl_days_applied,
+                },
+                new_value={
+                    "attachment_id": candidate.attachment_id,
+                    "sha256": candidate.sha256,
+                    "ttl_days_applied": candidate.ttl_days_applied,
+                    "reason": candidate.reason,
+                    "swept_by": sweeper_identity,
+                },
+                changed_by=sweeper_identity,
+                change_reason=candidate.reason,
+                strict=True,
+            )
+
         return CommitResult(
             tenant_id=tenant_id,
             residency_ok=True,
-            deleted_count=0,  # follow-up wires the actual delete
-            blocked_count=0,
+            deleted_count=deleted,
+            blocked_count=blocked,
         )

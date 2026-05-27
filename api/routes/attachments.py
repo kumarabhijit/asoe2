@@ -26,6 +26,7 @@ from api.attachment_read_token import (
     mint_read_token,
     verify_read_token,
 )
+from api.observability.audit_bearing import audit_bearing
 from api.deps import (
     AuthenticatedUser,
     get_current_user,
@@ -91,6 +92,12 @@ async def download_attachment(
     dependencies=[Depends(require_role(
         "analyst", "manager", "admin", "viewer", "partner",
     ))],
+)
+@audit_bearing(
+    reason="mints a scoped, expiring capability URL granting read access "
+           "to attachment bytes that may be evidence in a SOX-relevant "
+           "financial decision; auditor needs to attribute the mint to "
+           "an identity + tenant + case + attachment tuple",
 )
 async def create_signed_read_url(
     case_id: str,

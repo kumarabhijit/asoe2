@@ -93,6 +93,24 @@ ALERT_CATALOGUE: List[AlertDescriptor] = [
         severity="Sev1",
         runbook_anchor="docs/ops/erasure-flows.md#retention-sweeper-anomaly",
     ),
+    # PARITY-7 followup — emitted by scripts/run_drift_forwarder.py
+    # via the drift-alert Container Apps Job. Severity is Sev3
+    # because drift is a data-quality signal, not an operational
+    # emergency (compare with breaker-open Sev1 = real outage,
+    # extraction-cost-overrun Sev2 = provider drift). The 7-day
+    # rolling window + 50 / 200 sample split deliberately throttles
+    # the fire rate.
+    AlertDescriptor(
+        name="extraction-drift",
+        description=(
+            "7-day rolling median containment dropped >5pp on a "
+            "(model_id, prompt_hash) tuple. Possible AzureDI model "
+            "bump moved bounding boxes OR our golden set drifted "
+            "from production traffic. Investigate before re-baselining."
+        ),
+        severity="Sev3",
+        runbook_anchor="docs/ops/erasure-flows.md#extraction-drift",
+    ),
 ]
 
 

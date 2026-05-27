@@ -97,6 +97,39 @@ class TestShadowModeRunner:
             "would miss a real-vs-stub variance"
         )
 
+    def test_runner_exposes_last_entry_to_caller(self):
+        """Regression for code-review CRITICAL: callers (e.g.
+        ``GraphIntakeGateway``) that react to the just-recorded
+        DiffEntry MUST read ``runner.last_entry`` rather than
+        ``get_diff_log()[-1]`` — a concurrent connector on another
+        thread can append between the runner's append and the caller's
+        ``[-1]`` lookup, racing the attribution."""
+        from gateways.shadow_mode import ShadowRunner, get_diff_log
+        get_diff_log().clear()
+
+        def real_call(**_kw):
+            raise RuntimeError("real failed")
+
+        def stub_call(**_kw):
+            return {"po_number": "PO-X"}
+
+        runner = ShadowRunner(connector="connector_a", operation="op")
+        runner.run(real=real_call, stub=stub_call, params={})
+
+        # Simulate a concurrent connector appending its own entry —
+        # ``get_diff_log()[-1]`` would now mis-attribute. ``last_entry``
+        # on the runner instance is immune to that race.
+        from gateways.shadow_mode import _LOG, _LOCK, DiffEntry
+        with _LOCK:
+            _LOG.append(DiffEntry(
+                connector="connector_b", operation="other",
+                recorded_at=0,
+            ))
+
+        assert runner.last_entry is not None
+        assert runner.last_entry.connector == "connector_a"
+        assert runner.last_entry.real_error is not None
+
     def test_runner_real_failure_does_not_crash(self):
         """Shadow mode is opt-in observability; a real-side failure
         falls back to the stub return so the request still completes

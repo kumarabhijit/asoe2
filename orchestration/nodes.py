@@ -1472,6 +1472,25 @@ def apply_effects(state: GraphState) -> GraphState:
                 f" — {response.error or response.status}. "
                 f"Recipe completed but side effect requires manual follow-up."
             )
+            # PARITY-6.4 — post-recipe-success OMS write failure has a
+            # distinct DLQ contract: the audit log already committed the
+            # recipe decision, but OMS never recorded the write. The
+            # operator dashboard surfaces these orphans for
+            # reconciliation. Today no recipe declares an OMS write
+            # effect, so this branch is dormant; landing an OMS write
+            # effect on a recipe spec automatically wires the orphan
+            # surfacing without further changes.
+            if effect.gateway_name == "oms":
+                try:
+                    from gateways.oms_live import record_post_success_orphan
+                    record_post_success_orphan(
+                        tenant_id=state.tenant_id or "default",
+                        operation=effect.operation,
+                        recipe_run_id=str(trace_id or ""),
+                        reason=response.error or response.status,
+                    )
+                except Exception:  # noqa: BLE001  # pragma: no cover - orphan recorder must never crash the graph
+                    _node_logger.exception("oms_post_success_orphan_record_failed")
 
     _record(
         state, node="apply_effects", entered_at=entered_at,
