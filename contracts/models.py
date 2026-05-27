@@ -267,6 +267,50 @@ class OrderCase(BaseModel):
     pending_override: Optional["CasePendingOverride"] = None
 
 
+ClassifierType = Literal["HUMAN", "MODEL", "RULE"]
+"""Requirements §8.3 — who/what produced a classification.
+
+HUMAN  — CSR, lead, or steward.
+MODEL  — the LLM classifier, gated on confidence ≥ 0.85.
+RULE   — deterministic mapping (Phase 0 SAP-block-code → supergroup
+         lookup, or the SG_BLOCK_UNMAPPED fallback).
+"""
+
+
+class ClassificationEvent(BaseModel):
+    """Append-only audit-trail row for a (re)classification action.
+
+    Mirrors the ``case_classification_history`` table (V020) so the
+    in-memory and DB-backed stores produce identical shapes. Construction
+    rejects unknown fields (``extra='forbid'``) to keep the audit shape
+    immutable across versions.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    case_id: str
+    # NULL when this row records a parent-level (case) reclassification;
+    # populated for any per-child reclassification.
+    child_case_id: Optional[str] = None
+    supergroup_code: str
+    # NULL when this row records a parent-level supergroup change without
+    # a concurrent leaf classification (e.g. steward triage).
+    intent_code: Optional[str] = None
+    classified_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+    )
+    classified_by: str
+    classifier_type: ClassifierType
+    model_version: Optional[str] = None
+    reason_text: Optional[str] = None
+    source_event_id: Optional[str] = None
+    taxonomy_version: str
+    """Snapshot of the YAML taxonomy version (``case_taxonomy.yaml::version``)
+    at the time of classification. A later mapping change cannot retroactively
+    rewrite "what did we classify under?" for historical reporting."""
+
+
 class CasePendingOverride(BaseModel):
     """ADR-040 §2 — what the case carries while waiting for a cosigner.
 

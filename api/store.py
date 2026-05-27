@@ -24,7 +24,22 @@ from uuid import uuid4
 logger = logging.getLogger("asoe.api.store")
 
 from api.schemas import ExceptionDetailResponse, ExceptionSummary
-from contracts.models import STATUS_TO_LIFECYCLE
+from contracts._generated.taxonomy_constants import (
+    SG_NEEDS_TRIAGE,
+    TAXONOMY_VERSION,
+)
+from contracts.models import STATUS_TO_LIFECYCLE, ClassificationEvent
+
+
+class NeedsTriageCloseBlocked(ValueError):
+    """Raised when a case in ``SG_NEEDS_TRIAGE`` is asked to RESOLVE.
+
+    Requirements §8.2 forcing function #1 — hard-block at close.
+    Subclasses ``ValueError`` so existing exception handlers that
+    catch validation errors keep working, while callers that want
+    to handle the case specifically (e.g. surface a "reclassify
+    first" UI message) can ``except NeedsTriageCloseBlocked``.
+    """
 
 
 class ChildCase:
@@ -800,6 +815,12 @@ class CaseStore:
         self._cases: Dict[str, "OrderCase"] = {}
         # Correlation index: {(tenant_id, key_type, key_value): case_id}
         self._correlation: Dict[tuple, str] = {}
+        # Append-only classification audit per case_id. Mirrors the
+        # ``case_classification_history`` table (V020). Requirements §8.6
+        # — every classification event lands here as a new row; we never
+        # mutate or remove. The DB-backed store will read from the V020
+        # table; the in-memory store keeps this list authoritative.
+        self._history: Dict[str, List["ClassificationEvent"]] = {}
         self._lock = threading.RLock()
 
     # ----- correlation lookup --------------------------------------
@@ -953,11 +974,25 @@ class CaseStore:
         a mutation lands, unless the caller passes an explicit
         ``updated_at`` (audit replay, sandbox seeding). Callers
         therefore never need to remember to set it.
+
+        NEEDS_TRIAGE close-block (requirements §8.2): a case whose
+        supergroup_code is the reserved ``SG_NEEDS_TRIAGE`` value
+        cannot transition to ``RESOLVED``. Callers must reclassify
+        the case first. Raises ``NeedsTriageCloseBlocked`` so the
+        failure is explicit (CLAUDE.md §5: "Explicit failure is
+        correct behavior").
         """
         with self._lock:
             existing = self._cases.get(case_id)
             if existing is None:
                 raise KeyError(f"Unknown case_id: {case_id}")
+            target_status = fields.get("status", existing.status)
+            target_sg = fields.get("supergroup_code", existing.supergroup_code)
+            if target_status == "RESOLVED" and target_sg == SG_NEEDS_TRIAGE:
+                raise NeedsTriageCloseBlocked(
+                    f"Case {case_id} is in SG_NEEDS_TRIAGE and cannot be "
+                    "RESOLVED without reclassification (requirements §8.2)."
+                )
             if "updated_at" not in fields:
                 fields = {
                     **fields,
@@ -966,6 +1001,59 @@ class CaseStore:
             updated = existing.model_copy(update=fields)
             self._cases[case_id] = updated
             return updated
+
+    # ----- classification audit (requirements §8.6) -----------------
+
+    def record_classification(
+        self,
+        case_id: str,
+        *,
+        supergroup_code: str,
+        classified_by: str,
+        classifier_type: str,
+        intent_code: Optional[str] = None,
+        child_case_id: Optional[str] = None,
+        model_version: Optional[str] = None,
+        reason_text: Optional[str] = None,
+        source_event_id: Optional[str] = None,
+    ) -> ClassificationEvent:
+        """Append one ClassificationEvent row to the audit trail.
+
+        Raises ``KeyError`` if the case is unknown. The recording is
+        append-only — there is no public path to mutate or remove an
+        event once recorded (mirrors the DB-level append-only triggers
+        on ``case_classification_history`` from V020).
+        """
+        with self._lock:
+            if case_id not in self._cases:
+                raise KeyError(f"Unknown case_id: {case_id}")
+            event = ClassificationEvent(
+                case_id=case_id,
+                child_case_id=child_case_id,
+                supergroup_code=supergroup_code,
+                intent_code=intent_code,
+                classified_by=classified_by,
+                classifier_type=classifier_type,
+                model_version=model_version,
+                reason_text=reason_text,
+                source_event_id=source_event_id,
+                taxonomy_version=TAXONOMY_VERSION,
+            )
+            self._history.setdefault(case_id, []).append(event)
+            return event
+
+    def get_classification_history(
+        self, case_id: str,
+    ) -> List[ClassificationEvent]:
+        """Return the case's classification history in append order.
+
+        Returns an empty list for cases that have never been classified.
+        Returns a shallow copy so callers cannot mutate the in-memory
+        store; the events themselves are Pydantic frozen-equivalents
+        (extra='forbid') so mutation would error anyway.
+        """
+        with self._lock:
+            return list(self._history.get(case_id, []))
 
     def list_by_tenant(self, tenant_id: str) -> List["OrderCase"]:
         with self._lock:
