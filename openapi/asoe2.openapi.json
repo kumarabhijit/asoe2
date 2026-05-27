@@ -3390,11 +3390,11 @@
             "title": "Allowed Autonomy Levels",
             "type": "array"
           },
-          "allowed_case_sources": {
+          "allowed_case_origins": {
             "items": {
               "type": "string"
             },
-            "title": "Allowed Case Sources",
+            "title": "Allowed Case Origins",
             "type": "array"
           },
           "allowed_case_statuses": {
@@ -7118,9 +7118,9 @@
         "operationId": "list_cases_api_v1_cases_get",
         "parameters": [
           {
-            "description": "Filter by case source (manual_order | automated_order)",
+            "description": "Filter by case origin (CUSTOMER | API). Requirements \u00a73 glossary \u2014 CUSTOMER drives the Customer Inbox lens; API is the SAP-pushed block path.",
             "in": "query",
-            "name": "source",
+            "name": "origin",
             "required": false,
             "schema": {
               "anyOf": [
@@ -7131,14 +7131,14 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by case source (manual_order | automated_order)",
-              "title": "Source"
+              "description": "Filter by case origin (CUSTOMER | API). Requirements \u00a73 glossary \u2014 CUSTOMER drives the Customer Inbox lens; API is the SAP-pushed block path.",
+              "title": "Origin"
             }
           },
           {
-            "description": "Filter by case_type (EMAIL_ENTRY | BLOCK). Orthogonal to source (ADR-041 \u00a71); drives the Customer Inbox EMAIL_ENTRY lens (ADR-042).",
+            "description": "Filter by Intent Super-Group (requirements \u00a76). E.g. supergroup_code=SG_BLOCK_PRICING.",
             "in": "query",
-            "name": "case_type",
+            "name": "supergroup_code",
             "required": false,
             "schema": {
               "anyOf": [
@@ -7149,8 +7149,8 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by case_type (EMAIL_ENTRY | BLOCK). Orthogonal to source (ADR-041 \u00a71); drives the Customer Inbox EMAIL_ENTRY lens (ADR-042).",
-              "title": "Case Type"
+              "description": "Filter by Intent Super-Group (requirements \u00a76). E.g. supergroup_code=SG_BLOCK_PRICING.",
+              "title": "Supergroup Code"
             }
           },
           {

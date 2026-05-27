@@ -98,7 +98,7 @@ class TestCaseOpenEmission:
         co = case_opens[0]
         assert co["case_id"] == case.case_id
         assert co["tenant_id"] == "tenant-a"
-        assert co["payload"]["source"] == "manual_order"
+        assert co["payload"]["origin"] == "CUSTOMER"
         assert co["payload"]["customer_po_number"] == "PO-CO-1"
 
     def test_second_event_attaching_to_same_case_does_not_re_emit(self):

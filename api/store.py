@@ -77,12 +77,12 @@ class ExceptionRecord:
         # record once Phase H.3 wires lazy materialisation in
         # orchestration/nodes.py::build_analysis.
         self.parent_case_id: Optional[str] = parent_case_id
-        # ADR-041 §2 — raw SAP block reason code on records whose parent
-        # case is `case_type=BLOCK`. Distinct from `intent` (which is the
-        # classified business intent). Both coexist: `intent` is the
-        # vocabulary recipes dispatch on; `sap_block_code` is the source
+        # Requirements §5 — raw SAP block reason code on records whose
+        # parent case is ``origin='API'``. Distinct from ``intent_code``
+        # (the classified leaf intent): ``intent_code`` is the routing
+        # key recipes dispatch on; ``sap_block_code`` is the source
         # signal for audit ("SAP reported this exact code"). None on
-        # EMAIL_ENTRY-parented records.
+        # CUSTOMER-origin records.
         self.sap_block_code: Optional[str] = sap_block_code
         # Case & Intent Super-Group fields (requirements §5).
         # `supergroup_code` mirrors the parent OrderCase classification
@@ -834,7 +834,7 @@ class CaseStore:
         self,
         tenant_id: str,
         *,
-        source: str,
+        origin: str,
         source_channel: str,
         customer_id: Optional[str] = None,
         customer_po_number: Optional[str] = None,
@@ -843,8 +843,7 @@ class CaseStore:
         source_email_id: Optional[str] = None,
         sla_deadline: Optional[str] = None,
         bundle_version_at_open: Optional[str] = None,
-        case_type: Optional[str] = None,
-        email_classification: Optional[str] = None,
+        supergroup_code: Optional[str] = None,
     ) -> tuple["OrderCase", bool]:
         """Resolve an inbound event to a case (existing or new).
 
@@ -863,10 +862,10 @@ class CaseStore:
         with self._lock:
             if existing is not None:
                 # Enrich correlation keys with any new identifiers this
-                # event carried. The case `source` is immutable per ADR-038
-                # §3.1; `source_channel` is the existing one (don't
-                # overwrite — first event wins for the source/channel
-                # pair). New correlation keys join the case.
+                # event carried. The case ``origin`` is immutable;
+                # ``source_channel`` is the existing one (don't overwrite
+                # — first event wins for the origin/channel pair). New
+                # correlation keys join the case.
                 self._register_correlations_locked(
                     tenant_id, existing.case_id,
                     sales_order_id=sales_order_id,
@@ -876,28 +875,13 @@ class CaseStore:
                 )
                 return existing, False
 
-            # Open a new case.
-            from contracts.models import OrderCase, infer_case_type  # local to avoid cycles
-            resolved_case_type = case_type or infer_case_type(source, source_channel)
-            # EMAIL_ENTRY requires email_classification (1:1 with intake);
-            # default to OTHER when caller hasn't classified yet. Once the
-            # email-classification graph node ships (ADR-041 follow-on), the
-            # caller will pass the constrained value explicitly.
-            resolved_email_classification: Optional[str] = email_classification
-            if (
-                resolved_case_type == "EMAIL_ENTRY"
-                and resolved_email_classification is None
-            ):
-                resolved_email_classification = "OTHER"
-            elif resolved_case_type == "BLOCK":
-                resolved_email_classification = None
+            from contracts.models import OrderCase  # local to avoid cycles
             case = OrderCase(
                 tenant_id=tenant_id,
                 customer_id=customer_id,
-                source=source,  # type: ignore[arg-type]
+                origin=origin,  # type: ignore[arg-type]
                 source_channel=source_channel,
-                case_type=resolved_case_type,  # type: ignore[arg-type]
-                email_classification=resolved_email_classification,  # type: ignore[arg-type]
+                supergroup_code=supergroup_code,
                 customer_po_number=customer_po_number,
                 sales_order_id=sales_order_id,
                 edi_transaction_id=edi_transaction_id,

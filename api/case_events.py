@@ -50,7 +50,7 @@ def publish_case_open(
         trace_id=trace_id or str(uuid4()),
         case_id=case.case_id,
         tenant_id=case.tenant_id,
-        source=case.source,
+        origin=case.origin,
         source_channel=case.source_channel,
         status=case.status,
         sla_deadline=case.sla_deadline,

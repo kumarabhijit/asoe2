@@ -80,14 +80,14 @@ def _auth(token: str) -> dict:
 def _open_case(
     tenant_id: str = "tenant-a",
     *,
-    source: str = "automated_order",
+    origin: str = "API",
     source_channel: str = "edi_x12_850",
     customer_po_number: str | None = None,
     customer_id: str | None = None,
 ):
     case, _ = case_store.lookup_or_create(
         tenant_id,
-        source=source,
+        origin=origin,
         source_channel=source_channel,
         customer_po_number=customer_po_number,
         customer_id=customer_id,
@@ -157,7 +157,7 @@ class TestAuth:
 class TestList:
     def test_list_returns_open_cases(self, client, analyst_token):
         c1 = _open_case(customer_po_number="PO-1")
-        c2 = _open_case(customer_po_number="PO-2", source="manual_order",
+        c2 = _open_case(customer_po_number="PO-2", origin="CUSTOMER",
                         source_channel="email")
         r = client.get("/api/v1/cases", headers=_auth(analyst_token))
         assert r.status_code == 200
@@ -167,36 +167,36 @@ class TestList:
         assert ids == {c1.case_id, c2.case_id}
 
     def test_filter_by_source(self, client, analyst_token):
-        _open_case(customer_po_number="PO-1", source="automated_order")
+        _open_case(customer_po_number="PO-1", origin="API")
         manual = _open_case(
-            customer_po_number="PO-2", source="manual_order",
+            customer_po_number="PO-2", origin="CUSTOMER",
             source_channel="email",
         )
         r = client.get(
-            "/api/v1/cases?source=manual_order",
+            "/api/v1/cases?origin=CUSTOMER",
             headers=_auth(analyst_token),
         )
         body = r.json()
         assert body["total"] == 1
         assert body["items"][0]["case_id"] == manual.case_id
 
-    def test_filter_by_case_type(self, client, analyst_token):
-        # ADR-041 infer_case_type: manual_order => EMAIL_ENTRY,
-        # automated_order => BLOCK. The EMAIL_ENTRY lens (ADR-042) filters here.
+    def test_filter_by_supergroup_code(self, client, analyst_token):
+        """Requirements §6 — supergroup_code is the case-level intent."""
         email_case = _open_case(
-            customer_po_number="PO-1", source="manual_order",
+            customer_po_number="PO-1", origin="CUSTOMER",
             source_channel="email",
         )
-        _open_case(customer_po_number="PO-2", source="automated_order")
+        case_store.update(email_case.case_id, supergroup_code="SG_NEW_ORDER")
+        _open_case(customer_po_number="PO-2", origin="API")
         r = client.get(
-            "/api/v1/cases?case_type=EMAIL_ENTRY",
+            "/api/v1/cases?supergroup_code=SG_NEW_ORDER",
             headers=_auth(analyst_token),
         )
         assert r.status_code == 200
         body = r.json()
         assert body["total"] == 1
         assert body["items"][0]["case_id"] == email_case.case_id
-        assert body["items"][0]["case_type"] == "EMAIL_ENTRY"
+        assert body["items"][0]["supergroup_code"] == "SG_NEW_ORDER"
 
     def test_filter_by_status(self, client, analyst_token):
         c1 = _open_case(customer_po_number="PO-1")
@@ -303,18 +303,18 @@ class TestCursorPagination:
     def test_cursor_pagination_respects_filters(
         self, client, analyst_token,
     ):
-        # Two manual_order cases + three automated_order cases, page
-        # the manual_order subset at limit=1.
+        # Two CUSTOMER cases + three API cases, page the CUSTOMER subset
+        # at limit=1.
         for i in range(2):
             _open_case(
                 customer_po_number=f"M-{i:03d}",
-                source="manual_order",
+                origin="CUSTOMER",
                 source_channel="email",
             )
         for i in range(3):
-            _open_case(customer_po_number=f"A-{i:03d}", source="automated_order")
+            _open_case(customer_po_number=f"A-{i:03d}", origin="API")
 
-        url = "/api/v1/cases?source=manual_order&limit=1"
+        url = "/api/v1/cases?origin=CUSTOMER&limit=1"
         r = client.get(url, headers=_auth(analyst_token))
         body = r.json()
         assert body["total"] == 2
@@ -344,7 +344,7 @@ class TestDetail:
         body = r.json()
         assert body["case_id"] == case.case_id
         assert body["customer_po_number"] == "PO-X"
-        assert body["source"] == "automated_order"
+        assert body["origin"] == "API"
 
     def test_missing_returns_404(self, client, analyst_token):
         r = client.get(
@@ -406,7 +406,7 @@ class TestScoping:
         case = _open_case(
             customer_po_number="PO-EARLY",
             customer_id="acc-001",
-            source="manual_order",
+            origin="CUSTOMER",
             source_channel="email",
         )
         r = client.get("/api/v1/cases", headers=_auth(assigned_token))

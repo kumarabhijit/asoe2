@@ -39,13 +39,11 @@ def test_exceptions_has_new_columns(db: sqlite3.Connection):
             "sap_block_field", "scope"}.issubset(cols)
 
 
-def test_legacy_columns_preserved(db: sqlite3.Connection):
-    """Deprecated columns must remain through V018 for one-release overlap (§10)."""
-    oc = _cols(db, "order_case")
-    assert "source" in oc           # not yet renamed
+def test_anchor_columns_present(db: sqlite3.Connection):
+    """V009 anchor columns survive V018 alterations."""
     ex = _cols(db, "exceptions")
-    assert "intent" in ex           # leaf rename happens in a later step
-    assert "parent_case_id" in ex   # V009 anchor
+    assert "parent_case_id" in ex
+    assert "intent" in ex  # legacy column; renamed to intent_code later
 
 
 def test_app_config_seeded_with_strict_default(db: sqlite3.Connection):

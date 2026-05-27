@@ -980,6 +980,23 @@ def _apply_sqlite_v018(conn: sqlite3.Connection) -> None:
     )
 
 
+def _apply_sqlite_v019(conn: sqlite3.Connection) -> None:
+    """V019 — drop deprecated case columns. Mirrors V019_*.sql.
+
+    SQLite 3.35+ supports ``ALTER TABLE DROP COLUMN``; the project pins
+    Python 3.11+ (SQLite >= 3.40). Idempotent via _sqlite_column_exists.
+    """
+    for col in ("source", "case_type", "email_classification"):
+        if _sqlite_column_exists(conn, "order_case", col):
+            conn.execute(f"ALTER TABLE order_case DROP COLUMN {col}")
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+        ("V019", datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    logger.info("SQLite schema V019 applied (dropped deprecated case columns)")
+
+
 def apply_sqlite(conn: sqlite3.Connection) -> None:
     """Apply the SQLite-compatible schema (V001 + subsequent migrations)."""
     conn.executescript(_SQLITE_SCHEMA)
@@ -1011,6 +1028,7 @@ def apply_sqlite(conn: sqlite3.Connection) -> None:
     _apply_sqlite_v016(conn)
     _apply_sqlite_v017(conn)
     _apply_sqlite_v018(conn)
+    _apply_sqlite_v019(conn)
 
 
 def apply_postgres(database_url: str) -> None:
@@ -1079,6 +1097,7 @@ def apply_postgres(database_url: str) -> None:
             ("V016", "V016__email_attachment.sql", "PostgreSQL schema V016 applied (email_attachment store)"),
             ("V017", "V017__case_taxonomy.sql", "PostgreSQL schema V017 applied (case taxonomy lookup tables)"),
             ("V018", "V018__case_origin_supergroup.sql", "PostgreSQL schema V018 applied (case origin + supergroup_code + leaf intent_code)"),
+            ("V019", "V019__drop_legacy_case_columns.sql", "PostgreSQL schema V019 applied (dropped deprecated case columns)"),
         ):
             cur.execute(
                 "SELECT version FROM schema_migrations WHERE version = %s",

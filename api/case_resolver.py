@@ -38,14 +38,14 @@ from contracts.models import (
 
 
 # ---------------------------------------------------------------------------
-# Source / source_channel inference (ADR-038 §3.1, §3.3)
+# Origin / source_channel inference (requirements §3 glossary)
 # ---------------------------------------------------------------------------
 #
 # Mapping is intentionally conservative — events may carry an explicit
-# ``source`` / ``source_channel`` in metadata (e.g., from the upstream
+# ``origin`` / ``source_channel`` in metadata (e.g., from the upstream
 # email-intelligence-agent). When absent we infer from event_type using
-# this table. Default falls through to ``automated_order`` /
-# ``edi_x12_850`` which mirrors the V1 traffic shape.
+# this table. Default falls through to ``API`` / ``edi_x12_850`` which
+# mirrors the V1 traffic shape.
 
 _MANUAL_EVENT_TYPES = frozenset({
     # ADR-034 §6.2 — canonical post-cutover event_type (intent =
@@ -60,25 +60,28 @@ _MANUAL_EVENT_TYPES = frozenset({
 })
 
 
-def derive_source_and_channel(event: OrderEvent) -> Tuple[str, str]:
-    """Return ``(source, source_channel)`` for an event.
+def derive_origin_and_channel(event: OrderEvent) -> Tuple[str, str]:
+    """Return ``(origin, source_channel)`` for an event.
 
     Resolution priority:
-      1. ``event.metadata['source']`` + ``event.metadata['source_channel']``
+      1. ``event.metadata['origin']`` + ``event.metadata['source_channel']``
          (explicit override; trust the producer when both are present).
-      2. Event-type membership in the manual allowlist.
-      3. Default to ``("automated_order", "edi_x12_850")``.
+      2. Event-type membership in the customer-initiated allowlist.
+      3. Default to ``("API", "edi_x12_850")``.
+
+    ``origin`` per requirements §3 glossary: CUSTOMER (customer-initiated
+    intake) | API (SAP-pushed block).
     """
     meta = event.metadata or {}
-    explicit_source = meta.get("source")
+    explicit_origin = meta.get("origin")
     explicit_channel = meta.get("source_channel")
-    if isinstance(explicit_source, str) and isinstance(explicit_channel, str):
-        return explicit_source, explicit_channel
+    if isinstance(explicit_origin, str) and isinstance(explicit_channel, str):
+        return explicit_origin, explicit_channel
 
     upper = (event.event_type or "").upper()
     if upper in _MANUAL_EVENT_TYPES:
-        return "manual_order", "email"
-    return "automated_order", "edi_x12_850"
+        return "CUSTOMER", "email"
+    return "API", "edi_x12_850"
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +156,7 @@ def resolve_or_open_case(
     from api.metrics import record_event_type_received
     record_event_type_received(event.event_type)
 
-    source, channel = derive_source_and_channel(event)
+    origin, channel = derive_origin_and_channel(event)
 
     meta = event.metadata or {}
     customer_po = (
@@ -166,7 +169,7 @@ def resolve_or_open_case(
 
     return case_store.lookup_or_create(
         tenant_id=tenant_id,
-        source=source,
+        origin=origin,
         source_channel=channel,
         customer_id=event.retailer_id,
         customer_po_number=customer_po,

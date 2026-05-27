@@ -128,7 +128,7 @@ class TestPredicateEnabled:
         cases = case_store.list_by_tenant("tenant-a")
         assert len(cases) == 1
         case = cases[0]
-        assert case.source == "manual_order"
+        assert case.origin == "CUSTOMER"
         assert case.source_channel == "email"
         # Harness ran → tier graduated T2 → T3 on the non-clean event.
         assert case.tier == 3

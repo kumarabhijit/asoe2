@@ -38,16 +38,15 @@ def _make_case(
 ) -> str:
     case_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
+    channel = "email" if origin == "CUSTOMER" else "edi_x12_850"
     conn.execute(
         """
         INSERT INTO order_case (
-            case_id, tenant_id, source, source_channel,
+            case_id, tenant_id, source_channel,
             opened_at, status, tier, origin, supergroup_code
-        ) VALUES (?, ?, ?, ?, ?, 'OPEN_AGENT_PROCESSING', 2, ?, ?)
+        ) VALUES (?, ?, ?, ?, 'OPEN_AGENT_PROCESSING', 2, ?, ?)
         """,
-        (case_id, tenant_id, "manual_order" if origin == "CUSTOMER" else "automated_order",
-         "email" if origin == "CUSTOMER" else "edi_x12_850",
-         now, origin, supergroup_code),
+        (case_id, tenant_id, channel, now, origin, supergroup_code),
     )
     conn.commit()
     return case_id

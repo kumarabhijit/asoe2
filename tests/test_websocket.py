@@ -144,7 +144,7 @@ class TestEventSchema:
             trace_id="t-c-1",
             case_id="case-001",
             tenant_id="tenant-a",
-            source="manual_order",
+            origin="CUSTOMER",
             source_channel="email",
             status="OPEN_AGENT_PROCESSING",
             sla_deadline="2026-05-12T08:00:00Z",
@@ -153,7 +153,7 @@ class TestEventSchema:
         assert event.type == "case_open"
         assert event.case_id == "case-001"
         assert event.exception_id is None
-        assert event.payload["source"] == "manual_order"
+        assert event.payload["origin"] == "CUSTOMER"
         assert event.payload["customer_po_number"] == "PO-7842"
 
     def test_case_update_event_lists_changed_fields(self):
@@ -193,7 +193,7 @@ class TestEventSchema:
             trace_id="t",
             case_id="case-002",
             tenant_id="tenant-x",
-            source="automated_order",
+            origin="API",
             source_channel="edi_x12_850",
             status="OPEN_AGENT_PROCESSING",
         )

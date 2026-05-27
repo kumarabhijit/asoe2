@@ -70,7 +70,7 @@ def _reset_state():
 def case() -> OrderCase:
     case, _ = case_store.lookup_or_create(
         tenant_id="t1",
-        source="manual_order",
+        origin="CUSTOMER",
         source_channel="email",
         customer_po_number="PO-1",
         customer_id="acc-001",

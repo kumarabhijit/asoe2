@@ -222,11 +222,10 @@ class HealthResponse(BaseModel):
     # `useHealth.allowed_case_statuses` so the UI's CaseListPane
     # filter chips don't hardcode the enum, preserving Guardrail #1.
     allowed_case_statuses: List[str] = Field(default_factory=list)
-    # Phase 28.5.x §D1 — the case-source values. Until this field
-    # ships the UI carries an ALLOWED_CASE_SOURCES constant in
-    # `src/lib/api.ts`; once available, the UI consumes from health
-    # exclusively.
-    allowed_case_sources: List[str] = Field(default_factory=list)
+    # Requirements §3 glossary — case origin values (CUSTOMER | API). The
+    # UI consumes this from health exclusively (Guardrail #1, no
+    # hardcoded enum).
+    allowed_case_origins: List[str] = Field(default_factory=list)
     # ADR-042 §5/§8 — the autonomy vocabulary the UI renders. The UI sorts the
     # ladder by `rank` and reads labels from here (no hardcoded autonomy map,
     # Guardrail #1). `autonomy_vocab_version` is the version these rows resolve

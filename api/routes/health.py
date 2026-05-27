@@ -21,7 +21,7 @@ from constraints.specs import (
     AllowedRecipeName,
     AllowedResolutionAction,
 )
-from contracts.models import CaseSource, CaseStatus, LIFECYCLE_STATES
+from contracts.models import CaseStatus, LIFECYCLE_STATES, Origin
 from hardening.explain_mode import is_explain_mode_active
 from hardening.kill_switch import is_kill_switch_active
 
@@ -37,7 +37,7 @@ _REASON_TAGS_BY_INTENT = {k: list(v) for k, v in INTENT_REASON_TAGS.items()}
 # contracts/models.py Literal definitions so a backend rename surfaces
 # in the UI Guardrail #1 lock before it silently empties a chip group.
 _ALLOWED_CASE_STATUSES = list(CaseStatus.__args__)  # type: ignore[attr-defined]
-_ALLOWED_CASE_SOURCES = list(CaseSource.__args__)  # type: ignore[attr-defined]
+_ALLOWED_CASE_ORIGINS = list(Origin.__args__)  # type: ignore[attr-defined]
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -54,7 +54,7 @@ async def health() -> HealthResponse:
         allowed_override_reason_tags=_ALLOWED_OVERRIDE_REASON_TAGS,
         allowed_override_reason_tags_by_intent=_REASON_TAGS_BY_INTENT,
         allowed_case_statuses=_ALLOWED_CASE_STATUSES,
-        allowed_case_sources=_ALLOWED_CASE_SOURCES,
+        allowed_case_origins=_ALLOWED_CASE_ORIGINS,
         autonomy_vocab_version=CURRENT_AUTONOMY_VOCAB_VERSION,
         allowed_autonomy_levels=[
             AutonomyLevelInfo(**entry) for entry in allowed_autonomy_levels()

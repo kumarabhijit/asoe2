@@ -61,7 +61,7 @@ def _seed_case_with_children(
     """
     case, _opened = case_store.lookup_or_create(
         tenant_id=tenant_id,
-        source="manual_order",
+        origin="CUSTOMER",
         source_channel="email",
         customer_po_number="PO-CRL-1",
     )

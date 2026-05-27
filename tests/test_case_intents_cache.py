@@ -26,7 +26,7 @@ def _reset():
 def _seed_case_with_children(tenant_id: str, intents: list[str]) -> str:
     case, _ = case_store.lookup_or_create(
         tenant_id=tenant_id,
-        source="manual_order",
+        origin="CUSTOMER",
         source_channel="email",
         customer_po_number=f"PO-CACHE-{len(intents)}",
     )
@@ -56,7 +56,7 @@ class TestIntentsFor:
     def test_empty_set_for_case_with_no_children(self):
         case, _ = case_store.lookup_or_create(
             tenant_id="tenant-a",
-            source="manual_order",
+            origin="CUSTOMER",
             source_channel="email",
             customer_po_number="PO-EMPTY",
         )

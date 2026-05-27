@@ -108,16 +108,19 @@ def _scope_to_user(cases, user: AuthenticatedUser):
 async def list_cases(
     tenant_id: str = Depends(get_tenant_id),
     user: AuthenticatedUser = Depends(get_current_user),
-    source: Optional[str] = Query(
-        None,
-        description="Filter by case source (manual_order | automated_order)",
-    ),
-    case_type: Optional[str] = Query(
+    origin: Optional[str] = Query(
         None,
         description=(
-            "Filter by case_type (EMAIL_ENTRY | BLOCK). Orthogonal to source "
-            "(ADR-041 §1); drives the Customer Inbox EMAIL_ENTRY lens "
-            "(ADR-042)."
+            "Filter by case origin (CUSTOMER | API). Requirements §3 "
+            "glossary — CUSTOMER drives the Customer Inbox lens; API is "
+            "the SAP-pushed block path."
+        ),
+    ),
+    supergroup_code: Optional[str] = Query(
+        None,
+        description=(
+            "Filter by Intent Super-Group (requirements §6). E.g. "
+            "supergroup_code=SG_BLOCK_PRICING."
         ),
     ),
     status: Optional[str] = Query(
@@ -168,11 +171,11 @@ async def list_cases(
 ) -> CaseListResponse:
     cases = case_store.list_by_tenant(tenant_id)
 
-    if source:
-        cases = [c for c in cases if c.source == source]
+    if origin:
+        cases = [c for c in cases if c.origin == origin]
 
-    if case_type:
-        cases = [c for c in cases if c.case_type == case_type]
+    if supergroup_code:
+        cases = [c for c in cases if c.supergroup_code == supergroup_code]
 
     # Multi-value status: any-match. The empty list (after parse) is
     # treated as "no filter" so a trailing comma in the URL doesn't

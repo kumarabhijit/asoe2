@@ -67,7 +67,7 @@ def _seed(
     *,
     po: str,
     status: str = "OPEN_AGENT_PROCESSING",
-    source: str = "manual_order",
+    origin: str = "CUSTOMER",
     customer_id: str = "acct-walmart",
     sales_order_id: str | None = None,
     child_intent: str | None = "CONTRACTUAL_CORRECTION",
@@ -75,8 +75,8 @@ def _seed(
 ) -> str:
     case, _ = case_store.lookup_or_create(
         tenant_id=tenant_id,
-        source=source,  # type: ignore[arg-type]
-        source_channel="email" if source == "manual_order" else "edi_x12_850",
+        origin=origin,  # type: ignore[arg-type]
+        source_channel="email" if origin == "CUSTOMER" else "edi_x12_850",
         customer_id=customer_id,
         customer_po_number=po,
         sales_order_id=sales_order_id,
@@ -119,11 +119,11 @@ class TestHealthAllowedCaseVocab:
             "BLOCKED",
         }
 
-    def test_health_surfaces_allowed_case_sources(self, client):
+    def test_health_surfaces_allowed_case_origins(self, client):
         r = client.get("/api/v1/health")
         assert r.status_code == 200
-        assert set(r.json()["allowed_case_sources"]) == {
-            "manual_order", "automated_order",
+        assert set(r.json()["allowed_case_origins"]) == {
+            "CUSTOMER", "API",
         }
 
 

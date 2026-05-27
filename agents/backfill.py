@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from agents.sla import stamp_sla_deadline
-from api.case_resolver import derive_source_and_channel
+from api.case_resolver import derive_origin_and_channel
 from api.store import case_store, exception_store
 from contracts.models import OrderCase, OrderEvent
 
@@ -103,7 +103,7 @@ def backfill_orphan_cases(
             report.records_skipped_no_event += 1
             continue
 
-        source, channel = derive_source_and_channel(event)
+        origin, channel = derive_origin_and_channel(event)
         meta = event.metadata or {}
         customer_po = meta.get("customer_po_number") or event.order_id
         sales_order_id = meta.get("sales_order_id")
@@ -117,7 +117,7 @@ def backfill_orphan_cases(
 
         case, opened_now = case_store.lookup_or_create(
             tenant_id=record.tenant_id,
-            source=source,
+            origin=origin,
             source_channel=channel,
             customer_id=event.retailer_id,
             customer_po_number=customer_po,
