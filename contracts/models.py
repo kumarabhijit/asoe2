@@ -148,60 +148,12 @@ class OrderEvent(BaseModel):
 # clock, the case-source classification, and correlation keys that let
 # incoming events resolve to an existing case via lookup-or-create.
 
-CaseSource = Literal["manual_order", "automated_order"]
-"""ADR-038 §3.1 — Manual = email/phone/fax (CSR reads prose to extract);
-Automated = EDI X12 / portal / API feed / FTP / VMI (no prose to extract).
+Origin = Literal["CUSTOMER", "API"]
+"""Requirements §3 glossary — case intake mechanism. Binary axis paired with
+orthogonal ``source_channel`` (email / EDI / portal / phone / fax /
+CSR-keyed). ``CUSTOMER`` is the customer-initiated path (email today, web
+form / portal later); ``API`` is the SAP-pushed block path."""
 
-Distinct from `CaseType` below. `source` is "how did the order originate";
-`case_type` is "why is ASOE looking at this". A `manual_order` could be
-email OR phone OR fax; only the email subset surfaces as a
-case_type=EMAIL_ENTRY case. An `automated_order` (EDI 850) that later
-gets blocked by SAP becomes a case_type=BLOCK case — the order is
-automated but the trigger is the block."""
-
-CaseType = Literal["EMAIL_ENTRY", "BLOCK"]
-"""ADR-041 §1 — Why ASOE materialised this case.
-
-- `EMAIL_ENTRY` — A customer email arrived; ASOE classified it and may
-  create / amend / inquire about an order. Always paired with
-  `email_classification` (1:1; one email, one classification).
-- `BLOCK` — A SAP order carried a block reason code; ASOE pulled it to
-  resolve. The specific reason(s) live on each child ExceptionRecord
-  as `sap_block_code` (1:N; one SAP order can carry multiple
-  simultaneous block codes).
-
-Orthogonal to `source`. Together they answer two distinct questions —
-do not collapse them. Cleanly defined so future channels (e.g. a
-phone-call trigger that doesn't fit either bucket) can extend the
-literal without retrofitting existing semantics."""
-
-EmailClassification = Literal[
-    "NEW_ORDER",
-    "ORDER_CHANGE",
-    "INQUIRY",
-    "COMPLAINT",
-    "OTHER",
-]
-"""ADR-041 §2 — Per-intake classification for an EMAIL_ENTRY case.
-Set once at case open by the email-classification node; never mutates.
-None for any case where `case_type != "EMAIL_ENTRY"`."""
-
-
-def infer_case_type(source: str, source_channel: str) -> "CaseType":
-    """ADR-041 §4 — Default `case_type` from `source`/`source_channel`.
-
-    For the current event shape:
-      * `source == "manual_order"` (always email today) ⇒ EMAIL_ENTRY
-      * everything else ⇒ BLOCK
-
-    Callers that have richer trigger context (e.g. a phone-call event
-    that doesn't fit either bucket cleanly) should pass `case_type`
-    explicitly. The default is for back-compat with existing call
-    sites that only know `source`/`channel`.
-    """
-    if source == "manual_order":
-        return "EMAIL_ENTRY"
-    return "BLOCK"
 
 CaseStatus = Literal[
     "OPEN_AGENT_PROCESSING",  # agent is currently working
@@ -216,10 +168,10 @@ CaseStatus = Literal[
 which describes the per-exception lifecycle. The case-level lifecycle
 tracks "what's blocking forward progress on this business order"."""
 
-CaseTier = Literal[1, 2, 3]
+CaseTier = Literal[1, 2, 3, 4]
 """ADR-038 §7.1 — graduated materialisation policy. T1 = stateless,
-T2 = stateful, T3 = stateful + compacted. Forward-only transitions
-(never demote)."""
+T2 = stateful, T3 = stateful + compacted, T4 = case-instance SLA
+(requirements §8.4 bucketing). Forward-only transitions (never demote)."""
 
 
 class OrderCase(BaseModel):
@@ -242,29 +194,35 @@ class OrderCase(BaseModel):
     tenant_id: str
     customer_id: Optional[str] = None
 
-    source: CaseSource
+    origin: Origin
+    """Requirements §3 glossary / §5 model — case intake mechanism.
+    CUSTOMER = customer-initiated (email today, web form / portal
+    later); API = SAP-pushed block. Required at construction; no
+    derivation, no defaulting."""
+
     source_channel: str
-    """Finer-grained channel within `source`. ADR-038 §3.3 allowed
-    values: 'email' | 'phone' | 'fax' for manual_order; 'edi_x12_850'
-    | 'edi_x12_855' | 'portal' | 'api_feed' | 'ftp_csv' | 'ftp_xml'
-    | 'vmi_replenishment' for automated_order. The string is open
-    so new channels don't require a contract bump; routing decisions
-    don't branch on it (recipes handle issues, not channels)."""
+    """Finer-grained channel within ``origin``. Allowed values:
+    'email' | 'phone' | 'fax' | 'csr_keyed' for CUSTOMER; 'edi_x12_850'
+    | 'edi_x12_855' | 'portal' | 'api_feed' | 'ftp_csv' | 'ftp_xml' |
+    'vmi_replenishment' for API. The string is open so new channels
+    don't require a contract bump; routing decisions don't branch on
+    it (recipes handle issues, not channels)."""
 
-    case_type: Optional[CaseType] = None
-    """ADR-041 §1 — Why ASOE materialised this case. Orthogonal to
-    `source`. Never mutates. Defaults to `infer_case_type(source,
-    source_channel)` via `_default_case_type_from_source` below so
-    callers that only know `source`/`channel` don't have to compute
-    it; richer ingestion paths pass it explicitly. See the `CaseType`
-    literal docstring for the full distinction."""
+    supergroup_code: Optional[str] = None
+    """Requirements §6 — case-level Intent Super-Group classification.
+    Foreign key to ``case_supergroup.code``. None until the classifier
+    has run; once set it is the case-level intent (PO direction 24-May:
+    "case intent = intent super group")."""
 
-    email_classification: Optional[EmailClassification] = None
-    """ADR-041 §2 — Per-intake classification. Auto-defaulted to
-    `"OTHER"` when `case_type == "EMAIL_ENTRY"` and the caller didn't
-    classify; forced to `None` when `case_type == "BLOCK"`. The
-    eventual ADR-041 follow-on adds a classification graph node that
-    pre-populates this with the constrained vocabulary value."""
+    predecessor_case_id: Optional[str] = None
+    """Requirements §8.7 — re-block linkage. Set when a previously-resolved
+    API case re-trips on the next latent block; lets reporting join the
+    incident chain."""
+
+    will_miss_rdd: bool = False
+    """Requirements §3.13 — derived flag replacing the (rejected)
+    DELIVERY_DELAY super-group. True when RDD vs current ETA suggests
+    the order will miss its requested delivery date."""
 
     customer_po_number: Optional[str] = None
     sales_order_id: Optional[str] = None
@@ -287,6 +245,11 @@ class OrderCase(BaseModel):
     )
     status: CaseStatus = "OPEN_AGENT_PROCESSING"
     sla_deadline: Optional[str] = None
+    sla_due_at: Optional[str] = None
+    """Requirements §8.4 — case-instance SLA timestamp, ISO 8601.
+    Computed at case creation from default_sla_for_intent × rdd_urgency
+    × customer_tier × shelf_life. ``sla_deadline`` is the legacy
+    case-tier-derived value, retained for displays that still read it."""
 
     tier: CaseTier = 2
     """Default T2 (stateful). Tier-1 stateless events do not
@@ -303,67 +266,49 @@ class OrderCase(BaseModel):
     # `CaseStore.set_pending_override` / `clear_pending_override`.
     pending_override: Optional["CasePendingOverride"] = None
 
-    @model_validator(mode="before")
-    @classmethod
-    def _default_case_type_from_source(cls, data: Any) -> Any:
-        """ADR-041 §4 — back-compat default. Run before field validation
-        so the literal-type narrowing on `case_type` sees a concrete
-        value, and so the after-validator below can rely on
-        `email_classification` defaulting correctly for EMAIL_ENTRY.
 
-        Only acts on dict input (the normal construction path). When the
-        model is being copied / revalidated from an existing instance
-        Pydantic passes that instance through and we leave it alone.
-        """
-        if not isinstance(data, dict):
-            return data
-        if data.get("case_type") is None:
-            data["case_type"] = infer_case_type(
-                data.get("source", ""), data.get("source_channel", ""),
-            )
-        if data["case_type"] == "EMAIL_ENTRY":
-            if data.get("email_classification") is None:
-                data["email_classification"] = "OTHER"
-        elif data["case_type"] == "BLOCK":
-            # Force-strip an accidental email_classification on BLOCK
-            # rather than fail the after-validator with a confusing
-            # message — callers that pass both are conflating axes.
-            data["email_classification"] = None
-        return data
+ClassifierType = Literal["HUMAN", "MODEL", "RULE"]
+"""Requirements §8.3 — who/what produced a classification.
 
-    @model_validator(mode="after")
-    def _check_case_type_invariants(self) -> "OrderCase":
-        """ADR-041 §3 — shape constraints per case_type.
+HUMAN  — CSR, lead, or steward.
+MODEL  — the LLM classifier, gated on confidence ≥ 0.85.
+RULE   — deterministic mapping (Phase 0 SAP-block-code → supergroup
+         lookup, or the SG_BLOCK_UNMAPPED fallback).
+"""
 
-        Two hard invariants today:
-          * EMAIL_ENTRY ⇒ `email_classification` is required (1:1 with
-            the intake — the classification IS the intake's identity).
-          * BLOCK      ⇒ `email_classification` must be None (the field
-            is an EMAIL_ENTRY-only axis).
 
-        The "EMAIL_ENTRY must have source_email_id" and "BLOCK must have
-        sales_order_id" invariants are deferred to the ADR-041 follow-on
-        that audits every ingestion path — enabling them today would
-        regress existing test fixtures and sandbox flows that don't
-        always populate those correlation keys. Tracked in
-        `compliance/audit_bearing_registry.yaml::grandfather_clauses`
-        per CLAUDE.md Verdict-2026-04-22 Pillar 1.
-        """
-        if self.case_type == "EMAIL_ENTRY":
-            if self.email_classification is None:
-                raise ValueError(
-                    "OrderCase: case_type=EMAIL_ENTRY requires "
-                    "email_classification (NEW_ORDER | ORDER_CHANGE | "
-                    "INQUIRY | COMPLAINT | OTHER)"
-                )
-        elif self.case_type == "BLOCK":
-            if self.email_classification is not None:
-                raise ValueError(
-                    "OrderCase: case_type=BLOCK must have "
-                    "email_classification=None — email_classification is "
-                    "an EMAIL_ENTRY-only axis"
-                )
-        return self
+class ClassificationEvent(BaseModel):
+    """Append-only audit-trail row for a (re)classification action.
+
+    Mirrors the ``case_classification_history`` table (V020) so the
+    in-memory and DB-backed stores produce identical shapes. Construction
+    rejects unknown fields (``extra='forbid'``) to keep the audit shape
+    immutable across versions.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    case_id: str
+    # NULL when this row records a parent-level (case) reclassification;
+    # populated for any per-child reclassification.
+    child_case_id: Optional[str] = None
+    supergroup_code: str
+    # NULL when this row records a parent-level supergroup change without
+    # a concurrent leaf classification (e.g. steward triage).
+    intent_code: Optional[str] = None
+    classified_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+    )
+    classified_by: str
+    classifier_type: ClassifierType
+    model_version: Optional[str] = None
+    reason_text: Optional[str] = None
+    source_event_id: Optional[str] = None
+    taxonomy_version: str
+    """Snapshot of the YAML taxonomy version (``case_taxonomy.yaml::version``)
+    at the time of classification. A later mapping change cannot retroactively
+    rewrite "what did we classify under?" for historical reporting."""
 
 
 class CasePendingOverride(BaseModel):
@@ -883,7 +828,7 @@ class GraphState(BaseModel):
     # warehouse snapshots, contract refs, SAP doc numbers) that the
     # operator reviews to authorise an action. Distinct from
     # `resolved_data` (transient recipe input) in both semantics and
-    # lifetime: this bag survives to `ExceptionRecord.enrichment_context`
+    # lifetime: this bag survives to `ChildCase.enrichment_context`
     # and is consumed by the `build_analysis` composition node to
     # populate Layer-2 evidence on the UI. Empty means "not fetched
     # for this resolution path" — the UI must render "Context Not

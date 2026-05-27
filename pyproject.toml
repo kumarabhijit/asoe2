@@ -22,6 +22,11 @@ dependencies = [
   # langchain today but pinned explicitly here so the registry load
   # isn't at the mercy of an unrelated dep change.
   "pyyaml>=6.0",
+  # JSON-schema validation of the case taxonomy seed
+  # (db/seeds/case_taxonomy.yaml). Loader (scripts/seed_taxonomy.py)
+  # validates at import time; without this, a malformed seed reaches
+  # the DB silently. Required (not optional) per code-review finding #9.
+  "jsonschema>=4.17.0",
 ]
 
 [project.optional-dependencies]

@@ -2,15 +2,15 @@
 
 Locks the case primitive's contracts:
   * Pydantic OrderCase model accepts valid inputs and rejects
-    out-of-vocabulary source / status / tier values.
+    out-of-vocabulary origin / status / tier values.
   * CaseStore.lookup_or_create resolves correlation keys per the
     SO → PO → EDI txn → email priority (ADR-038 §6.2).
   * Multi-PO email opens N cases.
-  * Email matching pre-existing Automated case attaches (no new
-    case opened); first event's source/source_channel preserved.
+  * Email matching pre-existing API case attaches (no new
+    case opened); first event's origin / source_channel preserved.
   * Tenant isolation — two tenants with the same correlation key
     do NOT share a case.
-  * ExceptionRecord.parent_case_id is wired and defaults to None
+  * ChildCase.parent_case_id is wired and defaults to None
     for Tier-1 stateless records.
 """
 
@@ -19,7 +19,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from api.store import CaseStore, ExceptionRecord, case_store
+from api.store import CaseStore, ChildCase, case_store
 from contracts.models import OrderCase
 
 
@@ -40,7 +40,7 @@ class TestOrderCaseModel:
     def test_minimal_valid_case(self):
         case = OrderCase(
             tenant_id="t1",
-            source="manual_order",
+            origin="CUSTOMER",
             source_channel="email",
         )
         assert case.case_id  # auto-generated UUID
@@ -59,7 +59,7 @@ class TestOrderCaseModel:
         store = CaseStore()
         case = OrderCase(
             tenant_id="t1",
-            source="manual_order",
+            origin="CUSTOMER",
             source_channel="email",
         )
         store._cases[case.case_id] = case  # pre-seed
@@ -78,7 +78,7 @@ class TestOrderCaseModel:
         store = CaseStore()
         case = OrderCase(
             tenant_id="t1",
-            source="manual_order",
+            origin="CUSTOMER",
             source_channel="email",
         )
         store._cases[case.case_id] = case
@@ -90,16 +90,16 @@ class TestOrderCaseModel:
         with pytest.raises(ValidationError):
             OrderCase(
                 tenant_id="t1",
-                source="manual_order",
+                origin="CUSTOMER",
                 source_channel="email",
                 unknown_field="x",  # type: ignore[call-arg]
             )
 
-    def test_invalid_source_rejected(self):
+    def test_invalid_origin_rejected(self):
         with pytest.raises(ValidationError):
             OrderCase(
                 tenant_id="t1",
-                source="not_a_source",  # type: ignore[arg-type]
+                origin="not_an_origin",  # type: ignore[arg-type]
                 source_channel="email",
             )
 
@@ -107,7 +107,7 @@ class TestOrderCaseModel:
         with pytest.raises(ValidationError):
             OrderCase(
                 tenant_id="t1",
-                source="manual_order",
+                origin="CUSTOMER",
                 source_channel="email",
                 status="WHATEVER",  # type: ignore[arg-type]
             )
@@ -116,9 +116,9 @@ class TestOrderCaseModel:
         with pytest.raises(ValidationError):
             OrderCase(
                 tenant_id="t1",
-                source="manual_order",
+                origin="CUSTOMER",
                 source_channel="email",
-                tier=4,  # type: ignore[arg-type]
+                tier=5,  # type: ignore[arg-type]
             )
 
     def test_correlation_keys_optional(self):
@@ -126,7 +126,7 @@ class TestOrderCaseModel:
         # external identifiers materialise — uncommon but valid).
         case = OrderCase(
             tenant_id="t1",
-            source="manual_order",
+            origin="CUSTOMER",
             source_channel="email",
         )
         assert case.customer_po_number is None
@@ -144,7 +144,7 @@ class TestCaseStoreLookupOrCreate:
     def test_first_event_opens_a_case(self):
         case, opened_now = case_store.lookup_or_create(
             tenant_id="t1",
-            source="manual_order",
+            origin="CUSTOMER",
             source_channel="email",
             customer_po_number="PO-1234",
             source_email_id="msg-1",
@@ -156,7 +156,7 @@ class TestCaseStoreLookupOrCreate:
     def test_second_event_with_same_po_attaches_to_existing_case(self):
         case_a, opened_a = case_store.lookup_or_create(
             tenant_id="t1",
-            source="manual_order",
+            origin="CUSTOMER",
             source_channel="email",
             customer_po_number="PO-1234",
             source_email_id="msg-1",
@@ -164,7 +164,7 @@ class TestCaseStoreLookupOrCreate:
         # Second event from the same buyer — different email, same PO.
         case_b, opened_b = case_store.lookup_or_create(
             tenant_id="t1",
-            source="manual_order",
+            origin="CUSTOMER",
             source_channel="email",
             customer_po_number="PO-1234",
             source_email_id="msg-2",  # different email id
@@ -176,14 +176,14 @@ class TestCaseStoreLookupOrCreate:
     def test_second_event_with_same_so_id_attaches(self):
         case_a, _ = case_store.lookup_or_create(
             tenant_id="t1",
-            source="automated_order",
+            origin="API",
             source_channel="edi_x12_850",
             customer_po_number="PO-1234",
             sales_order_id="SO-9988",
         )
         case_b, opened_b = case_store.lookup_or_create(
             tenant_id="t1",
-            source="automated_order",
+            origin="API",
             source_channel="edi_x12_855",
             sales_order_id="SO-9988",  # SO match
         )
@@ -195,14 +195,14 @@ class TestCaseStoreLookupOrCreate:
         # Case A: opened on PO-A
         case_a, _ = case_store.lookup_or_create(
             tenant_id="t1",
-            source="manual_order",
+            origin="CUSTOMER",
             source_channel="email",
             customer_po_number="PO-A",
         )
         # Case B: opened on SO-A
         case_b, _ = case_store.lookup_or_create(
             tenant_id="t1",
-            source="automated_order",
+            origin="API",
             source_channel="edi_x12_850",
             sales_order_id="SO-A",
         )
@@ -212,7 +212,7 @@ class TestCaseStoreLookupOrCreate:
         # Per ADR-038 §6.2 priority, SO id wins → resolves to case_b.
         resolved, opened_new = case_store.lookup_or_create(
             tenant_id="t1",
-            source="automated_order",
+            origin="API",
             source_channel="edi_x12_855",
             customer_po_number="PO-A",
             sales_order_id="SO-A",
@@ -226,36 +226,36 @@ class TestCaseStoreLookupOrCreate:
         # Phase 1: EDI 850 opens an Automated Order case on PO-1234.
         edi_case, _ = case_store.lookup_or_create(
             tenant_id="t1",
-            source="automated_order",
+            origin="API",
             source_channel="edi_x12_850",
             customer_po_number="PO-1234",
         )
         # Phase 2: customer email arrives referencing the same PO.
         email_case, opened = case_store.lookup_or_create(
             tenant_id="t1",
-            source="manual_order",  # would-be source if new case opened
+            origin="CUSTOMER",  # would-be source if new case opened
             source_channel="email",
             customer_po_number="PO-1234",
             source_email_id="msg-1",
         )
-        # Same case as the EDI run; source stays automated_order
-        # (immutable per ADR-038 §3.1; source_channel could become a
+        # Same case as the EDI run; origin stays API (immutable; an
+        # earlier intake wins the origin/source_channel pair; the field
         # list in a future commit but the V1 model keeps it scalar).
         assert opened is False
         assert email_case.case_id == edi_case.case_id
-        assert email_case.source == "automated_order"
+        assert email_case.origin == "API"
 
     def test_tenant_isolation(self):
         """Two tenants with the same correlation key do NOT share a case."""
         case_a, _ = case_store.lookup_or_create(
             tenant_id="t1",
-            source="manual_order",
+            origin="CUSTOMER",
             source_channel="email",
             customer_po_number="PO-1234",
         )
         case_b, opened_b = case_store.lookup_or_create(
             tenant_id="t2",  # different tenant
-            source="manual_order",
+            origin="CUSTOMER",
             source_channel="email",
             customer_po_number="PO-1234",
         )
@@ -267,7 +267,7 @@ class TestCaseStoreLookupOrCreate:
         invocations, one per PO. Each opens its own case."""
         case_a, opened_a = case_store.lookup_or_create(
             tenant_id="t1",
-            source="manual_order",
+            origin="CUSTOMER",
             source_channel="email",
             customer_po_number="PO-A",
             source_email_id="msg-1",
@@ -279,7 +279,7 @@ class TestCaseStoreLookupOrCreate:
         # N cases by suppressing the email correlation for all but one.
         case_b, opened_b = case_store.lookup_or_create(
             tenant_id="t1",
-            source="manual_order",
+            origin="CUSTOMER",
             source_channel="email",
             customer_po_number="PO-B",
         )
@@ -293,7 +293,7 @@ class TestCaseStoreLookupOrCreate:
         id joins the case opened on the PO number)."""
         case_a, _ = case_store.lookup_or_create(
             tenant_id="t1",
-            source="automated_order",
+            origin="API",
             source_channel="edi_x12_850",
             customer_po_number="PO-1234",
         )
@@ -301,7 +301,7 @@ class TestCaseStoreLookupOrCreate:
         # the SO id should now also resolve to the same case.
         case_b, opened = case_store.lookup_or_create(
             tenant_id="t1",
-            source="automated_order",
+            origin="API",
             source_channel="edi_x12_850",
             customer_po_number="PO-1234",
             sales_order_id="SO-9988",
@@ -312,7 +312,7 @@ class TestCaseStoreLookupOrCreate:
         # Subsequent event keyed only on SO must resolve to the same case.
         case_c, opened_c = case_store.lookup_or_create(
             tenant_id="t1",
-            source="automated_order",
+            origin="API",
             source_channel="edi_x12_855",
             sales_order_id="SO-9988",
         )
@@ -332,7 +332,7 @@ class TestCaseStoreCRUD:
     def test_get_returns_existing_case(self):
         case, _ = case_store.lookup_or_create(
             tenant_id="t1",
-            source="manual_order",
+            origin="CUSTOMER",
             source_channel="email",
             customer_po_number="PO-1234",
         )
@@ -343,7 +343,7 @@ class TestCaseStoreCRUD:
     def test_update_modifies_fields(self):
         case, _ = case_store.lookup_or_create(
             tenant_id="t1",
-            source="manual_order",
+            origin="CUSTOMER",
             source_channel="email",
             customer_po_number="PO-1234",
         )
@@ -360,13 +360,13 @@ class TestCaseStoreCRUD:
     def test_list_by_tenant_filters(self):
         case_store.lookup_or_create(
             tenant_id="t1",
-            source="manual_order",
+            origin="CUSTOMER",
             source_channel="email",
             customer_po_number="PO-1",
         )
         case_store.lookup_or_create(
             tenant_id="t2",
-            source="manual_order",
+            origin="CUSTOMER",
             source_channel="email",
             customer_po_number="PO-2",
         )
@@ -379,7 +379,7 @@ class TestCaseStoreCRUD:
     def test_register_correlation_attaches_new_key(self):
         case, _ = case_store.lookup_or_create(
             tenant_id="t1",
-            source="manual_order",
+            origin="CUSTOMER",
             source_channel="email",
             source_email_id="msg-1",
         )
@@ -390,7 +390,7 @@ class TestCaseStoreCRUD:
         # Subsequent SO-keyed event resolves to the same case.
         resolved, opened = case_store.lookup_or_create(
             tenant_id="t1",
-            source="automated_order",
+            origin="API",
             source_channel="edi_x12_855",
             sales_order_id="SO-9988",
         )
@@ -399,15 +399,15 @@ class TestCaseStoreCRUD:
 
 
 # ---------------------------------------------------------------------------
-# ExceptionRecord.parent_case_id wiring
+# ChildCase.parent_case_id wiring
 # ---------------------------------------------------------------------------
 
 
-class TestExceptionRecordParentCaseId:
+class TestChildCaseParentCaseId:
     def test_default_is_none_for_tier_1(self):
         """Tier-1 stateless records (clean Automated) carry None
         parent_case_id per ADR-038 §7.2."""
-        record = ExceptionRecord(
+        record = ChildCase(
             tenant_id="t1",
             order_id="SO-1",
             event_type="EDI_850_PRICE_MISMATCH",
@@ -418,11 +418,11 @@ class TestExceptionRecordParentCaseId:
     def test_parent_case_id_wired_from_constructor(self):
         case, _ = case_store.lookup_or_create(
             tenant_id="t1",
-            source="manual_order",
+            origin="CUSTOMER",
             source_channel="email",
             customer_po_number="PO-1234",
         )
-        record = ExceptionRecord(
+        record = ChildCase(
             tenant_id="t1",
             order_id="PO-1234",
             event_type="EMAIL_ORDER_ENTRY_REQUEST",

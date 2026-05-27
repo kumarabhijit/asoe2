@@ -1,12 +1,16 @@
-"""Exception store for the ASOE API.
+"""Child-case store for the ASOE API.
 
-Provides two backends:
+Provides two backends over the ``exceptions`` table (V001):
   - ``ExceptionStore`` — in-memory (default when DATABASE_URL is unset)
   - ``DatabaseBackedStore`` — SQLite or PostgreSQL via ``db/repository.py``
 
-The module-level ``exception_store`` singleton is created at import time
-based on the ``DATABASE_URL`` environment variable. API routes import and
-use this singleton without knowing which backend is active.
+The store classes and the module-level ``exception_store`` singleton are
+named after the underlying DB table (``exceptions``, V001). The row
+class is ``ChildCase`` per the Case & Intent Super-Group requirements
+§3 glossary — the data is a child-of-OrderCase, regardless of where it
+lives on disk. The table name is retained for migration safety.
+
+API routes import the singleton and don't know which backend is active.
 """
 
 from __future__ import annotations
@@ -20,11 +24,33 @@ from uuid import uuid4
 logger = logging.getLogger("asoe.api.store")
 
 from api.schemas import ExceptionDetailResponse, ExceptionSummary
-from contracts.models import STATUS_TO_LIFECYCLE
+from contracts._generated.taxonomy_constants import (
+    SG_NEEDS_TRIAGE,
+    TAXONOMY_VERSION,
+)
+from contracts.models import STATUS_TO_LIFECYCLE, ClassificationEvent
 
 
-class ExceptionRecord:
-    """In-memory representation of a persisted exception."""
+# Statuses that count as "case closed" for the NEEDS_TRIAGE forcing
+# function (requirements §8.2). Today the spec names only "RESOLVED"
+# — declared as a set so a future closed-like status (e.g. RESOLVED_
+# WITH_OVERRIDE) is one place to add it.
+_RESOLVED_LIKE: frozenset[str] = frozenset({"RESOLVED"})
+
+
+class NeedsTriageCloseBlocked(Exception):
+    """Raised when a case in ``SG_NEEDS_TRIAGE`` is asked to RESOLVE.
+
+    Requirements §8.2 forcing function #1 — hard-block at close.
+    Inherits from ``Exception`` directly (not ``ValueError``): the
+    failure is structural, not a value-validation error, and callers
+    must handle it explicitly rather than catching a broader
+    ValueError net (CLAUDE.md §5 — failures are explicit).
+    """
+
+
+class ChildCase:
+    """In-memory representation of a child case (DB table: ``exceptions``)."""
 
     def __init__(
         self,
@@ -47,6 +73,13 @@ class ExceptionRecord:
         enrichment_context: Optional[Dict[str, Any]] = None,
         parent_case_id: Optional[str] = None,
         sap_block_code: Optional[str] = None,
+        # Case & Intent Super-Group fields (requirements §5).
+        # Optional carriers in Phase 2; populated by Phase 3 classifier wiring.
+        supergroup_code: Optional[str] = None,
+        intent_code: Optional[str] = None,
+        divergence_reason: Optional[str] = None,
+        sap_block_field: Optional[str] = None,
+        scope: Optional[str] = None,
     ):
         self.id = str(uuid4())
         self.tenant_id = tenant_id
@@ -70,13 +103,23 @@ class ExceptionRecord:
         # record once Phase H.3 wires lazy materialisation in
         # orchestration/nodes.py::build_analysis.
         self.parent_case_id: Optional[str] = parent_case_id
-        # ADR-041 §2 — raw SAP block reason code on records whose parent
-        # case is `case_type=BLOCK`. Distinct from `intent` (which is the
-        # classified business intent). Both coexist: `intent` is the
-        # vocabulary recipes dispatch on; `sap_block_code` is the source
+        # Requirements §5 — raw SAP block reason code on records whose
+        # parent case is ``origin='API'``. Distinct from ``intent_code``
+        # (the classified leaf intent): ``intent_code`` is the routing
+        # key recipes dispatch on; ``sap_block_code`` is the source
         # signal for audit ("SAP reported this exact code"). None on
-        # EMAIL_ENTRY-parented records.
+        # CUSTOMER-origin records.
         self.sap_block_code: Optional[str] = sap_block_code
+        # Case & Intent Super-Group fields (requirements §5).
+        # `supergroup_code` mirrors the parent OrderCase classification
+        # (strict inheritance per §8.1). `intent_code` is the leaf
+        # routing key from the case_intent lookup. Both nullable in
+        # Phase 2 until the classifier wiring lands in Phase 3.
+        self.supergroup_code: Optional[str] = supergroup_code
+        self.intent_code: Optional[str] = intent_code
+        self.divergence_reason: Optional[str] = divergence_reason
+        self.sap_block_field: Optional[str] = sap_block_field
+        self.scope: Optional[str] = scope
         # Original OrderEvent payload, captured at create time so a later
         # re-analysis can faithfully replay through run_graph(). None for
         # records created before the feature shipped.
@@ -114,6 +157,8 @@ class ExceptionRecord:
             account_id=self.account_id,
             account_name=self.account_name,
             parent_case_id=self.parent_case_id,
+            supergroup_code=self.supergroup_code,
+            intent_code=self.intent_code,
             created_at=self.created_at,
             updated_at=self.updated_at,
         )
@@ -133,6 +178,11 @@ class ExceptionRecord:
             account_name=self.account_name,
             trace_id=self.trace_id,
             parent_case_id=self.parent_case_id,
+            supergroup_code=self.supergroup_code,
+            intent_code=self.intent_code,
+            divergence_reason=self.divergence_reason,
+            sap_block_field=self.sap_block_field,
+            scope=self.scope,
             resolution_data=self.resolution_data,
             resolved_by=self.resolved_by,
             resolved_action=self.resolved_action,
@@ -147,7 +197,7 @@ class ExceptionStore:
     """Thread-safe in-memory exception store."""
 
     def __init__(self) -> None:
-        self._records: Dict[str, ExceptionRecord] = {}
+        self._records: Dict[str, ChildCase] = {}
         self._traces: Dict[str, Dict[str, Any]] = {}  # exception_id → trace data
         self._lock = threading.Lock()
 
@@ -171,9 +221,15 @@ class ExceptionStore:
         original_event: Optional[Dict[str, Any]] = None,
         enrichment_context: Optional[Dict[str, Any]] = None,
         parent_case_id: Optional[str] = None,
-    ) -> ExceptionRecord:
+        # V018 — symmetric with DatabaseBackedStore.create (finding #4).
+        supergroup_code: Optional[str] = None,
+        intent_code: Optional[str] = None,
+        divergence_reason: Optional[str] = None,
+        sap_block_field: Optional[str] = None,
+        scope: Optional[str] = None,
+    ) -> ChildCase:
         lifecycle = STATUS_TO_LIFECYCLE.get(final_status or "", "INGESTED")
-        record = ExceptionRecord(
+        record = ChildCase(
             tenant_id=tenant_id,
             order_id=order_id,
             event_type=event_type,
@@ -187,12 +243,17 @@ class ExceptionStore:
             original_event=original_event,
             enrichment_context=enrichment_context,
             parent_case_id=parent_case_id,
+            supergroup_code=supergroup_code,
+            intent_code=intent_code,
+            divergence_reason=divergence_reason,
+            sap_block_field=sap_block_field,
+            scope=scope,
         )
         with self._lock:
             self._records[record.id] = record
         return record
 
-    def get(self, exception_id: str, tenant_id: str) -> Optional[ExceptionRecord]:
+    def get(self, exception_id: str, tenant_id: str) -> Optional[ChildCase]:
         with self._lock:
             record = self._records.get(exception_id)
         if record and record.tenant_id == tenant_id:
@@ -206,7 +267,7 @@ class ExceptionStore:
         intent: Optional[str] = None,
         limit: int = 50,
         cursor: Optional[str] = None,
-    ) -> tuple[List[ExceptionRecord], Optional[str], bool]:
+    ) -> tuple[List[ChildCase], Optional[str], bool]:
         with self._lock:
             records = [
                 r for r in self._records.values()
@@ -236,7 +297,7 @@ class ExceptionStore:
 
     def list_by_case(
         self, tenant_id: str, case_id: str,
-    ) -> List[ExceptionRecord]:
+    ) -> List[ChildCase]:
         """ADR-038 Phase H.6 — children-of-case lookup for the
         ``/api/v1/cases/*`` partner-scope helper. The case itself
         carries no ``account_id``; scope is derived from its
@@ -247,15 +308,81 @@ class ExceptionStore:
                 if r.tenant_id == tenant_id and r.parent_case_id == case_id
             ]
 
-    def update(self, exception_id: str, tenant_id: str, **fields) -> Optional[ExceptionRecord]:
+    def update(
+        self,
+        exception_id: str,
+        tenant_id: str,
+        *,
+        classified_by: Optional[str] = None,
+        classifier_type: Optional[str] = None,
+        model_version: Optional[str] = None,
+        reason_text: Optional[str] = None,
+        source_event_id: Optional[str] = None,
+        **fields,
+    ) -> Optional[ChildCase]:
+        """Apply field updates. Audit: if ``intent_code`` or
+        ``supergroup_code`` is among the changed fields, the caller
+        must supply ``classified_by`` + ``classifier_type`` and we
+        append a ClassificationEvent to the parent case's history
+        (requirements §8.6, criterion #9). Updates that don't touch
+        those fields stay simple — no audit kwargs needed.
+        """
         with self._lock:
             record = self._records.get(exception_id)
             if not record or record.tenant_id != tenant_id:
                 return None
+            sg_changed = (
+                "supergroup_code" in fields
+                and fields["supergroup_code"] != record.supergroup_code
+            )
+            intent_changed = (
+                "intent_code" in fields
+                and fields["intent_code"] != record.intent_code
+            )
+            # Pre-mutation validation: reject reclassify-to-NULL on
+            # supergroup_code (unclassifying is not a meaningful
+            # transition; the NULL state is "never classified", set
+            # only at create time). Raise BEFORE mutating so a failed
+            # call leaves the record untouched (review finding #3).
+            if sg_changed and fields.get("supergroup_code") is None:
+                raise ValueError(
+                    f"ExceptionStore.update(exception_id={exception_id}): "
+                    "cannot reclassify supergroup_code to NULL "
+                    "(unclassifying is not a valid transition; "
+                    "requirements §8.6)."
+                )
+            if (sg_changed or intent_changed):
+                if not classified_by or not classifier_type:
+                    raise ValueError(
+                        f"ExceptionStore.update(exception_id={exception_id}) "
+                        "changes supergroup_code or intent_code but did not "
+                        "supply classified_by + classifier_type; every "
+                        "reclassification must be attributable "
+                        "(requirements §8.6)."
+                    )
             for key, value in fields.items():
                 if hasattr(record, key):
                     setattr(record, key, value)
             record.updated_at = datetime.now(timezone.utc).isoformat()
+            if (sg_changed or intent_changed) and record.parent_case_id:
+                # Append to the parent case's history. Resolved values
+                # come from the record post-update so reclassification
+                # to NULL is captured correctly.
+                # classifier_by / classifier_type guaranteed non-None
+                # by the guard above.
+                assert classified_by is not None
+                assert classifier_type is not None
+                case_store._record_for_child(
+                    case_id=record.parent_case_id,
+                    child_case_id=exception_id,
+                    supergroup_code=record.supergroup_code,
+                    intent_code=record.intent_code,
+                    classified_by=classified_by,
+                    classifier_type=classifier_type,
+                    model_version=model_version,
+                    reason_text=reason_text,
+                    source_event_id=source_event_id,
+                )
             return record
 
     def store_trace(self, exception_id: str, trace_data: Dict[str, Any]) -> None:
@@ -271,7 +398,7 @@ class ExceptionStore:
         exception_id: str,
         tenant_id: str,
         entry: Dict[str, Any],
-    ) -> Optional[ExceptionRecord]:
+    ) -> Optional[ChildCase]:
         """Append an immutable entry to the reanalysis_history list.
 
         Entries are append-only — callers must not mutate existing entries.
@@ -456,12 +583,17 @@ class DatabaseBackedStore:
 
     def __init__(self, database_url: str) -> None:
         from db.connection import create_adapter
-        from db.repository import ExceptionRepository, TraceRepository
+        from db.repository import (
+            ClassificationHistoryRepository,
+            ExceptionRepository,
+            TraceRepository,
+        )
 
         self._adapter = create_adapter(database_url)
         self._adapter.apply_schema()
         self._exceptions = ExceptionRepository(self._adapter)
         self._traces = TraceRepository(self._adapter)
+        self._classification_history = ClassificationHistoryRepository(self._adapter)
 
     def clear(self) -> None:
         # For testing: delete all records
@@ -483,7 +615,17 @@ class DatabaseBackedStore:
         original_event: Optional[Dict[str, Any]] = None,
         enrichment_context: Optional[Dict[str, Any]] = None,
         parent_case_id: Optional[str] = None,
-    ) -> ExceptionRecord:
+        # V018 — Case & Intent Super-Group fields (requirements §5).
+        # Forwarded into the repository so DB-backed writes persist them
+        # from day one (code-review finding #4). Phase 3 classifier
+        # wiring starts setting them; pre-Phase-3 callers leave them
+        # None and the columns stay NULL on the row.
+        supergroup_code: Optional[str] = None,
+        intent_code: Optional[str] = None,
+        divergence_reason: Optional[str] = None,
+        sap_block_field: Optional[str] = None,
+        scope: Optional[str] = None,
+    ) -> ChildCase:
         # Verdict Pillar 1: `enrichment_context` is persisted to a
         # dedicated JSONB column (V004). The repository serialises
         # to JSONB (Postgres) / JSON TEXT (SQLite) alongside
@@ -506,12 +648,17 @@ class DatabaseBackedStore:
             resolution_data=resolution_data,
             original_event=original_event,
             enrichment_context=enrichment_context,
+            supergroup_code=supergroup_code,
+            intent_code=intent_code,
+            divergence_reason=divergence_reason,
+            sap_block_field=sap_block_field,
+            scope=scope,
         )
         record = self._dict_to_record(row)
         record.parent_case_id = parent_case_id
         return record
 
-    def get(self, exception_id: str, tenant_id: str) -> Optional[ExceptionRecord]:
+    def get(self, exception_id: str, tenant_id: str) -> Optional[ChildCase]:
         row = self._exceptions.get(exception_id, tenant_id)
         if not row:
             return None
@@ -524,7 +671,7 @@ class DatabaseBackedStore:
         intent: Optional[str] = None,
         limit: int = 50,
         cursor: Optional[str] = None,
-    ) -> tuple[List[ExceptionRecord], Optional[str], bool]:
+    ) -> tuple[List[ChildCase], Optional[str], bool]:
         rows, next_cursor, has_more = self._exceptions.list(
             tenant_id=tenant_id, status=status, intent=intent,
             limit=limit, cursor=cursor,
@@ -534,7 +681,7 @@ class DatabaseBackedStore:
 
     def list_by_case(
         self, tenant_id: str, case_id: str,
-    ) -> List[ExceptionRecord]:
+    ) -> List[ChildCase]:
         """Return all child exception records linked to a case.
 
         ADR-038 Phase H.6 — used by `/api/v1/cases/*` to derive
@@ -547,7 +694,84 @@ class DatabaseBackedStore:
         records = [self._dict_to_record(r) for r in rows]
         return [r for r in records if r.parent_case_id == case_id]
 
-    def update(self, exception_id: str, tenant_id: str, **fields) -> Optional[ExceptionRecord]:
+    def update(
+        self,
+        exception_id: str,
+        tenant_id: str,
+        *,
+        classified_by: Optional[str] = None,
+        classifier_type: Optional[str] = None,
+        model_version: Optional[str] = None,
+        reason_text: Optional[str] = None,
+        source_event_id: Optional[str] = None,
+        **fields,
+    ) -> Optional[ChildCase]:
+        """Mirrors ``ExceptionStore.update`` audit semantics — when
+        ``intent_code`` or ``supergroup_code`` is among the changed
+        fields, classified_by + classifier_type are required and a
+        ClassificationEvent lands on the parent case's history
+        (requirements §8.6)."""
+        current = self._exceptions.get(exception_id, tenant_id)
+        if not current:
+            return None
+        sg_changed = (
+            "supergroup_code" in fields
+            and fields["supergroup_code"] != current.get("supergroup_code")
+        )
+        intent_changed = (
+            "intent_code" in fields
+            and fields["intent_code"] != current.get("intent_code")
+        )
+        # Pre-mutation validation: reject reclassify-to-NULL on
+        # supergroup_code (mirrors ExceptionStore.update).
+        if sg_changed and fields.get("supergroup_code") is None:
+            raise ValueError(
+                f"DatabaseBackedStore.update(exception_id={exception_id}): "
+                "cannot reclassify supergroup_code to NULL "
+                "(unclassifying is not a valid transition; "
+                "requirements §8.6)."
+            )
+        if (sg_changed or intent_changed):
+            if not classified_by or not classifier_type:
+                raise ValueError(
+                    f"DatabaseBackedStore.update(exception_id={exception_id}) "
+                    "changes supergroup_code or intent_code but did not "
+                    "supply classified_by + classifier_type; every "
+                    "reclassification must be attributable "
+                    "(requirements §8.6)."
+                )
+        if (sg_changed or intent_changed):
+            # Atomic UPDATE + INSERT in a single cursor / transaction
+            # (review finding #2). If the audit-row INSERT fails (FK,
+            # CHECK, taxonomy-version empty, append-only trigger), the
+            # adapter rolls back the row mutation too — no partial-state.
+            assert classified_by is not None
+            assert classifier_type is not None
+            with self._adapter.cursor(tenant_id) as cur:
+                row = self._exceptions.update(
+                    exception_id, tenant_id, _cursor=cur, **fields,
+                )
+                if not row:
+                    return None
+                record = self._dict_to_record(row)
+                if record.parent_case_id:
+                    self._classification_history.create(
+                        case_id=record.parent_case_id,
+                        child_case_id=exception_id,
+                        supergroup_code=record.supergroup_code,
+                        intent_code=record.intent_code,
+                        classified_by=classified_by,
+                        classifier_type=classifier_type,
+                        model_version=model_version,
+                        reason_text=reason_text,
+                        source_event_id=source_event_id,
+                        taxonomy_version=TAXONOMY_VERSION,
+                        tenant_id=tenant_id,
+                        _cursor=cur,
+                    )
+            return record
+        # Non-classification update: no audit hook needed; use the
+        # repository's own cursor.
         row = self._exceptions.update(exception_id, tenant_id, **fields)
         if not row:
             return None
@@ -558,7 +782,7 @@ class DatabaseBackedStore:
         exception_id: str,
         tenant_id: str,
         entry: Dict[str, Any],
-    ) -> Optional[ExceptionRecord]:
+    ) -> Optional[ChildCase]:
         """Append an entry to the reanalysis_history JSON column."""
         current = self._exceptions.get(exception_id, tenant_id)
         if not current:
@@ -669,8 +893,8 @@ class DatabaseBackedStore:
         except Exception:
             return []
 
-    def _dict_to_record(self, d: Dict[str, Any]) -> ExceptionRecord:
-        record = ExceptionRecord.__new__(ExceptionRecord)
+    def _dict_to_record(self, d: Dict[str, Any]) -> ChildCase:
+        record = ChildCase.__new__(ChildCase)
         record.id = d["id"]
         record.tenant_id = d["tenant_id"]
         record.order_id = d["order_id"]
@@ -693,6 +917,14 @@ class DatabaseBackedStore:
         record.reanalysis_history = d.get("reanalysis_history") or []
         record.created_at = d.get("created_at", "")
         record.updated_at = d.get("updated_at", "")
+        # V009 + V018 columns. Optional in Phase 2 (legacy rows are NULL).
+        record.parent_case_id = d.get("parent_case_id")
+        record.sap_block_code = d.get("sap_block_code")
+        record.supergroup_code = d.get("supergroup_code")
+        record.intent_code = d.get("intent_code")
+        record.divergence_reason = d.get("divergence_reason")
+        record.sap_block_field = d.get("sap_block_field")
+        record.scope = d.get("scope")
         return record
 
 
@@ -738,6 +970,12 @@ class CaseStore:
         self._cases: Dict[str, "OrderCase"] = {}
         # Correlation index: {(tenant_id, key_type, key_value): case_id}
         self._correlation: Dict[tuple, str] = {}
+        # Append-only classification audit per case_id. Mirrors the
+        # ``case_classification_history`` table (V020). Requirements §8.6
+        # — every classification event lands here as a new row; we never
+        # mutate or remove. The DB-backed store will read from the V020
+        # table; the in-memory store keeps this list authoritative.
+        self._history: Dict[str, List["ClassificationEvent"]] = {}
         self._lock = threading.RLock()
 
     # ----- correlation lookup --------------------------------------
@@ -776,7 +1014,7 @@ class CaseStore:
         self,
         tenant_id: str,
         *,
-        source: str,
+        origin: str,
         source_channel: str,
         customer_id: Optional[str] = None,
         customer_po_number: Optional[str] = None,
@@ -785,8 +1023,10 @@ class CaseStore:
         source_email_id: Optional[str] = None,
         sla_deadline: Optional[str] = None,
         bundle_version_at_open: Optional[str] = None,
-        case_type: Optional[str] = None,
-        email_classification: Optional[str] = None,
+        supergroup_code: Optional[str] = None,
+        intent_code: Optional[str] = None,
+        classified_by: str = "system:case_intake",
+        classifier_type: str = "RULE",
     ) -> tuple["OrderCase", bool]:
         """Resolve an inbound event to a case (existing or new).
 
@@ -794,6 +1034,14 @@ class CaseStore:
         a new case was opened on this call. ADR-038 §6.2 multi-PO note:
         callers split a multi-PO email into N invocations of this
         method (one per PO); each opens or attaches to its own case.
+
+        Audit trail (requirements §8.6, criterion #9): when a new case
+        is opened with ``supergroup_code`` set, exactly one
+        ``ClassificationEvent`` row is appended to ``_history``. The
+        intake path defaults are ``classifier_type='RULE'``,
+        ``classified_by='system:case_intake'`` — overridable by the
+        caller when the intake path itself ran a classifier (MODEL) or
+        a human (HUMAN) chose the value.
         """
         existing = self.find_by_correlation(
             tenant_id,
@@ -805,10 +1053,10 @@ class CaseStore:
         with self._lock:
             if existing is not None:
                 # Enrich correlation keys with any new identifiers this
-                # event carried. The case `source` is immutable per ADR-038
-                # §3.1; `source_channel` is the existing one (don't
-                # overwrite — first event wins for the source/channel
-                # pair). New correlation keys join the case.
+                # event carried. The case ``origin`` is immutable;
+                # ``source_channel`` is the existing one (don't overwrite
+                # — first event wins for the origin/channel pair). New
+                # correlation keys join the case.
                 self._register_correlations_locked(
                     tenant_id, existing.case_id,
                     sales_order_id=sales_order_id,
@@ -818,28 +1066,13 @@ class CaseStore:
                 )
                 return existing, False
 
-            # Open a new case.
-            from contracts.models import OrderCase, infer_case_type  # local to avoid cycles
-            resolved_case_type = case_type or infer_case_type(source, source_channel)
-            # EMAIL_ENTRY requires email_classification (1:1 with intake);
-            # default to OTHER when caller hasn't classified yet. Once the
-            # email-classification graph node ships (ADR-041 follow-on), the
-            # caller will pass the constrained value explicitly.
-            resolved_email_classification: Optional[str] = email_classification
-            if (
-                resolved_case_type == "EMAIL_ENTRY"
-                and resolved_email_classification is None
-            ):
-                resolved_email_classification = "OTHER"
-            elif resolved_case_type == "BLOCK":
-                resolved_email_classification = None
+            from contracts.models import OrderCase  # local to avoid cycles
             case = OrderCase(
                 tenant_id=tenant_id,
                 customer_id=customer_id,
-                source=source,  # type: ignore[arg-type]
+                origin=origin,  # type: ignore[arg-type]
                 source_channel=source_channel,
-                case_type=resolved_case_type,  # type: ignore[arg-type]
-                email_classification=resolved_email_classification,  # type: ignore[arg-type]
+                supergroup_code=supergroup_code,
                 customer_po_number=customer_po_number,
                 sales_order_id=sales_order_id,
                 edi_transaction_id=edi_transaction_id,
@@ -855,6 +1088,19 @@ class CaseStore:
                 edi_transaction_id=edi_transaction_id,
                 source_email_id=source_email_id,
             )
+            # Audit trail: record the intake classification so criterion
+            # #9 is satisfied at the data-store boundary. No-op when the
+            # case opened without a supergroup_code (Phase 5 will fill
+            # those in via a later record_classification call once the
+            # classifier wires through).
+            if supergroup_code is not None:
+                self._record_classification_locked(
+                    case_id=case.case_id,
+                    supergroup_code=supergroup_code,
+                    intent_code=intent_code,
+                    classified_by=classified_by,
+                    classifier_type=classifier_type,
+                )
             return case, True
 
     def _register_correlations_locked(
@@ -897,7 +1143,18 @@ class CaseStore:
     def get(self, case_id: str) -> Optional["OrderCase"]:
         return self._cases.get(case_id)
 
-    def update(self, case_id: str, **fields: Any) -> "OrderCase":
+    def update(
+        self,
+        case_id: str,
+        *,
+        classified_by: Optional[str] = None,
+        classifier_type: Optional[str] = None,
+        intent_code_classification: Optional[str] = None,
+        model_version: Optional[str] = None,
+        reason_text: Optional[str] = None,
+        source_event_id: Optional[str] = None,
+        **fields: Any,
+    ) -> "OrderCase":
         """Apply field updates and return the updated case.
 
         Pydantic model is recreated via `model_copy(update=...)` so
@@ -907,11 +1164,55 @@ class CaseStore:
         a mutation lands, unless the caller passes an explicit
         ``updated_at`` (audit replay, sandbox seeding). Callers
         therefore never need to remember to set it.
+
+        NEEDS_TRIAGE close-block (requirements §8.2): a case whose
+        supergroup_code is the reserved ``SG_NEEDS_TRIAGE`` value
+        cannot transition to ``RESOLVED``. Callers must reclassify
+        the case first. Raises ``NeedsTriageCloseBlocked`` so the
+        failure is explicit (CLAUDE.md §5: "Explicit failure is
+        correct behavior").
+
+        Audit trail (requirements §8.6, criterion #9): an update that
+        touches ``supergroup_code`` is a reclassification event.
+        Callers MUST pass ``classified_by`` and ``classifier_type``
+        kwargs in that case; the method appends one
+        ``ClassificationEvent`` row to the in-memory audit trail
+        atomically with the state mutation. Updates that don't touch
+        ``supergroup_code`` are pure field updates and don't require
+        the audit kwargs.
+
+        Confidence gate: when ``classifier_type='MODEL'`` is used here
+        or in ``record_classification``, the caller must have already
+        verified that the model's confidence is ≥ 0.85 per
+        requirements §8.3. The gate is enforced at the call site
+        (skills/intent_classifier.py, Phase 5) — this store does not
+        re-check.
         """
         with self._lock:
             existing = self._cases.get(case_id)
             if existing is None:
                 raise KeyError(f"Unknown case_id: {case_id}")
+            target_status = fields.get("status", existing.status)
+            target_sg = fields.get("supergroup_code", existing.supergroup_code)
+            sg_is_reclassified = (
+                "supergroup_code" in fields
+                and fields["supergroup_code"] != existing.supergroup_code
+            )
+            # Audit-kwarg requirement: every change to supergroup_code
+            # must be attributable.
+            if sg_is_reclassified:
+                if not classified_by or not classifier_type:
+                    raise ValueError(
+                        f"update(case_id={case_id}) changes supergroup_code "
+                        "but did not supply classified_by + classifier_type; "
+                        "every reclassification must be attributable "
+                        "(requirements §8.6)."
+                    )
+            if target_status in _RESOLVED_LIKE and target_sg == SG_NEEDS_TRIAGE:
+                raise NeedsTriageCloseBlocked(
+                    f"Case {case_id} is in SG_NEEDS_TRIAGE and cannot be "
+                    "RESOLVED without reclassification (requirements §8.2)."
+                )
             if "updated_at" not in fields:
                 fields = {
                     **fields,
@@ -919,7 +1220,155 @@ class CaseStore:
                 }
             updated = existing.model_copy(update=fields)
             self._cases[case_id] = updated
+            if sg_is_reclassified:
+                # classifier_type / classified_by are guaranteed non-None
+                # by the guard above; appease the type checker.
+                assert classified_by is not None
+                assert classifier_type is not None
+                self._record_classification_locked(
+                    case_id=case_id,
+                    supergroup_code=updated.supergroup_code or "",
+                    intent_code=intent_code_classification,
+                    classified_by=classified_by,
+                    classifier_type=classifier_type,
+                    model_version=model_version,
+                    reason_text=reason_text,
+                    source_event_id=source_event_id,
+                )
             return updated
+
+    # ----- classification audit (requirements §8.6) -----------------
+
+    def _record_classification_locked(
+        self,
+        *,
+        case_id: str,
+        supergroup_code: str,
+        intent_code: Optional[str],
+        classified_by: str,
+        classifier_type: str,
+        child_case_id: Optional[str] = None,
+        model_version: Optional[str] = None,
+        reason_text: Optional[str] = None,
+        source_event_id: Optional[str] = None,
+    ) -> ClassificationEvent:
+        """Internal: append a ClassificationEvent. Caller already holds
+        ``self._lock`` and has confirmed case_id exists."""
+        event = ClassificationEvent(
+            case_id=case_id,
+            child_case_id=child_case_id,
+            supergroup_code=supergroup_code,
+            intent_code=intent_code,
+            classified_by=classified_by,
+            classifier_type=classifier_type,
+            model_version=model_version,
+            reason_text=reason_text,
+            source_event_id=source_event_id,
+            taxonomy_version=TAXONOMY_VERSION,
+        )
+        self._history.setdefault(case_id, []).append(event)
+        return event
+
+    def _record_for_child(
+        self,
+        *,
+        case_id: str,
+        child_case_id: str,
+        supergroup_code: str,
+        intent_code: Optional[str],
+        classified_by: str,
+        classifier_type: str,
+        model_version: Optional[str] = None,
+        reason_text: Optional[str] = None,
+        source_event_id: Optional[str] = None,
+    ) -> ClassificationEvent:
+        """Append a child-level ClassificationEvent.
+
+        Called from ``ExceptionStore.update`` when a child's
+        ``intent_code`` or ``supergroup_code`` changes. ``supergroup_code``
+        on the event row is taken from the child's post-update value (the
+        leaf-validity DB trigger guarantees it matches the parent's SG
+        under STRICT inheritance, so the audit row is consistent).
+
+        Raises ``KeyError`` if the case isn't in the in-memory CaseStore.
+        The earlier silent no-op was a real audit-loss bug — for the
+        DB-backed flow the caller (``DatabaseBackedStore.update``) writes
+        to the V020 ``case_classification_history`` table directly via
+        ``ClassificationHistoryRepository`` and never reaches here.
+        """
+        with self._lock:
+            if case_id not in self._cases:
+                raise KeyError(
+                    f"_record_for_child: case_id {case_id!r} not in the "
+                    "in-memory CaseStore. The in-memory path requires the "
+                    "case to be present; the DB-backed path writes to "
+                    "case_classification_history directly and must not "
+                    "reach this method."
+                )
+            return self._record_classification_locked(
+                case_id=case_id,
+                supergroup_code=supergroup_code,
+                intent_code=intent_code,
+                classified_by=classified_by,
+                classifier_type=classifier_type,
+                child_case_id=child_case_id,
+                model_version=model_version,
+                reason_text=reason_text,
+                source_event_id=source_event_id,
+            )
+
+    def record_classification(
+        self,
+        case_id: str,
+        *,
+        supergroup_code: str,
+        classified_by: str,
+        classifier_type: str,
+        intent_code: Optional[str] = None,
+        child_case_id: Optional[str] = None,
+        model_version: Optional[str] = None,
+        reason_text: Optional[str] = None,
+        source_event_id: Optional[str] = None,
+    ) -> ClassificationEvent:
+        """Append one ClassificationEvent row to the audit trail.
+
+        Use this when the classification event happens *out-of-band*
+        from a CaseStore.update / lookup_or_create call — e.g. the
+        steward writes a corrective row, or a Phase 5 classifier batch
+        records its own MODEL events. For inline classifications,
+        prefer the ``classified_by`` / ``classifier_type`` kwargs on
+        ``update`` / ``lookup_or_create``, which write the event
+        atomically with the state mutation.
+
+        Raises ``KeyError`` if the case is unknown.
+        """
+        with self._lock:
+            if case_id not in self._cases:
+                raise KeyError(f"Unknown case_id: {case_id}")
+            return self._record_classification_locked(
+                case_id=case_id,
+                supergroup_code=supergroup_code,
+                intent_code=intent_code,
+                classified_by=classified_by,
+                classifier_type=classifier_type,
+                child_case_id=child_case_id,
+                model_version=model_version,
+                reason_text=reason_text,
+                source_event_id=source_event_id,
+            )
+
+    def get_classification_history(
+        self, case_id: str,
+    ) -> List[ClassificationEvent]:
+        """Return the case's classification history in append order.
+
+        Returns an empty list for cases that have never been classified.
+        Returns a shallow copy so callers cannot mutate the in-memory
+        store; the events themselves are Pydantic frozen-equivalents
+        (extra='forbid') so mutation would error anyway.
+        """
+        with self._lock:
+            return list(self._history.get(case_id, []))
 
     def list_by_tenant(self, tenant_id: str) -> List["OrderCase"]:
         with self._lock:

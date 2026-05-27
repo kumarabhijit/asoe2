@@ -43,7 +43,7 @@ import yaml
 from pydantic import BaseModel
 
 from api.analysis_adapters import ANALYSIS_ADAPTERS, resolve_adapter_key
-from api.store import ExceptionRecord
+from api.store import ChildCase
 
 # --------------------------------------------------------------------------
 # Registry load — happens once at module import. The file is part of the
@@ -157,7 +157,7 @@ def _classify_field(
     )
 
 
-def _resolve_action_of(record: ExceptionRecord) -> Optional[str]:
+def _resolve_action_of(record: ChildCase) -> Optional[str]:
     """Look up the resolved action for conditional-field evaluation.
 
     A `conditional` field's `depends_on` string like
@@ -207,7 +207,7 @@ def _iter_registry_fields(
 
 
 def _required_audit_fields(
-    record: ExceptionRecord, class_name: str,
+    record: ChildCase, class_name: str,
 ) -> Tuple[List[str], List[str]]:
     """Split the class's audit-bearing fields into (enforced,
     grandfathered). Enforced fields MUST be populated for coverage to
@@ -257,7 +257,7 @@ def _populated(model: BaseModel, field_name: str) -> bool:
 # --------------------------------------------------------------------------
 
 
-def compose(record: ExceptionRecord) -> ComposedAnalysis:
+def compose(record: ChildCase) -> ComposedAnalysis:
     """Project one record's enrichment and validate registry coverage.
 
     Returns a ComposedAnalysis with:
@@ -361,7 +361,7 @@ def compose_from_state(state: Any) -> ComposedAnalysis:
       * enrichment_context       — (reserved for Pillar 1 consumers)
       * resolved_action          — conditional predicate evaluation
 
-    The view is a dataclass-like stub, not a real ExceptionRecord —
+    The view is a dataclass-like stub, not a real ChildCase —
     it doesn't persist, doesn't have an id, doesn't need a tenant.
     That's intentional: we're enforcing the registry, not creating
     an audit row.

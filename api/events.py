@@ -92,7 +92,7 @@ class ReanalysisStartedPayload(BaseModel):
 
 class CaseOpenedPayload(BaseModel):
     """Published when a new OrderCase is materialised (T2/T3)."""
-    source: str
+    origin: str
     source_channel: str
     status: str
     sla_deadline: Optional[str] = None
@@ -300,7 +300,7 @@ class WSEvent(BaseModel):
         trace_id: str,
         case_id: str,
         tenant_id: str,
-        source: str,
+        origin: str,
         source_channel: str,
         status: str,
         sla_deadline: Optional[str] = None,
@@ -308,7 +308,7 @@ class WSEvent(BaseModel):
         sales_order_id: Optional[str] = None,
     ) -> "WSEvent":
         payload = CaseOpenedPayload(
-            source=source,
+            origin=origin,
             source_channel=source_channel,
             status=status,
             sla_deadline=sla_deadline,

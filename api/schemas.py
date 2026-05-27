@@ -9,7 +9,13 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from contracts.models import ExecutedNode, GatewayCallSpan, LifecycleState, OrderEvent
+from contracts.models import (
+    ClassifierType,
+    ExecutedNode,
+    GatewayCallSpan,
+    LifecycleState,
+    OrderEvent,
+)
 
 # Re-exported so OpenAPI consumers see ExecutedNode / GatewayCallSpan
 # under api.schemas. The domain definitions live in contracts/models.py
@@ -222,11 +228,10 @@ class HealthResponse(BaseModel):
     # `useHealth.allowed_case_statuses` so the UI's CaseListPane
     # filter chips don't hardcode the enum, preserving Guardrail #1.
     allowed_case_statuses: List[str] = Field(default_factory=list)
-    # Phase 28.5.x §D1 — the case-source values. Until this field
-    # ships the UI carries an ALLOWED_CASE_SOURCES constant in
-    # `src/lib/api.ts`; once available, the UI consumes from health
-    # exclusively.
-    allowed_case_sources: List[str] = Field(default_factory=list)
+    # Requirements §3 glossary — case origin values (CUSTOMER | API). The
+    # UI consumes this from health exclusively (Guardrail #1, no
+    # hardcoded enum).
+    allowed_case_origins: List[str] = Field(default_factory=list)
     # ADR-042 §5/§8 — the autonomy vocabulary the UI renders. The UI sorts the
     # ladder by `rank` and reads labels from here (no hardcoded autonomy map,
     # Guardrail #1). `autonomy_vocab_version` is the version these rows resolve
@@ -268,6 +273,10 @@ class ExceptionSummary(BaseModel):
     # round-trip. None on Tier-1 stateless records and pre-Phase-H.3
     # legacy rows.
     parent_case_id: Optional[str] = None
+    # Case & Intent Super-Group surface (requirements §5).
+    # Optional in Phase 2; populated by the Phase 3 classifier wiring.
+    supergroup_code: Optional[str] = None
+    intent_code: Optional[str] = None
     created_at: str
     updated_at: str
 
@@ -304,6 +313,13 @@ class ExceptionDetailResponse(BaseModel):
     # exceptional and the UI throws loudly rather than silently
     # routing to a phantom page.
     parent_case_id: Optional[str] = None
+    # Case & Intent Super-Group surface (requirements §5).
+    # Optional in Phase 2; populated by the Phase 3 classifier wiring.
+    supergroup_code: Optional[str] = None
+    intent_code: Optional[str] = None
+    divergence_reason: Optional[str] = None
+    sap_block_field: Optional[str] = None
+    scope: Optional[str] = None
     resolution_data: Dict[str, Any] = Field(default_factory=dict)
     resolved_by: Optional[str] = None
     resolved_action: Optional[str] = None
@@ -1905,7 +1921,7 @@ class CaseRecordsResponse(BaseModel):
     (Phase 28.5.x §28.5 follow-up).
 
     `items` is the list of `ExceptionDetail`-shaped child records
-    attached to the case (`ExceptionRecord.parent_case_id == case_id`).
+    attached to the case (`ChildCase.parent_case_id == case_id`).
     The UI's CaseDetailPanel uses this both to render the stack of
     per-event sections and to aggregate `aggregated_policy_hits` into
     the L1/L2 PolicyHitBadge surface (ADR-039 §4.5).
@@ -1935,3 +1951,75 @@ class CaseRecordsResponse(BaseModel):
             "PolicyHitBadge distinguishes the two visually."
         ),
     )
+
+
+class ClassificationHistoryEntry(BaseModel):
+    """One row of the case's classification audit trail.
+
+    Mirrors ``contracts.models.ClassificationEvent`` and the
+    ``case_classification_history`` table (V020). Requirements §8.6 —
+    surfaces the append-only audit for UI / steward reporting.
+
+    Field-set parity with ``ClassificationEvent`` is locked by
+    ``tests/test_classification_history_shape.py``: an event field
+    that this model doesn't mirror would silently drop data on the
+    wire, so the field sets must remain identical.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    case_id: str
+    child_case_id: Optional[str] = None
+    supergroup_code: str
+    intent_code: Optional[str] = None
+    classified_at: str
+    classified_by: str
+    classifier_type: ClassifierType  # Literal["HUMAN","MODEL","RULE"] from contracts
+    model_version: Optional[str] = None
+    reason_text: Optional[str] = None
+    source_event_id: Optional[str] = None
+    taxonomy_version: str
+
+    def redact_for_partner(self) -> "ClassificationHistoryEntry":
+        """Return a copy with internal-only fields blanked for the
+        partner (external retailer) audience.
+
+        Redacts four fields whose values may carry internal info:
+          * ``reason_text`` — operator-authored free text (commercial
+            notes, escalation flags).
+          * ``classified_by`` — replaced with a coarse role token
+            (``internal:human``, ``internal:model``, ``internal:rule``)
+            so the partner sees who-shape but not internal user IDs /
+            email addresses.
+          * ``model_version`` — internal model build identifier.
+          * ``source_event_id`` — internal trace/event UUID or, for
+            API-origin cases, the SAP doc number (reveals SAP doc
+            numbering / volume).
+
+        The structural audit (case_id, supergroup_code, intent_code,
+        classified_at, classifier_type, taxonomy_version) is preserved
+        so the partner can still verify the audit trail's shape.
+        ``child_case_id`` is left as-is — it's an opaque UUID, and
+        omitting it would also remove the parent-vs-child marker the
+        partner audit relies on.
+        """
+        coarse_who = f"internal:{self.classifier_type.lower()}"
+        return self.model_copy(update={
+            "reason_text": None,
+            "classified_by": coarse_who,
+            "model_version": None,
+            "source_event_id": None,
+        })
+
+
+class ClassificationHistoryResponse(BaseModel):
+    """GET /api/v1/cases/{case_id}/classification-history.
+
+    Returns the case's full audit trail in append order (oldest first).
+    ``total`` is the row count; callers paginate client-side today (the
+    expected depth is single-digit for the audit window).
+    """
+
+    items: List[ClassificationHistoryEntry] = Field(default_factory=list)
+    total: int = 0

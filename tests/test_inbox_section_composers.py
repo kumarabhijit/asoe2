@@ -12,10 +12,10 @@ from api.profile_composer import (
     compose_entities_analysis,
     compose_sap_data_analysis,
 )
-from api.store import ExceptionRecord
+from api.store import ChildCase
 
 
-def _record(**overrides) -> ExceptionRecord:
+def _record(**overrides) -> ChildCase:
     base = dict(
         tenant_id="acme-corp",
         order_id="SO-TEST-001",
@@ -27,7 +27,7 @@ def _record(**overrides) -> ExceptionRecord:
         resolution_data={},
     )
     base.update(overrides)
-    return ExceptionRecord(**base)
+    return ChildCase(**base)
 
 
 # ── Entities ──────────────────────────────────────────────────────────────

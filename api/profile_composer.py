@@ -39,7 +39,7 @@ from api.schemas import (
     OrderEntryExtraction,
     SapDataAnalysisData,
 )
-from api.store import ExceptionRecord
+from api.store import ChildCase
 from api.users import get_account
 
 
@@ -47,7 +47,7 @@ from api.users import get_account
 # Entity profile
 # ---------------------------------------------------------------------------
 
-def compose_entity_profile(record: ExceptionRecord) -> Optional[EntityProfile]:
+def compose_entity_profile(record: ChildCase) -> Optional[EntityProfile]:
     """Build an EntityProfile for the exception's customer.
 
     Uses the seed `Account` table as the master-data source. Returns
@@ -103,7 +103,7 @@ def compose_entity_profile(record: ExceptionRecord) -> Optional[EntityProfile]:
 # ---------------------------------------------------------------------------
 
 def compose_entities_analysis(
-    record: ExceptionRecord,
+    record: ChildCase,
 ) -> Optional[EntitiesAnalysisData]:
     """Project the AI-extracted entities from
     `enrichment_context["inbox_entities"]` (shape: ``{"extracted": [...]}``).
@@ -122,7 +122,7 @@ def compose_entities_analysis(
 
 
 def compose_sap_data_analysis(
-    record: ExceptionRecord,
+    record: ChildCase,
 ) -> Optional[SapDataAnalysisData]:
     """Project live SAP context from `enrichment_context["sap_data"]`. Requires
     `system` + `validation_status` (the audit-bearing anchors); None otherwise."""
@@ -143,7 +143,7 @@ def compose_sap_data_analysis(
 
 
 def compose_order_entry_extraction(
-    record: ExceptionRecord,
+    record: ChildCase,
 ) -> Optional[OrderEntryExtraction]:
     """Project the extracted order form from
     `enrichment_context["order_entry_extraction"]`. None when absent or
@@ -158,7 +158,7 @@ def compose_order_entry_extraction(
 
 
 def compose_edi_850_document(
-    record: ExceptionRecord,
+    record: ChildCase,
 ) -> Optional[Edi850Document]:
     """Project the deterministically built EDI 850 from
     `enrichment_context["edi_850"]` (the `edi_850` builder producer's read).
@@ -175,7 +175,7 @@ def compose_edi_850_document(
 
 
 def compose_change_analysis(
-    record: ExceptionRecord,
+    record: ChildCase,
 ) -> Optional[ChangeAnalysis]:
     """Project the deterministic Change Analysis from
     `enrichment_context["change_analysis"]` (the recipe-homed evaluator's read).
@@ -192,7 +192,7 @@ def compose_change_analysis(
 
 
 def compose_knowledge_graph(
-    record: ExceptionRecord,
+    record: ChildCase,
 ) -> Optional[KnowledgeGraphPayload]:
     """Project the derived knowledge graph from
     `enrichment_context["knowledge_graph"]` (the builder producer's read). None
@@ -208,7 +208,7 @@ def compose_knowledge_graph(
         return None
 
 
-def compose_draft_reply(record: ExceptionRecord) -> Optional[DraftReply]:
+def compose_draft_reply(record: ChildCase) -> Optional[DraftReply]:
     """Project the current AI reply draft from `resolution_data["reply_draft"]`
     (the ReplyDraftRecipe output a DRAFT_REPLY disposition persisted). None when
     no draft exists. Flattens the nested `draft` block into the typed contract;
@@ -251,7 +251,7 @@ def _opt_str(value: Any) -> Optional[str]:
 # Impact metrics
 # ---------------------------------------------------------------------------
 
-def compose_impact_metrics(record: ExceptionRecord) -> Optional[ImpactMetrics]:
+def compose_impact_metrics(record: ChildCase) -> Optional[ImpactMetrics]:
     """Compute deterministic blast-radius metrics from line items.
 
     Returns ``None`` when the record carries no line-item data —
@@ -305,7 +305,7 @@ def compose_impact_metrics(record: ExceptionRecord) -> Optional[ImpactMetrics]:
     )
 
 
-def _sla_priority_for(record: ExceptionRecord) -> str:
+def _sla_priority_for(record: ChildCase) -> str:
     """Map shadow verdict + lifecycle to a coarse SLA priority label.
 
     Pure presentation mapping — no business-rule authority. The UI
@@ -327,7 +327,7 @@ def _sla_priority_for(record: ExceptionRecord) -> str:
 # ---------------------------------------------------------------------------
 
 def compose_narrative(
-    record: ExceptionRecord,
+    record: ChildCase,
     trace_data: Optional[Dict[str, Any]],
 ) -> Tuple[Optional[str], Optional[str]]:
     """Extract order-level root_cause + recommendation prose.
@@ -408,7 +408,7 @@ def compose_narrative(
 # ---------------------------------------------------------------------------
 
 
-def _synthesise_root_cause(record: ExceptionRecord) -> Optional[str]:
+def _synthesise_root_cause(record: ChildCase) -> Optional[str]:
     intent = (record.intent or "").upper() if record.intent else ""
     rd = record.resolution_data or {}
     event = record.original_event or {}
@@ -495,7 +495,7 @@ def _synthesise_root_cause(record: ExceptionRecord) -> Optional[str]:
     return None
 
 
-def _synthesise_recommendation(record: ExceptionRecord) -> Optional[str]:
+def _synthesise_recommendation(record: ChildCase) -> Optional[str]:
     rd = record.resolution_data or {}
     intent = (record.intent or "").upper() if record.intent else ""
 

@@ -13,17 +13,17 @@ Written test-first; RED until `_cosign_materiality_usd` exists.
 from __future__ import annotations
 
 from api.routes.exceptions import _cosign_materiality_usd
-from api.store import ExceptionRecord
+from api.store import ChildCase
 
 
-def _rec(**overrides) -> ExceptionRecord:
+def _rec(**overrides) -> ChildCase:
     base = dict(
         tenant_id="t", order_id="o", event_type="MANUAL_ORDER_INTAKE",
         trace_id="x", intent="MANUAL_ORDER_INTAKE", lifecycle_state="RESOLVED",
         shadow_verdict="GREEN", resolution_data={},
     )
     base.update(overrides)
-    return ExceptionRecord(**base)
+    return ChildCase(**base)
 
 
 def test_prefers_sap_reprice_over_llm_impact() -> None:

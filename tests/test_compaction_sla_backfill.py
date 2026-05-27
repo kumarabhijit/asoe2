@@ -60,7 +60,7 @@ def _reset_stores():
 def case() -> OrderCase:
     case, _ = case_store.lookup_or_create(
         tenant_id="t1",
-        source="manual_order",
+        origin="CUSTOMER",
         source_channel="email",
         customer_po_number="PO-1",
     )
@@ -232,7 +232,7 @@ class TestPerEventTypeTemplates:
             {"event_type": "shadow_decision", "timestamp": "T2",
              "shadow_verdict": "GREEN", "intent": "MANUAL_ORDER_INTAKE"},
             {"event_type": "case_open", "timestamp": "T3",
-             "source": "manual_order", "source_channel": "email",
+             "origin": "CUSTOMER", "source_channel": "email",
              "tier": 2, "sla_deadline": "2026-05-10T00:00:00Z"},
         ]
         first = compact_events(events)
@@ -489,8 +489,8 @@ class TestBackfill:
 
     def test_backfill_skips_records_with_no_original_event(self):
         # Direct-construct without the original_event payload.
-        from api.store import ExceptionRecord
-        record = ExceptionRecord(
+        from api.store import ChildCase
+        record = ChildCase(
             tenant_id="t1",
             order_id="PO-X",
             event_type="UNKNOWN",
@@ -529,11 +529,11 @@ class TestBackfill:
         # Force two cases on the same (tenant, customer_po) by opening
         # them out-of-order so Pass 1 doesn't naturally collapse them.
         case_a, _ = case_store.lookup_or_create(
-            tenant_id="t1", source="automated_order",
+            tenant_id="t1", origin="API",
             source_channel="edi_x12_850", customer_po_number="PO-MERGE",
         )
         case_b, _ = case_store.lookup_or_create(
-            tenant_id="t1", source="manual_order",
+            tenant_id="t1", origin="CUSTOMER",
             source_channel="email",
         )
         # Manually patch case_b to share the PO without going through
@@ -550,11 +550,11 @@ class TestBackfill:
 
     def test_merge_pass_actually_merges(self):
         case_a, _ = case_store.lookup_or_create(
-            tenant_id="t1", source="automated_order",
+            tenant_id="t1", origin="API",
             source_channel="edi_x12_850", customer_po_number="PO-MERGE-2",
         )
         case_b, _ = case_store.lookup_or_create(
-            tenant_id="t1", source="manual_order",
+            tenant_id="t1", origin="CUSTOMER",
             source_channel="email",
         )
         case_store._cases[case_b.case_id] = case_b.model_copy(  # type: ignore[attr-defined]

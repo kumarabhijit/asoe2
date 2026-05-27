@@ -10,11 +10,11 @@ from __future__ import annotations
 
 from api.profile_composer import compose_edi_850_document
 from api.schemas import AnalysisResponse, Edi850Document
-from api.store import ExceptionRecord
+from api.store import ChildCase
 from gateways.edi850 import build_edi_850
 
 
-def _record(**overrides) -> ExceptionRecord:
+def _record(**overrides) -> ChildCase:
     base = dict(
         tenant_id="acme-corp", order_id="SO-1", event_type="MANUAL_ORDER_INTAKE",
         trace_id="tr-1", intent="MANUAL_ORDER_INTAKE",
@@ -22,7 +22,7 @@ def _record(**overrides) -> ExceptionRecord:
         resolution_data={},
     )
     base.update(overrides)
-    return ExceptionRecord(**base)
+    return ChildCase(**base)
 
 
 _CTX = build_edi_850(

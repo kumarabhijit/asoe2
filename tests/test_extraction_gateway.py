@@ -26,7 +26,7 @@ from api.profile_composer import (
     compose_sap_data_analysis,
 )
 from api.schemas import OrderEntryHeader
-from api.store import ExceptionRecord
+from api.store import ChildCase
 from contracts.models import GatewayRequest, GraphState, OrderEvent
 from gateways.base import InfrastructureGateway
 from gateways.extraction import (
@@ -48,7 +48,7 @@ _INJECTION = (
 )
 
 
-def _record(**overrides) -> ExceptionRecord:
+def _record(**overrides) -> ChildCase:
     base = dict(
         tenant_id="acme-corp", order_id="SO-1", event_type="MANUAL_ORDER_INTAKE",
         trace_id="tr-1", intent="MANUAL_ORDER_INTAKE",
@@ -56,7 +56,7 @@ def _record(**overrides) -> ExceptionRecord:
         resolution_data={},
     )
     base.update(overrides)
-    return ExceptionRecord(**base)
+    return ChildCase(**base)
 
 
 def _req(operation: str, **params) -> GatewayRequest:

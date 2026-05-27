@@ -405,7 +405,7 @@ def compose_duplicate_po_envelope(
     than synthesising a malformed envelope.
 
     Args:
-        record: ``ExceptionRecord`` (in-memory store) or repository
+        record: ``ChildCase`` (in-memory store) or repository
             row dict — duck-typed access via attributes.
         audit_log_entries: Full per-tenant audit log (caller fetches
             via ``exception_store.get_audit_log(tenant_id)``). The

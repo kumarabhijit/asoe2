@@ -230,7 +230,7 @@ def _iter_records_in_window(
         store_records = getattr(exception_store, "_records", {})
         records = list(store_records.values()) if store_records else []
     for r in records:
-        # `exception_store.list` returns ExceptionRecord instances;
+        # `exception_store.list` returns ChildCase instances;
         # downstream we want a dict. Use to_detail() when available
         # (the in-memory shape has it), else attribute-walk.
         if hasattr(r, "to_detail"):

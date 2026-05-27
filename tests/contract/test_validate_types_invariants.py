@@ -4,11 +4,11 @@ Implements design.md Lane 1 W4 (the second of the two missing
 tests surfaced when the BDD plan was audited):
 
   "tests/contract/test_validate_types_invariants.py — feed
-   validate_types 1000 generated ExceptionRecord instances;
+   validate_types 1000 generated ChildCase instances;
    assert no node raises and final_status is in LIFECYCLE_STATES."
 
 The W4 plan was approximate (validate_types takes GraphState, not
-ExceptionRecord). This test exercises the actual contract:
+ChildCase). This test exercises the actual contract:
 
   For each (intent, recipe) pair, generate N perturbed OrderEvent
   variants, run them through validate_types directly, and assert

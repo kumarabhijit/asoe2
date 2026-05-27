@@ -66,7 +66,7 @@ def _auth(token: str) -> dict:
 def _open_case(tenant_id: str = "tenant-a"):
     case, _ = case_store.lookup_or_create(
         tenant_id=tenant_id,
-        source="manual_order",
+        origin="CUSTOMER",
         source_channel="email",
         customer_po_number="PO-COSIGN-1",
     )

@@ -54,14 +54,14 @@ def _seed_case_with_children(
     tenant_id: str,
     children: list[tuple[str, list[str]]],
 ) -> str:
-    """Helper: create a case + N child ExceptionRecords + traces.
+    """Helper: create a case + N child ChildCases + traces.
 
     Each entry in `children` is `(order_id, policy_hits)`. Returns
     the case_id.
     """
     case, _opened = case_store.lookup_or_create(
         tenant_id=tenant_id,
-        source="manual_order",
+        origin="CUSTOMER",
         source_channel="email",
         customer_po_number="PO-CRL-1",
     )

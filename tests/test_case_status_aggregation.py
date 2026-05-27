@@ -54,7 +54,7 @@ def _open_case(tenant_id: str = "t1", po: str = "PO-AGG-1"):
     """Open a bare case for the tests that need a case_id to attach to."""
     case, _opened = case_store.lookup_or_create(
         tenant_id=tenant_id,
-        source="automated_order",
+        origin="API",
         source_channel="edi_x12_850",
         customer_po_number=po,
     )
@@ -62,7 +62,7 @@ def _open_case(tenant_id: str = "t1", po: str = "PO-AGG-1"):
 
 
 def _attach_record(tenant_id: str, case_id: str, order_id: str, final_status: str):
-    """Persist a child ExceptionRecord with the given terminal status.
+    """Persist a child ChildCase with the given terminal status.
 
     `exception_store.create` derives `lifecycle_state` from
     `final_status` via `STATUS_TO_LIFECYCLE` — exactly the path the

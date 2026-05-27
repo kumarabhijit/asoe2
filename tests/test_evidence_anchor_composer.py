@@ -9,11 +9,11 @@ and carrying NO geometry. The UI later only *locates* these — it invents nothi
 
 from __future__ import annotations
 
-from api.store import ExceptionRecord
+from api.store import ChildCase
 
 
-def _record() -> ExceptionRecord:
-    return ExceptionRecord(
+def _record() -> ChildCase:
+    return ChildCase(
         tenant_id="t1",
         order_id="EML-PO-2026-0042",
         event_type="EMAIL_ORDER_ENTRY_REQUEST",

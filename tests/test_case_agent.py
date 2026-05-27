@@ -59,7 +59,7 @@ def case() -> OrderCase:
     """A T2 case ready for the agent to run on."""
     case, _ = case_store.lookup_or_create(
         tenant_id="t1",
-        source="manual_order",
+        origin="CUSTOMER",
         source_channel="email",
         customer_id="acct-southeast",
         customer_po_number="EML-PO-2026-0042",
@@ -132,7 +132,7 @@ class TestCaseBudget:
     def test_for_case_uses_case_tier(self):
         case = OrderCase(
             tenant_id="t1",
-            source="manual_order",
+            origin="CUSTOMER",
             source_channel="email",
             tier=3,
         )
@@ -192,7 +192,7 @@ class TestBuiltInTools:
         )
         assert result.status == "ok"
         assert result.data["case_id"] == case.case_id
-        assert result.data["source"] == "manual_order"
+        assert result.data["origin"] == "CUSTOMER"
 
     def test_read_case_summary_unknown_case(self, registry):
         ctx = ToolContext(tenant_id="t1", case_id="ghost")
@@ -469,7 +469,7 @@ class TestAgentLoop:
         # state. The agent loop is pure given (case, event, provider).
         case_store.clear()
         case_b, _ = case_store.lookup_or_create(
-            tenant_id=case.tenant_id, source=case.source,
+            tenant_id=case.tenant_id, origin=case.origin,
             source_channel=case.source_channel,
             customer_po_number=case.customer_po_number,
         )

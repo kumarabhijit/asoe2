@@ -22,7 +22,7 @@ Invariants (post price_analysis_gateway_gap retirement):
 from __future__ import annotations
 
 from api.analysis_adapters import adapt_price
-from api.store import ExceptionRecord
+from api.store import ChildCase
 
 
 def _record(
@@ -32,8 +32,8 @@ def _record(
     original_event=None,
     selected_recipe="PriceAdjustmentRecipe.py",
     intent="CONTRACTUAL_CORRECTION",
-) -> ExceptionRecord:
-    return ExceptionRecord(
+) -> ChildCase:
+    return ChildCase(
         tenant_id="t1",
         order_id="PO-PRICE-1",
         event_type="EDI_850_PRICE_MISMATCH",

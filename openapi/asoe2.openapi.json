@@ -806,7 +806,7 @@
         "type": "object"
       },
       "CaseRecordsResponse": {
-        "description": "GET /api/v1/cases/{id}/records \u2014 attached-record loader response\n(Phase 28.5.x \u00a728.5 follow-up).\n\n`items` is the list of `ExceptionDetail`-shaped child records\nattached to the case (`ExceptionRecord.parent_case_id == case_id`).\nThe UI's CaseDetailPanel uses this both to render the stack of\nper-event sections and to aggregate `aggregated_policy_hits` into\nthe L1/L2 PolicyHitBadge surface (ADR-039 \u00a74.5).\n\nWhy a separate field for the aggregate (rather than re-deriving it\nclient-side):\n\n  * Authoritative: the backend already has the deduped union with\n    the LLM_SHADOW: prefix preserved; making the client recompute\n    it from `items[*].shadow_policy_hits` invites drift.\n  * Empty-set distinction: the UI hides the section when the\n    aggregate is empty (Guardrail #6 \u2014 no synthesised \"no hits\"\n    placeholder); we want one place that decides \"no hits\".\n  * Telemetry surface: a future SLI on case-level disagreement\n    rate reads off the same aggregate without re-iterating\n    children.",
+        "description": "GET /api/v1/cases/{id}/records \u2014 attached-record loader response\n(Phase 28.5.x \u00a728.5 follow-up).\n\n`items` is the list of `ExceptionDetail`-shaped child records\nattached to the case (`ChildCase.parent_case_id == case_id`).\nThe UI's CaseDetailPanel uses this both to render the stack of\nper-event sections and to aggregate `aggregated_policy_hits` into\nthe L1/L2 PolicyHitBadge surface (ADR-039 \u00a74.5).\n\nWhy a separate field for the aggregate (rather than re-deriving it\nclient-side):\n\n  * Authoritative: the backend already has the deduped union with\n    the LLM_SHADOW: prefix preserved; making the client recompute\n    it from `items[*].shadow_policy_hits` invites drift.\n  * Empty-set distinction: the UI hides the section when the\n    aggregate is empty (Guardrail #6 \u2014 no synthesised \"no hits\"\n    placeholder); we want one place that decides \"no hits\".\n  * Telemetry surface: a future SLI on case-level disagreement\n    rate reads off the same aggregate without re-iterating\n    children.",
         "properties": {
           "aggregated_policy_hits": {
             "description": "Deduped union of `shadow_policy_hits` across all attached records. L1 rule names (bare strings) and L2 LLM-derived concerns (LLM_SHADOW: prefix) are preserved; the UI's PolicyHitBadge distinguishes the two visually.",
@@ -958,6 +958,130 @@
           "field"
         ],
         "title": "ChangeItem",
+        "type": "object"
+      },
+      "ClassificationHistoryEntry": {
+        "additionalProperties": false,
+        "description": "One row of the case's classification audit trail.\n\nMirrors ``contracts.models.ClassificationEvent`` and the\n``case_classification_history`` table (V020). Requirements \u00a78.6 \u2014\nsurfaces the append-only audit for UI / steward reporting.\n\nField-set parity with ``ClassificationEvent`` is locked by\n``tests/test_classification_history_shape.py``: an event field\nthat this model doesn't mirror would silently drop data on the\nwire, so the field sets must remain identical.",
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "child_case_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Child Case Id"
+          },
+          "classified_at": {
+            "title": "Classified At",
+            "type": "string"
+          },
+          "classified_by": {
+            "title": "Classified By",
+            "type": "string"
+          },
+          "classifier_type": {
+            "enum": [
+              "HUMAN",
+              "MODEL",
+              "RULE"
+            ],
+            "title": "Classifier Type",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "intent_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intent Code"
+          },
+          "model_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Version"
+          },
+          "reason_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Text"
+          },
+          "source_event_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Event Id"
+          },
+          "supergroup_code": {
+            "title": "Supergroup Code",
+            "type": "string"
+          },
+          "taxonomy_version": {
+            "title": "Taxonomy Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "case_id",
+          "supergroup_code",
+          "classified_at",
+          "classified_by",
+          "classifier_type",
+          "taxonomy_version"
+        ],
+        "title": "ClassificationHistoryEntry",
+        "type": "object"
+      },
+      "ClassificationHistoryResponse": {
+        "description": "GET /api/v1/cases/{case_id}/classification-history.\n\nReturns the case's full audit trail in append order (oldest first).\n``total`` is the row count; callers paginate client-side today (the\nexpected depth is single-digit for the audit window).",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ClassificationHistoryEntry"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "default": 0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "title": "ClassificationHistoryResponse",
         "type": "object"
       },
       "ComparisonLineItem": {
@@ -2804,6 +2928,17 @@
             "title": "Created At",
             "type": "string"
           },
+          "divergence_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Divergence Reason"
+          },
           "event_type": {
             "title": "Event Type",
             "type": "string"
@@ -2833,6 +2968,17 @@
               }
             ],
             "title": "Intent"
+          },
+          "intent_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intent Code"
           },
           "lifecycle_state": {
             "$ref": "#/components/schemas/LifecycleState"
@@ -2898,6 +3044,28 @@
             ],
             "title": "Resolved By"
           },
+          "sap_block_field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sap Block Field"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          },
           "selected_recipe": {
             "anyOf": [
               {
@@ -2919,6 +3087,17 @@
               }
             ],
             "title": "Shadow Verdict"
+          },
+          "supergroup_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supergroup Code"
           },
           "tenant_id": {
             "title": "Tenant Id",
@@ -3044,6 +3223,17 @@
             ],
             "title": "Intent"
           },
+          "intent_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intent Code"
+          },
           "lifecycle_state": {
             "$ref": "#/components/schemas/LifecycleState"
           },
@@ -3083,6 +3273,17 @@
               }
             ],
             "title": "Shadow Verdict"
+          },
+          "supergroup_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supergroup Code"
           },
           "tenant_id": {
             "title": "Tenant Id",
@@ -3313,11 +3514,11 @@
             "title": "Allowed Autonomy Levels",
             "type": "array"
           },
-          "allowed_case_sources": {
+          "allowed_case_origins": {
             "items": {
               "type": "string"
             },
-            "title": "Allowed Case Sources",
+            "title": "Allowed Case Origins",
             "type": "array"
           },
           "allowed_case_statuses": {
@@ -7041,27 +7242,31 @@
         "operationId": "list_cases_api_v1_cases_get",
         "parameters": [
           {
-            "description": "Filter by case source (manual_order | automated_order)",
+            "description": "Filter by case origin (CUSTOMER | API). Requirements \u00a73 glossary \u2014 CUSTOMER drives the Customer Inbox lens; API is the SAP-pushed block path. Unknown values rejected at the edge by FastAPI (constrained-input gate, CLAUDE.md \u00a73).",
             "in": "query",
-            "name": "source",
+            "name": "origin",
             "required": false,
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "CUSTOMER",
+                    "API"
+                  ],
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter by case source (manual_order | automated_order)",
-              "title": "Source"
+              "description": "Filter by case origin (CUSTOMER | API). Requirements \u00a73 glossary \u2014 CUSTOMER drives the Customer Inbox lens; API is the SAP-pushed block path. Unknown values rejected at the edge by FastAPI (constrained-input gate, CLAUDE.md \u00a73).",
+              "title": "Origin"
             }
           },
           {
-            "description": "Filter by case_type (EMAIL_ENTRY | BLOCK). Orthogonal to source (ADR-041 \u00a71); drives the Customer Inbox EMAIL_ENTRY lens (ADR-042).",
+            "description": "Filter by Intent Super-Group (requirements \u00a76). E.g. supergroup_code=SG_BLOCK_PRICING.",
             "in": "query",
-            "name": "case_type",
+            "name": "supergroup_code",
             "required": false,
             "schema": {
               "anyOf": [
@@ -7072,8 +7277,8 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by case_type (EMAIL_ENTRY | BLOCK). Orthogonal to source (ADR-041 \u00a71); drives the Customer Inbox EMAIL_ENTRY lens (ADR-042).",
-              "title": "Case Type"
+              "description": "Filter by Intent Super-Group (requirements \u00a76). E.g. supergroup_code=SG_BLOCK_PRICING.",
+              "title": "Supergroup Code"
             }
           },
           {
@@ -7415,6 +7620,65 @@
         "summary": "Create Signed Read Url",
         "tags": [
           "attachments"
+        ]
+      }
+    },
+    "/api/v1/cases/{case_id}/classification-history": {
+      "get": {
+        "description": "Return the case's full classification audit trail in append order.\n\nRequirements \u00a78.6: every classification or reclassification event\nappends exactly one row stamped with the taxonomy version in effect\nat the time. The audit is append-only on both sides (in-memory and\nV020 DB triggers). Reads are open to any role that can see the case.",
+        "operationId": "list_classification_history_api_v1_cases__case_id__classification_history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassificationHistoryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Classification History",
+        "tags": [
+          "cases"
         ]
       }
     },

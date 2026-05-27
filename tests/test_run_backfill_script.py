@@ -20,7 +20,7 @@ from uuid import uuid4
 import pytest
 
 from agents.backfill import BackfillReport
-from api.store import case_store, exception_store, ExceptionRecord
+from api.store import case_store, exception_store, ChildCase
 from contracts.models import OrderEvent
 from scripts.run_backfill import main as run_backfill_main
 
@@ -34,7 +34,7 @@ def _clear_stores():
     exception_store.clear()
 
 
-def _make_orphan_record(*, order_id: str, tenant_id: str = "tenant-a") -> ExceptionRecord:
+def _make_orphan_record(*, order_id: str, tenant_id: str = "tenant-a") -> ChildCase:
     """Insert an orphaned record (parent_case_id=None) with a valid
     persisted ``original_event`` so backfill has something to act on."""
     event = OrderEvent(
@@ -44,7 +44,7 @@ def _make_orphan_record(*, order_id: str, tenant_id: str = "tenant-a") -> Except
         event_type="EDI_850_PRICE_MISMATCH",
         retailer_id="walmart",
     )
-    record = ExceptionRecord(
+    record = ChildCase(
         tenant_id=tenant_id,
         order_id=order_id,
         event_type="EDI_850_PRICE_MISMATCH",
@@ -93,7 +93,7 @@ class TestPass1:
         assert report["cases_opened"] == 0
 
     def test_skipped_when_original_event_missing(self):
-        record = ExceptionRecord(
+        record = ChildCase(
             tenant_id="tenant-a",
             order_id="PO-NO-EVT",
             event_type="EDI_850_PRICE_MISMATCH",

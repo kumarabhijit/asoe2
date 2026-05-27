@@ -21,7 +21,7 @@ from api.analysis_adapters import (
     _floor_status_from_record,
     adapt_email_order_entry,
 )
-from api.store import ExceptionRecord
+from api.store import ChildCase
 
 
 def _record(
@@ -31,8 +31,8 @@ def _record(
     original_event=None,
     selected_recipe="EmailOrderEntryRecipe.py",
     intent="MANUAL_ORDER_INTAKE",
-) -> ExceptionRecord:
-    return ExceptionRecord(
+) -> ChildCase:
+    return ChildCase(
         tenant_id="t1",
         order_id="EML-PO-2026-0042",
         event_type="EMAIL_ORDER_ENTRY_REQUEST",

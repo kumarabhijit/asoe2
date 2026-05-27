@@ -1,0 +1,296 @@
+"""Phase 2 — inheritance trigger tests.
+
+Covers acceptance criteria #2 and #3:
+  #2 An API parent rejects a child whose supergroup_code differs.
+  #3 A CUSTOMER parent under STRICT (v1 default) also rejects divergence.
+
+Also exercises the latent RELAXED capability (§8.1) so we know the trigger
+honours the app_config flag — even though v1 ships with STRICT and the
+column ``divergence_reason`` stays NULL in production.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+import uuid
+from datetime import datetime, timezone
+
+import pytest
+
+from db.migrations.runner import apply_sqlite
+
+
+@pytest.fixture
+def db() -> sqlite3.Connection:
+    conn = sqlite3.connect(":memory:")
+    conn.execute("PRAGMA foreign_keys = ON")
+    apply_sqlite(conn)
+    yield conn
+    conn.close()
+
+
+def _make_case(
+    conn: sqlite3.Connection,
+    *,
+    origin: str,
+    supergroup_code: str,
+    tenant_id: str = "t1",
+) -> str:
+    case_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    channel = "email" if origin == "CUSTOMER" else "edi_x12_850"
+    conn.execute(
+        """
+        INSERT INTO order_case (
+            case_id, tenant_id, source_channel,
+            opened_at, status, tier, origin, supergroup_code
+        ) VALUES (?, ?, ?, ?, 'OPEN_AGENT_PROCESSING', 2, ?, ?)
+        """,
+        (case_id, tenant_id, channel, now, origin, supergroup_code),
+    )
+    conn.commit()
+    return case_id
+
+
+def _insert_child(
+    conn: sqlite3.Connection,
+    *,
+    parent_case_id: str,
+    supergroup_code: str,
+    intent_code: str,
+    tenant_id: str = "t1",
+    divergence_reason: str | None = None,
+) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        """
+        INSERT INTO exceptions (
+            id, tenant_id, order_id, event_type, trace_id,
+            intent, lifecycle_state, created_at, updated_at,
+            parent_case_id, supergroup_code, intent_code, divergence_reason
+        ) VALUES (?, ?, ?, 'TEST', ?, ?, 'INGESTED', ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            str(uuid.uuid4()), tenant_id, "ord1",
+            str(uuid.uuid4()),
+            intent_code, now, now,
+            parent_case_id, supergroup_code, intent_code, divergence_reason,
+        ),
+    )
+    conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# v1 STRICT behaviour
+# ---------------------------------------------------------------------------
+
+def test_api_parent_accepts_matching_child(db: sqlite3.Connection):
+    parent = _make_case(db, origin="API", supergroup_code="SG_BLOCK_PRICING")
+    _insert_child(
+        db, parent_case_id=parent,
+        supergroup_code="SG_BLOCK_PRICING", intent_code="INT_PRICE_MISMATCH",
+    )
+    cur = db.execute("SELECT COUNT(*) FROM exceptions WHERE parent_case_id = ?", (parent,))
+    assert cur.fetchone()[0] == 1
+
+
+def test_api_parent_rejects_divergent_child(db: sqlite3.Connection):
+    """Criterion #2."""
+    parent = _make_case(db, origin="API", supergroup_code="SG_BLOCK_PRICING")
+    with pytest.raises(sqlite3.IntegrityError, match="API child cases cannot diverge"):
+        _insert_child(
+            db, parent_case_id=parent,
+            supergroup_code="SG_BLOCK_CREDIT", intent_code="INT_CREDIT_BLOCK",
+        )
+
+
+def test_customer_parent_strict_rejects_divergent_child(db: sqlite3.Connection):
+    """Criterion #3 (v1 default STRICT). Divergent pair is itself valid
+    (SG_NEEDS_TRIAGE + INT_UNKNOWN both seeded) — we are testing the
+    inheritance trigger, not the leaf-validity one."""
+    parent = _make_case(db, origin="CUSTOMER", supergroup_code="SG_NEW_ORDER")
+    with pytest.raises(sqlite3.IntegrityError, match="STRICT inheritance"):
+        _insert_child(
+            db, parent_case_id=parent,
+            supergroup_code="SG_NEEDS_TRIAGE", intent_code="INT_UNKNOWN",
+        )
+
+
+def test_customer_parent_accepts_matching_child(db: sqlite3.Connection):
+    parent = _make_case(db, origin="CUSTOMER", supergroup_code="SG_NEW_ORDER")
+    _insert_child(
+        db, parent_case_id=parent,
+        supergroup_code="SG_NEW_ORDER", intent_code="INT_MANUAL_ORDER_INTAKE",
+    )
+    cur = db.execute("SELECT COUNT(*) FROM exceptions WHERE parent_case_id = ?", (parent,))
+    assert cur.fetchone()[0] == 1
+
+
+# ---------------------------------------------------------------------------
+# Latent RELAXED capability (§8.1)
+# ---------------------------------------------------------------------------
+
+def test_customer_parent_relaxed_with_reason_accepts(db: sqlite3.Connection):
+    """Latent RELAXED mode: divergent CUSTOMER child accepted with reason.
+    Uses SG_NEEDS_TRIAGE + INT_UNKNOWN as the divergent target — both
+    seeded, so leaf validity passes and we are exercising inheritance only."""
+    db.execute(
+        "UPDATE app_config SET value = 'RELAXED' WHERE key = 'inheritance_mode_customer'"
+    )
+    db.commit()
+    parent = _make_case(db, origin="CUSTOMER", supergroup_code="SG_NEW_ORDER")
+    _insert_child(
+        db, parent_case_id=parent,
+        supergroup_code="SG_NEEDS_TRIAGE", intent_code="INT_UNKNOWN",
+        divergence_reason="Triage uncertain — escalating",
+    )
+    cur = db.execute("SELECT COUNT(*) FROM exceptions WHERE parent_case_id = ?", (parent,))
+    assert cur.fetchone()[0] == 1
+
+
+def test_customer_parent_relaxed_without_reason_rejects(db: sqlite3.Connection):
+    """RELAXED still requires divergence_reason."""
+    db.execute(
+        "UPDATE app_config SET value = 'RELAXED' WHERE key = 'inheritance_mode_customer'"
+    )
+    db.commit()
+    parent = _make_case(db, origin="CUSTOMER", supergroup_code="SG_NEW_ORDER")
+    with pytest.raises(sqlite3.IntegrityError, match="divergence_reason required"):
+        _insert_child(
+            db, parent_case_id=parent,
+            supergroup_code="SG_NEEDS_TRIAGE", intent_code="INT_UNKNOWN",
+            divergence_reason=None,
+        )
+
+
+def test_api_relaxed_still_rejects_divergence(db: sqlite3.Connection):
+    """RELAXED mode applies only to CUSTOMER. API stays strict regardless."""
+    db.execute(
+        "UPDATE app_config SET value = 'RELAXED' WHERE key = 'inheritance_mode_customer'"
+    )
+    db.commit()
+    parent = _make_case(db, origin="API", supergroup_code="SG_BLOCK_PRICING")
+    with pytest.raises(sqlite3.IntegrityError, match="API child cases cannot diverge"):
+        _insert_child(
+            db, parent_case_id=parent,
+            supergroup_code="SG_BLOCK_CREDIT", intent_code="INT_CREDIT_BLOCK",
+            divergence_reason="should be ignored on API path",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Edge cases (transitional state)
+# ---------------------------------------------------------------------------
+
+def test_child_with_null_supergroup_passes(db: sqlite3.Connection):
+    """Children that don't yet carry supergroup_code (legacy / transitional)
+    must still insert — the trigger no-ops when the value is NULL."""
+    parent = _make_case(db, origin="API", supergroup_code="SG_BLOCK_PRICING")
+    _insert_child(
+        db, parent_case_id=parent,
+        supergroup_code=None,  # transitional
+        intent_code=None,
+    )
+
+
+def test_child_without_parent_passes(db: sqlite3.Connection):
+    """Orphan child cases (no parent_case_id) are allowed — inheritance only
+    fires when parent_case_id is set."""
+    now = datetime.now(timezone.utc).isoformat()
+    db.execute(
+        """
+        INSERT INTO exceptions (
+            id, tenant_id, order_id, event_type, trace_id,
+            intent, lifecycle_state, created_at, updated_at,
+            parent_case_id, supergroup_code, intent_code
+        ) VALUES (?, 't1', 'ord1', 'TEST', ?, ?, 'INGESTED', ?, ?,
+                  NULL, 'SG_BLOCK_PRICING', 'INT_PRICE_MISMATCH')
+        """,
+        (str(uuid.uuid4()), str(uuid.uuid4()), "INT_PRICE_MISMATCH", now, now),
+    )
+    db.commit()
+
+
+# ---------------------------------------------------------------------------
+# UPDATE-trigger paths (code-review finding #5)
+# ---------------------------------------------------------------------------
+
+def test_update_child_supergroup_to_diverge_rejected_under_strict(db: sqlite3.Connection):
+    """UPDATE that changes child supergroup_code to a value that diverges
+    from parent — STRICT default rejects on both CUSTOMER and API."""
+    parent = _make_case(db, origin="API", supergroup_code="SG_BLOCK_PRICING")
+    # Insert a matching child first (passes inheritance + leaf-validity).
+    _insert_child(
+        db, parent_case_id=parent,
+        supergroup_code="SG_BLOCK_PRICING", intent_code="INT_PRICE_MISMATCH",
+    )
+    # Try to UPDATE both fields atomically to a valid pair under a
+    # different supergroup. The leaf-validity trigger would accept it
+    # (SG_BLOCK_CREDIT + INT_CREDIT_BLOCK is in supergroup_intent_allowed),
+    # but the inheritance trigger must reject the SG change.
+    with pytest.raises(sqlite3.IntegrityError, match="API child cases cannot diverge"):
+        db.execute(
+            "UPDATE exceptions SET supergroup_code='SG_BLOCK_CREDIT', "
+            "intent_code='INT_CREDIT_BLOCK' WHERE parent_case_id = ?",
+            (parent,),
+        )
+        db.commit()
+
+
+def test_update_child_to_matching_supergroup_after_classification(db: sqlite3.Connection):
+    """UPDATE that brings a previously-NULL supergroup into agreement with
+    the parent — classifier wiring (Phase 3) will use exactly this path."""
+    parent = _make_case(db, origin="CUSTOMER", supergroup_code="SG_NEW_ORDER")
+    # Child inserted without classification.
+    xid = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    db.execute(
+        """INSERT INTO exceptions
+           (id, tenant_id, order_id, event_type, trace_id, intent,
+            lifecycle_state, created_at, updated_at, parent_case_id)
+           VALUES (?, 't1', 'ord1', 'TEST', ?, NULL, 'INGESTED', ?, ?, ?)""",
+        (xid, str(uuid.uuid4()), now, now, parent),
+    )
+    db.commit()
+    # Phase 3 classifier resolves both fields.
+    db.execute(
+        "UPDATE exceptions SET supergroup_code='SG_NEW_ORDER', "
+        "intent_code='INT_MANUAL_ORDER_INTAKE' WHERE id = ?",
+        (xid,),
+    )
+    db.commit()
+    row = db.execute(
+        "SELECT supergroup_code, intent_code FROM exceptions WHERE id = ?", (xid,)
+    ).fetchone()
+    assert row == ("SG_NEW_ORDER", "INT_MANUAL_ORDER_INTAKE")
+
+
+def test_update_parent_relink_to_diverging_parent_silently_allowed(db: sqlite3.Connection):
+    """Code-review finding #8 (recorded behaviour lock): the inheritance
+    trigger only fires on supergroup_code change, not on parent_case_id
+    change. Re-linking a child to a different-supergroup parent without
+    touching the child's own supergroup is currently silently allowed.
+
+    This test locks today's behaviour so a later "fix" makes a deliberate
+    decision. If we want to enforce, add ``BEFORE UPDATE OF parent_case_id``
+    to both triggers."""
+    parent_a = _make_case(db, origin="API", supergroup_code="SG_BLOCK_PRICING")
+    parent_b = _make_case(db, origin="API", supergroup_code="SG_BLOCK_CREDIT")
+    _insert_child(
+        db, parent_case_id=parent_a,
+        supergroup_code="SG_BLOCK_PRICING", intent_code="INT_PRICE_MISMATCH",
+    )
+    # Re-link without changing child SG — silently allowed today.
+    db.execute(
+        "UPDATE exceptions SET parent_case_id = ? WHERE parent_case_id = ?",
+        (parent_b, parent_a),
+    )
+    db.commit()
+    row = db.execute(
+        "SELECT parent_case_id, supergroup_code FROM exceptions "
+        "WHERE parent_case_id = ?",
+        (parent_b,),
+    ).fetchone()
+    # Child kept its own SG even though parent SG now differs (gap noted
+    # in code-review finding #8; not enforced in Phase 2).
+    assert row == (parent_b, "SG_BLOCK_PRICING")

@@ -96,6 +96,14 @@ class ExceptionRepository:
         original_event: Optional[Dict[str, Any]] = None,
         reanalysis_history: Optional[List[Dict[str, Any]]] = None,
         enrichment_context: Optional[Dict[str, Any]] = None,
+        # V018 — Case & Intent Super-Group fields (requirements §5).
+        # Optional in Phase 2 so existing callers stay green; Phase 3
+        # classifier wiring starts passing them.
+        supergroup_code: Optional[str] = None,
+        intent_code: Optional[str] = None,
+        divergence_reason: Optional[str] = None,
+        sap_block_field: Optional[str] = None,
+        scope: Optional[str] = None,
     ) -> Dict[str, Any]:
         record_id = _uuid()
         now = _now()
@@ -115,12 +123,16 @@ class ExceptionRepository:
                     lifecycle_state, shadow_verdict, selected_recipe,
                     final_status, trace_id, resolution_data,
                     original_event, reanalysis_history, enrichment_context,
+                    supergroup_code, intent_code, divergence_reason,
+                    sap_block_field, scope,
                     created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (record_id, tenant_id, order_id, event_type, intent,
                  lifecycle_state, shadow_verdict, selected_recipe,
                  final_status, trace_id, res_data,
                  original_event_json, history_json, enrichment_json,
+                 supergroup_code, intent_code, divergence_reason,
+                 sap_block_field, scope,
                  now, now),
             )
 
@@ -134,23 +146,35 @@ class ExceptionRepository:
             "reanalysis_history": reanalysis_history or [],
             "enrichment_context": enrichment_context or {},
             "resolved_by": None, "resolved_action": None, "resolution_notes": None,
+            "supergroup_code": supergroup_code, "intent_code": intent_code,
+            "divergence_reason": divergence_reason,
+            "sap_block_field": sap_block_field, "scope": scope,
             "created_at": now, "updated_at": now,
         }
 
-    def get(self, exception_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
-        with self._adapter.cursor(tenant_id) as cur:
-            cur.execute(
-                """SELECT id, tenant_id, order_id, event_type, intent,
-                          lifecycle_state, shadow_verdict, selected_recipe,
-                          final_status, trace_id, resolution_data,
-                          resolved_by, resolved_action, resolution_notes,
-                          original_event, reanalysis_history, enrichment_context,
-                          created_at, updated_at
-                   FROM exceptions
-                   WHERE id = ? AND tenant_id = ?""",
-                (exception_id, tenant_id),
-            )
-            row = cur.fetchone()
+    def get(
+        self, exception_id: str, tenant_id: str,
+        *, _cursor: Optional[Any] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch one exception row. Pass ``_cursor`` to share the
+        transaction with surrounding writes (see ``update`` docstring)."""
+        sql = """SELECT id, tenant_id, order_id, event_type, intent,
+                        lifecycle_state, shadow_verdict, selected_recipe,
+                        final_status, trace_id, resolution_data,
+                        resolved_by, resolved_action, resolution_notes,
+                        original_event, reanalysis_history, enrichment_context,
+                        supergroup_code, intent_code, divergence_reason,
+                        sap_block_field, scope,
+                        created_at, updated_at
+                 FROM exceptions
+                 WHERE id = ? AND tenant_id = ?"""
+        if _cursor is not None:
+            _cursor.execute(sql, (exception_id, tenant_id))
+            row = _cursor.fetchone()
+        else:
+            with self._adapter.cursor(tenant_id) as cur:
+                cur.execute(sql, (exception_id, tenant_id))
+                row = cur.fetchone()
         if not row:
             return None
         return self._to_dict(row)
@@ -179,6 +203,8 @@ class ExceptionRepository:
                            final_status, trace_id, resolution_data,
                            resolved_by, resolved_action, resolution_notes,
                            original_event, reanalysis_history, enrichment_context,
+                           supergroup_code, intent_code, divergence_reason,
+                           sap_block_field, scope,
                            created_at, updated_at
                     FROM exceptions
                     WHERE {where}
@@ -193,9 +219,20 @@ class ExceptionRepository:
         next_cursor = records[-1]["id"] if has_more and records else None
         return records, next_cursor, has_more
 
-    def update(self, exception_id: str, tenant_id: str, **fields) -> Optional[Dict[str, Any]]:
+    def update(
+        self, exception_id: str, tenant_id: str,
+        *, _cursor: Optional[Any] = None, **fields,
+    ) -> Optional[Dict[str, Any]]:
+        """Update fields on an exception row.
+
+        Pass ``_cursor`` when the caller wants this UPDATE to share a
+        transaction with subsequent writes (e.g. DatabaseBackedStore.update
+        wraps UPDATE + classification-history INSERT in one cursor so a
+        failed audit write rolls back the row mutation — review finding #2
+        from the Phase-5/6 review checkpoint).
+        """
         if not fields:
-            return self.get(exception_id, tenant_id)
+            return self.get(exception_id, tenant_id, _cursor=_cursor)
         for json_col in ("resolution_data", "original_event",
                          "reanalysis_history", "enrichment_context"):
             if json_col in fields and not isinstance(fields[json_col], str):
@@ -204,12 +241,15 @@ class ExceptionRepository:
         set_clause = ", ".join(f"{k} = ?" for k in fields)
         values = list(fields.values())
         values.extend([exception_id, tenant_id])
-        with self._adapter.cursor(tenant_id) as cur:
-            cur.execute(
-                f"UPDATE exceptions SET {set_clause} WHERE id = ? AND tenant_id = ?",
-                tuple(values),
-            )
-        return self.get(exception_id, tenant_id)
+        sql = (
+            f"UPDATE exceptions SET {set_clause} WHERE id = ? AND tenant_id = ?"
+        )
+        if _cursor is not None:
+            _cursor.execute(sql, tuple(values))
+        else:
+            with self._adapter.cursor(tenant_id) as cur:
+                cur.execute(sql, tuple(values))
+        return self.get(exception_id, tenant_id, _cursor=_cursor)
 
     def stats(self, tenant_id: str) -> Dict[str, Any]:
         with self._adapter.cursor(tenant_id) as cur:
@@ -275,6 +315,10 @@ class ExceptionRepository:
         "final_status", "trace_id", "resolution_data", "resolved_by",
         "resolved_action", "resolution_notes",
         "original_event", "reanalysis_history", "enrichment_context",
+        # V018 — Case & Intent Super-Group columns (requirements §5).
+        # Nullable in Phase 2; populated by the Phase 3 classifier wiring.
+        "supergroup_code", "intent_code", "divergence_reason",
+        "sap_block_field", "scope",
         "created_at", "updated_at",
     )
 
@@ -345,6 +389,120 @@ class TraceRepository:
         if isinstance(r.get("trace_record"), str):
             r["trace_record"] = _json_loads(r["trace_record"])
         return r
+
+
+# ---------------------------------------------------------------------------
+# Classification History Repository (V020)
+# ---------------------------------------------------------------------------
+
+
+class ClassificationHistoryRepository:
+    """Append-only writer for ``case_classification_history`` (V020).
+
+    The table's UPDATE/DELETE/TRUNCATE/INSERT-OR-REPLACE triggers reject
+    every mutation path; this repository only writes INSERTs. Reads
+    surface the audit trail for the
+    ``GET /api/v1/cases/{id}/classification-history`` endpoint when the
+    DB-backed store is active.
+
+    Requirements: docs/specs/case-intent-supergroup-requirements.md §8.6,
+    acceptance criterion #9.
+    """
+
+    _COLUMNS = (
+        "id", "tenant_id", "case_id", "child_case_id", "supergroup_code",
+        "intent_code", "classified_at", "classified_by", "classifier_type",
+        "model_version", "reason_text", "source_event_id",
+        "taxonomy_version",
+    )
+
+    def __init__(self, adapter=None):
+        self._adapter = adapter or create_adapter()
+
+    def create(
+        self,
+        *,
+        tenant_id: str,
+        case_id: str,
+        supergroup_code: str,
+        classified_by: str,
+        classifier_type: str,
+        intent_code: Optional[str] = None,
+        child_case_id: Optional[str] = None,
+        model_version: Optional[str] = None,
+        reason_text: Optional[str] = None,
+        source_event_id: Optional[str] = None,
+        taxonomy_version: str = "",
+        _cursor: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """Append one classification event. ``taxonomy_version`` must be
+        passed by the caller (read from the active YAML at app boot).
+        ``tenant_id`` is required (ADR-028 Guard-rail 4 — every audit row
+        carries tenant_id for cross-tenant query filtering).
+        Returns the inserted row as a dict for the call-site to log."""
+        if not tenant_id:
+            raise ValueError("tenant_id is required (ADR-028 Guard-rail 4).")
+        if not supergroup_code:
+            raise ValueError(
+                "supergroup_code is required on a classification event."
+            )
+        if classifier_type not in ("HUMAN", "MODEL", "RULE"):
+            raise ValueError(
+                f"classifier_type must be HUMAN | MODEL | RULE, got "
+                f"{classifier_type!r}"
+            )
+        if not taxonomy_version:
+            raise ValueError(
+                "taxonomy_version must be non-empty (read from the active "
+                "YAML at app boot)."
+            )
+        row_id = _uuid()
+        now = _now()
+        sql = """
+            INSERT INTO case_classification_history (
+                id, tenant_id, case_id, child_case_id, supergroup_code,
+                intent_code, classified_at, classified_by,
+                classifier_type, model_version, reason_text,
+                source_event_id, taxonomy_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        params = (
+            row_id, tenant_id, case_id, child_case_id, supergroup_code,
+            intent_code, now, classified_by, classifier_type,
+            model_version, reason_text, source_event_id,
+            taxonomy_version,
+        )
+        if _cursor is not None:
+            _cursor.execute(sql, params)
+        else:
+            with self._adapter.cursor(tenant_id) as cur:
+                cur.execute(sql, params)
+        return {
+            "id": row_id, "tenant_id": tenant_id, "case_id": case_id,
+            "child_case_id": child_case_id, "supergroup_code": supergroup_code,
+            "intent_code": intent_code, "classified_at": now,
+            "classified_by": classified_by, "classifier_type": classifier_type,
+            "model_version": model_version, "reason_text": reason_text,
+            "source_event_id": source_event_id,
+            "taxonomy_version": taxonomy_version,
+        }
+
+    def list_by_case(
+        self, case_id: str, tenant_id: str,
+    ) -> List[Dict[str, Any]]:
+        """Return all history rows for a case in append order, scoped
+        to ``tenant_id`` (ADR-028 cross-tenant filter)."""
+        with self._adapter.cursor(tenant_id) as cur:
+            cur.execute(
+                f"""
+                SELECT {", ".join(self._COLUMNS)}
+                FROM case_classification_history
+                WHERE tenant_id = ? AND case_id = ?
+                ORDER BY classified_at, id
+                """,
+                (tenant_id, case_id),
+            )
+            return [_row_to_dict(r, self._COLUMNS) for r in cur.fetchall()]
 
 
 # ---------------------------------------------------------------------------

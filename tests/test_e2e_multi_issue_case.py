@@ -4,7 +4,7 @@ A real CPG purchase order routinely produces more than one
 exception: a price mismatch, a duplicate retransmission, a
 back-order, etc. Each inbound event runs its own
 Skill -> Shadow -> Recipe pipeline and persists its own
-`ExceptionRecord`; the `OrderCase` is the aggregator that
+`ChildCase`; the `OrderCase` is the aggregator that
 correlates them by customer PO.
 
 This module drives that path through the real in-process API

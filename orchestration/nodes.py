@@ -1091,7 +1091,7 @@ def resolve_dependencies(state: GraphState) -> GraphState:
       3. Store result in state.enrichment_context[dep.result_key]
 
     Verdict Pillar 1: gateway-fetched evidence lives in enrichment_context
-    (audit-bearing, persisted to ExceptionRecord.enrichment_context).
+    (audit-bearing, persisted to ChildCase.enrichment_context).
     Recipe-input sites read from the same bag — one source of truth.
 
     If any dependency fails, halt with FAIL_TO_HUMAN.

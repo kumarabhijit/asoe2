@@ -1,7 +1,8 @@
 """OrderCase read endpoints (ADR-038 Phase H.6).
 
 GET /api/v1/cases          — list cases for the caller's tenant, with
-                              optional source / status filters.
+                              optional origin / supergroup_code / status
+                              filters.
 GET /api/v1/cases/{id}     — fetch a single case.
 
 The case lifecycle is mutated implicitly by the orchestration graph
@@ -41,8 +42,14 @@ from api.case_events import (
 from api.errors import ASOEError
 from api.metrics import record_cases_returned
 from api.observability.audit_bearing import audit_bearing
-from api.schemas import CaseListResponse, CaseRecordsResponse
+from api.schemas import (
+    CaseListResponse,
+    CaseRecordsResponse,
+    ClassificationHistoryEntry,
+    ClassificationHistoryResponse,
+)
 from api.store import case_store, exception_store
+from contracts.models import Origin
 
 logger = logging.getLogger("asoe.api.cases")
 
@@ -57,7 +64,7 @@ def _scope_to_user(cases, user: AuthenticatedUser):
     """Apply assigned-accounts / partner-retailer scoping to the case list.
 
     Cases don't carry ``account_id`` directly, so we derive scope from
-    the child ``ExceptionRecord`` rows that share the case's
+    the child ``ChildCase`` rows that share the case's
     ``parent_case_id``. A case is in scope when at least one of its
     children is in scope. Cases with no children yet (just-opened
     Manual Orders before any event lands) fall back to the case's
@@ -108,16 +115,20 @@ def _scope_to_user(cases, user: AuthenticatedUser):
 async def list_cases(
     tenant_id: str = Depends(get_tenant_id),
     user: AuthenticatedUser = Depends(get_current_user),
-    source: Optional[str] = Query(
-        None,
-        description="Filter by case source (manual_order | automated_order)",
-    ),
-    case_type: Optional[str] = Query(
+    origin: Optional[Origin] = Query(
         None,
         description=(
-            "Filter by case_type (EMAIL_ENTRY | BLOCK). Orthogonal to source "
-            "(ADR-041 §1); drives the Customer Inbox EMAIL_ENTRY lens "
-            "(ADR-042)."
+            "Filter by case origin (CUSTOMER | API). Requirements §3 "
+            "glossary — CUSTOMER drives the Customer Inbox lens; API is "
+            "the SAP-pushed block path. Unknown values rejected at the "
+            "edge by FastAPI (constrained-input gate, CLAUDE.md §3)."
+        ),
+    ),
+    supergroup_code: Optional[str] = Query(
+        None,
+        description=(
+            "Filter by Intent Super-Group (requirements §6). E.g. "
+            "supergroup_code=SG_BLOCK_PRICING."
         ),
     ),
     status: Optional[str] = Query(
@@ -168,11 +179,11 @@ async def list_cases(
 ) -> CaseListResponse:
     cases = case_store.list_by_tenant(tenant_id)
 
-    if source:
-        cases = [c for c in cases if c.source == source]
+    if origin:
+        cases = [c for c in cases if c.origin == origin]
 
-    if case_type:
-        cases = [c for c in cases if c.case_type == case_type]
+    if supergroup_code:
+        cases = [c for c in cases if c.supergroup_code == supergroup_code]
 
     # Multi-value status: any-match. The empty list (after parse) is
     # treated as "no filter" so a trailing comma in the URL doesn't
@@ -332,7 +343,7 @@ async def get_case(
 # "Attached records" stack and the aggregated `policyHits` surface
 # the L1-vs-L2 PolicyHitBadge section consumes. The endpoint reads
 # from the existing `exception_store.list_by_case` join key
-# (`ExceptionRecord.parent_case_id`); no new persistence is needed.
+# (`ChildCase.parent_case_id`); no new persistence is needed.
 #
 # RBAC inherits from `_scope_to_user` — a caller who can read the
 # parent case can read its children. Partner / assigned-account
@@ -377,7 +388,7 @@ async def list_case_records(
     # across refetches (PolicyHitBadge keys on the string itself —
     # an unstable order would re-mount every badge on every event).
     # The policy hits live on the persisted trace
-    # (`shadow_policy_hits`), not on ExceptionRecord itself, so we
+    # (`shadow_policy_hits`), not on ChildCase itself, so we
     # walk traces for each child.
     seen: set[str] = set()
     aggregated: list[str] = []
@@ -394,6 +405,49 @@ async def list_case_records(
         total=len(records),
         aggregated_policy_hits=aggregated,
     )
+
+
+# ---------------------------------------------------------------------------
+# Classification audit trail (requirements §8.6, acceptance criterion #9)
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/cases/{case_id}/classification-history",
+    response_model=ClassificationHistoryResponse,
+    dependencies=[Depends(require_role(
+        "analyst", "manager", "admin", "viewer", "partner",
+    ))],
+)
+async def list_classification_history(
+    case_id: str,
+    tenant_id: str = Depends(get_tenant_id),
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> ClassificationHistoryResponse:
+    """Return the case's full classification audit trail in append order.
+
+    Requirements §8.6: every classification or reclassification event
+    appends exactly one row stamped with the taxonomy version in effect
+    at the time. The audit is append-only on both sides (in-memory and
+    V020 DB triggers). Reads are open to any role that can see the case.
+    """
+    case = case_store.get(case_id)
+    if case is None or case.tenant_id != tenant_id:
+        raise ASOEError(
+            code="NOT_FOUND",
+            message=f"Case {case_id} not found.",
+            status_code=404,
+        )
+    events = case_store.get_classification_history(case_id)
+    items = [
+        ClassificationHistoryEntry(**event.model_dump()) for event in events
+    ]
+    # Partners are external retailers; ``reason_text`` is operator-authored
+    # free text and may carry internal commercial notes ("escalate to VP",
+    # "watchlist customer", etc.). Redact it for the partner role; analysts
+    # / managers / admins / viewers (all internal) see the full row.
+    if "partner" in (user.roles or ()):
+        items = [it.redact_for_partner() for it in items]
+    return ClassificationHistoryResponse(items=items, total=len(items))
 
 
 # ---------------------------------------------------------------------------

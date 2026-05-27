@@ -3,13 +3,13 @@
 End-to-end coverage for the case-resolver wiring in
 ``api/routes/exceptions.py::_persist_exception``. Verifies:
 
-  * Clean Automated event (final_status == COMPLETE) → no case opened;
+  * Clean API event (final_status == COMPLETE) → no case opened;
     record's ``parent_case_id`` is None (T1 stateless path).
-  * Non-clean Automated event (MANUAL_REVIEW_REQUIRED / BLOCKED) →
+  * Non-clean API event (MANUAL_REVIEW_REQUIRED / BLOCKED) →
     case opens; record's ``parent_case_id`` is set; case carries
-    ``source = "automated_order"``.
-  * Manual Order event → case opens eagerly regardless of terminal
-    status; ``source = "manual_order"``.
+    ``origin = "API"``.
+  * CUSTOMER-origin event → case opens eagerly regardless of terminal
+    status; ``origin = "CUSTOMER"``.
   * Multiple non-clean events for the same customer PO → all attach
     to the same case (correlation lookup-or-create works through the
     full e2e path).
@@ -20,7 +20,7 @@ from __future__ import annotations
 import pytest
 
 from api.case_resolver import (
-    derive_source_and_channel,
+    derive_origin_and_channel,
     materialise_for_event,
     should_materialise,
 )
@@ -38,60 +38,57 @@ def _reset_stores():
 
 
 # ---------------------------------------------------------------------------
-# derive_source_and_channel — pure routing helper
+# derive_origin_and_channel — pure routing helper
 # ---------------------------------------------------------------------------
 
 
-class TestDeriveSourceAndChannel:
-    def test_email_event_type_routes_to_manual(self):
+class TestDeriveOriginAndChannel:
+    def test_email_event_type_routes_to_customer(self):
         event = OrderEvent(
             order_id="EML-1", po_price=100.0, sap_base_price=100.0,
             event_type="EMAIL_ORDER_ENTRY_REQUEST",
         )
-        source, channel = derive_source_and_channel(event)
-        assert source == "manual_order"
+        origin, channel = derive_origin_and_channel(event)
+        assert origin == "CUSTOMER"
         assert channel == "email"
 
-    def test_edi_event_type_routes_to_automated(self):
+    def test_edi_event_type_routes_to_api(self):
         event = OrderEvent(
             order_id="SO-1", po_price=100.0, sap_base_price=100.0,
             event_type="EDI_850_DUPLICATE_PO",
         )
-        source, channel = derive_source_and_channel(event)
-        assert source == "automated_order"
+        origin, channel = derive_origin_and_channel(event)
+        assert origin == "API"
         assert channel == "edi_x12_850"
 
-    def test_unknown_event_type_defaults_to_automated(self):
+    def test_unknown_event_type_defaults_to_api(self):
         event = OrderEvent(
             order_id="SO-1", po_price=100.0, sap_base_price=100.0,
             event_type="UNKNOWN_EVENT_TYPE",
         )
-        source, channel = derive_source_and_channel(event)
-        assert source == "automated_order"
+        origin, channel = derive_origin_and_channel(event)
+        assert origin == "API"
 
     def test_explicit_metadata_overrides_inference(self):
-        # Portal orders are Automated per ADR-038 §3.1; metadata
-        # carries source='automated_order' + source_channel='portal'.
+        # Portal orders are API per requirements §3 glossary; metadata
+        # carries origin='API' + source_channel='portal'.
         event = OrderEvent(
             order_id="SO-1", po_price=100.0, sap_base_price=100.0,
             event_type="GENERIC",
-            metadata={
-                "source": "automated_order",
-                "source_channel": "portal",
-            },
+            metadata={"origin": "API", "source_channel": "portal"},
         )
-        source, channel = derive_source_and_channel(event)
-        assert source == "automated_order"
+        origin, channel = derive_origin_and_channel(event)
+        assert origin == "API"
         assert channel == "portal"
 
     def test_partial_metadata_falls_back_to_inference(self):
-        # Only one of source/source_channel set → ignore both, infer.
+        # Only one of origin/source_channel set → ignore both, infer.
         event = OrderEvent(
             order_id="SO-1", po_price=100.0, sap_base_price=100.0,
             event_type="EDI_850_DUPLICATE_PO",
-            metadata={"source": "automated_order"},  # missing channel
+            metadata={"origin": "API"},  # missing channel
         )
-        source, channel = derive_source_and_channel(event)
+        _origin, channel = derive_origin_and_channel(event)
         # Inference path used; channel defaults to edi_x12_850.
         assert channel == "edi_x12_850"
 
@@ -175,7 +172,7 @@ class TestMaterialiseForEvent:
         )
         case = materialise_for_event("t1", event, "COMPLETE")
         assert case is not None
-        assert case.source == "automated_order"
+        assert case.origin == "API"
         assert len(case_store.list_by_tenant("t1")) == 1
 
     def test_non_clean_automated_opens_case(self):
@@ -186,7 +183,7 @@ class TestMaterialiseForEvent:
         )
         case = materialise_for_event("t1", event, "MANUAL_REVIEW_REQUIRED")
         assert case is not None
-        assert case.source == "automated_order"
+        assert case.origin == "API"
         assert case.source_channel == "edi_x12_850"
         assert case.customer_po_number == "SO-1"
         assert case.customer_id == "R-100"
@@ -200,7 +197,7 @@ class TestMaterialiseForEvent:
         # Manual Orders open even on COMPLETE.
         case = materialise_for_event("t1", event, "COMPLETE")
         assert case is not None
-        assert case.source == "manual_order"
+        assert case.origin == "CUSTOMER"
         assert case.source_channel == "email"
 
     def test_multiple_events_same_po_attach_to_one_case(self):
@@ -227,20 +224,19 @@ class TestMaterialiseForEvent:
         assert len(case_store.list_by_tenant("t1")) == 1
 
     def test_explicit_source_channel_propagates(self):
-        # Portal-typed order: metadata overrides inference; source is
-        # automated_order (workload-centric criterion per §3.1) and
-        # channel is 'portal'.
+        # Portal-typed order: metadata overrides inference; origin is
+        # API (system-initiated) and channel is 'portal'.
         event = OrderEvent(
             order_id="PORTAL-9", po_price=100.0, sap_base_price=100.0,
             event_type="ORDER_RECEIVED",
             metadata={
-                "source": "automated_order",
+                "origin": "API",
                 "source_channel": "portal",
             },
         )
         case = materialise_for_event("t1", event, "MANUAL_REVIEW_REQUIRED")
         assert case is not None
-        assert case.source == "automated_order"
+        assert case.origin == "API"
         assert case.source_channel == "portal"
 
     def test_correlation_keys_from_metadata(self):

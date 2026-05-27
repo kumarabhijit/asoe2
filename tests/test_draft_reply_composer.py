@@ -9,11 +9,11 @@ from __future__ import annotations
 
 from api.profile_composer import compose_draft_reply
 from api.schemas import AnalysisResponse, DraftReply
-from api.store import ExceptionRecord
+from api.store import ChildCase
 
 
-def _record(resolution_data) -> ExceptionRecord:
-    return ExceptionRecord(
+def _record(resolution_data) -> ChildCase:
+    return ChildCase(
         tenant_id="acme-corp", order_id="SO-1", event_type="MANUAL_ORDER_INTAKE",
         trace_id="tr-1", intent="MANUAL_ORDER_INTAKE",
         lifecycle_state="PENDING_REVIEW", shadow_verdict="YELLOW",

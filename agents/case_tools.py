@@ -191,7 +191,7 @@ def _tool_read_case_summary(ctx: ToolContext, args: Dict[str, Any]) -> ToolResul
         data={
             "case_id": case.case_id,
             "tenant_id": case.tenant_id,
-            "source": case.source,
+            "origin": case.origin,
             "source_channel": case.source_channel,
             "customer_id": case.customer_id,
             "customer_po_number": case.customer_po_number,
