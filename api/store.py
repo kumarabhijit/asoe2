@@ -308,15 +308,69 @@ class ExceptionStore:
                 if r.tenant_id == tenant_id and r.parent_case_id == case_id
             ]
 
-    def update(self, exception_id: str, tenant_id: str, **fields) -> Optional[ChildCase]:
+    def update(
+        self,
+        exception_id: str,
+        tenant_id: str,
+        *,
+        classified_by: Optional[str] = None,
+        classifier_type: Optional[str] = None,
+        model_version: Optional[str] = None,
+        reason_text: Optional[str] = None,
+        source_event_id: Optional[str] = None,
+        **fields,
+    ) -> Optional[ChildCase]:
+        """Apply field updates. Audit: if ``intent_code`` or
+        ``supergroup_code`` is among the changed fields, the caller
+        must supply ``classified_by`` + ``classifier_type`` and we
+        append a ClassificationEvent to the parent case's history
+        (requirements §8.6, criterion #9). Updates that don't touch
+        those fields stay simple — no audit kwargs needed.
+        """
         with self._lock:
             record = self._records.get(exception_id)
             if not record or record.tenant_id != tenant_id:
                 return None
+            sg_changed = (
+                "supergroup_code" in fields
+                and fields["supergroup_code"] != record.supergroup_code
+            )
+            intent_changed = (
+                "intent_code" in fields
+                and fields["intent_code"] != record.intent_code
+            )
+            if (sg_changed or intent_changed):
+                if not classified_by or not classifier_type:
+                    raise ValueError(
+                        f"ExceptionStore.update(exception_id={exception_id}) "
+                        "changes supergroup_code or intent_code but did not "
+                        "supply classified_by + classifier_type; every "
+                        "reclassification must be attributable "
+                        "(requirements §8.6)."
+                    )
             for key, value in fields.items():
                 if hasattr(record, key):
                     setattr(record, key, value)
             record.updated_at = datetime.now(timezone.utc).isoformat()
+            if (sg_changed or intent_changed) and record.parent_case_id:
+                # Append to the parent case's history. Resolved values
+                # come from the record post-update so reclassification
+                # to NULL is captured correctly.
+                # classifier_by / classifier_type guaranteed non-None
+                # by the guard above.
+                assert classified_by is not None
+                assert classifier_type is not None
+                case_store._record_for_child(
+                    case_id=record.parent_case_id,
+                    child_case_id=exception_id,
+                    supergroup_code=record.supergroup_code,
+                    intent_code=record.intent_code,
+                    classified_by=classified_by,
+                    classifier_type=classifier_type,
+                    model_version=model_version,
+                    reason_text=reason_text,
+                    source_event_id=source_event_id,
+                )
             return record
 
     def store_trace(self, exception_id: str, trace_data: Dict[str, Any]) -> None:
@@ -623,11 +677,62 @@ class DatabaseBackedStore:
         records = [self._dict_to_record(r) for r in rows]
         return [r for r in records if r.parent_case_id == case_id]
 
-    def update(self, exception_id: str, tenant_id: str, **fields) -> Optional[ChildCase]:
+    def update(
+        self,
+        exception_id: str,
+        tenant_id: str,
+        *,
+        classified_by: Optional[str] = None,
+        classifier_type: Optional[str] = None,
+        model_version: Optional[str] = None,
+        reason_text: Optional[str] = None,
+        source_event_id: Optional[str] = None,
+        **fields,
+    ) -> Optional[ChildCase]:
+        """Mirrors ``ExceptionStore.update`` audit semantics — when
+        ``intent_code`` or ``supergroup_code`` is among the changed
+        fields, classified_by + classifier_type are required and a
+        ClassificationEvent lands on the parent case's history
+        (requirements §8.6)."""
+        current = self._exceptions.get(exception_id, tenant_id)
+        if not current:
+            return None
+        sg_changed = (
+            "supergroup_code" in fields
+            and fields["supergroup_code"] != current.get("supergroup_code")
+        )
+        intent_changed = (
+            "intent_code" in fields
+            and fields["intent_code"] != current.get("intent_code")
+        )
+        if (sg_changed or intent_changed):
+            if not classified_by or not classifier_type:
+                raise ValueError(
+                    f"DatabaseBackedStore.update(exception_id={exception_id}) "
+                    "changes supergroup_code or intent_code but did not "
+                    "supply classified_by + classifier_type; every "
+                    "reclassification must be attributable "
+                    "(requirements §8.6)."
+                )
         row = self._exceptions.update(exception_id, tenant_id, **fields)
         if not row:
             return None
-        return self._dict_to_record(row)
+        record = self._dict_to_record(row)
+        if (sg_changed or intent_changed) and record.parent_case_id:
+            assert classified_by is not None
+            assert classifier_type is not None
+            case_store._record_for_child(
+                case_id=record.parent_case_id,
+                child_case_id=exception_id,
+                supergroup_code=record.supergroup_code,
+                intent_code=record.intent_code,
+                classified_by=classified_by,
+                classifier_type=classifier_type,
+                model_version=model_version,
+                reason_text=reason_text,
+                source_event_id=source_event_id,
+            )
+        return record
 
     def append_reanalysis(
         self,
@@ -1120,6 +1225,56 @@ class CaseStore:
         )
         self._history.setdefault(case_id, []).append(event)
         return event
+
+    def _record_for_child(
+        self,
+        *,
+        case_id: str,
+        child_case_id: str,
+        supergroup_code: Optional[str],
+        intent_code: Optional[str],
+        classified_by: str,
+        classifier_type: str,
+        model_version: Optional[str] = None,
+        reason_text: Optional[str] = None,
+        source_event_id: Optional[str] = None,
+    ) -> Optional[ClassificationEvent]:
+        """Append a child-level ClassificationEvent.
+
+        Called from ``ExceptionStore.update`` when a child's
+        ``intent_code`` or ``supergroup_code`` changes. ``supergroup_code``
+        on the event row is taken from the child's post-update value (the
+        leaf-validity DB trigger guarantees it matches the parent's SG
+        under STRICT inheritance, so the audit row is consistent).
+
+        Returns ``None`` and is a no-op when the case is unknown — the
+        DB-backed path may have a case that the in-memory CaseStore
+        doesn't mirror, in which case the V020 trigger captures the
+        audit at the DB layer. (Phase-5 follow-up will lift CaseStore
+        to a true mirror; for now this method is tolerant.)
+        """
+        if supergroup_code is None:
+            # Cannot persist a NULL supergroup_code on the event (the
+            # contract is non-null). The reclassify-to-NULL transition
+            # is upstream of the audit boundary; reject explicitly.
+            raise ValueError(
+                "Cannot record classification event with NULL supergroup_code; "
+                "reclassify the child to a valid super-group first."
+            )
+        with self._lock:
+            if case_id not in self._cases:
+                return None
+            return self._record_classification_locked(
+                case_id=case_id,
+                supergroup_code=supergroup_code,
+                intent_code=intent_code,
+                classified_by=classified_by,
+                classifier_type=classifier_type,
+                child_case_id=child_case_id,
+                model_version=model_version,
+                reason_text=reason_text,
+                source_event_id=source_event_id,
+            )
 
     def record_classification(
         self,
