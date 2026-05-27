@@ -152,22 +152,29 @@ class ExceptionRepository:
             "created_at": now, "updated_at": now,
         }
 
-    def get(self, exception_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
-        with self._adapter.cursor(tenant_id) as cur:
-            cur.execute(
-                """SELECT id, tenant_id, order_id, event_type, intent,
-                          lifecycle_state, shadow_verdict, selected_recipe,
-                          final_status, trace_id, resolution_data,
-                          resolved_by, resolved_action, resolution_notes,
-                          original_event, reanalysis_history, enrichment_context,
-                          supergroup_code, intent_code, divergence_reason,
-                          sap_block_field, scope,
-                          created_at, updated_at
-                   FROM exceptions
-                   WHERE id = ? AND tenant_id = ?""",
-                (exception_id, tenant_id),
-            )
-            row = cur.fetchone()
+    def get(
+        self, exception_id: str, tenant_id: str,
+        *, _cursor: Optional[Any] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch one exception row. Pass ``_cursor`` to share the
+        transaction with surrounding writes (see ``update`` docstring)."""
+        sql = """SELECT id, tenant_id, order_id, event_type, intent,
+                        lifecycle_state, shadow_verdict, selected_recipe,
+                        final_status, trace_id, resolution_data,
+                        resolved_by, resolved_action, resolution_notes,
+                        original_event, reanalysis_history, enrichment_context,
+                        supergroup_code, intent_code, divergence_reason,
+                        sap_block_field, scope,
+                        created_at, updated_at
+                 FROM exceptions
+                 WHERE id = ? AND tenant_id = ?"""
+        if _cursor is not None:
+            _cursor.execute(sql, (exception_id, tenant_id))
+            row = _cursor.fetchone()
+        else:
+            with self._adapter.cursor(tenant_id) as cur:
+                cur.execute(sql, (exception_id, tenant_id))
+                row = cur.fetchone()
         if not row:
             return None
         return self._to_dict(row)
@@ -212,9 +219,20 @@ class ExceptionRepository:
         next_cursor = records[-1]["id"] if has_more and records else None
         return records, next_cursor, has_more
 
-    def update(self, exception_id: str, tenant_id: str, **fields) -> Optional[Dict[str, Any]]:
+    def update(
+        self, exception_id: str, tenant_id: str,
+        *, _cursor: Optional[Any] = None, **fields,
+    ) -> Optional[Dict[str, Any]]:
+        """Update fields on an exception row.
+
+        Pass ``_cursor`` when the caller wants this UPDATE to share a
+        transaction with subsequent writes (e.g. DatabaseBackedStore.update
+        wraps UPDATE + classification-history INSERT in one cursor so a
+        failed audit write rolls back the row mutation — review finding #2
+        from the Phase-5/6 review checkpoint).
+        """
         if not fields:
-            return self.get(exception_id, tenant_id)
+            return self.get(exception_id, tenant_id, _cursor=_cursor)
         for json_col in ("resolution_data", "original_event",
                          "reanalysis_history", "enrichment_context"):
             if json_col in fields and not isinstance(fields[json_col], str):
@@ -223,12 +241,15 @@ class ExceptionRepository:
         set_clause = ", ".join(f"{k} = ?" for k in fields)
         values = list(fields.values())
         values.extend([exception_id, tenant_id])
-        with self._adapter.cursor(tenant_id) as cur:
-            cur.execute(
-                f"UPDATE exceptions SET {set_clause} WHERE id = ? AND tenant_id = ?",
-                tuple(values),
-            )
-        return self.get(exception_id, tenant_id)
+        sql = (
+            f"UPDATE exceptions SET {set_clause} WHERE id = ? AND tenant_id = ?"
+        )
+        if _cursor is not None:
+            _cursor.execute(sql, tuple(values))
+        else:
+            with self._adapter.cursor(tenant_id) as cur:
+                cur.execute(sql, tuple(values))
+        return self.get(exception_id, tenant_id, _cursor=_cursor)
 
     def stats(self, tenant_id: str) -> Dict[str, Any]:
         with self._adapter.cursor(tenant_id) as cur:
@@ -412,6 +433,7 @@ class ClassificationHistoryRepository:
         reason_text: Optional[str] = None,
         source_event_id: Optional[str] = None,
         taxonomy_version: str = "",
+        _cursor: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """Append one classification event. ``taxonomy_version`` must be
         passed by the caller (read from the active YAML at app boot).
@@ -436,23 +458,25 @@ class ClassificationHistoryRepository:
             )
         row_id = _uuid()
         now = _now()
-        with self._adapter.cursor(tenant_id) as cur:
-            cur.execute(
-                """
-                INSERT INTO case_classification_history (
-                    id, tenant_id, case_id, child_case_id, supergroup_code,
-                    intent_code, classified_at, classified_by,
-                    classifier_type, model_version, reason_text,
-                    source_event_id, taxonomy_version
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    row_id, tenant_id, case_id, child_case_id, supergroup_code,
-                    intent_code, now, classified_by, classifier_type,
-                    model_version, reason_text, source_event_id,
-                    taxonomy_version,
-                ),
-            )
+        sql = """
+            INSERT INTO case_classification_history (
+                id, tenant_id, case_id, child_case_id, supergroup_code,
+                intent_code, classified_at, classified_by,
+                classifier_type, model_version, reason_text,
+                source_event_id, taxonomy_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        params = (
+            row_id, tenant_id, case_id, child_case_id, supergroup_code,
+            intent_code, now, classified_by, classifier_type,
+            model_version, reason_text, source_event_id,
+            taxonomy_version,
+        )
+        if _cursor is not None:
+            _cursor.execute(sql, params)
+        else:
+            with self._adapter.cursor(tenant_id) as cur:
+                cur.execute(sql, params)
         return {
             "id": row_id, "tenant_id": tenant_id, "case_id": case_id,
             "child_case_id": child_case_id, "supergroup_code": supergroup_code,

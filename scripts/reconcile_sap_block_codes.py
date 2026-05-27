@@ -92,16 +92,20 @@ def reconcile(
 ) -> ReconciliationReport:
     """Compute the diff. ``db_codes`` is the iterable of
     ``(intent_code, sap_block_code, sap_block_field)`` tuples from
-    ``case_intent``. Rows where ``sap_block_field`` is NULL but
-    ``sap_block_code`` is set are surfaced as ``malformed_in_db`` —
-    they can't be reconciled and indicate a seed bug."""
+    ``case_intent``. Rows are surfaced as ``malformed_in_db`` when:
+      - ``sap_block_field`` is NULL but ``sap_block_code`` is set, or
+      - ``sap_block_field`` is set to a value outside
+        ``ALLOWED_SAP_FIELDS`` (the V017 CHECK would normally catch
+        this; we re-check here so a future drift / manual SQL bypass
+        surfaces explicitly instead of silently matching or going
+        stale — review finding #7)."""
     sap_set = {c.key: c for c in sap_codes}
     db_keyed: dict[tuple[str, str], tuple[str, str, str]] = {}
     malformed: list[tuple[str, str]] = []
     for intent_code, sbc, sbf in db_codes:
         if sbc is None:
             continue  # CUSTOMER intent or sentinel — out of scope.
-        if sbf is None:
+        if sbf is None or sbf not in ALLOWED_SAP_FIELDS:
             malformed.append((intent_code, sbc))
             continue
         db_keyed[(sbc, sbf)] = (intent_code, sbc, sbf)

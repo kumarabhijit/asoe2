@@ -1985,7 +1985,7 @@ class ClassificationHistoryEntry(BaseModel):
         """Return a copy with internal-only fields blanked for the
         partner (external retailer) audience.
 
-        Redacts three fields whose values may carry internal info:
+        Redacts four fields whose values may carry internal info:
           * ``reason_text`` — operator-authored free text (commercial
             notes, escalation flags).
           * ``classified_by`` — replaced with a coarse role token
@@ -1993,16 +1993,23 @@ class ClassificationHistoryEntry(BaseModel):
             so the partner sees who-shape but not internal user IDs /
             email addresses.
           * ``model_version`` — internal model build identifier.
+          * ``source_event_id`` — internal trace/event UUID or, for
+            API-origin cases, the SAP doc number (reveals SAP doc
+            numbering / volume).
 
         The structural audit (case_id, supergroup_code, intent_code,
         classified_at, classifier_type, taxonomy_version) is preserved
         so the partner can still verify the audit trail's shape.
+        ``child_case_id`` is left as-is — it's an opaque UUID, and
+        omitting it would also remove the parent-vs-child marker the
+        partner audit relies on.
         """
         coarse_who = f"internal:{self.classifier_type.lower()}"
         return self.model_copy(update={
             "reason_text": None,
             "classified_by": coarse_who,
             "model_version": None,
+            "source_event_id": None,
         })
 
 

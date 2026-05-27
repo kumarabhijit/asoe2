@@ -740,30 +740,42 @@ class DatabaseBackedStore:
                     "reclassification must be attributable "
                     "(requirements §8.6)."
                 )
+        if (sg_changed or intent_changed):
+            # Atomic UPDATE + INSERT in a single cursor / transaction
+            # (review finding #2). If the audit-row INSERT fails (FK,
+            # CHECK, taxonomy-version empty, append-only trigger), the
+            # adapter rolls back the row mutation too — no partial-state.
+            assert classified_by is not None
+            assert classifier_type is not None
+            with self._adapter.cursor(tenant_id) as cur:
+                row = self._exceptions.update(
+                    exception_id, tenant_id, _cursor=cur, **fields,
+                )
+                if not row:
+                    return None
+                record = self._dict_to_record(row)
+                if record.parent_case_id:
+                    self._classification_history.create(
+                        case_id=record.parent_case_id,
+                        child_case_id=exception_id,
+                        supergroup_code=record.supergroup_code,
+                        intent_code=record.intent_code,
+                        classified_by=classified_by,
+                        classifier_type=classifier_type,
+                        model_version=model_version,
+                        reason_text=reason_text,
+                        source_event_id=source_event_id,
+                        taxonomy_version=TAXONOMY_VERSION,
+                        tenant_id=tenant_id,
+                        _cursor=cur,
+                    )
+            return record
+        # Non-classification update: no audit hook needed; use the
+        # repository's own cursor.
         row = self._exceptions.update(exception_id, tenant_id, **fields)
         if not row:
             return None
-        record = self._dict_to_record(row)
-        if (sg_changed or intent_changed) and record.parent_case_id:
-            assert classified_by is not None
-            assert classifier_type is not None
-            # DB-backed path writes to case_classification_history (V020)
-            # directly. The earlier silent no-op via _record_for_child was
-            # a real audit-loss bug (review finding #2).
-            self._classification_history.create(
-                case_id=record.parent_case_id,
-                child_case_id=exception_id,
-                supergroup_code=record.supergroup_code,
-                intent_code=record.intent_code,
-                classified_by=classified_by,
-                classifier_type=classifier_type,
-                model_version=model_version,
-                reason_text=reason_text,
-                source_event_id=source_event_id,
-                taxonomy_version=TAXONOMY_VERSION,
-                tenant_id=tenant_id,
-            )
-        return record
+        return self._dict_to_record(row)
 
     def append_reanalysis(
         self,

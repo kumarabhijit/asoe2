@@ -54,12 +54,12 @@ def test_extra_fields_forbidden_on_response_entry():
 
 
 def test_redact_for_partner_blanks_internal_fields():
-    """The partner redaction blanks three internal-only fields
-    (reason_text, classified_by user-id, model_version) and replaces
-    classified_by with a coarse role token. The structural audit
-    (case_id, supergroup, intent, classifier_type, taxonomy_version,
-    timestamps) is preserved so the partner can verify the trail's
-    shape."""
+    """The partner redaction blanks four internal-only fields
+    (reason_text, classified_by user-id, model_version,
+    source_event_id) and replaces classified_by with a coarse role
+    token. The structural audit (case_id, supergroup, intent,
+    classifier_type, taxonomy_version, timestamps) is preserved so the
+    partner can verify the trail's shape."""
     entry = ClassificationHistoryEntry(
         id="x", case_id="x", supergroup_code="SG_NEW_ORDER",
         intent_code="INT_MANUAL_ORDER_INTAKE",
@@ -68,12 +68,14 @@ def test_redact_for_partner_blanks_internal_fields():
         classifier_type="HUMAN",
         model_version="claude-haiku-4-5-20251001",
         reason_text="Customer escalation risk — internal flag",
+        source_event_id="SAP-DOC-0500001234",
         taxonomy_version="2026-05-27-v1",
     )
     redacted = entry.redact_for_partner()
     # Internal fields blanked.
     assert redacted.reason_text is None
     assert redacted.model_version is None
+    assert redacted.source_event_id is None
     # classified_by maps to a coarse role token.
     assert redacted.classified_by == "internal:human"
     assert "user:" not in redacted.classified_by
