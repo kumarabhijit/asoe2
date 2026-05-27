@@ -195,6 +195,12 @@ class ExceptionStore:
         original_event: Optional[Dict[str, Any]] = None,
         enrichment_context: Optional[Dict[str, Any]] = None,
         parent_case_id: Optional[str] = None,
+        # V018 — symmetric with DatabaseBackedStore.create (finding #4).
+        supergroup_code: Optional[str] = None,
+        intent_code: Optional[str] = None,
+        divergence_reason: Optional[str] = None,
+        sap_block_field: Optional[str] = None,
+        scope: Optional[str] = None,
     ) -> ExceptionRecord:
         lifecycle = STATUS_TO_LIFECYCLE.get(final_status or "", "INGESTED")
         record = ExceptionRecord(
@@ -211,6 +217,11 @@ class ExceptionStore:
             original_event=original_event,
             enrichment_context=enrichment_context,
             parent_case_id=parent_case_id,
+            supergroup_code=supergroup_code,
+            intent_code=intent_code,
+            divergence_reason=divergence_reason,
+            sap_block_field=sap_block_field,
+            scope=scope,
         )
         with self._lock:
             self._records[record.id] = record
@@ -507,6 +518,16 @@ class DatabaseBackedStore:
         original_event: Optional[Dict[str, Any]] = None,
         enrichment_context: Optional[Dict[str, Any]] = None,
         parent_case_id: Optional[str] = None,
+        # V018 — Case & Intent Super-Group fields (requirements §5).
+        # Forwarded into the repository so DB-backed writes persist them
+        # from day one (code-review finding #4). Phase 3 classifier
+        # wiring starts setting them; pre-Phase-3 callers leave them
+        # None and the columns stay NULL on the row.
+        supergroup_code: Optional[str] = None,
+        intent_code: Optional[str] = None,
+        divergence_reason: Optional[str] = None,
+        sap_block_field: Optional[str] = None,
+        scope: Optional[str] = None,
     ) -> ExceptionRecord:
         # Verdict Pillar 1: `enrichment_context` is persisted to a
         # dedicated JSONB column (V004). The repository serialises
@@ -530,6 +551,11 @@ class DatabaseBackedStore:
             resolution_data=resolution_data,
             original_event=original_event,
             enrichment_context=enrichment_context,
+            supergroup_code=supergroup_code,
+            intent_code=intent_code,
+            divergence_reason=divergence_reason,
+            sap_block_field=sap_block_field,
+            scope=scope,
         )
         record = self._dict_to_record(row)
         record.parent_case_id = parent_case_id

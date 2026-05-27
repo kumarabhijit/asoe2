@@ -16,9 +16,11 @@ from scripts.generate_taxonomy_constants import PY_OUT, TS_OUT, generate
 
 
 def test_generated_python_matches_yaml():
+    """Compare bytes-on-disk vs bytes-from-generator so newline translation
+    on the developer's platform cannot mask drift (code-review finding #1)."""
     py_text, _ = generate()
-    actual = PY_OUT.read_text(encoding="utf-8")
-    assert actual == py_text, (
+    actual = PY_OUT.read_bytes()
+    assert actual == py_text.encode("utf-8"), (
         "contracts/_generated/taxonomy_constants.py is out of sync with "
         "db/seeds/case_taxonomy.yaml.\n\n"
         "Run: python -m scripts.generate_taxonomy_constants"
@@ -26,13 +28,25 @@ def test_generated_python_matches_yaml():
 
 
 def test_generated_typescript_matches_yaml():
+    """Bytes-on-disk vs bytes-from-generator (see test above)."""
     _, ts_text = generate()
-    actual = TS_OUT.read_text(encoding="utf-8")
-    assert actual == ts_text, (
+    actual = TS_OUT.read_bytes()
+    assert actual == ts_text.encode("utf-8"), (
         "asoe-ui/src/generated/taxonomy.ts is out of sync with "
         "db/seeds/case_taxonomy.yaml.\n\n"
         "Run: python -m scripts.generate_taxonomy_constants"
     )
+
+
+def test_generated_files_have_lf_line_endings():
+    """Hard guard: committed files must use Unix LF endings. A CRLF file
+    would round-trip through text-mode read and falsely pass — the
+    bytes-comparison tests above already catch that, but a focused
+    assertion makes the failure mode unambiguous."""
+    py = PY_OUT.read_bytes()
+    ts = TS_OUT.read_bytes()
+    assert b"\r\n" not in py, "Python constants file has CRLF line endings"
+    assert b"\r\n" not in ts, "TypeScript constants file has CRLF line endings"
 
 
 def test_generator_is_deterministic():

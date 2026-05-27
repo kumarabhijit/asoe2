@@ -96,6 +96,14 @@ class ExceptionRepository:
         original_event: Optional[Dict[str, Any]] = None,
         reanalysis_history: Optional[List[Dict[str, Any]]] = None,
         enrichment_context: Optional[Dict[str, Any]] = None,
+        # V018 — Case & Intent Super-Group fields (requirements §5).
+        # Optional in Phase 2 so existing callers stay green; Phase 3
+        # classifier wiring starts passing them.
+        supergroup_code: Optional[str] = None,
+        intent_code: Optional[str] = None,
+        divergence_reason: Optional[str] = None,
+        sap_block_field: Optional[str] = None,
+        scope: Optional[str] = None,
     ) -> Dict[str, Any]:
         record_id = _uuid()
         now = _now()
@@ -115,12 +123,16 @@ class ExceptionRepository:
                     lifecycle_state, shadow_verdict, selected_recipe,
                     final_status, trace_id, resolution_data,
                     original_event, reanalysis_history, enrichment_context,
+                    supergroup_code, intent_code, divergence_reason,
+                    sap_block_field, scope,
                     created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (record_id, tenant_id, order_id, event_type, intent,
                  lifecycle_state, shadow_verdict, selected_recipe,
                  final_status, trace_id, res_data,
                  original_event_json, history_json, enrichment_json,
+                 supergroup_code, intent_code, divergence_reason,
+                 sap_block_field, scope,
                  now, now),
             )
 
@@ -134,6 +146,9 @@ class ExceptionRepository:
             "reanalysis_history": reanalysis_history or [],
             "enrichment_context": enrichment_context or {},
             "resolved_by": None, "resolved_action": None, "resolution_notes": None,
+            "supergroup_code": supergroup_code, "intent_code": intent_code,
+            "divergence_reason": divergence_reason,
+            "sap_block_field": sap_block_field, "scope": scope,
             "created_at": now, "updated_at": now,
         }
 
@@ -145,6 +160,8 @@ class ExceptionRepository:
                           final_status, trace_id, resolution_data,
                           resolved_by, resolved_action, resolution_notes,
                           original_event, reanalysis_history, enrichment_context,
+                          supergroup_code, intent_code, divergence_reason,
+                          sap_block_field, scope,
                           created_at, updated_at
                    FROM exceptions
                    WHERE id = ? AND tenant_id = ?""",
@@ -179,6 +196,8 @@ class ExceptionRepository:
                            final_status, trace_id, resolution_data,
                            resolved_by, resolved_action, resolution_notes,
                            original_event, reanalysis_history, enrichment_context,
+                           supergroup_code, intent_code, divergence_reason,
+                           sap_block_field, scope,
                            created_at, updated_at
                     FROM exceptions
                     WHERE {where}
@@ -275,6 +294,10 @@ class ExceptionRepository:
         "final_status", "trace_id", "resolution_data", "resolved_by",
         "resolved_action", "resolution_notes",
         "original_event", "reanalysis_history", "enrichment_context",
+        # V018 — Case & Intent Super-Group columns (requirements §5).
+        # Nullable in Phase 2; populated by the Phase 3 classifier wiring.
+        "supergroup_code", "intent_code", "divergence_reason",
+        "sap_block_field", "scope",
         "created_at", "updated_at",
     )
 

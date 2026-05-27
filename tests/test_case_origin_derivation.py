@@ -106,3 +106,31 @@ def test_origin_derivation_runs_before_case_type_derivation():
     assert case.origin == "CUSTOMER"
     assert case.case_type == "EMAIL_ENTRY"
     assert case.email_classification == "OTHER"
+
+
+def test_validator_chain_locks_all_derived_fields_from_source_only():
+    """Code-review finding #2 — lock that both before-validators run and
+    the four derived fields (origin, case_type, email_classification for
+    EMAIL_ENTRY) end up populated, with nothing else missing, from a
+    minimal CUSTOMER input. If a future edit reorders the validators or
+    drops one, this test fires loudly."""
+    case = OrderCase(
+        tenant_id="t1", source="manual_order", source_channel="email",
+    )
+    # The four invariants the chain is meant to establish:
+    assert case.origin == "CUSTOMER"                  # new derivation
+    assert case.case_type == "EMAIL_ENTRY"            # legacy derivation
+    assert case.email_classification == "OTHER"       # legacy default
+    assert case.source == "manual_order"              # input preserved
+
+
+def test_validator_chain_locks_all_derived_fields_for_api_path():
+    """Symmetric lock for the API path: origin=API derived AND case_type=
+    BLOCK derived AND email_classification stays None."""
+    case = OrderCase(
+        tenant_id="t1", source="automated_order", source_channel="edi_x12_850",
+    )
+    assert case.origin == "API"
+    assert case.case_type == "BLOCK"
+    assert case.email_classification is None
+    assert case.source == "automated_order"

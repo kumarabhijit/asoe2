@@ -210,3 +210,88 @@ def test_child_without_parent_passes(db: sqlite3.Connection):
         (str(uuid.uuid4()), str(uuid.uuid4()), "INT_PRICE_MISMATCH", now, now),
     )
     db.commit()
+
+
+# ---------------------------------------------------------------------------
+# UPDATE-trigger paths (code-review finding #5)
+# ---------------------------------------------------------------------------
+
+def test_update_child_supergroup_to_diverge_rejected_under_strict(db: sqlite3.Connection):
+    """UPDATE that changes child supergroup_code to a value that diverges
+    from parent — STRICT default rejects on both CUSTOMER and API."""
+    parent = _make_case(db, origin="API", supergroup_code="SG_BLOCK_PRICING")
+    # Insert a matching child first (passes inheritance + leaf-validity).
+    _insert_child(
+        db, parent_case_id=parent,
+        supergroup_code="SG_BLOCK_PRICING", intent_code="INT_PRICE_MISMATCH",
+    )
+    # Try to UPDATE both fields atomically to a valid pair under a
+    # different supergroup. The leaf-validity trigger would accept it
+    # (SG_BLOCK_CREDIT + INT_CREDIT_BLOCK is in supergroup_intent_allowed),
+    # but the inheritance trigger must reject the SG change.
+    with pytest.raises(sqlite3.IntegrityError, match="API child cases cannot diverge"):
+        db.execute(
+            "UPDATE exceptions SET supergroup_code='SG_BLOCK_CREDIT', "
+            "intent_code='INT_CREDIT_BLOCK' WHERE parent_case_id = ?",
+            (parent,),
+        )
+        db.commit()
+
+
+def test_update_child_to_matching_supergroup_after_classification(db: sqlite3.Connection):
+    """UPDATE that brings a previously-NULL supergroup into agreement with
+    the parent — classifier wiring (Phase 3) will use exactly this path."""
+    parent = _make_case(db, origin="CUSTOMER", supergroup_code="SG_NEW_ORDER")
+    # Child inserted without classification.
+    xid = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    db.execute(
+        """INSERT INTO exceptions
+           (id, tenant_id, order_id, event_type, trace_id, intent,
+            lifecycle_state, created_at, updated_at, parent_case_id)
+           VALUES (?, 't1', 'ord1', 'TEST', ?, NULL, 'INGESTED', ?, ?, ?)""",
+        (xid, str(uuid.uuid4()), now, now, parent),
+    )
+    db.commit()
+    # Phase 3 classifier resolves both fields.
+    db.execute(
+        "UPDATE exceptions SET supergroup_code='SG_NEW_ORDER', "
+        "intent_code='INT_MANUAL_ORDER_INTAKE' WHERE id = ?",
+        (xid,),
+    )
+    db.commit()
+    row = db.execute(
+        "SELECT supergroup_code, intent_code FROM exceptions WHERE id = ?", (xid,)
+    ).fetchone()
+    assert row == ("SG_NEW_ORDER", "INT_MANUAL_ORDER_INTAKE")
+
+
+def test_update_parent_relink_to_diverging_parent_silently_allowed(db: sqlite3.Connection):
+    """Code-review finding #8 (recorded behaviour lock): the inheritance
+    trigger only fires on supergroup_code change, not on parent_case_id
+    change. Re-linking a child to a different-supergroup parent without
+    touching the child's own supergroup is currently silently allowed.
+
+    This test locks today's behaviour so a later "fix" makes a deliberate
+    decision. If we want to enforce, add ``BEFORE UPDATE OF parent_case_id``
+    to both triggers."""
+    parent_a = _make_case(db, origin="API", supergroup_code="SG_BLOCK_PRICING")
+    parent_b = _make_case(db, origin="API", supergroup_code="SG_BLOCK_CREDIT")
+    _insert_child(
+        db, parent_case_id=parent_a,
+        supergroup_code="SG_BLOCK_PRICING", intent_code="INT_PRICE_MISMATCH",
+    )
+    # Re-link without changing child SG — silently allowed today.
+    db.execute(
+        "UPDATE exceptions SET parent_case_id = ? WHERE parent_case_id = ?",
+        (parent_b, parent_a),
+    )
+    db.commit()
+    row = db.execute(
+        "SELECT parent_case_id, supergroup_code FROM exceptions "
+        "WHERE parent_case_id = ?",
+        (parent_b,),
+    ).fetchone()
+    # Child kept its own SG even though parent SG now differs (gap noted
+    # in code-review finding #8; not enforced in Phase 2).
+    assert row == (parent_b, "SG_BLOCK_PRICING")

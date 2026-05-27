@@ -876,6 +876,13 @@ def _apply_sqlite_v018(conn: sqlite3.Connection) -> None:
     # 4. + 5. Triggers (inheritance + leaf validity), unified as inline SQLite.
     # One trigger per (event × column-filter). We collapse the inheritance
     # logic into a single CASE chain that RAISEs on the first violated rule.
+    #
+    # NULL-equality idiom note (review finding #6): the UPDATE triggers use
+    # ``NEW.supergroup_code != COALESCE(OLD.supergroup_code, '')`` because
+    # SQLite has no ``IS DISTINCT FROM`` operator before 3.39 and we want a
+    # NULL→non-NULL transition to count as a change. The empty-string
+    # sentinel collides only with a literal empty-string SG code, which the
+    # FK to ``case_supergroup(code)`` already rejects.
     conn.executescript(
         """
         DROP TRIGGER IF EXISTS tg_child_supergroup_inheritance_ins;

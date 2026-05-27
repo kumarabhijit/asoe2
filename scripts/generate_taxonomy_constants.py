@@ -228,14 +228,21 @@ def main(argv: list[str] | None = None) -> int:
 
     py_text, ts_text = generate()
 
+    # Binary I/O so newline handling is identical across platforms — text-
+    # mode write on Windows turns ``\n`` into ``\r\n`` and text-mode read
+    # turns it back, hiding a real drift in the committed file (code-
+    # review finding #1, BLOCKER).
+    py_bytes = py_text.encode("utf-8")
+    ts_bytes = ts_text.encode("utf-8")
+
     if args.check:
-        existing_py = PY_OUT.read_text(encoding="utf-8") if PY_OUT.exists() else ""
-        existing_ts = TS_OUT.read_text(encoding="utf-8") if TS_OUT.exists() else ""
+        existing_py = PY_OUT.read_bytes() if PY_OUT.exists() else b""
+        existing_ts = TS_OUT.read_bytes() if TS_OUT.exists() else b""
         ok = True
-        if existing_py != py_text:
+        if existing_py != py_bytes:
             print(f"[drift] {PY_OUT.relative_to(REPO_ROOT)} is out of date", file=sys.stderr)
             ok = False
-        if existing_ts != ts_text:
+        if existing_ts != ts_bytes:
             print(f"[drift] {TS_OUT.relative_to(REPO_ROOT)} is out of date", file=sys.stderr)
             ok = False
         if not ok:
@@ -248,8 +255,8 @@ def main(argv: list[str] | None = None) -> int:
 
     PY_OUT.parent.mkdir(parents=True, exist_ok=True)
     TS_OUT.parent.mkdir(parents=True, exist_ok=True)
-    PY_OUT.write_text(py_text, encoding="utf-8")
-    TS_OUT.write_text(ts_text, encoding="utf-8")
+    PY_OUT.write_bytes(py_bytes)
+    TS_OUT.write_bytes(ts_bytes)
     print(f"wrote {PY_OUT.relative_to(REPO_ROOT)}")
     print(f"wrote {TS_OUT.relative_to(REPO_ROOT)}")
     return 0

@@ -53,15 +53,10 @@ def load_yaml(path: Path = SEED_PATH) -> dict[str, Any]:
 
 
 def _validate(data: Any) -> None:
-    """Validate against JSON schema. Lazy-import jsonschema."""
-    try:
-        import jsonschema  # noqa: F401
-    except ImportError:
-        # Fallback: schema validation is best-effort if jsonschema is not
-        # installed. The structural checks in _validate_invariants below
-        # cover the most important cases.
-        return
-    import jsonschema  # type: ignore
+    """Validate against JSON schema. ``jsonschema`` is a hard requirement
+    (declared in pyproject) so a malformed seed can never reach the DB
+    silently on a misconfigured host."""
+    import jsonschema  # hard dep per pyproject.toml
 
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     try:
