@@ -66,6 +66,34 @@ def test_app_boot_under_preprod_env_registers_gateways(monkeypatch):
     assert "email_intake" in registry.registered_gateways()
 
 
+def test_preprod_with_graph_driver_swaps_email_intake_to_router(monkeypatch):
+    """PARITY-6.1 — ``ASOE_EMAIL_INTAKE_DRIVER=graph`` replaces the
+    ``email_intake`` StubGateway with the ``GraphIntakeGateway`` live-
+    or-stub router. The registry name is preserved so existing recipe
+    dependencies resolve unchanged; the routing decision is per-request
+    (canary % + driver env) so this test only locks the swap, not the
+    per-call routing (covered by tests/test_msgraph_intake.py)."""
+    monkeypatch.setenv("ASOE_ENV", "preprod")
+    monkeypatch.setenv("ASOE_EMAIL_INTAKE_DRIVER", "graph")
+    # The live backend requires Graph creds; provide stubs so the
+    # factory doesn't refuse to construct. The router only calls the
+    # factory on the first request that's canary-eligible — this test
+    # never makes a request, so the creds are only needed for type
+    # safety when the factory eventually runs.
+    monkeypatch.setenv("ASOE_GRAPH_TENANT_ID", "tenant-stub")
+    monkeypatch.setenv("ASOE_GRAPH_CLIENT_ID", "client-stub")
+    monkeypatch.setenv("ASOE_GRAPH_CLIENT_SECRET", "secret-stub")
+    registry.clear_registry()
+    from api.preprod_gateways import register_preprod_gateways
+    from gateways.msgraph_intake import GraphIntakeGateway
+    register_preprod_gateways()
+    resolved = registry.get_gateway("email_intake")
+    assert isinstance(resolved, GraphIntakeGateway), (
+        "ASOE_EMAIL_INTAKE_DRIVER=graph must route email_intake through "
+        "the live-or-stub router"
+    )
+
+
 def test_preprod_resolve_populates_inbox_sections(monkeypatch):
     """The contract from asoe2 #175 (sandbox) must also hold for preprod:
     a vanilla MANUAL_ORDER_INTAKE event through /resolve produces an

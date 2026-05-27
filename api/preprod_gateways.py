@@ -17,10 +17,60 @@ caller's mistake, not a silent failure here.
 from __future__ import annotations
 
 import logging
+import os
 
 from api.sandbox_gateways import _register_all_stub_gateways
 
 logger = logging.getLogger("asoe.api.preprod_gateways")
+
+
+def _maybe_swap_email_intake_for_graph() -> None:
+    """PARITY-6.1 — replace the `email_intake` StubGateway with the
+    `GraphIntakeGateway` live-or-stub router when
+    ``ASOE_EMAIL_INTAKE_DRIVER=graph``.
+
+    The router preserves the registry name ``email_intake`` so existing
+    recipe ``GatewayDependency`` rows resolve unchanged. Default driver
+    (``recorded`` or unset) leaves the StubGateway in place — fully
+    reversible by clearing the env var per the parity plan's Rollback /
+    safety net §.
+    """
+    driver = (os.getenv("ASOE_EMAIL_INTAKE_DRIVER") or "recorded").strip().lower()
+    if driver != "graph":
+        return
+    try:
+        from gateways.msgraph_intake import (
+            GraphIntakeGateway,
+            LiveGraphIntakeBackend,
+        )
+        from gateways.registry import get_gateway, register_gateway
+    except ImportError as exc:
+        logger.warning(
+            "ASOE_EMAIL_INTAKE_DRIVER=graph requested but live backend "
+            "imports failed (%s) — staying on stub",
+            exc,
+        )
+        return
+    try:
+        existing_stub = get_gateway("email_intake")
+    except KeyError:
+        logger.warning(
+            "ASOE_EMAIL_INTAKE_DRIVER=graph requested but no email_intake "
+            "stub registered — skipping live swap",
+        )
+        return
+
+    def _factory():
+        return LiveGraphIntakeBackend()
+
+    router = GraphIntakeGateway(
+        stub=existing_stub, live_backend_factory=_factory,
+    )
+    register_gateway(router)
+    logger.info(
+        "email_intake gateway routed through GraphIntakeGateway "
+        "(canary pct env: ASOE_CANARY_PCT_EMAIL_INTAKE)",
+    )
 
 
 def register_preprod_gateways() -> None:
@@ -36,3 +86,4 @@ def register_preprod_gateways() -> None:
         "(Phase 6 will replace these with real connectors)",
     )
     _register_all_stub_gateways()
+    _maybe_swap_email_intake_for_graph()
