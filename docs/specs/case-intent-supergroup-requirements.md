@@ -19,7 +19,7 @@ Unify ASOE2's two case-intake paths — customer email and SAP block — under a
 
 - Case data model on `OrderCase` and its child cases (currently `ExceptionRecord`).
 - Intent Super-Group and Intent taxonomy storage, governance, and lifecycle.
-- Two intake origins: customer **EMAIL** and SAP **API** push.
+- Two intake origins: customer-initiated (**CUSTOMER**) and SAP-pushed (**API**).
 - Routing, SLA, and audit behaviours that depend on the taxonomy.
 
 **Out of scope (deferred to a follow-up requirement)**
@@ -36,7 +36,7 @@ Unify ASOE2's two case-intake paths — customer email and SAP block — under a
 |---|---|
 | **Case** (`OrderCase`) | A single business unit of work opened by ASOE2 against one customer-PO context. |
 | **Child case** | A scoped sub-work-unit under a Case. Today's `ExceptionRecord` table is renamed in API/UI but the table name is retained for migration safety. |
-| **Origin** | The intake mechanism. Exactly two values: `EMAIL`, `API`. |
+| **Origin** | The intake mechanism. Exactly two values: `CUSTOMER` (customer-initiated intake — email today, web form / portal later), `API` (SAP-pushed block). |
 | **Source channel** | Orthogonal metadata describing the upstream channel: `EMAIL`, `EDI_850`, `B2B_PORTAL`, `CSR_KEYED`, `PHONE`, `FAX`. |
 | **Intent Super-Group** | Case-level classification. The "Case intent" referred to in the PO chat of 24-May. |
 | **Intent** | Leaf classification on a child case. The agent dispatch / routing key. |
@@ -49,12 +49,12 @@ Unify ASOE2's two case-intake paths — customer email and SAP block — under a
 | # | Question | Decision |
 |---|---|---|
 | Q1 | Multi-block on API path | **1:N children from day one.** API parents may carry multiple children; the "one block per order" SAP runtime behaviour is an observed invariant, not a schema constraint. |
-| Q2 | Strict super-group inheritance | **Asymmetric.** API: strict inheritance enforced by trigger. EMAIL: parent super-group is a default; children may carry a different super-group. A child whose super-group differs from its parent records a `divergence_reason`. |
-| Q3 | Source-channel scope | **Binary origin `{EMAIL, API}` + orthogonal `source_channel`.** EDI 855/997 inbound disputes deferred (§2 out of scope). |
+| Q2 | Strict super-group inheritance | **Asymmetric.** API: strict inheritance enforced by trigger. CUSTOMER: parent super-group is a default; children may carry a different super-group. A child whose super-group differs from its parent records a `divergence_reason`. |
+| Q3 | Source-channel scope | **Binary origin `{CUSTOMER, API}` + orthogonal `source_channel`.** EDI 855/997 inbound disputes deferred (§2 out of scope). |
 | Q4 | API super-group granularity | **8 coarse buckets** (§6.2). Leaf intent carries SAP-code granularity. |
 | Q5 | Taxonomy seed source | **Data-mining sprint (Phase 0) precedes contract changes.** 90-day SAP block extract from `VBAK`/`VBAP`/`VBUK` × `TVLST`/`TVFST`/`TVAGT`; 30-day email-classification audit. Seed list in §6.2/§6.3 is the initial commitment; Phase 0 may add but not subtract from this list without PO approval. |
 | Q6 | Storage as data vs enum | **DB-managed lookup tables** (§7) with CI-generated constants for compile-time safety. |
-| Q7 | "Customer Inbox" UI label | **Keep.** Internal model uses `EMAIL`; visible UI chrome remains "Customer Inbox". |
+| Q7 | "Customer Inbox" UI label | **Keep.** Internal model uses `CUSTOMER`; visible UI chrome remains "Customer Inbox". |
 | Q8 | Naming convention | **Prefix discipline.** Super-groups: `SG_*`; intents: `INT_*`. Identical strings across the two domains are banned by lint. |
 | Q9 | Steward authority & change SLA | Steward proposes → OM business lead approves → SAP functional lead co-signs for SAP semantics → engineering merges. **Target lifecycle: 3 business days** (data change), **emergency same-day** with retroactive CAB within 48h. |
 | Q10 | Pallet semantics | `INT_PALLET_CONFIG` (order-math rounding) and `INT_BROKEN_PALLET` (warehouse handling-fee policy) are **sibling leaves** under `SG_BLOCK_LOGISTICS`. Distinction documented in §6.4. |
@@ -68,15 +68,15 @@ Unify ASOE2's two case-intake paths — customer email and SAP block — under a
 
 ```
 Case (OrderCase)
-  ├─ origin                EMAIL | API
+  ├─ origin                CUSTOMER | API
   ├─ source_channel        EMAIL | EDI_850 | B2B_PORTAL | CSR_KEYED | PHONE | FAX
   ├─ supergroup_code       fk → case_supergroup
   ├─ predecessor_case_id   fk → order_case  (null; set on re-block / fork)
   ├─ will_miss_rdd         bool             (replaces the deprecated DELIVERY_DELAY super-group)
   ├─ sla_tier              tier 1–4         (computed at create, §8.4)
   └─ children: 0..N child cases
-        ├─ supergroup_code      (API: trigger-enforced = parent; EMAIL: parent default, may differ)
-        ├─ divergence_reason    text null   (required if EMAIL child SG ≠ parent SG)
+        ├─ supergroup_code      (API: trigger-enforced = parent; CUSTOMER: parent default, may differ)
+        ├─ divergence_reason    text null   (required if CUSTOMER child SG ≠ parent SG)
         ├─ intent_code          fk → case_intent  (LEAF = routing key)
         ├─ sap_block_code       text null
         ├─ sap_block_field      LIFSK|LIFSP|FAKSK|FAKSP|ABGRU|CMGST|Z_CUSTOM | null
@@ -91,7 +91,7 @@ Routing key: **leaf `intent_code`**, never `supergroup_code`. Super-group is rep
 
 ### 6.1 Origin
 
-Exactly two values: `EMAIL`, `API`. No third origin in this requirement.
+Exactly two values: `CUSTOMER`, `API`. No third origin in this requirement. The visible UI label for the `CUSTOMER` path is **"Customer Inbox"** (unchanged).
 
 ### 6.2 API Super-Groups (8, committed)
 
@@ -106,7 +106,7 @@ Exactly two values: `EMAIL`, `API`. No third origin in this requirement.
 | `SG_BLOCK_ORDER_INTEGRITY` | Duplicate PO, EDI mismatch (850 vs SAP), incomplete sales doc, contractual correction needed. |
 | `SG_BLOCK_UNMAPPED` | Reserved. Auto-assigned when SAP returns a block code not in `case_intent.sap_block_code`. Triggers P2 ops alert; mapping SLA = 1 business day. |
 
-### 6.3 EMAIL Super-Groups (12, committed)
+### 6.3 CUSTOMER Super-Groups (12, committed)
 
 | Code | Description |
 |---|---|
@@ -157,7 +157,7 @@ The final leaf list per super-group is produced by Phase 0; PO approves the addi
 ```sql
 case_supergroup (
   code              text  primary key,        -- SG_*, immutable
-  origin            text  check (origin in ('EMAIL','API','BOTH')),
+  origin            text  check (origin in ('CUSTOMER','API','BOTH')),
   description       text  not null,
   owner_role        text  not null,
   is_active         boolean not null default true,
@@ -217,7 +217,7 @@ Inheritance and "leaf ∈ allowed set" rules are enforced by triggers reading th
 | Origin | Rule |
 |---|---|
 | `API` | Trigger sets `child.supergroup_code := parent.supergroup_code` on insert. Updates that diverge are rejected. |
-| `EMAIL` | Trigger sets `child.supergroup_code := parent.supergroup_code` on insert by default. Updates that diverge are accepted **only if** `divergence_reason` is non-null. |
+| `CUSTOMER` | Trigger sets `child.supergroup_code := parent.supergroup_code` on insert by default. Updates that diverge are accepted **only if** `divergence_reason` is non-null. |
 
 Leaf validity: trigger asserts `(child.supergroup_code, child.intent_code) ∈ supergroup_intent_allowed` for the effective date.
 
@@ -328,10 +328,10 @@ UI fetches display labels from `intent_label(code, domain, locale)`. Locale fall
 2. `OrderCase.email_classification` is **deprecated** and superseded by `supergroup_code`. One-release overlap.
 3. `exception_record` table keeps its name. A view `child_case` is added for API/UI/BI consumers.
 4. The flat `Intent` enum in `contracts/models.py` is **removed**; consumers read generated constants from §7.2.
-5. `source = 'manual_order' | 'automated_order'` is **renamed** to `origin = 'EMAIL' | 'API'`. Old column kept as derived for one release.
-6. UI label "Customer Inbox" is **retained**. Internal model uses `EMAIL`. No CSR retraining required.
+5. `source = 'manual_order' | 'automated_order'` is **renamed** to `origin = 'CUSTOMER' | 'API'`. Old column kept as derived for one release.
+6. UI label "Customer Inbox" is **retained**. Internal model uses `CUSTOMER`. No CSR retraining required.
 7. Backfill of existing cases:
-   - `source='manual_order'` → `origin='EMAIL'`, `supergroup_code` derived from old `email_classification` (`NEW_ORDER`→`SG_NEW_ORDER`, etc.; `OTHER`→`SG_NEEDS_TRIAGE`).
+   - `source='manual_order'` → `origin='CUSTOMER'`, `supergroup_code` derived from old `email_classification` (`NEW_ORDER`→`SG_NEW_ORDER`, etc.; `OTHER`→`SG_NEEDS_TRIAGE`).
    - `source='automated_order'` → `origin='API'`, `supergroup_code` derived from dominant `sap_block_code` of children via the `case_intent.sap_block_code` mapping; unmapped codes → `SG_BLOCK_UNMAPPED`.
 
 ---
@@ -340,9 +340,9 @@ UI fetches display labels from `intent_label(code, domain, locale)`. Locale fall
 
 A change satisfies this requirement when **all** of the following are demonstrable:
 
-1. A case can be created via the EMAIL path with `supergroup_code` set from intake classification, and via the API path with `supergroup_code` derived from the SAP block code through `case_intent.sap_block_code`.
+1. A case can be created via the CUSTOMER path with `supergroup_code` set from intake classification, and via the API path with `supergroup_code` derived from the SAP block code through `case_intent.sap_block_code`.
 2. An API parent rejects a child whose `supergroup_code` differs from its own.
-3. An EMAIL parent accepts a child with a different `supergroup_code` if and only if `divergence_reason` is provided; the change writes a history row.
+3. A CUSTOMER parent accepts a child with a different `supergroup_code` if and only if `divergence_reason` is provided; the change writes a history row.
 4. Any `(supergroup_code, intent_code)` pair not present in `supergroup_intent_allowed` for the effective date is rejected at insert.
 5. A case with `supergroup_code='SG_NEEDS_TRIAGE'` cannot be transitioned to `RESOLVED`.
 6. SLA tier on a new case reflects the §8.4 formula; super-group floor SLA is never exceeded.
@@ -374,7 +374,7 @@ A change satisfies this requirement when **all** of the following are demonstrab
 | # | Risk | Mitigation |
 |---|---|---|
 | R1 | Phase 0 data mining reveals SAP block codes that don't fit the 8 super-groups | Steward + SAP lead may propose **one additional** super-group with PO approval before §11 sign-off is invalidated. More than one addition reopens this requirement. |
-| R2 | EMAIL multi-intent emails are even more common than estimated (>35%) | `divergence_reason` is required-not-optional; weekly steward report tracks divergence rate. If >40% divergence in any super-group, PO triggers a review of the EMAIL list. |
+| R2 | Multi-intent customer emails are even more common than estimated (>35%) | `divergence_reason` is required-not-optional; weekly steward report tracks divergence rate. If >40% divergence in any super-group, PO triggers a review of the CUSTOMER super-group list. |
 | R3 | Model classifier confidence threshold (0.85) is too aggressive | Threshold is configurable per-environment. CS Ops can raise it without a code deploy. |
 | R4 | Steward 3-day SLA is missed under volume | If three consecutive misses, PO escalates to staffing — not by lowering the bar. |
 | R5 | Re-block linkage creates unbounded chains | Reporting view caps chain depth at 5; chains deeper than 5 surface as an ops anomaly for steward review. |
