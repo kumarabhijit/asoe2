@@ -49,7 +49,7 @@ Unify ASOE2's two case-intake paths — customer email and SAP block — under a
 | # | Question | Decision |
 |---|---|---|
 | Q1 | Multi-block on API path | **1:N children from day one.** API parents may carry multiple children; the "one block per order" SAP runtime behaviour is an observed invariant, not a schema constraint. |
-| Q2 | Strict super-group inheritance | **Asymmetric.** API: strict inheritance enforced by trigger. CUSTOMER: parent super-group is a default; children may carry a different super-group. A child whose super-group differs from its parent records a `divergence_reason`. |
+| Q2 | Strict super-group inheritance | **Strict on both paths in v1.** Triggers reject a child whose `supergroup_code` differs from its parent. A nullable `divergence_reason` column and an operational `inheritance_mode_customer` config flag (default `STRICT`) are reserved so the Steward can relax CUSTOMER inheritance later if production data warrants (§8.1), without a schema migration or PO re-approval. |
 | Q3 | Source-channel scope | **Binary origin `{CUSTOMER, API}` + orthogonal `source_channel`.** EDI 855/997 inbound disputes deferred (§2 out of scope). |
 | Q4 | API super-group granularity | **8 coarse buckets** (§6.2). Leaf intent carries SAP-code granularity. |
 | Q5 | Taxonomy seed source | **Data-mining sprint (Phase 0) precedes contract changes.** 90-day SAP block extract from `VBAK`/`VBAP`/`VBUK` × `TVLST`/`TVFST`/`TVAGT`; 30-day email-classification audit. Seed list in §6.2/§6.3 is the initial commitment; Phase 0 may add but not subtract from this list without PO approval. |
@@ -75,8 +75,8 @@ Case (OrderCase)
   ├─ will_miss_rdd         bool             (replaces the deprecated DELIVERY_DELAY super-group)
   ├─ sla_tier              tier 1–4         (computed at create, §8.4)
   └─ children: 0..N child cases
-        ├─ supergroup_code      (API: trigger-enforced = parent; CUSTOMER: parent default, may differ)
-        ├─ divergence_reason    text null   (required if CUSTOMER child SG ≠ parent SG)
+        ├─ supergroup_code      (trigger-enforced = parent on both origins in v1)
+        ├─ divergence_reason    text null   (reserved; always null in v1 — see §8.1)
         ├─ intent_code          fk → case_intent  (LEAF = routing key)
         ├─ sap_block_code       text null
         ├─ sap_block_field      LIFSK|LIFSP|FAKSK|FAKSP|ABGRU|CMGST|Z_CUSTOM | null
@@ -214,10 +214,15 @@ Inheritance and "leaf ∈ allowed set" rules are enforced by triggers reading th
 
 ### 8.1 Inheritance
 
+**v1 rule (both origins, strict):**
+
 | Origin | Rule |
 |---|---|
 | `API` | Trigger sets `child.supergroup_code := parent.supergroup_code` on insert. Updates that diverge are rejected. |
-| `CUSTOMER` | Trigger sets `child.supergroup_code := parent.supergroup_code` on insert by default. Updates that diverge are accepted **only if** `divergence_reason` is non-null. |
+| `CUSTOMER` | Trigger sets `child.supergroup_code := parent.supergroup_code` on insert. Updates that diverge are rejected. |
+
+**Reserved operational lever (out of scope for v1, no PO approval needed to enable later):**
+A runtime config `inheritance_mode_customer ∈ { STRICT, RELAXED }` defaults to `STRICT`. The schema includes a nullable `divergence_reason` column on the child case. If multi-intent customer email volume justifies it, the Steward proposes switching the flag to `RELAXED`; under `RELAXED`, a child may carry a different `supergroup_code` from its parent *only if* `divergence_reason` is populated. The change follows the §9.1 governance workflow (Steward → OM lead approval) and requires no code deploy or schema migration. Switching back to `STRICT` is reversible; existing divergent children are left as-is and surface in a Steward review.
 
 Leaf validity: trigger asserts `(child.supergroup_code, child.intent_code) ∈ supergroup_intent_allowed` for the effective date.
 
@@ -342,7 +347,7 @@ A change satisfies this requirement when **all** of the following are demonstrab
 
 1. A case can be created via the CUSTOMER path with `supergroup_code` set from intake classification, and via the API path with `supergroup_code` derived from the SAP block code through `case_intent.sap_block_code`.
 2. An API parent rejects a child whose `supergroup_code` differs from its own.
-3. A CUSTOMER parent accepts a child with a different `supergroup_code` if and only if `divergence_reason` is provided; the change writes a history row.
+3. A CUSTOMER parent rejects a child whose `supergroup_code` differs from its own under the v1 default `inheritance_mode_customer = STRICT`. The `divergence_reason` column exists and is always NULL in v1 (relaxation path covered in §8.1; not in scope for v1 acceptance).
 4. Any `(supergroup_code, intent_code)` pair not present in `supergroup_intent_allowed` for the effective date is rejected at insert.
 5. A case with `supergroup_code='SG_NEEDS_TRIAGE'` cannot be transitioned to `RESOLVED`.
 6. SLA tier on a new case reflects the §8.4 formula; super-group floor SLA is never exceeded.
@@ -374,7 +379,7 @@ A change satisfies this requirement when **all** of the following are demonstrab
 | # | Risk | Mitigation |
 |---|---|---|
 | R1 | Phase 0 data mining reveals SAP block codes that don't fit the 8 super-groups | Steward + SAP lead may propose **one additional** super-group with PO approval before §11 sign-off is invalidated. More than one addition reopens this requirement. |
-| R2 | Multi-intent customer emails are even more common than estimated (>35%) | `divergence_reason` is required-not-optional; weekly steward report tracks divergence rate. If >40% divergence in any super-group, PO triggers a review of the CUSTOMER super-group list. |
+| R2 | Multi-intent customer emails force CSRs to misclassify or split aggressively, distorting volume metrics | A weekly Steward report tracks the *would-be-divergence rate* (cases where the CSR opened a sibling case within 1 hour of the first, against the same customer/PO). If the rate exceeds 15% sustained, the Steward proposes switching `inheritance_mode_customer` from `STRICT` to `RELAXED` (§8.1). Operational toggle, no code change, no PO re-sign-off required. |
 | R3 | Model classifier confidence threshold (0.85) is too aggressive | Threshold is configurable per-environment. CS Ops can raise it without a code deploy. |
 | R4 | Steward 3-day SLA is missed under volume | If three consecutive misses, PO escalates to staffing — not by lowering the bar. |
 | R5 | Re-block linkage creates unbounded chains | Reporting view caps chain depth at 5; chains deeper than 5 surface as an ops anomaly for steward review. |
