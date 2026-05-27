@@ -160,6 +160,12 @@ param deployUiContainerApp bool = false
 @description('Gate for the ADR-039 §7.3 observability stack — Prometheus + Grafana Container Apps that scrape /api/v1/metrics on the asoe-api app. Kept independent so observability can roll out (or back) without dragging the API. Set true once both images are built into ACR via `docker build -f Dockerfile.prometheus|grafana . && az acr build ...`.')
 param deployObservability bool = false
 
+@description('PARITY-8 — gate for the retention-sweeper Container Apps Job (api/retention_sweeper.py). Cron-scheduled bulk-delete job that wipes attachments past their per-tenant retention TTL. Kept off by default; turning it on AND setting RETENTION_SWEEPER_ENABLED=true on the job is the two-step opt-in the Compliance review mandated. Image reuses containerImage (the same ASOE Python container).')
+param deployRetentionSweeperJob bool = false
+
+@description('PARITY-8 — cron expression for the retention sweeper. Default 02:00 UTC daily; tighten/loosen per operational cadence. Format is standard 5-field cron (minute hour day month weekday).')
+param retentionSweeperCron string = '0 2 * * *'
+
 @description('Prometheus container image (built from Dockerfile.prometheus; bakes in ops/observability/prometheus.yml). Placeholder until set-secrets.sh / deploy pipeline overrides.')
 param prometheusImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
 
@@ -1128,6 +1134,89 @@ resource grafanaApp 'Microsoft.App/containerApps@2024-03-01' = if (deployObserva
   dependsOn: [
     prometheusApp
   ]
+}
+
+// ──────────────────────────────── Retention sweeper Container Apps Job
+//
+// PARITY-8 — bulk-delete attachments past their per-tenant retention TTL.
+// The Job runs api/retention_sweeper.py on a cron schedule against the
+// same database the API app uses; reuses the API container image since
+// the sweeper module is in the same package. RETENTION_SWEEPER_ENABLED
+// is the second opt-in switch (defaulted off here, mirroring the kill-
+// switch contract in api/retention_sweeper.is_enabled).
+//
+// Why a Job, not an in-process scheduler in the API app:
+//   * the API replicas autoscale on HTTP traffic; a sweeper running in
+//     every replica would multi-delete.
+//   * Container Apps Jobs surface their own success/failure metrics and
+//     can be paused with `az containerapp job stop` without touching
+//     the API revision — operational blast-radius isolation.
+
+resource retentionSweeperJob 'Microsoft.App/jobs@2024-03-01' = if (deployRetentionSweeperJob) {
+  name: '${namePrefix}-retention-sweeper'
+  location: location
+  tags: commonTags
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${uami.id}': {}
+    }
+  }
+  properties: {
+    environmentId: cae.id
+    workloadProfileName: 'Consumption'
+    configuration: {
+      // Scheduled cron trigger — the runtime instantiates one
+      // execution per cron tick.
+      triggerType: 'Schedule'
+      replicaTimeout: 3600  // 1h ceiling per execution
+      replicaRetryLimit: 0  // a failed sweep does NOT auto-retry;
+                            // operator inspects the audit log first
+                            // (compliance review: silent retries on a
+                            // bulk-delete job mask blast-radius bugs).
+      scheduleTriggerConfig: {
+        cronExpression: retentionSweeperCron
+        parallelism: 1       // never more than one sweep at a time
+        replicaCompletionCount: 1
+      }
+      registries: [
+        {
+          server: '${acrName}.azurecr.io'
+          identity: uami.id
+        }
+      ]
+      secrets: [
+        { name: 'database-url', value: databaseUrl }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'retention-sweeper'
+          image: containerImage
+          // Override the default API entrypoint with the sweeper CLI.
+          // The CLI lives at scripts/run_retention_sweeper.py and
+          // walks every tenant's candidates via
+          // RetentionSweeper.dry_run → commit_with_residency_check.
+          command: [ 'python' ]
+          args: [ '-m', 'scripts.run_retention_sweeper' ]
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+          env: [
+            { name: 'ASOE_ENV', value: asoeEnv }
+            { name: 'DATABASE_URL', secretRef: 'database-url' }
+            // Default OFF — the operator flips this to 'true' via
+            // `az containerapp job update --set-env-vars
+            // RETENTION_SWEEPER_ENABLED=true` after the dry-run
+            // produces an audited plan the operator approves.
+            { name: 'RETENTION_SWEEPER_ENABLED', value: 'false' }
+          ]
+        }
+      ]
+    }
+  }
 }
 
 // ──────────────────────────────────────────────────────────────── Outputs
