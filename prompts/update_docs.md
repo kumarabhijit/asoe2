@@ -10,12 +10,18 @@ Target documents (update only the ones relevant to what has changed):
 - docs/AUDITOR_GUIDE.md  — audit controls reference; audience: auditors and operators
 - docs/STATUS_MODEL.md   — status/state surface reference; audience: engineers and auditors. Update when an Intent / ShadowStatus / TerminalStatus / CaseStatus / LIFECYCLE_STATES value changes, when STATUS_TO_LIFECYCLE or _case_status_from_lifecycle changes a mapping, when the _aggregate_case_status dominance order changes, or when a HITL endpoint's lifecycle transition changes (see its own §7).
 - docs/adr/*.md          — architecture decision records; audience: architects and senior engineers
+- docs/plans/*.md        — design plans the codebase is actively executing. The Azure pre-prod parity plan (`azure-preprod-parity-plan.md`) carries a status table at the top — update the row when a phase ships. `ga-preconditions.md` tracks deferred preprod→GA items.
+- docs/ops/*.md          — operator runbooks (`secrets-rotation.md`, `fixture-capture.md`, `erasure-flows.md`). Update when a procedure changes, not when prose drifts.
+- gateways/changelog/<connector>.md — per-connector fixture/schema-drift attribution trail. Append a row on every fixture refresh or live-backend contract change per `docs/ops/fixture-capture.md` cadence.
 - tasks.md               — phase checklist; mark completed items with [x]
 - prompts/phase_*.md     — phase-specific build prompts; add new phases as needed
 - (any other *.md added in future)
 
-Excluded from doc updates (owned by product, not engineering):
-- docs/specs/*.md        — PO product specs; do not modify during code changes
+Excluded from doc updates (owned by product / CODEOWNERS-gated):
+- docs/specs/*.md                          — PO product specs; do not modify during code changes
+- compliance/audit_bearing_registry.yaml   — CODEOWNERS-gated; PII-free tombstone schema lock
+- compliance/audit_bearing_exemptions.yaml — CODEOWNERS-gated; @audit_bearing grandfather list
+- compliance/dpia/_template.md             — per-tenant DPIA template; tenant copies land out-of-tree
 
 Rules:
 1. Update only what has actually changed in the codebase since the last doc update.

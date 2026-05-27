@@ -436,9 +436,16 @@ server registers an in-process StubGateway set at startup
 block-status + customer-master + SLA contract + promotion +
 buyer-notification. This mirrors `tests/conftest.py` and lets every
 recipe's `GatewayDependency` chain resolve without real ERP
-connectivity. Production deployments (`ASOE_ENV=production`) skip
-the stubs — the platform team is responsible for registering real
-gateway adapters before serving traffic.
+connectivity.
+
+`ASOE_ENV=preprod` boots the same stub set via
+`api/preprod_gateways.py` and additionally swaps a connector
+through its live-or-stub router if the matching driver env var is
+set — see the "Pre-prod real-connector matrix" subsection under
+[Deployment](#azure-container-apps-pre-prod) for the env flags.
+`ASOE_ENV=production` refuses to boot until
+`register_production_gateways` is implemented (fail-loud per the
+parity plan §0b).
 
 ### End-to-end with asoe-ui
 
@@ -1356,6 +1363,51 @@ and a comprehensive Troubleshooting section (covering the issues we
 actually hit during first deploys: `Operation expired`, ACR 401,
 `pgcrypto not allow-listed`, password-with-`@`, etc.) lives in
 [`docs/deploy-azure-container-apps.md`](docs/deploy-azure-container-apps.md).
+
+#### Pre-prod real-connector matrix (PARITY-6)
+
+Pre-prod ships with the sandbox stub gateways by default. Each real
+connector is a single env flag away — the live backend is wired
+behind the same `propose(...)` / `execute(...)` seam the stub
+satisfies, with a `ShadowRunner` diff log + canary rollout %
+keyed on `case_id`. Clearing the driver env reverts to the stub
+(per the parity plan's Rollback / safety net §). Per-connector
+fixture and schema-drift attribution lives at
+[`gateways/changelog/<connector>.md`](gateways/changelog/).
+
+| Connector | Driver env | Canary env | Live backend class | Status |
+|---|---|---|---|---|
+| `email_intake` (Microsoft Graph) | `ASOE_EMAIL_INTAKE_DRIVER=graph` | `ASOE_CANARY_PCT_EMAIL_INTAKE` | `gateways/msgraph_intake.py::LiveGraphIntakeBackend` | Router shipped; live `execute()` raises `NotImplementedError` until nightly `-m live` mark lands |
+| `document_extraction` (AzureDI) | `ASOE_DOCUMENT_EXTRACTION_BACKEND=live` | (no canary — backend swap) | `gateways/document_extraction.py::LiveDocumentIntelligenceBackend` | Router shipped; live `propose()` raises until live mark |
+| `sap_order` / `sap_doc` / `sap_contract` / `promotion` / `sap_block` / `sap_customer_master` / `sla_contract` (S/4HANA) | `ASOE_SAP_DRIVER=s4hana` | `ASOE_CANARY_PCT_SAP` (shared) | `gateways/sap_live.py::LiveSapBackend` (shared OData context) | Router shipped for all 7 domains; live `execute()` raises until live mark |
+| `oms` | `ASOE_OMS_DRIVER=live` | `ASOE_CANARY_PCT_OMS` | `gateways/oms_live.py::LiveOmsBackend` | Router shipped; post-recipe-success write failures route through `record_post_success_orphan` (already wired into `orchestration/nodes.py::apply_effects`) |
+
+Terminal live failures land in `api/dead_letter_queue.py` under the
+operator-facing source name (`graph`, `sap`, `oms`,
+`document_extraction`) so the operator dashboard groups orphans by
+upstream system, not by ASOE-internal registry name. The post-
+recipe-success OMS-write contract is documented in
+[`gateways/changelog/oms.md`](gateways/changelog/oms.md).
+
+#### Scheduled Container Apps Jobs
+
+Two cron Jobs land in `infra/main.bicep` — both default off:
+
+| Job | Bicep param | Schedule (default) | Purpose |
+|---|---|---|---|
+| Retention sweeper | `deployRetentionSweeperJob=true` | `retentionSweeperCron='0 2 * * *'` (02:00 UTC daily) | Bulk-wipes attachments past per-tenant TTL via `scripts/run_retention_sweeper.py`. Two-step opt-in: bicep param **and** `RETENTION_SWEEPER_ENABLED=true` env on the deployed Job. Preserves the PARITY-0.5 audit-row-before-byte-wipe invariant. |
+| Drift forwarder | `deployDriftAlertJob=true` | `driftAlertCron='0 6 * * *'` (06:00 UTC daily) | Calls `evaluate_all_extraction_drift()` and emits `extraction-drift` log events through the OTel exporter to App Insights. `replicaRetryLimit=0` — failed evaluators surface to the operator, not silently retry. |
+
+#### GA-only deferrals
+
+Items intentionally deferred from preprod to GA (automated KV
+rotation, multi-tenant Entra, asymmetric attachment signing,
+per-tenant residency + GRS, customer-managed HSM, hot-reload,
+multi-region active-active, automated DPIA gate, learned PII
+redactor, DLQ→operator-dashboard UI, schema-evolution drift CI,
+customer-facing erasure-cert UI, runtime per-tenant TTL store) live
+in [`docs/plans/ga-preconditions.md`](docs/plans/ga-preconditions.md)
+with the owning phase + unblock event for each row.
 
 ---
 
