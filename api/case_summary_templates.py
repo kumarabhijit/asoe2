@@ -84,6 +84,36 @@ TemplateFn = Callable[[Any, Any], Optional[RenderedTemplate]]
 
 
 # ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+
+def _with_more_suffix(title: Optional[str], plan_length: int) -> Optional[str]:
+    """ADR-041 P3e Phase 0b T2e — multi-line indicator.
+
+    Append " +N more" to the title when the recipe's per-line
+    plan (`trim_plan` for OVER_MAX, `round_up_plan` for MOQ,
+    etc.) covers more than one SKU. The displayed SKU is the
+    head entry; the suffix signals "the row represents more
+    than just this line."
+
+    Returns the title unchanged when:
+      * plan_length <= 1 (single-line — no suffix needed)
+      * title is None AND plan_length <= 1 (nothing to render)
+
+    When title is None but plan_length > 1, returns the suffix
+    alone so the line-count indicator still surfaces.
+    """
+    extra = plan_length - 1
+    if extra <= 0:
+        return title
+    suffix = f"+{extra} more"
+    if title:
+        return f"{title} (+{extra} more)"
+    return suffix
+
+
+# ---------------------------------------------------------------------------
 # Per-intent template implementations
 # ---------------------------------------------------------------------------
 
@@ -364,6 +394,12 @@ def _over_max_template(record, _case) -> Optional[RenderedTemplate]:
     `trim_plan[0]` — the recipe pre-sorts by value, so the head
     entry is the line driving the operator's decision. Renders
     without the sku prefix when trim_plan is empty.
+
+    Phase 0b T2e — multi-line cases append " +N more" to the
+    sku_title so the operator sees that the case spans more than
+    the displayed top line. Driven off len(trim_plan), not a
+    blind line count, so the suffix accurately counts the lines
+    the recipe flagged for trim.
     """
     from api.analysis_adapters import adapt_overmax
 
@@ -381,6 +417,7 @@ def _over_max_template(record, _case) -> Optional[RenderedTemplate]:
         # TrimPlanLine carries description as a contextual field.
         desc = getattr(head, "description", None)
         title = desc if desc else None
+        title = _with_more_suffix(title, len(data.trim_plan))
     one_liner = (
         f"Over max by {data.excess_qty:g} {data.uom} "
         f"({data.exceedance_pct:.1f}% over)"
@@ -395,6 +432,10 @@ def _moq_uplift_template(record, _case) -> Optional[RenderedTemplate]:
 
     Dispatches to `adapt_moq`. SKU + contextual description
     project directly from the analysis data.
+
+    Phase 0b T2e — when the recipe's round_up_plan covers more
+    than one line, append " +N more" to the sku_title so the
+    operator knows the row represents multiple lines.
     """
     from api.analysis_adapters import adapt_moq
 
@@ -405,6 +446,7 @@ def _moq_uplift_template(record, _case) -> Optional[RenderedTemplate]:
     if data is None:
         return None
     title = data.description if data.description else None
+    title = _with_more_suffix(title, len(data.round_up_plan))
     one_liner = (
         f"Below MOQ by {data.shortfall_qty:g} {data.uom} "
         f"(ordered {data.ordered_qty:g} vs {data.moq_qty:g} required)"

@@ -499,6 +499,22 @@ class TestOverMaxTemplate:
         result = render_template(record, _StubCase())
         assert result == RenderedTemplate()
 
+    def test_multi_line_appends_more_suffix(self):
+        """Phase 0b T2e — when trim_plan covers more than one
+        line, sku_title gets `+N more` appended."""
+        record = _over_max_record()
+        record.resolution_data["trim_plan"].extend([
+            {"sku": "SNK-CHIPS-FAM", "description": "Family chips",
+             "qty_to_trim": 80, "complete_layer_aligned": True},
+            {"sku": "BEV-WATER-24PK", "description": "Water 24pk",
+             "qty_to_trim": 40, "complete_layer_aligned": True},
+        ])
+        result = render_template(record, _StubCase())
+        # Head SKU stays the first line's value.
+        assert result.sku_code == "BEV-COLA-12PK"
+        assert result.sku_title is not None
+        assert "+2 more" in result.sku_title
+
 
 # ---------------------------------------------------------------------------
 # MOQ_UPLIFT — Round 2 implementation
@@ -541,6 +557,48 @@ class TestMoqUpliftTemplate:
         record.original_event["metadata"] = {}
         result = render_template(record, _StubCase())
         assert result == RenderedTemplate()
+
+    def test_single_line_no_more_suffix(self):
+        """MOQ_UPLIFT's adapter normalises round_up_plan to a
+        single entry by design (one SKU per case). The Phase 0b
+        T2e suffix wiring is in the template for symmetry but
+        never fires under today's adapter shape."""
+        result = render_template(_moq_record(), _StubCase())
+        assert result.sku_title is not None
+        # No multi-line suffix on the single-SKU recipe surface.
+        assert "+" not in result.sku_title
+
+
+# Phase 0b T2e — _with_more_suffix helper unit tests.
+class TestWithMoreSuffix:
+    def test_single_line_returns_title_unchanged(self):
+        from api.case_summary_templates import _with_more_suffix
+
+        assert _with_more_suffix("Cola 12-pack", 1) == "Cola 12-pack"
+
+    def test_zero_or_negative_plan_returns_title_unchanged(self):
+        from api.case_summary_templates import _with_more_suffix
+
+        assert _with_more_suffix("Cola", 0) == "Cola"
+        assert _with_more_suffix("Cola", -1) == "Cola"
+
+    def test_multi_line_appends_suffix(self):
+        from api.case_summary_templates import _with_more_suffix
+
+        assert _with_more_suffix("Cola", 3) == "Cola (+2 more)"
+
+    def test_no_title_renders_suffix_alone_for_multi_line(self):
+        from api.case_summary_templates import _with_more_suffix
+
+        # When the recipe gives us a count but no description,
+        # surface the count alone so the operator still sees the
+        # multi-line indicator.
+        assert _with_more_suffix(None, 4) == "+3 more"
+
+    def test_no_title_single_line_stays_none(self):
+        from api.case_summary_templates import _with_more_suffix
+
+        assert _with_more_suffix(None, 1) is None
 
 
 # ---------------------------------------------------------------------------
