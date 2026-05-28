@@ -243,6 +243,100 @@ def test_dollar_impact_null_for_non_numeric_value(cleanup):
 
 
 # ---------------------------------------------------------------------------
+# ADR-041 P3e Phase 0b T2d — multi-currency carrier
+# ---------------------------------------------------------------------------
+
+
+def test_dollar_impact_picks_up_explicit_currency_carrier(cleanup):
+    """Preferred path — `financial_impact` + `currency` fields
+    project directly. Currency stays as written (not coerced to
+    USD)."""
+    case = _open_case(customer_po_number="PO-X")
+    _attach_child(
+        parent_case_id=case.case_id,
+        intent="PRICE_DISCREPANCY",
+        resolution_data={"financial_impact": 1234.50, "currency": "EUR"},
+    )
+    records = exception_store.list_by_case("tenant-a", case.case_id)
+    summary = compute_case_summary(case, records)
+    assert summary.dollar_impact == DollarImpact(
+        amount_cents=123450, currency="EUR",
+    )
+
+
+def test_dollar_impact_preferred_wins_over_legacy(cleanup):
+    """When both shapes are present (recipe mid-migration), the
+    explicit-currency one wins. This lets recipes land
+    multi-currency support without immediately deleting the legacy
+    `_usd` field."""
+    case = _open_case(customer_po_number="PO-X")
+    _attach_child(
+        parent_case_id=case.case_id,
+        resolution_data={
+            "financial_impact": 100.0,
+            "currency": "GBP",
+            "financial_impact_usd": 99.0,  # stale legacy
+        },
+    )
+    records = exception_store.list_by_case("tenant-a", case.case_id)
+    summary = compute_case_summary(case, records)
+    assert summary.dollar_impact is not None
+    assert summary.dollar_impact.currency == "GBP"
+    assert summary.dollar_impact.amount_cents == 10000
+
+
+def test_dollar_impact_currency_normalised_to_uppercase(cleanup):
+    """ISO 4217 codes are uppercase; lowercase / mixed input
+    normalises so the wire shape is consistent."""
+    case = _open_case(customer_po_number="PO-X")
+    _attach_child(
+        parent_case_id=case.case_id,
+        resolution_data={"financial_impact": 50.0, "currency": "jpy"},
+    )
+    records = exception_store.list_by_case("tenant-a", case.case_id)
+    summary = compute_case_summary(case, records)
+    assert summary.dollar_impact is not None
+    assert summary.dollar_impact.currency == "JPY"
+
+
+def test_dollar_impact_rejects_malformed_currency(cleanup):
+    """Two-letter or four-letter currency codes are not ISO 4217.
+    Reject at the projection boundary so the UI never sees a
+    partial-truth code."""
+    case = _open_case(customer_po_number="PO-X")
+    _attach_child(
+        parent_case_id=case.case_id,
+        resolution_data={"financial_impact": 100, "currency": "US"},
+    )
+    records = exception_store.list_by_case("tenant-a", case.case_id)
+    assert compute_case_summary(case, records).dollar_impact is None
+
+
+def test_dollar_impact_rejects_non_alpha_currency(cleanup):
+    """Currency code containing digits or punctuation — defensive
+    rejection so corrupted/malicious data can't smuggle through."""
+    case = _open_case(customer_po_number="PO-X")
+    _attach_child(
+        parent_case_id=case.case_id,
+        resolution_data={"financial_impact": 100, "currency": "U$D"},
+    )
+    records = exception_store.list_by_case("tenant-a", case.case_id)
+    assert compute_case_summary(case, records).dollar_impact is None
+
+
+def test_dollar_impact_explicit_currency_only_no_amount_returns_none(cleanup):
+    """Currency without an amount is missing data; nothing to
+    render."""
+    case = _open_case(customer_po_number="PO-X")
+    _attach_child(
+        parent_case_id=case.case_id,
+        resolution_data={"currency": "EUR"},
+    )
+    records = exception_store.list_by_case("tenant-a", case.case_id)
+    assert compute_case_summary(case, records).dollar_impact is None
+
+
+# ---------------------------------------------------------------------------
 # to_dict — wire shape contract
 # ---------------------------------------------------------------------------
 

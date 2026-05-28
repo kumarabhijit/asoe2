@@ -84,6 +84,36 @@ TemplateFn = Callable[[Any, Any], Optional[RenderedTemplate]]
 
 
 # ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+
+def _with_more_suffix(title: Optional[str], plan_length: int) -> Optional[str]:
+    """ADR-041 P3e Phase 0b T2e — multi-line indicator.
+
+    Append " +N more" to the title when the recipe's per-line
+    plan (`trim_plan` for OVER_MAX, `round_up_plan` for MOQ,
+    etc.) covers more than one SKU. The displayed SKU is the
+    head entry; the suffix signals "the row represents more
+    than just this line."
+
+    Returns the title unchanged when:
+      * plan_length <= 1 (single-line — no suffix needed)
+      * title is None AND plan_length <= 1 (nothing to render)
+
+    When title is None but plan_length > 1, returns the suffix
+    alone so the line-count indicator still surfaces.
+    """
+    extra = plan_length - 1
+    if extra <= 0:
+        return title
+    suffix = f"+{extra} more"
+    if title:
+        return f"{title} (+{extra} more)"
+    return suffix
+
+
+# ---------------------------------------------------------------------------
 # Per-intent template implementations
 # ---------------------------------------------------------------------------
 
@@ -170,110 +200,328 @@ def _grandfathered_no_template(_record, _case) -> Optional[RenderedTemplate]:
 
 
 def _price_discrepancy_template(record, _case) -> Optional[RenderedTemplate]:
-    """TODO(recipe-team):
+    """Recipe SME spec:
        `{sku} — {material_desc} (PO ${po_unit_price}/{uom} vs ERP
         ${erp_unit_price}; {variance_pct}% delta, ${total_at_risk}
         at risk)`
 
-    Field source: `record.resolution_data["price_analysis"]` —
-    PriceAdjustmentRecipe output. Confirm the exact key names
-    against asoe-ui/src/types/exceptions.ts::PriceAnalysisData.
+    Implementation: dispatches to the existing `adapt_price`
+    adapter so the field projection matches the OrderAnalysis
+    composer byte-for-byte. The adapter returns None when any
+    audit-bearing gateway field is absent — we treat the same way
+    (Structurally Omitted on the queue row). `material_desc` is
+    contextual; we render with or without it.
     """
-    return None
+    # Lazy import — keeps the module's import graph independent
+    # of the heavy analysis_adapters surface for the dispatcher
+    # cases that don't need it.
+    from api.analysis_adapters import adapt_price
+
+    try:
+        data = adapt_price(record)
+    except Exception:
+        # Recipe-output shape mismatch in production — never let
+        # template rendering crash the route hot path.
+        return None
+    if data is None:
+        return None
+    sku = data.sku
+    variance_pct = data.variance_pct
+    at_risk = data.total_at_risk
+    po = data.po_unit_price
+    erp = data.erp_unit_price
+    uom = data.uom
+    desc = data.material_desc
+    title = desc if desc else None
+    one_liner = (
+        f"PO ${po:.2f}/{uom} vs ERP ${erp:.2f} — "
+        f"{variance_pct:.1f}% delta, ${at_risk:,.2f} at risk"
+    )
+    return RenderedTemplate(sku_code=sku, sku_title=title, one_liner=one_liner)
 
 
 def _back_order_template(record, _case) -> Optional[RenderedTemplate]:
-    """TODO(recipe-team):
+    """Recipe SME spec:
        `{sku} — short stock: {available_qty}/{ordered_qty} {uom}
         ({gap_pct}% gap, ATP {atp_date})`
 
-    Field source: `record.resolution_data["backorder_analysis"]`
-    plus `price_analysis.sku` for the SKU prefix. See
-    BackOrderResolutionRecipe.
+    Dispatches to `adapt_back_order` for the audit-bearing
+    quantity + ATP fields; SKU pulls from
+    `record.original_event["sku"]` (the recipe input) — the
+    BackOrderAnalysisData schema doesn't carry sku, but the
+    one-liner is more readable with it. Renders without the
+    sku prefix when original_event is missing or carries no sku.
     """
-    return None
+    from api.analysis_adapters import adapt_back_order
+
+    try:
+        data = adapt_back_order(record)
+    except Exception:
+        return None
+    if data is None:
+        return None
+    event = getattr(record, "original_event", None) or {}
+    sku = event.get("sku") if isinstance(event, dict) else None
+    one_liner = (
+        f"Short stock: {data.available_qty:g}/{data.ordered_qty:g} "
+        f"{data.uom} ({data.gap_pct:.1f}% gap, ATP {data.atp_date})"
+    )
+    return RenderedTemplate(sku_code=sku, sku_title=None, one_liner=one_liner)
 
 
 def _credit_block_template(record, _case) -> Optional[RenderedTemplate]:
-    """TODO(recipe-team):
-       `Credit limit breached: ${exposure} exposure over ${limit} limit`
+    """Recipe SME spec:
+       `Credit limit breached: ${current_exposure} exposure over
+        ${credit_limit} limit`
 
-    Field source: `record.enrichment_context["customer_master_context"]`
-    + `record.resolution_data["credit_block_analysis"]`. Confirm
-    the exposure / limit field names with CreditHoldReleaseRecipe.
+    Reads from `record.enrichment_context["customer_master_context"]`
+    when the SAP customer-master gateway has wired (today: only
+    in sandbox). Field-presence guard returns None when either
+    field is absent — the gateway gap is documented under the
+    credit_block_customer_master grandfather candidate.
+
+    No adapter exists yet (CreditHoldReleaseRecipe doesn't
+    project structured analysis the way PriceAdjustmentRecipe
+    does); when the adapter lands this template flips to the
+    same dispatch-to-adapter pattern as the others.
     """
-    return None
+    enrichment = getattr(record, "enrichment_context", None) or {}
+    cm_ctx = enrichment.get("customer_master_context") or {}
+    if not isinstance(cm_ctx, dict):
+        return None
+    credit_limit = cm_ctx.get("credit_limit")
+    current_exposure = cm_ctx.get("current_exposure")
+    try:
+        limit_f = float(credit_limit) if credit_limit is not None else None
+        exposure_f = (
+            float(current_exposure) if current_exposure is not None else None
+        )
+    except (TypeError, ValueError):
+        return None
+    if limit_f is None or exposure_f is None:
+        return None
+    one_liner = (
+        f"Credit limit breached: ${exposure_f:,.0f} exposure over "
+        f"${limit_f:,.0f} limit"
+    )
+    return RenderedTemplate(one_liner=one_liner)
 
 
 def _contractual_correction_template(record, case) -> Optional[RenderedTemplate]:
-    """TODO(recipe-team):
-       `{sku} — Contract price ${contract_price} vs PO ${po_price}
-        — {variance_pct}% variance`
+    """Recipe SME spec:
+       `{sku} — Contract price ${erp_unit_price} vs PO
+        ${po_unit_price} — {variance_pct}% variance`
 
-    Shares many fields with PRICE_DISCREPANCY; consolidate the
-    template helpers once both land (Recipe SME §2 — share via a
-    sub-helper to keep the registry dispatch table thin).
+    CONTRACTUAL_CORRECTION and PRICE_DISCREPANCY share the
+    PriceAdjustmentRecipe surface (see recipes/EdiMismatchRecipe.py
+    comment at line 105 — both intents route through that
+    recipe). Delegates to _price_discrepancy_template for the
+    same field projection; the visible vocabulary on the row is
+    intent-agnostic since the variance + at-risk values are the
+    operator's decision signal regardless of the intent label.
     """
-    return None
+    return _price_discrepancy_template(record, case)
 
 
 def _mass_pricing_error_template(record, _case) -> Optional[RenderedTemplate]:
-    """TODO(recipe-team):
-       `Bulk price drift across {affected_lines} lines (avg
+    """Recipe SME spec:
+       `Bulk price drift across {line_count} lines (avg
         {avg_variance_pct}% variance)`
 
-    Field source: `record.resolution_data["mass_price_analysis"]`.
-    Hide the SKU on the row — this intent spans multiple SKUs by
-    construction; line 3 is one-liner-only.
+    MASS_PRICING_ERROR routes to FAIL_TO_HUMAN upstream
+    (recipes/DuplicatePORecipe.py:36 — no recipe handles this
+    intent's resolution today; operators get the case as
+    manual-review). The recipe-input event metadata is what we
+    have: `line_count` is on the OrderEvent shape, and we
+    aggregate the variance signal from the line_items if
+    populated.
+
+    Hides sku_code on the row by construction — multi-SKU intent.
+    Returns None when neither line_count nor a usable variance is
+    available.
     """
-    return None
+    event = getattr(record, "original_event", None) or {}
+    if not isinstance(event, dict):
+        return None
+    line_count = event.get("line_count")
+    metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+    # Variance: prefer the recipe-input avg, else compute from
+    # line_items when available. Either signal alone is enough to
+    # render an honest one-liner; both absent → None.
+    avg_variance_pct = metadata.get("avg_variance_pct")
+    if avg_variance_pct is None:
+        items = event.get("line_items") if isinstance(event.get("line_items"), list) else []
+        deltas = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            try:
+                pp = float(it.get("po_price") or 0)
+                sp = float(it.get("sap_base_price") or 0)
+                if sp > 0:
+                    deltas.append(abs(pp - sp) / sp * 100.0)
+            except (TypeError, ValueError):
+                continue
+        avg_variance_pct = (sum(deltas) / len(deltas)) if deltas else None
+    if line_count is None and avg_variance_pct is None:
+        return None
+    parts = []
+    if line_count is not None:
+        try:
+            n = int(line_count)
+            parts.append(f"Bulk price drift across {n} lines")
+        except (TypeError, ValueError):
+            pass
+    if avg_variance_pct is not None:
+        try:
+            parts.append(f"avg {float(avg_variance_pct):.1f}% variance")
+        except (TypeError, ValueError):
+            pass
+    if not parts:
+        return None
+    one_liner = (
+        f"{parts[0]} ({parts[1]})" if len(parts) == 2 else parts[0]
+    )
+    return RenderedTemplate(one_liner=one_liner)
 
 
 def _over_max_template(record, _case) -> Optional[RenderedTemplate]:
-    """TODO(recipe-team):
+    """Recipe SME spec:
        `{trim_plan[0].sku} — over max by {excess_qty} {uom}
         ({exceedance_pct}% over)`
 
-    Field source: `record.resolution_data["overmax_analysis"]`.
-    `trim_plan[0]` is the SKU driving the largest excess; recipe
-    sorts the plan by value already.
+    Dispatches to `adapt_overmax`. SKU + title come from
+    `trim_plan[0]` — the recipe pre-sorts by value, so the head
+    entry is the line driving the operator's decision. Renders
+    without the sku prefix when trim_plan is empty.
+
+    Phase 0b T2e — multi-line cases append " +N more" to the
+    sku_title so the operator sees that the case spans more than
+    the displayed top line. Driven off len(trim_plan), not a
+    blind line count, so the suffix accurately counts the lines
+    the recipe flagged for trim.
     """
-    return None
+    from api.analysis_adapters import adapt_overmax
+
+    try:
+        data = adapt_overmax(record)
+    except Exception:
+        return None
+    if data is None:
+        return None
+    sku: Optional[str] = None
+    title: Optional[str] = None
+    if data.trim_plan:
+        head = data.trim_plan[0]
+        sku = head.sku or None
+        # TrimPlanLine carries description as a contextual field.
+        desc = getattr(head, "description", None)
+        title = desc if desc else None
+        title = _with_more_suffix(title, len(data.trim_plan))
+    one_liner = (
+        f"Over max by {data.excess_qty:g} {data.uom} "
+        f"({data.exceedance_pct:.1f}% over)"
+    )
+    return RenderedTemplate(sku_code=sku, sku_title=title, one_liner=one_liner)
 
 
 def _moq_uplift_template(record, _case) -> Optional[RenderedTemplate]:
-    """TODO(recipe-team):
-       `{sku} — below MOQ by {shortfall_qty} {uom} (ordered vs
-        {moq_qty} required)`
+    """Recipe SME spec:
+       `{sku} — below MOQ by {shortfall_qty} {uom} (ordered
+        {ordered_qty} vs {moq_qty} required)`
 
-    Field source: `record.resolution_data["moq_analysis"]`.
+    Dispatches to `adapt_moq`. SKU + contextual description
+    project directly from the analysis data.
+
+    Phase 0b T2e — when the recipe's round_up_plan covers more
+    than one line, append " +N more" to the sku_title so the
+    operator knows the row represents multiple lines.
     """
-    return None
+    from api.analysis_adapters import adapt_moq
+
+    try:
+        data = adapt_moq(record)
+    except Exception:
+        return None
+    if data is None:
+        return None
+    title = data.description if data.description else None
+    title = _with_more_suffix(title, len(data.round_up_plan))
+    one_liner = (
+        f"Below MOQ by {data.shortfall_qty:g} {data.uom} "
+        f"(ordered {data.ordered_qty:g} vs {data.moq_qty:g} required)"
+    )
+    return RenderedTemplate(
+        sku_code=data.sku, sku_title=title, one_liner=one_liner,
+    )
 
 
 def _delivery_delay_template(record, _case) -> Optional[RenderedTemplate]:
-    """TODO(recipe-team):
+    """Recipe SME spec:
        `{affected_lines} line(s) — {days_late}d late
         ({delay_category}, ETA {projected_eta})`
 
-    Field source: `record.resolution_data["delivery_delay_analysis"]`.
-    Note: dollar_impact for this intent is null until the gateway
-    completes (2026-07-21 target per Recipe SME §3).
+    Dispatches to `adapt_delivery_delay`. DeliveryDelayAnalysisData
+    doesn't carry a SKU (multi-line by construction), so sku_code
+    + sku_title stay None — line 3 on the queue row collapses to
+    the one-liner only, which matches the multi-line intent
+    shape Recipe SME §3 documented.
+
+    `dollar_impact` for this intent is null at the projection
+    layer until the gateway completes (2026-07-21 target).
     """
-    return None
+    from api.analysis_adapters import adapt_delivery_delay
+
+    try:
+        data = adapt_delivery_delay(record)
+    except Exception:
+        return None
+    if data is None:
+        return None
+    line_word = "line" if data.affected_lines == 1 else "lines"
+    one_liner = (
+        f"{data.affected_lines} {line_word} — {data.days_late}d late "
+        f"({data.delay_category}, ETA {data.projected_eta})"
+    )
+    return RenderedTemplate(one_liner=one_liner)
 
 
 def _change_analysis_template(record, _case) -> Optional[RenderedTemplate]:
-    """TODO(recipe-team):
+    """Recipe SME spec:
        `{change_items[0].field}: {from_value} → {to_value} (rec:
         {decision.recommended_action}, ${revenue_impact_usd})`
 
-    Field source: `record.resolution_data["change_analysis"]` —
-    ChangeAnalysisRecipe output. Renders the FIRST change item;
-    when there are multiple, the recipe already sorts by revenue
-    impact desc so the head is the operator-relevant one.
+    Dispatches to `compose_change_analysis` so we project from
+    `enrichment_context["change_analysis"]` via the typed
+    ChangeAnalysis Pydantic shape. Renders the first change item
+    (recipe pre-sorts by revenue-impact desc). Renders without
+    the revenue-impact suffix when the field is absent (it's
+    Optional on ChangeDecision).
     """
-    return None
+    from api.profile_composer import compose_change_analysis
+
+    try:
+        data = compose_change_analysis(record)
+    except Exception:
+        return None
+    if data is None:
+        return None
+    items = data.evaluation.change_items
+    if not items:
+        return None
+    head = items[0]
+    field = head.field
+    from_v = head.from_value if head.from_value is not None else "—"
+    to_v = head.to_value if head.to_value is not None else "—"
+    action = data.decision.recommended_action
+    revenue = data.decision.revenue_impact_usd
+    suffix = (
+        f", ${revenue:,.2f}" if isinstance(revenue, (int, float)) else ""
+    )
+    one_liner = (
+        f"{field}: {from_v} → {to_v} (rec: {action}{suffix})"
+    )
+    return RenderedTemplate(one_liner=one_liner)
 
 
 # ---------------------------------------------------------------------------

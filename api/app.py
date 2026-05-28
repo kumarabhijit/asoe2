@@ -26,6 +26,7 @@ logger = logging.getLogger("asoe.api.app")
 
 from api.routes import accounts, auth, cases, exceptions, health, pipeline, policies, workflows, ws
 from api.routes import attachments as _attachments_routes
+from api.routes import cases_telemetry as _cases_telemetry_routes
 from api.routes import config as _config_routes
 from api.routes import duplicate_envelope as _duplicate_envelope_routes
 from api.routes import sandbox as _sandbox_routes
@@ -214,6 +215,12 @@ def create_app() -> FastAPI:
     )
     # ADR-038 Phase H.6 — case-centric read surface (`/cases` UI).
     application.include_router(cases.router, prefix="/api/v1", tags=["cases"])
+    # ADR-041 P3e Phase 3 gate #5 — cases V2 telemetry receivers.
+    # Router declares its own prefix (/api/v1/metrics/cases), so
+    # no prefix override here.
+    application.include_router(
+        _cases_telemetry_routes.router, tags=["metrics"],
+    )
     application.include_router(_attachments_routes.router, prefix="/api/v1", tags=["attachments"])
     application.include_router(workflows.router, prefix="/api/v1", tags=["workflows"])
     application.include_router(policies.router, prefix="/api/v1", tags=["policies"])

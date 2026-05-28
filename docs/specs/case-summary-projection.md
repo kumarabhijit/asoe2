@@ -354,28 +354,54 @@ the registry today:
   * **EMAIL_COMPLAINT (pure intake)** has no quantity fields — add
     `complaint_analysis` recipe output, or grandfather.
 
-### T2c — Verdict color override gates
+### T2c — Verdict color override gates — ✅ shipped (commit 322965a)
 
-Recipe SME §5 — the rollup color today is the raw severity-wins
-output of child shadow verdicts. The gates ("never RED at intake
-for DELIVERY_DELAY without SLA breach", "never GREEN for
-PRICE_HOLD with auto-release near-ceiling", etc.) live in the
-recipe layer. T2c adds a `verdict_color_gate(intent, context,
-raw_color) -> color` function applied at compose time. Architectural
-lock asserts all ten gates from the panel response.
+`api/case_summary_verdict_gates.py::apply_verdict_color_gates`
+implements the 7 Recipe SME §5 rules:
 
-### T2d — Currency carrier field
+CEILING (NEVER RED):
+  1. DELIVERY_DELAY days_late > 0 without sla_breach
+  2. PALLET classification ∈ {BROKEN_LAYER, PARTIAL_PALLET}
+  3. EDI_MISMATCH sub_type ∈ {DATE_FORMAT, UOM_NORMALISATION}
 
-Today `dollar_impact` defaults to `"USD"` because
-`resolution_data["financial_impact_usd"]` is single-currency by
-field name. Multi-currency cases need a `currency` field alongside
-`financial_impact`. Recipe team to coordinate with Compliance on
-the resolution_data field shape before multi-currency tenants land.
+FLOOR (NEVER GREEN):
+  4. PRICE_HOLD AUTO_RELEASE at ≥80% of tolerance ceiling
+  5. DUPLICATE_PO when duplicate_order.total_value > $10k
+  6. Tier-1 customer (any intent)
+  7. EMAIL_COMPLAINT / CHANGE_ANALYSIS with requires_cosign=true
 
-### T2e — `top_line_sku_*` multi-line rule
+Gate constants (`PRICE_HOLD_NEAR_CEILING_FRACTION`,
+`DUPLICATE_PO_GREEN_FLOOR_USD`, `NEVER_GREEN_CUSTOMER_TIERS`,
+`NEVER_RED_EDI_SUBTYPES`, `NEVER_RED_PALLET_CLASSIFICATIONS`)
+exposed at module top for dashboard / policy review. 27 unit
+tests in `tests/test_case_summary_verdict_gates.py`.
 
-Recipe SME §4 — top line by absolute dollar impact, then `+N more`
-suffix when `line_count > 1`. Requires the recipe output to expose
-per-line SKU + value (currently only `resolution_data` carries
-totals). Recipe team to land per-line breakdown alongside the
-template registry.
+### T2d — Currency carrier field — ✅ shipped (commit d5d613c)
+
+`api/case_summary.py::_dollar_impact_of` accepts two source
+shapes on `resolution_data`:
+
+  1. **Preferred** — `financial_impact` (amount) + `currency`
+     (ISO 4217). Symmetric to the wire shape; recipes write
+     both.
+  2. **Legacy** — `financial_impact_usd` (amount, USD assumed).
+     Backward-compat for pre-multi-currency recipes.
+
+When both shapes present, preferred wins (recipes mid-migration).
+Currency validated as 3 uppercase ISO 4217 letters at the
+projection boundary; malformed codes drop the field rather than
+emit partial-truth (Guardrail #6).
+
+### T2e — `top_line_sku_*` multi-line rule — ✅ shipped (this PR)
+
+`_with_more_suffix(title, plan_length)` helper appends `+N more`
+to the SKU title when the recipe's per-line plan covers more
+than one entry. Wired into OVER_MAX (uses `trim_plan`) and
+MOQ_UPLIFT (uses `round_up_plan`; today's adapter normalises to
+single-line so the suffix is wiring-ready but never fires in
+production yet — flips on when the recipe surface goes
+multi-line).
+
+Single source of truth — the helper is a pure function, tested
+in isolation against all branches (single line, zero plan,
+multi-line with + without title).

@@ -921,4 +921,194 @@ def render_all() -> str:
         + render_reviewer_activity_metrics()
         + render_preview_metrics()
         + render_extraction_metrics()
+        + render_cases_v2_telemetry_metrics()
     )
+
+
+# ---------------------------------------------------------------------------
+# ADR-041 P3e Phase 3 sign-off gate #5 — cases V2 telemetry counters
+# ---------------------------------------------------------------------------
+# Three best-effort metrics the gate requires:
+#
+#   * row-click             — operators picking from the queue. Used
+#                              by gate review to confirm SLA-sort
+#                              effectiveness (do they click the top
+#                              row?).
+#   * time-to-first-action  — dwell from case-open to first HITL
+#                              button click. Compared with the legacy
+#                              row baseline by gate review.
+#   * analysis-scroll-depth — how far into Agent Analysis operators
+#                              read before clicking. Sub-gate metric
+#                              for the Compliance audit-format review.
+#
+# All three are tenant-agnostic counters (no PII; aggregated). Lock-
+# protected for thread safety in the FastAPI worker pool. The
+# Prometheus exposition format is consistent with the existing
+# reviewer-activity counters above so dashboards can re-use the
+# render template.
+
+from threading import Lock as _CasesV2Lock  # noqa: E402
+from typing import Dict, List, Optional  # noqa: E402, F811
+
+_cases_v2_lock = _CasesV2Lock()
+
+# Aggregate counters
+_cases_v2_row_clicks: int = 0
+_cases_v2_row_clicks_by_verdict: Dict[str, int] = {
+    "R": 0, "A": 0, "G": 0, "none": 0,
+}
+
+# Dwell histogram for time-to-first-action. Re-uses the existing
+# automation-bias bucket edges (0.5s, 1s, 2s, 5s, 10s, 30s, 60s, 120s)
+# so the gate-review dashboards can overlay the two distributions.
+_cases_v2_ttfa_by_action: Dict[str, int] = {
+    "approve": 0, "reject": 0, "override": 0,
+    "escalate": 0, "reanalyze": 0,
+}
+_cases_v2_ttfa_dwell_buckets: List[int] = [0] * (len(_DWELL_BUCKETS_S) + 1)
+_cases_v2_ttfa_dwell_sum: float = 0.0
+_cases_v2_ttfa_count: int = 0
+
+# Analysis-scroll-depth histogram. 21 buckets matching the V2
+# observer's threshold sweep (5% resolution).
+_SCROLL_BUCKETS = 21
+_cases_v2_scroll_buckets: List[int] = [0] * _SCROLL_BUCKETS
+_cases_v2_scroll_count: int = 0
+_cases_v2_scroll_acted: int = 0
+
+
+def record_cases_row_click(verdict: Optional[str] = None) -> None:
+    """One queue-row click. `verdict` is the audit_verdict_color
+    on the row at click time (R/A/G/None). Best-effort; never
+    raises."""
+    global _cases_v2_row_clicks
+    key = verdict if verdict in ("R", "A", "G") else "none"
+    with _cases_v2_lock:
+        _cases_v2_row_clicks += 1
+        _cases_v2_row_clicks_by_verdict[key] = (
+            _cases_v2_row_clicks_by_verdict.get(key, 0) + 1
+        )
+
+
+def record_cases_time_to_first_action(
+    *, dwell_ms: float, first_action: str,
+) -> None:
+    """One time-to-first-action sample. `first_action` is one of
+    approve / reject / override / escalate / reanalyze. No-op on
+    a negative / NaN / non-numeric dwell (matches the
+    reviewer-activity contract). Unknown `first_action` is
+    counted under no per-action key but still contributes to the
+    histogram so the metric never silently drops samples."""
+    global _cases_v2_ttfa_dwell_sum, _cases_v2_ttfa_count
+    try:
+        dwell_s = float(dwell_ms) / 1000.0
+    except (TypeError, ValueError):
+        return
+    if dwell_s != dwell_s or dwell_s < 0:  # NaN or negative
+        return
+    with _cases_v2_lock:
+        if first_action in _cases_v2_ttfa_by_action:
+            _cases_v2_ttfa_by_action[first_action] += 1
+        for i, edge in enumerate(_DWELL_BUCKETS_S):
+            if dwell_s <= edge:
+                _cases_v2_ttfa_dwell_buckets[i] += 1
+                break
+        else:
+            _cases_v2_ttfa_dwell_buckets[-1] += 1
+        _cases_v2_ttfa_dwell_sum += dwell_s
+        _cases_v2_ttfa_count += 1
+
+
+def record_cases_analysis_scroll_depth(
+    *, max_scroll_pct: float, acted: bool,
+) -> None:
+    """One scroll-depth sample. `max_scroll_pct` is clamped to
+    [0, 1] before bucketing. `acted=True` flags samples where the
+    operator clicked an action after observing the reported
+    max depth — the gate-review correlation. Best-effort; never
+    raises."""
+    global _cases_v2_scroll_count, _cases_v2_scroll_acted
+    try:
+        pct = float(max_scroll_pct)
+    except (TypeError, ValueError):
+        return
+    if pct != pct:  # NaN
+        return
+    if pct < 0:
+        pct = 0.0
+    if pct > 1:
+        pct = 1.0
+    # bucket = floor(pct * (N-1)); pct=1.0 → top bucket inclusive.
+    bucket = min(int(pct * (_SCROLL_BUCKETS - 1) + 0.5), _SCROLL_BUCKETS - 1)
+    with _cases_v2_lock:
+        _cases_v2_scroll_buckets[bucket] += 1
+        _cases_v2_scroll_count += 1
+        if acted:
+            _cases_v2_scroll_acted += 1
+
+
+def reset_cases_v2_telemetry() -> None:
+    """Test helper — drop all V2 telemetry samples."""
+    global _cases_v2_row_clicks, _cases_v2_ttfa_dwell_sum
+    global _cases_v2_ttfa_count, _cases_v2_scroll_count, _cases_v2_scroll_acted
+    with _cases_v2_lock:
+        _cases_v2_row_clicks = 0
+        for k in _cases_v2_row_clicks_by_verdict:
+            _cases_v2_row_clicks_by_verdict[k] = 0
+        for k in _cases_v2_ttfa_by_action:
+            _cases_v2_ttfa_by_action[k] = 0
+        for i in range(len(_cases_v2_ttfa_dwell_buckets)):
+            _cases_v2_ttfa_dwell_buckets[i] = 0
+        _cases_v2_ttfa_dwell_sum = 0.0
+        _cases_v2_ttfa_count = 0
+        for i in range(_SCROLL_BUCKETS):
+            _cases_v2_scroll_buckets[i] = 0
+        _cases_v2_scroll_count = 0
+        _cases_v2_scroll_acted = 0
+
+
+def render_cases_v2_telemetry_metrics() -> str:
+    """Prometheus text rendering for the three counters."""
+    lines: List[str] = []
+    with _cases_v2_lock:
+        lines.append(
+            "# HELP cases_v2_row_clicks_total Cases V2 queue-row click events."
+        )
+        lines.append("# TYPE cases_v2_row_clicks_total counter")
+        lines.append(f"cases_v2_row_clicks_total {_cases_v2_row_clicks}")
+        for verdict, count in _cases_v2_row_clicks_by_verdict.items():
+            lines.append(
+                f'cases_v2_row_clicks_by_verdict_total'
+                f'{{verdict="{verdict}"}} {count}'
+            )
+
+        lines.append(
+            "# HELP cases_v2_time_to_first_action_total "
+            "Cases V2 time-to-first-action samples."
+        )
+        lines.append("# TYPE cases_v2_time_to_first_action_total counter")
+        lines.append(
+            f"cases_v2_time_to_first_action_total {_cases_v2_ttfa_count}"
+        )
+        for action, count in _cases_v2_ttfa_by_action.items():
+            lines.append(
+                f'cases_v2_time_to_first_action_by_action_total'
+                f'{{action="{action}"}} {count}'
+            )
+        lines.append(
+            f"cases_v2_time_to_first_action_dwell_sum_seconds "
+            f"{_cases_v2_ttfa_dwell_sum:.3f}"
+        )
+
+        lines.append(
+            "# HELP cases_v2_analysis_scroll_depth_total "
+            "Cases V2 analysis-scroll-depth samples."
+        )
+        lines.append("# TYPE cases_v2_analysis_scroll_depth_total counter")
+        lines.append(
+            f"cases_v2_analysis_scroll_depth_total {_cases_v2_scroll_count}"
+        )
+        lines.append(
+            f"cases_v2_analysis_scroll_depth_acted_total {_cases_v2_scroll_acted}"
+        )
+    return "\n".join(lines) + "\n"
