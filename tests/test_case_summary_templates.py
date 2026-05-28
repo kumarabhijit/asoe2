@@ -444,6 +444,160 @@ class TestChangeAnalysisTemplate:
 
 
 # ---------------------------------------------------------------------------
+# OVER_MAX — Round 2 implementation
+# ---------------------------------------------------------------------------
+
+
+def _over_max_record():
+    event = {
+        "order_id": "SO-OM-1",
+        "metadata": {
+            "total_ordered": 3000,
+            "max_qty": 2760,
+            "order_lines": [
+                {
+                    "sku": "BEV-COLA-12PK",
+                    "description": "Cola 12-pack",
+                    "qty": 3000,
+                    "max_line_qty": 2760,
+                    "excess": 240,
+                },
+            ],
+        },
+    }
+    rd = {
+        "status": "COMPLETE",
+        "excess_qty": 240,
+        "exceedance_pct": 8.7,
+        "at_risk": 4080.0,
+        "trim_plan": [
+            {
+                "sku": "BEV-COLA-12PK",
+                "description": "Cola 12-pack",
+                "qty_to_trim": 240,
+                "complete_layer_aligned": True,
+            },
+        ],
+    }
+    r = _StubRecord(intent="OVER_MAX", resolution_data=rd)
+    r.original_event = event
+    return r
+
+
+class TestOverMaxTemplate:
+    def test_happy_path_picks_trim_plan_head_sku(self):
+        result = render_template(_over_max_record(), _StubCase())
+        assert result.sku_code == "BEV-COLA-12PK"
+        assert result.sku_title == "Cola 12-pack"
+        assert result.one_liner is not None
+        assert "Over max by 240" in result.one_liner
+        assert "8.7% over" in result.one_liner
+
+    def test_missing_metadata_returns_empty(self):
+        record = _over_max_record()
+        record.original_event["metadata"] = {}
+        result = render_template(record, _StubCase())
+        assert result == RenderedTemplate()
+
+
+# ---------------------------------------------------------------------------
+# MOQ_UPLIFT — Round 2 implementation
+# ---------------------------------------------------------------------------
+
+
+def _moq_record():
+    event = {
+        "order_id": "SO-MOQ-1",
+        "metadata": {
+            "ordered_qty": 64,
+            "moq_qty": 100,
+            "unit_cost": 9.80,
+            "uom": "EA",
+            "sku": "BEV-COLA-12PK",
+            "description": "Cola 12-pack",
+        },
+    }
+    rd = {
+        "status": "COMPLETE",
+        "shortfall_qty": 36,
+        "shortfall_pct": 36.0,
+        "at_risk": 352.80,
+    }
+    r = _StubRecord(intent="MOQ_UPLIFT", resolution_data=rd)
+    r.original_event = event
+    return r
+
+
+class TestMoqUpliftTemplate:
+    def test_happy_path_renders_sku_and_shortfall(self):
+        result = render_template(_moq_record(), _StubCase())
+        assert result.sku_code == "BEV-COLA-12PK"
+        assert result.one_liner is not None
+        assert "Below MOQ by 36 EA" in result.one_liner
+        assert "ordered 64 vs 100 required" in result.one_liner
+
+    def test_missing_metadata_returns_empty(self):
+        record = _moq_record()
+        record.original_event["metadata"] = {}
+        result = render_template(record, _StubCase())
+        assert result == RenderedTemplate()
+
+
+# ---------------------------------------------------------------------------
+# DELIVERY_DELAY — Round 2 implementation
+# ---------------------------------------------------------------------------
+
+
+def _delivery_delay_record(*, affected_lines: int = 3):
+    event = {
+        "order_id": "SO-DD-1",
+        "line_count": affected_lines,
+        "metadata": {
+            "planned_date": "2026-05-30",
+            "projected_eta": "2026-06-04",
+            "carrier": "ACME-FREIGHT",
+            "route": "NE-1",
+        },
+    }
+    rd = {
+        "status": "COMPLETE",
+        "planned_date": "2026-05-30",
+        "projected_eta": "2026-06-04",
+        "days_late": 5,
+        "delay_category": "MINOR",
+        "affected_lines": affected_lines,
+    }
+    r = _StubRecord(intent="DELIVERY_DELAY", resolution_data=rd)
+    r.original_event = event
+    return r
+
+
+class TestDeliveryDelayTemplate:
+    def test_happy_path_plural_lines(self):
+        result = render_template(_delivery_delay_record(), _StubCase())
+        assert result.sku_code is None  # multi-line intent
+        assert result.one_liner is not None
+        assert "3 lines" in result.one_liner
+        assert "5d late" in result.one_liner
+        assert "MINOR" in result.one_liner
+        assert "ETA 2026-06-04" in result.one_liner
+
+    def test_singular_line(self):
+        result = render_template(
+            _delivery_delay_record(affected_lines=1), _StubCase(),
+        )
+        assert result.one_liner is not None
+        assert "1 line " in result.one_liner
+
+    def test_missing_event_dates_returns_empty(self):
+        record = _delivery_delay_record()
+        record.resolution_data = {}  # adapter falls through to event metadata
+        record.original_event["metadata"] = {}
+        result = render_template(record, _StubCase())
+        assert result == RenderedTemplate()
+
+
+# ---------------------------------------------------------------------------
 # Grandfather-clause registrations
 # ---------------------------------------------------------------------------
 
@@ -487,15 +641,12 @@ class TestTodoStubs:
     catches that regression at the test level."""
 
     TODO_INTENTS = (
-        # PRICE_DISCREPANCY, BACK_ORDER, CHANGE_ANALYSIS were
-        # implemented in Round 2 — their happy-path tests live in
-        # the per-intent describe blocks below. Remaining stubs:
+        # Implemented in Round 2: PRICE_DISCREPANCY, BACK_ORDER,
+        # CHANGE_ANALYSIS, OVER_MAX, MOQ_UPLIFT, DELIVERY_DELAY.
+        # Remaining stubs (Round 3 candidates):
         "CREDIT_BLOCK",
         "CONTRACTUAL_CORRECTION",
         "MASS_PRICING_ERROR",
-        "OVER_MAX",
-        "MOQ_UPLIFT",
-        "DELIVERY_DELAY",
     )
 
     @pytest.mark.parametrize("intent", TODO_INTENTS)

@@ -275,37 +275,92 @@ def _mass_pricing_error_template(record, _case) -> Optional[RenderedTemplate]:
 
 
 def _over_max_template(record, _case) -> Optional[RenderedTemplate]:
-    """TODO(recipe-team):
+    """Recipe SME spec:
        `{trim_plan[0].sku} — over max by {excess_qty} {uom}
         ({exceedance_pct}% over)`
 
-    Field source: `record.resolution_data["overmax_analysis"]`.
-    `trim_plan[0]` is the SKU driving the largest excess; recipe
-    sorts the plan by value already.
+    Dispatches to `adapt_overmax`. SKU + title come from
+    `trim_plan[0]` — the recipe pre-sorts by value, so the head
+    entry is the line driving the operator's decision. Renders
+    without the sku prefix when trim_plan is empty.
     """
-    return None
+    from api.analysis_adapters import adapt_overmax
+
+    try:
+        data = adapt_overmax(record)
+    except Exception:
+        return None
+    if data is None:
+        return None
+    sku: Optional[str] = None
+    title: Optional[str] = None
+    if data.trim_plan:
+        head = data.trim_plan[0]
+        sku = head.sku or None
+        # TrimPlanLine carries description as a contextual field.
+        desc = getattr(head, "description", None)
+        title = desc if desc else None
+    one_liner = (
+        f"Over max by {data.excess_qty:g} {data.uom} "
+        f"({data.exceedance_pct:.1f}% over)"
+    )
+    return RenderedTemplate(sku_code=sku, sku_title=title, one_liner=one_liner)
 
 
 def _moq_uplift_template(record, _case) -> Optional[RenderedTemplate]:
-    """TODO(recipe-team):
-       `{sku} — below MOQ by {shortfall_qty} {uom} (ordered vs
-        {moq_qty} required)`
+    """Recipe SME spec:
+       `{sku} — below MOQ by {shortfall_qty} {uom} (ordered
+        {ordered_qty} vs {moq_qty} required)`
 
-    Field source: `record.resolution_data["moq_analysis"]`.
+    Dispatches to `adapt_moq`. SKU + contextual description
+    project directly from the analysis data.
     """
-    return None
+    from api.analysis_adapters import adapt_moq
+
+    try:
+        data = adapt_moq(record)
+    except Exception:
+        return None
+    if data is None:
+        return None
+    title = data.description if data.description else None
+    one_liner = (
+        f"Below MOQ by {data.shortfall_qty:g} {data.uom} "
+        f"(ordered {data.ordered_qty:g} vs {data.moq_qty:g} required)"
+    )
+    return RenderedTemplate(
+        sku_code=data.sku, sku_title=title, one_liner=one_liner,
+    )
 
 
 def _delivery_delay_template(record, _case) -> Optional[RenderedTemplate]:
-    """TODO(recipe-team):
+    """Recipe SME spec:
        `{affected_lines} line(s) — {days_late}d late
         ({delay_category}, ETA {projected_eta})`
 
-    Field source: `record.resolution_data["delivery_delay_analysis"]`.
-    Note: dollar_impact for this intent is null until the gateway
-    completes (2026-07-21 target per Recipe SME §3).
+    Dispatches to `adapt_delivery_delay`. DeliveryDelayAnalysisData
+    doesn't carry a SKU (multi-line by construction), so sku_code
+    + sku_title stay None — line 3 on the queue row collapses to
+    the one-liner only, which matches the multi-line intent
+    shape Recipe SME §3 documented.
+
+    `dollar_impact` for this intent is null at the projection
+    layer until the gateway completes (2026-07-21 target).
     """
-    return None
+    from api.analysis_adapters import adapt_delivery_delay
+
+    try:
+        data = adapt_delivery_delay(record)
+    except Exception:
+        return None
+    if data is None:
+        return None
+    line_word = "line" if data.affected_lines == 1 else "lines"
+    one_liner = (
+        f"{data.affected_lines} {line_word} — {data.days_late}d late "
+        f"({data.delay_category}, ETA {data.projected_eta})"
+    )
+    return RenderedTemplate(one_liner=one_liner)
 
 
 def _change_analysis_template(record, _case) -> Optional[RenderedTemplate]:
