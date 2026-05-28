@@ -102,6 +102,52 @@ def publish_case_update(
     case_intents_cache.invalidate(case.tenant_id, case.case_id)
 
 
+def publish_case_summary_changed(
+    case: OrderCase,
+    *,
+    trace_id: Optional[str] = None,
+) -> None:
+    """ADR-041 P3e §3.2 — emit a `case_update` whose `updated_fields`
+    flags the CaseSummary projection (the seven new fields on the
+    `/cases` queue row: customer_name, top_line_sku_*,
+    problem_one_liner, intent, dollar_impact, audit_verdict_color).
+
+    Called after a child mutation that COULD have shifted any of
+    those fields without flipping `OrderCase.status` — e.g. a
+    classifier rerun changes child intent, a reanalyze updates
+    financial_impact_usd, or a shadow recompute flips verdict
+    color from YELLOW to GREEN.
+
+    The UI's WS handler (`isCaseInvalidationEvent` in
+    `asoe-ui/src/hooks/useManualOrderCases.ts`) treats every
+    `case_update` as a refetch trigger, so over-fire is safe; the
+    spec ("any mutation touching these fields emits case_update")
+    explicitly accepts over-fire as the safer side of the
+    transactional drift trade.
+
+    Distinct helper rather than rewiring `publish_case_update` so
+    the status-rollup path's emission contract stays single-purpose
+    (`updated_fields=["status"]` means "status changed"; this one's
+    `updated_fields=["case_summary"]` means "summary may have
+    changed; refetch to find out"). Both are case_update wire
+    events; the UI doesn't distinguish.
+    """
+    event = WSEvent.case_update(
+        trace_id=trace_id or str(uuid4()),
+        case_id=case.case_id,
+        tenant_id=case.tenant_id,
+        status=case.status,
+        updated_fields=["case_summary"],
+        sla_deadline=case.sla_deadline,
+        updated_at=case.updated_at,
+    )
+    event_publisher.publish(case.tenant_id, event)
+    # Intents cache may carry stale derivation when intent flips
+    # without a status change. Invalidate so the next /cases read
+    # re-derives.
+    case_intents_cache.invalidate(case.tenant_id, case.case_id)
+
+
 def publish_case_close(
     case: OrderCase,
     *,

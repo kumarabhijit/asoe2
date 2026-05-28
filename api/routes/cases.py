@@ -34,6 +34,7 @@ from api.deps import (
     require_role,
 )
 from api import case_intents_cache
+from api.case_summary import compute_case_summary
 from api.case_events import (
     is_terminal_status,
     publish_case_close,
@@ -245,8 +246,19 @@ async def list_cases(
     # NOT the post-filter total, because the alert is about render
     # cost on the client, not about tenant case volume.
     record_cases_returned(len(page))
+    # ADR-041 P3e §3.4 — RBAC strips `dollar_impact` for callers
+    # without `exceptions:approve` OR `exceptions:override`. Computed
+    # once per request (not per case) so the route hot path doesn't
+    # re-scan permissions in the loop.
+    expose_dollar_impact = (
+        "exceptions:approve" in user.permissions
+        or "exceptions:override" in user.permissions
+    )
     return CaseListResponse(
-        items=[_serialise_case(c, tenant_id) for c in page],
+        items=[
+            _serialise_case(c, tenant_id, expose_dollar_impact=expose_dollar_impact)
+            for c in page
+        ],
         total=total,
         cursor=next_cursor,
         has_more=has_more,
@@ -287,17 +299,38 @@ def _matches_q(case, needle: str) -> bool:
     return False
 
 
-def _serialise_case(case, tenant_id: str) -> dict:
+def _serialise_case(
+    case,
+    tenant_id: str,
+    *,
+    expose_dollar_impact: bool = True,
+) -> dict:
     """Project an OrderCase to the wire shape, plus the
-    Phase 28.5.x §D2 derived `child_intents` field. Derived fields
-    are added to the response dict, NOT to the OrderCase model
-    (which is `extra="forbid"`); the UI's typed contract widens to
-    accept them via a separate response interface.
+    Phase 28.5.x §D2 derived `child_intents` field and the
+    ADR-041 P3e §3.1 `CaseSummary` projection. Derived fields are
+    added to the response dict, NOT to the OrderCase model (which
+    is `extra="forbid"`); the UI's typed contract widens to accept
+    them via the `CaseListItem` interface.
+
+    `expose_dollar_impact=False` strips the `dollar_impact` field
+    from the response — ADR-041 P3e §3.4 RBAC gate for callers
+    lacking `exceptions:approve` AND `exceptions:override`.
     """
     payload = case.model_dump(mode="json")
     payload["child_intents"] = sorted(
         case_intents_cache.intents_for(tenant_id, case.case_id),
     )
+
+    # ADR-041 P3e §3.1 — CaseSummary projection. Pure projection;
+    # safe in the route hot path.
+    # The child-record store (ExceptionStore) owns `list_by_case`,
+    # NOT the parent CaseStore — children carry `parent_case_id`.
+    records = exception_store.list_by_case(tenant_id, case.case_id)
+    summary = compute_case_summary(case, records)
+    summary_dict = summary.to_dict()
+    if not expose_dollar_impact:
+        summary_dict["dollar_impact"] = None
+    payload.update(summary_dict)
     return payload
 
 

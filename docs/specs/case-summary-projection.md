@@ -4,6 +4,19 @@
 **Owner:** asoe2 backend.
 **Blocks:** `NEXT_PUBLIC_CASES_ROW_V2` flag flip in asoe-ui.
 
+## Phase 0a status (2026-05-28)
+
+T1 + T2-minimal + T3 + T4 shipped on branch
+`claude/brave-curie-SHt83`. Scope of the **deferred T2 per-intent
+template work** documented at the end of this file under "Phase 0b
+follow-on (Recipe team)".
+
+T1, T3, T4 are complete. T2 ships the always-available projection
+fields (verdict color rollup, intent, customer_name, dollar_impact).
+The per-intent `problem_one_liner` and `top_line_sku_*` fields ship
+as `null` pending the Recipe team's template implementations — see
+"Phase 0b follow-on" below.
+
 This document is the ticket scope for Phase 0 of ADR-041 P3e. Four
 tickets, sequenceable in the order listed.
 
@@ -291,3 +304,60 @@ alongside on the asoe-ui side.
 4. CSA dry-run on 10 sample cases confirms reorder ≥3.
 5. Telemetry instrumentation live (row-click, time-to-first-action,
    Analysis scroll depth).
+6. **Phase 0b complete** (per-intent template implementations — see
+   below). Until then the queue row ships without SKU + one-liner.
+
+---
+
+## Phase 0b follow-on (Recipe team)
+
+Phase 0a shipped the four schema/route/event tickets. The remaining
+work is the per-intent template implementations the Recipe SME
+panel mapped in their 2026-05-28 response. Owner: Recipe team.
+**No blocker for the asoe-ui flag flip** — the projection
+gracefully returns null for any intent without a registered
+template (Guardrail #6 EvidenceBlock contract on the UI side
+collapses the cell).
+
+### T2b — Per-intent template registry
+
+Add a registry in `api/case_summary.py` (or a sibling module) keyed
+on `intent`, dispatched by `compute_case_summary` when the primary
+child carries an intent with a registered template. The template is
+a pure function `(intent, primary_record, case) -> dict` returning
+`top_line_sku_code`, `top_line_sku_title`, `problem_one_liner`.
+Templates verbatim from the Recipe SME table (see the parent ADR
+appendix). Two known recipe-output gaps that ship hidden:
+
+  * **PRICE_HOLD** missing `sku` + `qty` on `PriceHoldAnalysisData`
+    — either extend the recipe output (Verdict 2026-04-22 Pillar 1)
+    or document in `compliance/audit_bearing_registry.yaml::
+    grandfather_clauses` with deadline.
+  * **EMAIL_COMPLAINT (pure intake)** has no quantity fields — add
+    `complaint_analysis` recipe output, or grandfather.
+
+### T2c — Verdict color override gates
+
+Recipe SME §5 — the rollup color today is the raw severity-wins
+output of child shadow verdicts. The gates ("never RED at intake
+for DELIVERY_DELAY without SLA breach", "never GREEN for
+PRICE_HOLD with auto-release near-ceiling", etc.) live in the
+recipe layer. T2c adds a `verdict_color_gate(intent, context,
+raw_color) -> color` function applied at compose time. Architectural
+lock asserts all ten gates from the panel response.
+
+### T2d — Currency carrier field
+
+Today `dollar_impact` defaults to `"USD"` because
+`resolution_data["financial_impact_usd"]` is single-currency by
+field name. Multi-currency cases need a `currency` field alongside
+`financial_impact`. Recipe team to coordinate with Compliance on
+the resolution_data field shape before multi-currency tenants land.
+
+### T2e — `top_line_sku_*` multi-line rule
+
+Recipe SME §4 — top line by absolute dollar impact, then `+N more`
+suffix when `line_count > 1`. Requires the recipe output to expose
+per-line SKU + value (currently only `resolution_data` carries
+totals). Recipe team to land per-line breakdown alongside the
+template registry.

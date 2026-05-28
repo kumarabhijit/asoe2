@@ -145,7 +145,18 @@ def _reaggregate_parent_case(tenant_id: str, record) -> None:
     """
     if record is not None and record.parent_case_id:
         from api.case_resolver import recompute_case_status
-        recompute_case_status(tenant_id, record.parent_case_id)
+        from api.case_events import publish_case_summary_changed
+
+        case, status_changed = recompute_case_status(
+            tenant_id, record.parent_case_id,
+        )
+        # ADR-041 P3e §3.2 — when the HITL action shifts the
+        # CaseSummary projection (verdict color, intent, dollar
+        # impact) without flipping case status, fire a
+        # no-status-change case_update so the UI refetches and
+        # picks up the new summary. Over-fires are acceptable.
+        if case is not None and not status_changed:
+            publish_case_summary_changed(case)
 
 
 def _record_reviewer_override_of_llm_downgrade(exception_id: str) -> None:
