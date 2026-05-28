@@ -196,37 +196,68 @@ def _intent_of(record) -> Optional[str]:
 
 def _dollar_impact_of(record) -> Optional[DollarImpact]:
     """Extract the dollar impact from the primary child's
-    `resolution_data["financial_impact_usd"]`. Returns None when:
+    resolution_data. Returns None when:
 
       * the field is absent (intent gap — e.g., EDI_MISMATCH,
         PALLET, EMAIL_COMPLAINT-intake; see Recipe SME table for
         the explicit hide-the-column list);
       * the value is None / non-numeric (partial-truth guard);
       * the value is zero (zero-impact rows are not actionable in
-        the dollar-sort triage frame; collapse the cell).
+        the dollar-sort triage frame; collapse the cell);
+      * the currency code is malformed (must be ISO 4217 3-letter
+        uppercase).
 
-    Currency defaults to USD pending the resolution_data carrier
-    field landing. The v1 single-currency assumption is documented
-    in the module docstring.
+    ADR-041 P3e Phase 0b T2d — multi-currency carrier. Two source
+    shapes accepted:
+
+      1. **Preferred** — `resolution_data["financial_impact"]`
+         (amount) + `resolution_data["currency"]` (ISO 4217).
+         Symmetric to the CaseSummaryDollarImpact wire shape; the
+         recipe writes both fields together.
+      2. **Legacy** — `resolution_data["financial_impact_usd"]`
+         (amount, USD assumed). Pre-T2d field; defaults the
+         currency to "USD". Backward-compat for the
+         pre-multi-currency recipe surface.
+
+    When BOTH shapes are present, the preferred one wins — recipes
+    migrating one at a time can land the explicit-currency field
+    without removing the legacy alias.
     """
     if record is None:
         return None
     rd = getattr(record, "resolution_data", None)
     if not isinstance(rd, dict):
         return None
-    raw = rd.get("financial_impact_usd")
-    if raw is None:
+
+    # Preferred path — explicit currency carrier.
+    raw_amount = rd.get("financial_impact")
+    currency = rd.get("currency")
+    if raw_amount is None:
+        # Legacy fallback — _usd suffix implies USD.
+        raw_amount = rd.get("financial_impact_usd")
+        currency = currency or "USD"
+
+    if raw_amount is None:
         return None
     try:
-        amount = float(raw)
+        amount = float(raw_amount)
     except (TypeError, ValueError):
         return None
     if amount == 0.0:
         return None
-    # Convert dollars → cents. round() to nearest cent — avoids
-    # float-truncation underpayment of $0.005 amounts.
+
+    # Currency validation — ISO 4217 is 3 uppercase letters.
+    # Reject non-string / non-3-letter / mixed-case to keep the
+    # wire boundary clean (Compliance Guardrail #6 — bare amount
+    # without a clear currency code is a partial-truth state).
+    if not isinstance(currency, str) or len(currency) != 3 or not currency.isalpha():
+        return None
+    currency = currency.upper()
+
+    # Convert to cents. round() to nearest — float-truncation
+    # silently underpays $0.005 amounts.
     cents = int(round(amount * 100))
-    return DollarImpact(amount_cents=cents, currency="USD")
+    return DollarImpact(amount_cents=cents, currency=currency)
 
 
 def _verdict_color_rollup(records: list) -> Optional[VerdictColor]:
