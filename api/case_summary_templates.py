@@ -170,28 +170,73 @@ def _grandfathered_no_template(_record, _case) -> Optional[RenderedTemplate]:
 
 
 def _price_discrepancy_template(record, _case) -> Optional[RenderedTemplate]:
-    """TODO(recipe-team):
+    """Recipe SME spec:
        `{sku} — {material_desc} (PO ${po_unit_price}/{uom} vs ERP
         ${erp_unit_price}; {variance_pct}% delta, ${total_at_risk}
         at risk)`
 
-    Field source: `record.resolution_data["price_analysis"]` —
-    PriceAdjustmentRecipe output. Confirm the exact key names
-    against asoe-ui/src/types/exceptions.ts::PriceAnalysisData.
+    Implementation: dispatches to the existing `adapt_price`
+    adapter so the field projection matches the OrderAnalysis
+    composer byte-for-byte. The adapter returns None when any
+    audit-bearing gateway field is absent — we treat the same way
+    (Structurally Omitted on the queue row). `material_desc` is
+    contextual; we render with or without it.
     """
-    return None
+    # Lazy import — keeps the module's import graph independent
+    # of the heavy analysis_adapters surface for the dispatcher
+    # cases that don't need it.
+    from api.analysis_adapters import adapt_price
+
+    try:
+        data = adapt_price(record)
+    except Exception:
+        # Recipe-output shape mismatch in production — never let
+        # template rendering crash the route hot path.
+        return None
+    if data is None:
+        return None
+    sku = data.sku
+    variance_pct = data.variance_pct
+    at_risk = data.total_at_risk
+    po = data.po_unit_price
+    erp = data.erp_unit_price
+    uom = data.uom
+    desc = data.material_desc
+    title = desc if desc else None
+    one_liner = (
+        f"PO ${po:.2f}/{uom} vs ERP ${erp:.2f} — "
+        f"{variance_pct:.1f}% delta, ${at_risk:,.2f} at risk"
+    )
+    return RenderedTemplate(sku_code=sku, sku_title=title, one_liner=one_liner)
 
 
 def _back_order_template(record, _case) -> Optional[RenderedTemplate]:
-    """TODO(recipe-team):
+    """Recipe SME spec:
        `{sku} — short stock: {available_qty}/{ordered_qty} {uom}
         ({gap_pct}% gap, ATP {atp_date})`
 
-    Field source: `record.resolution_data["backorder_analysis"]`
-    plus `price_analysis.sku` for the SKU prefix. See
-    BackOrderResolutionRecipe.
+    Dispatches to `adapt_back_order` for the audit-bearing
+    quantity + ATP fields; SKU pulls from
+    `record.original_event["sku"]` (the recipe input) — the
+    BackOrderAnalysisData schema doesn't carry sku, but the
+    one-liner is more readable with it. Renders without the
+    sku prefix when original_event is missing or carries no sku.
     """
-    return None
+    from api.analysis_adapters import adapt_back_order
+
+    try:
+        data = adapt_back_order(record)
+    except Exception:
+        return None
+    if data is None:
+        return None
+    event = getattr(record, "original_event", None) or {}
+    sku = event.get("sku") if isinstance(event, dict) else None
+    one_liner = (
+        f"Short stock: {data.available_qty:g}/{data.ordered_qty:g} "
+        f"{data.uom} ({data.gap_pct:.1f}% gap, ATP {data.atp_date})"
+    )
+    return RenderedTemplate(sku_code=sku, sku_title=None, one_liner=one_liner)
 
 
 def _credit_block_template(record, _case) -> Optional[RenderedTemplate]:
@@ -264,16 +309,41 @@ def _delivery_delay_template(record, _case) -> Optional[RenderedTemplate]:
 
 
 def _change_analysis_template(record, _case) -> Optional[RenderedTemplate]:
-    """TODO(recipe-team):
+    """Recipe SME spec:
        `{change_items[0].field}: {from_value} → {to_value} (rec:
         {decision.recommended_action}, ${revenue_impact_usd})`
 
-    Field source: `record.resolution_data["change_analysis"]` —
-    ChangeAnalysisRecipe output. Renders the FIRST change item;
-    when there are multiple, the recipe already sorts by revenue
-    impact desc so the head is the operator-relevant one.
+    Dispatches to `compose_change_analysis` so we project from
+    `enrichment_context["change_analysis"]` via the typed
+    ChangeAnalysis Pydantic shape. Renders the first change item
+    (recipe pre-sorts by revenue-impact desc). Renders without
+    the revenue-impact suffix when the field is absent (it's
+    Optional on ChangeDecision).
     """
-    return None
+    from api.profile_composer import compose_change_analysis
+
+    try:
+        data = compose_change_analysis(record)
+    except Exception:
+        return None
+    if data is None:
+        return None
+    items = data.evaluation.change_items
+    if not items:
+        return None
+    head = items[0]
+    field = head.field
+    from_v = head.from_value if head.from_value is not None else "—"
+    to_v = head.to_value if head.to_value is not None else "—"
+    action = data.decision.recommended_action
+    revenue = data.decision.revenue_impact_usd
+    suffix = (
+        f", ${revenue:,.2f}" if isinstance(revenue, (int, float)) else ""
+    )
+    one_liner = (
+        f"{field}: {from_v} → {to_v} (rec: {action}{suffix})"
+    )
+    return RenderedTemplate(one_liner=one_liner)
 
 
 # ---------------------------------------------------------------------------

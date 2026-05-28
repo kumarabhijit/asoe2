@@ -223,6 +223,227 @@ class TestManualOrderIntakeTemplate:
 
 
 # ---------------------------------------------------------------------------
+# PRICE_DISCREPANCY — Round 2 implementation
+# ---------------------------------------------------------------------------
+
+
+def _price_record(**overrides):
+    """A ChildCase-like stub with the four source bags adapt_price
+    consumes. Defaults pass the audit-bearing gateway gate."""
+    event = {
+        "po_price": 10.50,
+        "sap_base_price": 9.80,
+        "sku": "BEV-COLA-12PK",
+        "line_count": 1,
+        "uom": "EA",
+        "metadata": {
+            "total_quantity": 480,
+            "material_desc": "Cola 12-pack",
+        },
+    }
+    event.update(overrides.pop("event", {}))
+    enrichment = {
+        "sap_doc_context": {
+            "doc_type": "ZOR",
+            "doc_number": "5012345",
+        },
+        "contract_context": {
+            "rule_id": "RULE-PRICE-001",
+            "root_cause_category": "PROMO_EXPIRED",
+        },
+        "promotion_context": {
+            "root_cause_category": "PROMO_EXPIRED",
+        },
+    }
+    return _StubRecord(
+        intent="PRICE_DISCREPANCY",
+        resolution_data=overrides.get("resolution_data", {}),
+        enrichment_context=enrichment,
+    )._with_event(event)
+
+
+# Extend _StubRecord with original_event support since adapters
+# read from it (the existing stub didn't expose it).
+def _stub_with_event(self, event):
+    self.original_event = event
+    return self
+
+
+_StubRecord._with_event = _stub_with_event  # type: ignore[attr-defined]
+
+
+class TestPriceDiscrepancyTemplate:
+    def test_happy_path_renders_sku_and_one_liner(self):
+        record = _price_record()
+        result = render_template(record, _StubCase())
+        assert result.sku_code == "BEV-COLA-12PK"
+        assert result.sku_title == "Cola 12-pack"
+        # The one-liner should mention prices + variance + at-risk.
+        assert result.one_liner is not None
+        assert "$10.50/EA" in result.one_liner
+        assert "$9.80" in result.one_liner
+        assert "%" in result.one_liner
+
+    def test_missing_gateway_context_returns_empty(self):
+        # adapt_price returns None when audit-bearing fields absent.
+        record = _StubRecord(
+            intent="PRICE_DISCREPANCY",
+            enrichment_context={},  # no sap_doc / contract / promo
+        )
+        record.original_event = {"po_price": 10, "sap_base_price": 9}
+        result = render_template(record, _StubCase())
+        assert result == RenderedTemplate()
+
+    def test_renders_without_material_desc(self):
+        """material_desc is contextual; absence is OK."""
+        record = _price_record()
+        record.original_event["metadata"].pop("material_desc")
+        result = render_template(record, _StubCase())
+        assert result.sku_code == "BEV-COLA-12PK"
+        assert result.sku_title is None  # gracefully absent
+        assert result.one_liner is not None
+
+
+# ---------------------------------------------------------------------------
+# BACK_ORDER — Round 2 implementation
+# ---------------------------------------------------------------------------
+
+
+def _back_order_record(**overrides):
+    # adapt_back_order reads quantities from event.metadata.*
+    # (recipe input convention); sku is at the top level since
+    # the template pulls it from there directly.
+    event = {
+        "sku": "BEV-COLA-12PK",
+        "metadata": {
+            "ordered_qty": 480,
+            "available_qty": 380,
+            "unit_price": 9.80,
+            "uom": "EA",
+        },
+    }
+    event.update(overrides.pop("event", {}))
+    enrichment = {
+        "inventory_snapshot": {
+            "primary_dc": {
+                "plant": "DC-100",
+                "name": "Northeast DC",
+                "region": "NE",
+                "qty": 380,
+            },
+            "atp_date": "2026-06-04",
+            "alternate_warehouses": [],
+            "substitutes": [],
+            "production": None,
+            "inbound_po": None,
+        },
+    }
+    # `recommended_action` present so adapt_back_order uses the
+    # recipe-computed values rather than calling
+    # _synthesize_back_order_outputs (which returns a fractional
+    # gap_pct via the default-compute path — a separate
+    # adapter-side concern outside this template's scope).
+    rd = {
+        "gap_qty": 100,
+        "gap_pct": 20.8,
+        "at_risk": 980.0,
+        "recommended_action": "RESCHEDULE",
+        "resolution_options": [],
+    }
+    rd.update(overrides.pop("resolution_data", {}))
+    r = _StubRecord(
+        intent="BACK_ORDER",
+        resolution_data=rd,
+        enrichment_context=enrichment,
+    )
+    r.original_event = event
+    return r
+
+
+class TestBackOrderTemplate:
+    def test_happy_path_renders_sku_and_short_stock_line(self):
+        record = _back_order_record()
+        result = render_template(record, _StubCase())
+        assert result.sku_code == "BEV-COLA-12PK"
+        assert result.one_liner is not None
+        assert "380/480" in result.one_liner
+        assert "20.8% gap" in result.one_liner
+        assert "ATP 2026-06-04" in result.one_liner
+
+    def test_missing_inventory_snapshot_returns_empty(self):
+        record = _back_order_record()
+        record.enrichment_context = {}  # adapter returns None
+        result = render_template(record, _StubCase())
+        assert result == RenderedTemplate()
+
+
+# ---------------------------------------------------------------------------
+# CHANGE_ANALYSIS — Round 2 implementation
+# ---------------------------------------------------------------------------
+
+
+def _change_record(*, with_revenue: bool = True):
+    enrichment = {
+        "change_analysis": {
+            "evaluation": {
+                "lifecycle_stages": ["DRAFT", "REVIEW", "APPROVED"],
+                "lifecycle_index": 1,
+                "change_items": [
+                    {
+                        "field": "quantity",
+                        "from_value": "100",
+                        "to_value": "150",
+                    },
+                ],
+                "checks": [],
+                "pass_count": 0,
+                "conditional_count": 0,
+                "warning_count": 0,
+            },
+            "scenarios": [],
+            "decision": {
+                "recommended_action": "APPROVE_WITH_COSIGN",
+                "confidence": 0.86,
+                "rationale": "Within tolerance.",
+                "revenue_impact_usd": 4200.0 if with_revenue else None,
+                "requires_cosign": True,
+                "sap_actions": [],
+            },
+        },
+    }
+    return _StubRecord(intent="CHANGE_ANALYSIS", enrichment_context=enrichment)
+
+
+class TestChangeAnalysisTemplate:
+    def test_happy_path_renders_field_arrow_action_revenue(self):
+        result = render_template(_change_record(), _StubCase())
+        assert result.one_liner is not None
+        assert "quantity:" in result.one_liner
+        assert "100 → 150" in result.one_liner
+        assert "APPROVE_WITH_COSIGN" in result.one_liner
+        assert "$4,200" in result.one_liner
+
+    def test_no_revenue_impact_omits_suffix(self):
+        result = render_template(_change_record(with_revenue=False), _StubCase())
+        assert result.one_liner is not None
+        # No dollar suffix when revenue_impact_usd is None.
+        assert "$" not in result.one_liner
+
+    def test_missing_change_analysis_returns_empty(self):
+        record = _StubRecord(intent="CHANGE_ANALYSIS", enrichment_context={})
+        result = render_template(record, _StubCase())
+        assert result == RenderedTemplate()
+
+    def test_empty_change_items_returns_empty(self):
+        record = _change_record()
+        record.enrichment_context["change_analysis"]["evaluation"][
+            "change_items"
+        ] = []
+        result = render_template(record, _StubCase())
+        assert result == RenderedTemplate()
+
+
+# ---------------------------------------------------------------------------
 # Grandfather-clause registrations
 # ---------------------------------------------------------------------------
 
@@ -266,15 +487,15 @@ class TestTodoStubs:
     catches that regression at the test level."""
 
     TODO_INTENTS = (
-        "PRICE_DISCREPANCY",
-        "BACK_ORDER",
+        # PRICE_DISCREPANCY, BACK_ORDER, CHANGE_ANALYSIS were
+        # implemented in Round 2 — their happy-path tests live in
+        # the per-intent describe blocks below. Remaining stubs:
         "CREDIT_BLOCK",
         "CONTRACTUAL_CORRECTION",
         "MASS_PRICING_ERROR",
         "OVER_MAX",
         "MOQ_UPLIFT",
         "DELIVERY_DELAY",
-        "CHANGE_ANALYSIS",
     )
 
     @pytest.mark.parametrize("intent", TODO_INTENTS)
