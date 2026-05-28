@@ -1895,6 +1895,75 @@ class AnalysisResponse(BaseModel):
 # volumes are bounded by the materialisation policy (ADR-038 §7.1).
 
 
+class CaseSummaryDollarImpact(BaseModel):
+    """ADR-041 P3e §3.1 — financial-impact projection on
+    `CaseListItem`. Mirror of
+    `asoe-ui/src/lib/api.ts::CaseSummaryDollarImpact`.
+
+    `amount_cents` is the integer-cent value (avoids float drift
+    across JSON); `currency` is ISO 4217 (3-letter, uppercase).
+    Both fields are required — a bare amount across multi-currency
+    queues is a Compliance Guardrail #6 partial-truth violation.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    amount_cents: int
+    currency: str = Field(..., min_length=3, max_length=3)
+
+
+class CaseListItem(BaseModel):
+    """GET /api/v1/cases — single row in the list response.
+
+    ADR-041 P3e §3.1 — adds the seven `CaseSummary` projection
+    fields to the OrderCase wire shape. Backend serialiser populates
+    via `api.case_summary.compute_case_summary()`; UI mirror in
+    `asoe-ui/src/lib/api.ts::CaseListItem`.
+
+    The `Dict[str, Any]` permissive shape on this model (rather
+    than a strict OrderCase + CaseSummary merge) reflects the
+    historical wire shape: the route serialiser `_serialise_case`
+    composes `case.model_dump()` + `child_intents` + the new
+    summary fields as a plain dict. This model documents the
+    expected contract and provides a typed surface for the
+    `CaseListResponse.items` list, but tolerates additive
+    OrderCase fields without requiring a schema bump on every
+    OrderCase change.
+
+    Audit-bearing fields (all but `customer_name`) flow through
+    `<EvidenceBlock>` on the UI side (Guardrail #6 — no `?? '—'`
+    fallbacks). `dollar_impact` is RBAC-stripped at the route
+    boundary for callers without `exceptions:approve` OR
+    `exceptions:override`; UI handles the absent value as
+    Structurally Omitted.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    # Inherited OrderCase fields (the route serialiser dumps the
+    # full case model; we declare the bare minimum that downstream
+    # consumers reference, and let `extra="allow"` carry the rest).
+    case_id: str
+    tenant_id: str
+    origin: str
+    source_channel: str
+    opened_at: str
+    status: str
+
+    # Phase 28.5.x §D2 — derived intent set across child records.
+    child_intents: List[str] = Field(default_factory=list)
+
+    # ADR-041 P3e §3.1 — the seven CaseSummary projection fields.
+    # All nullable; UI's EvidenceBlock collapses absent cells.
+    customer_name: Optional[str] = None
+    top_line_sku_code: Optional[str] = None
+    top_line_sku_title: Optional[str] = None
+    problem_one_liner: Optional[str] = None
+    intent: Optional[str] = None
+    dollar_impact: Optional[CaseSummaryDollarImpact] = None
+    audit_verdict_color: Optional[Literal["R", "A", "G"]] = None
+
+
 class CaseListResponse(BaseModel):
     """GET /api/v1/cases — list response.
 

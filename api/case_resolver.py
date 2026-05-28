@@ -25,6 +25,7 @@ from api.case_events import (
     is_terminal_status,
     publish_case_close,
     publish_case_open,
+    publish_case_summary_changed,
     publish_case_update,
 )
 from api.store import case_store, exception_store
@@ -359,11 +360,19 @@ def materialise_for_event(
     # moves the status emits `case_close` / `case_update` from inside
     # `recompute_case_status`; one that doesn't emits nothing — the
     # per-exception telemetry already covers it.
-    recomputed, _changed = recompute_case_status(
+    recomputed, status_changed = recompute_case_status(
         tenant_id, case.case_id, final_status, emit=not opened_now,
     )
     if recomputed is not None:
         case = recomputed
     if opened_now:
         publish_case_open(case)
+    elif not status_changed:
+        # ADR-041 P3e §3.2 — the child mutation that triggered this
+        # call may have shifted the CaseSummary projection (verdict
+        # color, intent, dollar_impact) without flipping the case
+        # status. Fire a no-status-change case_update so the UI
+        # refetches and picks up the new summary. Over-fires are
+        # acceptable; the UI's WS handler is idempotent.
+        publish_case_summary_changed(case)
     return case
