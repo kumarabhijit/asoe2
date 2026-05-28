@@ -133,14 +133,22 @@ def compute_case_summary(case, records: Iterable) -> CaseSummary:
     records = list(records)
     primary = _pick_primary_record(records)
 
+    # ADR-041 P3e Phase 0b T2b — per-intent template registry
+    # dispatch. Templates are pure projections over
+    # `record.resolution_data` + `record.enrichment_context`
+    # (Guardrail #6 — no event-metadata blending). When the intent
+    # has no template OR the recipe output is too sparse, all
+    # three fields stay None — the wire shape ships nulls and the
+    # UI's EvidenceBlock collapses the cells.
+    from api.case_summary_templates import render_template
+
+    rendered = render_template(primary, case)
+
     return CaseSummary(
         customer_name=_customer_name(case),
-        # The per-intent template work owns these three. They stay
-        # null in v1 by design (see module docstring) — never
-        # synthesise from event metadata.
-        top_line_sku_code=None,
-        top_line_sku_title=None,
-        problem_one_liner=None,
+        top_line_sku_code=rendered.sku_code,
+        top_line_sku_title=rendered.sku_title,
+        problem_one_liner=rendered.one_liner,
         intent=_intent_of(primary),
         dollar_impact=_dollar_impact_of(primary),
         audit_verdict_color=_verdict_color_rollup(records),

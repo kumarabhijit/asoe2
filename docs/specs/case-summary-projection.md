@@ -321,13 +321,31 @@ collapses the cell).
 
 ### T2b — Per-intent template registry
 
-Add a registry in `api/case_summary.py` (or a sibling module) keyed
-on `intent`, dispatched by `compute_case_summary` when the primary
-child carries an intent with a registered template. The template is
-a pure function `(intent, primary_record, case) -> dict` returning
-`top_line_sku_code`, `top_line_sku_title`, `problem_one_liner`.
-Templates verbatim from the Recipe SME table (see the parent ADR
-appendix). Two known recipe-output gaps that ship hidden:
+**Scaffold shipped** (`api/case_summary_templates.py`). The
+registry, dispatcher, and two working templates (DUPLICATE_PO,
+MANUAL_ORDER_INTAKE) plus four grandfather-clause registrations
+(PRICE_HOLD, EDI_MISMATCH, PALLET, EMAIL_COMPLAINT) are in `main`
+on the asoe2 side. **The remaining nine intents carry
+`# TODO(recipe-team)` stubs** with the Recipe SME's verbatim spec
+in each function's docstring. Recipe team's owner:
+
+  * Confirm the field names on the matching `*AnalysisData` shape
+    against the spec — `asoe-ui/src/types/exceptions.ts` mirrors
+    each one.
+  * Replace the stub return-None with the template implementation.
+  * Add a happy-path + missing-field test mirroring the patterns in
+    `tests/test_case_summary_templates.py::TestDuplicatePOTemplate`.
+  * When all nine intents are complete, flip the
+    `TestTodoStubs::test_todo_template_returns_empty` expectation —
+    that lock catches half-written templates today.
+
+Order suggested by the dispatcher docstring (most operator-visible
+first): PRICE_DISCREPANCY → BACK_ORDER → CREDIT_BLOCK →
+CONTRACTUAL_CORRECTION → MASS_PRICING_ERROR → OVER_MAX → MOQ_UPLIFT
+→ DELIVERY_DELAY → CHANGE_ANALYSIS.
+
+Two known recipe-output gaps wired as grandfather-clause no-ops in
+the registry today:
 
   * **PRICE_HOLD** missing `sku` + `qty` on `PriceHoldAnalysisData`
     — either extend the recipe output (Verdict 2026-04-22 Pillar 1)
