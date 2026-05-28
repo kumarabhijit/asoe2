@@ -240,38 +240,119 @@ def _back_order_template(record, _case) -> Optional[RenderedTemplate]:
 
 
 def _credit_block_template(record, _case) -> Optional[RenderedTemplate]:
-    """TODO(recipe-team):
-       `Credit limit breached: ${exposure} exposure over ${limit} limit`
+    """Recipe SME spec:
+       `Credit limit breached: ${current_exposure} exposure over
+        ${credit_limit} limit`
 
-    Field source: `record.enrichment_context["customer_master_context"]`
-    + `record.resolution_data["credit_block_analysis"]`. Confirm
-    the exposure / limit field names with CreditHoldReleaseRecipe.
+    Reads from `record.enrichment_context["customer_master_context"]`
+    when the SAP customer-master gateway has wired (today: only
+    in sandbox). Field-presence guard returns None when either
+    field is absent — the gateway gap is documented under the
+    credit_block_customer_master grandfather candidate.
+
+    No adapter exists yet (CreditHoldReleaseRecipe doesn't
+    project structured analysis the way PriceAdjustmentRecipe
+    does); when the adapter lands this template flips to the
+    same dispatch-to-adapter pattern as the others.
     """
-    return None
+    enrichment = getattr(record, "enrichment_context", None) or {}
+    cm_ctx = enrichment.get("customer_master_context") or {}
+    if not isinstance(cm_ctx, dict):
+        return None
+    credit_limit = cm_ctx.get("credit_limit")
+    current_exposure = cm_ctx.get("current_exposure")
+    try:
+        limit_f = float(credit_limit) if credit_limit is not None else None
+        exposure_f = (
+            float(current_exposure) if current_exposure is not None else None
+        )
+    except (TypeError, ValueError):
+        return None
+    if limit_f is None or exposure_f is None:
+        return None
+    one_liner = (
+        f"Credit limit breached: ${exposure_f:,.0f} exposure over "
+        f"${limit_f:,.0f} limit"
+    )
+    return RenderedTemplate(one_liner=one_liner)
 
 
 def _contractual_correction_template(record, case) -> Optional[RenderedTemplate]:
-    """TODO(recipe-team):
-       `{sku} — Contract price ${contract_price} vs PO ${po_price}
-        — {variance_pct}% variance`
+    """Recipe SME spec:
+       `{sku} — Contract price ${erp_unit_price} vs PO
+        ${po_unit_price} — {variance_pct}% variance`
 
-    Shares many fields with PRICE_DISCREPANCY; consolidate the
-    template helpers once both land (Recipe SME §2 — share via a
-    sub-helper to keep the registry dispatch table thin).
+    CONTRACTUAL_CORRECTION and PRICE_DISCREPANCY share the
+    PriceAdjustmentRecipe surface (see recipes/EdiMismatchRecipe.py
+    comment at line 105 — both intents route through that
+    recipe). Delegates to _price_discrepancy_template for the
+    same field projection; the visible vocabulary on the row is
+    intent-agnostic since the variance + at-risk values are the
+    operator's decision signal regardless of the intent label.
     """
-    return None
+    return _price_discrepancy_template(record, case)
 
 
 def _mass_pricing_error_template(record, _case) -> Optional[RenderedTemplate]:
-    """TODO(recipe-team):
-       `Bulk price drift across {affected_lines} lines (avg
+    """Recipe SME spec:
+       `Bulk price drift across {line_count} lines (avg
         {avg_variance_pct}% variance)`
 
-    Field source: `record.resolution_data["mass_price_analysis"]`.
-    Hide the SKU on the row — this intent spans multiple SKUs by
-    construction; line 3 is one-liner-only.
+    MASS_PRICING_ERROR routes to FAIL_TO_HUMAN upstream
+    (recipes/DuplicatePORecipe.py:36 — no recipe handles this
+    intent's resolution today; operators get the case as
+    manual-review). The recipe-input event metadata is what we
+    have: `line_count` is on the OrderEvent shape, and we
+    aggregate the variance signal from the line_items if
+    populated.
+
+    Hides sku_code on the row by construction — multi-SKU intent.
+    Returns None when neither line_count nor a usable variance is
+    available.
     """
-    return None
+    event = getattr(record, "original_event", None) or {}
+    if not isinstance(event, dict):
+        return None
+    line_count = event.get("line_count")
+    metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+    # Variance: prefer the recipe-input avg, else compute from
+    # line_items when available. Either signal alone is enough to
+    # render an honest one-liner; both absent → None.
+    avg_variance_pct = metadata.get("avg_variance_pct")
+    if avg_variance_pct is None:
+        items = event.get("line_items") if isinstance(event.get("line_items"), list) else []
+        deltas = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            try:
+                pp = float(it.get("po_price") or 0)
+                sp = float(it.get("sap_base_price") or 0)
+                if sp > 0:
+                    deltas.append(abs(pp - sp) / sp * 100.0)
+            except (TypeError, ValueError):
+                continue
+        avg_variance_pct = (sum(deltas) / len(deltas)) if deltas else None
+    if line_count is None and avg_variance_pct is None:
+        return None
+    parts = []
+    if line_count is not None:
+        try:
+            n = int(line_count)
+            parts.append(f"Bulk price drift across {n} lines")
+        except (TypeError, ValueError):
+            pass
+    if avg_variance_pct is not None:
+        try:
+            parts.append(f"avg {float(avg_variance_pct):.1f}% variance")
+        except (TypeError, ValueError):
+            pass
+    if not parts:
+        return None
+    one_liner = (
+        f"{parts[0]} ({parts[1]})" if len(parts) == 2 else parts[0]
+    )
+    return RenderedTemplate(one_liner=one_liner)
 
 
 def _over_max_template(record, _case) -> Optional[RenderedTemplate]:

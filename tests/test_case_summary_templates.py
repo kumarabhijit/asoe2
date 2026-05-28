@@ -598,6 +598,132 @@ class TestDeliveryDelayTemplate:
 
 
 # ---------------------------------------------------------------------------
+# CREDIT_BLOCK — Round 2 implementation
+# ---------------------------------------------------------------------------
+
+
+class TestCreditBlockTemplate:
+    def test_happy_path_renders_exposure_over_limit(self):
+        record = _StubRecord(
+            intent="CREDIT_BLOCK",
+            enrichment_context={
+                "customer_master_context": {
+                    "credit_limit": 40000.0,
+                    "current_exposure": 48200.0,
+                },
+            },
+        )
+        result = render_template(record, _StubCase())
+        assert result.one_liner is not None
+        assert "$48,200" in result.one_liner
+        assert "$40,000" in result.one_liner
+        assert "breached" in result.one_liner
+
+    def test_missing_customer_master_context_returns_empty(self):
+        record = _StubRecord(intent="CREDIT_BLOCK", enrichment_context={})
+        result = render_template(record, _StubCase())
+        assert result == RenderedTemplate()
+
+    def test_partial_field_set_returns_empty(self):
+        """Only credit_limit present → can't render the comparison."""
+        record = _StubRecord(
+            intent="CREDIT_BLOCK",
+            enrichment_context={
+                "customer_master_context": {"credit_limit": 40000.0},
+            },
+        )
+        result = render_template(record, _StubCase())
+        assert result == RenderedTemplate()
+
+    def test_non_numeric_values_return_empty(self):
+        record = _StubRecord(
+            intent="CREDIT_BLOCK",
+            enrichment_context={
+                "customer_master_context": {
+                    "credit_limit": "not a number",
+                    "current_exposure": 100,
+                },
+            },
+        )
+        result = render_template(record, _StubCase())
+        assert result == RenderedTemplate()
+
+
+# ---------------------------------------------------------------------------
+# CONTRACTUAL_CORRECTION — Round 2 implementation (delegates to PRICE)
+# ---------------------------------------------------------------------------
+
+
+class TestContractualCorrectionTemplate:
+    def test_delegates_to_price_discrepancy(self):
+        """Both intents route through PriceAdjustmentRecipe; the
+        template re-uses the same adapter dispatch. A happy path
+        for CONTRACTUAL_CORRECTION should produce the same shape
+        as PRICE_DISCREPANCY."""
+        record = _price_record()
+        record.intent = "CONTRACTUAL_CORRECTION"
+        result = render_template(record, _StubCase())
+        # Same shape as PRICE_DISCREPANCY happy-path output.
+        assert result.sku_code == "BEV-COLA-12PK"
+        assert result.one_liner is not None
+        assert "$10.50" in result.one_liner
+        assert "$9.80" in result.one_liner
+
+    def test_missing_gateway_context_returns_empty(self):
+        record = _StubRecord(
+            intent="CONTRACTUAL_CORRECTION",
+            enrichment_context={},
+        )
+        record.original_event = {"po_price": 10}
+        result = render_template(record, _StubCase())
+        assert result == RenderedTemplate()
+
+
+# ---------------------------------------------------------------------------
+# MASS_PRICING_ERROR — Round 2 implementation
+# ---------------------------------------------------------------------------
+
+
+class TestMassPricingErrorTemplate:
+    def test_happy_path_renders_line_count_and_avg_variance(self):
+        record = _StubRecord(intent="MASS_PRICING_ERROR")
+        record.original_event = {
+            "line_count": 12,
+            "metadata": {"avg_variance_pct": 8.2},
+        }
+        result = render_template(record, _StubCase())
+        assert result.sku_code is None  # multi-SKU intent
+        assert result.one_liner is not None
+        assert "12 lines" in result.one_liner
+        assert "8.2% variance" in result.one_liner
+
+    def test_computes_variance_from_line_items_when_avg_absent(self):
+        record = _StubRecord(intent="MASS_PRICING_ERROR")
+        record.original_event = {
+            "line_count": 2,
+            "line_items": [
+                {"po_price": 11.0, "sap_base_price": 10.0},  # 10% delta
+                {"po_price": 9.0, "sap_base_price": 10.0},   # 10% delta
+            ],
+        }
+        result = render_template(record, _StubCase())
+        assert result.one_liner is not None
+        assert "10.0% variance" in result.one_liner
+
+    def test_no_signals_returns_empty(self):
+        record = _StubRecord(intent="MASS_PRICING_ERROR")
+        record.original_event = {}
+        result = render_template(record, _StubCase())
+        assert result == RenderedTemplate()
+
+    def test_line_count_only_renders_without_variance_suffix(self):
+        record = _StubRecord(intent="MASS_PRICING_ERROR")
+        record.original_event = {"line_count": 7}
+        result = render_template(record, _StubCase())
+        assert result.one_liner == "Bulk price drift across 7 lines"
+
+
+# ---------------------------------------------------------------------------
 # Grandfather-clause registrations
 # ---------------------------------------------------------------------------
 
@@ -640,14 +766,7 @@ class TestTodoStubs:
     would ship a misleading one-liner to operators; this lock
     catches that regression at the test level."""
 
-    TODO_INTENTS = (
-        # Implemented in Round 2: PRICE_DISCREPANCY, BACK_ORDER,
-        # CHANGE_ANALYSIS, OVER_MAX, MOQ_UPLIFT, DELIVERY_DELAY.
-        # Remaining stubs (Round 3 candidates):
-        "CREDIT_BLOCK",
-        "CONTRACTUAL_CORRECTION",
-        "MASS_PRICING_ERROR",
-    )
+    TODO_INTENTS: tuple = ()  # all 9 templates implemented in Round 2
 
     @pytest.mark.parametrize("intent", TODO_INTENTS)
     def test_todo_template_returns_empty(self, intent):
