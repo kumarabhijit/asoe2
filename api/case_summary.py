@@ -141,17 +141,31 @@ def compute_case_summary(case, records: Iterable) -> CaseSummary:
     # three fields stay None — the wire shape ships nulls and the
     # UI's EvidenceBlock collapses the cells.
     from api.case_summary_templates import render_template
+    from api.case_summary_verdict_gates import apply_verdict_color_gates
 
     rendered = render_template(primary, case)
+    intent = _intent_of(primary)
+    raw_color = _verdict_color_rollup(records)
+
+    # ADR-041 P3e Phase 0b T2c — per-intent verdict color
+    # overrides. The raw severity-wins rollup is ceiling-ed at
+    # AMBER for over-flagged intents and floored at AMBER for
+    # SOX-touchy ones (Recipe SME §5).
+    gated_color = apply_verdict_color_gates(
+        raw_color,
+        intent=intent,
+        primary_record=primary,
+        case=case,
+    )
 
     return CaseSummary(
         customer_name=_customer_name(case),
         top_line_sku_code=rendered.sku_code,
         top_line_sku_title=rendered.sku_title,
         problem_one_liner=rendered.one_liner,
-        intent=_intent_of(primary),
+        intent=intent,
         dollar_impact=_dollar_impact_of(primary),
-        audit_verdict_color=_verdict_color_rollup(records),
+        audit_verdict_color=gated_color,
     )
 
 
