@@ -104,7 +104,12 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:16
+        # pgvector/pgvector:pg16 = official postgres:16 + the `vector`
+        # extension preinstalled. V001 does `CREATE EXTENSION vector`
+        # (VECTOR(1536) column, pgvector V2-readiness), which the stock
+        # postgres:16 image lacks → migration aborts. pgcrypto (V001/V003)
+        # ships with this image too.
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: asoe
           POSTGRES_PASSWORD: asoe
