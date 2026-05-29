@@ -15,6 +15,7 @@ API routes import the singleton and don't know which backend is active.
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 from datetime import datetime, timezone
@@ -631,11 +632,11 @@ class DatabaseBackedStore:
         # to JSONB (Postgres) / JSON TEXT (SQLite) alongside
         # `original_event` (V002).
         #
-        # ADR-038 Phase H.3: parent_case_id is accepted on this
-        # signature for API compat with ExceptionStore. The
-        # DB-backed repository persistence of this column lands in
-        # Phase H.7 alongside the orphan-case backfill; until then
-        # the value is captured on the in-memory record only.
+        # ADR-038 Phase H.3 / H.7: parent_case_id is now persisted to the
+        # `exceptions.parent_case_id` column (V009, corrected to target the
+        # real table) so the child→parent edge survives a container
+        # restart on the DB-backed path — not just set on the returned
+        # in-memory record.
         row = self._exceptions.create(
             tenant_id=tenant_id,
             order_id=order_id,
@@ -653,10 +654,9 @@ class DatabaseBackedStore:
             divergence_reason=divergence_reason,
             sap_block_field=sap_block_field,
             scope=scope,
+            parent_case_id=parent_case_id,
         )
-        record = self._dict_to_record(row)
-        record.parent_case_id = parent_case_id
-        return record
+        return self._dict_to_record(row)
 
     def get(self, exception_id: str, tenant_id: str) -> Optional[ChildCase]:
         row = self._exceptions.get(exception_id, tenant_id)
@@ -1426,6 +1426,372 @@ class CaseStore:
             self._correlation.clear()
 
 
-# Module-level singleton — case store uses in-memory backing; the
-# DB-backed equivalent ships with the V009/V010 migration in Phase H.7.
-case_store = CaseStore()
+class DatabaseBackedCaseStore:
+    """Phase H.7 — durable, DB-backed ``OrderCase`` store.
+
+    Mirrors the public surface of the in-memory :class:`CaseStore` but
+    persists to ``order_case`` / ``case_correlation_keys`` /
+    ``case_classification_history`` so cases survive a container restart
+    and are coherent across replicas (the in-memory store was per-process
+    and wiped on every restart/scale event).
+
+    Concurrency: the in-memory store used a process lock; here the
+    integrity-critical paths run as single DB transactions —
+    ``lookup_or_create`` (find+insert+correlation+audit) and
+    ``update`` (row update + classification audit) share one cursor so
+    they commit or roll back atomically (the SOX audit guarantee), and
+    ``set_pending_override`` uses a conditional compare-and-set that
+    serialises a second cosign initiator without a row lock.
+    """
+
+    def __init__(self, database_url: str) -> None:
+        # Local imports mirror DatabaseBackedStore — keep module import
+        # side-effect-free and avoid the api.store ↔ db.repository cycle.
+        from db.connection import create_adapter
+        from db.repository import (
+            CaseCorrelationRepository,
+            ClassificationHistoryRepository,
+            OrderCaseRepository,
+        )
+
+        self._adapter = create_adapter(database_url)
+        self._adapter.apply_schema()
+        self._cases = OrderCaseRepository(self._adapter)
+        self._correlation = CaseCorrelationRepository(self._adapter)
+        self._history = ClassificationHistoryRepository(self._adapter)
+
+    # ----- mapping helpers -----------------------------------------
+
+    @staticmethod
+    def _to_order_case(row: Dict[str, Any]) -> "OrderCase":
+        from contracts.models import OrderCase  # local to avoid cycle
+        # Repo _COLUMNS map 1:1 to OrderCase fields; pending_override is a
+        # dict (or None) that Pydantic coerces into CasePendingOverride.
+        return OrderCase(**row)
+
+    @staticmethod
+    def _event_from_row(row: Dict[str, Any]) -> "ClassificationEvent":
+        # The V020 row carries tenant_id, which ClassificationEvent
+        # (extra='forbid') does not model — drop it.
+        return ClassificationEvent(
+            **{k: v for k, v in row.items() if k != "tenant_id"}
+        )
+
+    def _resolve_tenant(self, case_id: str) -> Optional[str]:
+        """The in-memory API keys several methods on case_id alone; the
+        DB needs the tenant. Resolve it from the (PK-unique) row."""
+        row = self._cases.get(case_id)
+        return row["tenant_id"] if row else None
+
+    # ----- correlation lookup --------------------------------------
+
+    def find_by_correlation(
+        self,
+        tenant_id: str,
+        *,
+        sales_order_id: Optional[str] = None,
+        customer_po_number: Optional[str] = None,
+        edi_transaction_id: Optional[str] = None,
+        source_email_id: Optional[str] = None,
+    ) -> Optional["OrderCase"]:
+        cid = self._correlation.find_by_priority(
+            tenant_id,
+            sales_order_id=sales_order_id,
+            customer_po_number=customer_po_number,
+            edi_transaction_id=edi_transaction_id,
+            source_email_id=source_email_id,
+        )
+        if cid is None:
+            return None
+        row = self._cases.get(cid, tenant_id)
+        return self._to_order_case(row) if row else None
+
+    # ----- lookup-or-create ----------------------------------------
+
+    def lookup_or_create(
+        self,
+        tenant_id: str,
+        *,
+        origin: str,
+        source_channel: str,
+        customer_id: Optional[str] = None,
+        customer_po_number: Optional[str] = None,
+        sales_order_id: Optional[str] = None,
+        edi_transaction_id: Optional[str] = None,
+        source_email_id: Optional[str] = None,
+        sla_deadline: Optional[str] = None,
+        bundle_version_at_open: Optional[str] = None,
+        supergroup_code: Optional[str] = None,
+        intent_code: Optional[str] = None,
+        classified_by: str = "system:case_intake",
+        classifier_type: str = "RULE",
+    ) -> tuple["OrderCase", bool]:
+        from contracts.models import OrderCase  # local to avoid cycle
+
+        keys = (
+            ("sales_order_id", sales_order_id),
+            ("customer_po_number", customer_po_number),
+            ("edi_transaction_id", edi_transaction_id),
+            ("source_email_id", source_email_id),
+        )
+        # Single transaction: find → (enrich | create + correlation +
+        # intake-audit). Mirrors the in-memory lock-held critical section.
+        with self._adapter.cursor(tenant_id) as cur:
+            existing_id = self._correlation.find_by_priority(
+                tenant_id,
+                sales_order_id=sales_order_id,
+                customer_po_number=customer_po_number,
+                edi_transaction_id=edi_transaction_id,
+                source_email_id=source_email_id,
+                _cursor=cur,
+            )
+            if existing_id is not None:
+                for key_type, key_value in keys:
+                    if key_value:
+                        self._correlation.register(
+                            tenant_id, existing_id, key_type, key_value,
+                            _cursor=cur,
+                        )
+                row = self._cases.get(existing_id, tenant_id, _cursor=cur)
+                return self._to_order_case(row), False
+
+            case = OrderCase(
+                tenant_id=tenant_id,
+                customer_id=customer_id,
+                origin=origin,  # type: ignore[arg-type]
+                source_channel=source_channel,
+                supergroup_code=supergroup_code,
+                customer_po_number=customer_po_number,
+                sales_order_id=sales_order_id,
+                edi_transaction_id=edi_transaction_id,
+                source_email_id=source_email_id,
+                sla_deadline=sla_deadline,
+                bundle_version_at_open=bundle_version_at_open,
+            )
+            self._cases.create(tenant_id, case.model_dump(), _cursor=cur)
+            for key_type, key_value in keys:
+                if key_value:
+                    self._correlation.register(
+                        tenant_id, case.case_id, key_type, key_value,
+                        _cursor=cur,
+                    )
+            # Audit the intake classification (requirements §8.6 #9) —
+            # atomic with the case insert.
+            if supergroup_code is not None:
+                self._history.create(
+                    tenant_id=tenant_id,
+                    case_id=case.case_id,
+                    supergroup_code=supergroup_code,
+                    intent_code=intent_code,
+                    classified_by=classified_by,
+                    classifier_type=classifier_type,
+                    taxonomy_version=TAXONOMY_VERSION,
+                    _cursor=cur,
+                )
+            return case, True
+
+    def register_correlation(
+        self, tenant_id: str, case_id: str, key_type: str, key_value: str,
+    ) -> None:
+        if self._cases.get(case_id, tenant_id) is None:
+            raise KeyError(f"Unknown case_id: {case_id}")
+        self._correlation.register(tenant_id, case_id, key_type, key_value)
+
+    # ----- CRUD ----------------------------------------------------
+
+    def get(self, case_id: str) -> Optional["OrderCase"]:
+        row = self._cases.get(case_id)
+        return self._to_order_case(row) if row else None
+
+    def update(
+        self,
+        case_id: str,
+        *,
+        classified_by: Optional[str] = None,
+        classifier_type: Optional[str] = None,
+        intent_code_classification: Optional[str] = None,
+        model_version: Optional[str] = None,
+        reason_text: Optional[str] = None,
+        source_event_id: Optional[str] = None,
+        **fields: Any,
+    ) -> "OrderCase":
+        """Field update + (on supergroup reclassification) an atomic
+        classification-audit row. Enforces the same invariants as
+        ``CaseStore.update``: reclassification attribution and the
+        NEEDS_TRIAGE close-block."""
+        existing = self.get(case_id)
+        if existing is None:
+            raise KeyError(f"Unknown case_id: {case_id}")
+        tenant_id = existing.tenant_id
+
+        target_status = fields.get("status", existing.status)
+        target_sg = fields.get("supergroup_code", existing.supergroup_code)
+        sg_is_reclassified = (
+            "supergroup_code" in fields
+            and fields["supergroup_code"] != existing.supergroup_code
+        )
+        if sg_is_reclassified and (not classified_by or not classifier_type):
+            raise ValueError(
+                f"update(case_id={case_id}) changes supergroup_code but did "
+                "not supply classified_by + classifier_type; every "
+                "reclassification must be attributable (requirements §8.6)."
+            )
+        if target_status in _RESOLVED_LIKE and target_sg == SG_NEEDS_TRIAGE:
+            raise NeedsTriageCloseBlocked(
+                f"Case {case_id} is in SG_NEEDS_TRIAGE and cannot be RESOLVED "
+                "without reclassification (requirements §8.2)."
+            )
+        if "updated_at" not in fields:
+            fields = {**fields, "updated_at": datetime.now(timezone.utc).isoformat()}
+
+        with self._adapter.cursor(tenant_id) as cur:
+            self._cases.update(case_id, tenant_id, fields, _cursor=cur)
+            if sg_is_reclassified:
+                self._history.create(
+                    tenant_id=tenant_id,
+                    case_id=case_id,
+                    supergroup_code=fields["supergroup_code"] or "",
+                    intent_code=intent_code_classification,
+                    classified_by=classified_by,  # type: ignore[arg-type]
+                    classifier_type=classifier_type,  # type: ignore[arg-type]
+                    model_version=model_version,
+                    reason_text=reason_text,
+                    source_event_id=source_event_id,
+                    taxonomy_version=TAXONOMY_VERSION,
+                    _cursor=cur,
+                )
+            row = self._cases.get(case_id, tenant_id, _cursor=cur)
+        return self._to_order_case(row)
+
+    # ----- classification audit (requirements §8.6) -----------------
+
+    def record_classification(
+        self,
+        case_id: str,
+        *,
+        supergroup_code: str,
+        classified_by: str,
+        classifier_type: str,
+        intent_code: Optional[str] = None,
+        child_case_id: Optional[str] = None,
+        model_version: Optional[str] = None,
+        reason_text: Optional[str] = None,
+        source_event_id: Optional[str] = None,
+    ) -> "ClassificationEvent":
+        tenant_id = self._resolve_tenant(case_id)
+        if tenant_id is None:
+            raise KeyError(f"Unknown case_id: {case_id}")
+        row = self._history.create(
+            tenant_id=tenant_id,
+            case_id=case_id,
+            supergroup_code=supergroup_code,
+            intent_code=intent_code,
+            classified_by=classified_by,
+            classifier_type=classifier_type,
+            child_case_id=child_case_id,
+            model_version=model_version,
+            reason_text=reason_text,
+            source_event_id=source_event_id,
+            taxonomy_version=TAXONOMY_VERSION,
+        )
+        return self._event_from_row(row)
+
+    def _record_for_child(
+        self,
+        *,
+        case_id: str,
+        child_case_id: str,
+        supergroup_code: str,
+        intent_code: Optional[str],
+        classified_by: str,
+        classifier_type: str,
+        model_version: Optional[str] = None,
+        reason_text: Optional[str] = None,
+        source_event_id: Optional[str] = None,
+    ) -> "ClassificationEvent":
+        """Child-level audit row. The DB-backed exception update path
+        (``DatabaseBackedStore.update``) writes V020 directly; this is
+        kept for API symmetry with the in-memory store."""
+        return self.record_classification(
+            case_id,
+            supergroup_code=supergroup_code,
+            classified_by=classified_by,
+            classifier_type=classifier_type,
+            intent_code=intent_code,
+            child_case_id=child_case_id,
+            model_version=model_version,
+            reason_text=reason_text,
+            source_event_id=source_event_id,
+        )
+
+    def get_classification_history(
+        self, case_id: str,
+    ) -> List["ClassificationEvent"]:
+        tenant_id = self._resolve_tenant(case_id)
+        if tenant_id is None:
+            return []
+        rows = self._history.list_by_case(case_id, tenant_id)
+        return [self._event_from_row(r) for r in rows]
+
+    def list_by_tenant(self, tenant_id: str) -> List["OrderCase"]:
+        return [self._to_order_case(r) for r in self._cases.list_by_tenant(tenant_id)]
+
+    # ----- cosign / four-eyes override (ADR-040) -------------------
+
+    def set_pending_override(self, case_id: str, override: Any) -> "OrderCase":
+        existing = self.get(case_id)
+        if existing is None:
+            raise KeyError(f"Unknown case_id: {case_id}")
+        tenant_id = existing.tenant_id
+        payload = override.model_dump() if hasattr(override, "model_dump") else override
+        override_json = json.dumps(payload, default=str)
+        now = datetime.now(timezone.utc).isoformat()
+        with self._adapter.cursor(tenant_id) as cur:
+            affected = self._cases.set_pending_override_cas(
+                case_id, tenant_id, override_json, now, _cursor=cur,
+            )
+        if affected == 0:
+            # Forward-only invariant (ADR-040 §4): the conditional UPDATE
+            # matched no row because an override is already in flight.
+            raise ValueError(
+                f"Case {case_id} already has a pending_override; second "
+                "initiator must wait for cosign-resolve.",
+            )
+        return self.get(case_id)  # type: ignore[return-value]
+
+    def clear_pending_override(self, case_id: str) -> "OrderCase":
+        existing = self.get(case_id)
+        if existing is None:
+            raise KeyError(f"Unknown case_id: {case_id}")
+        # Mirror the in-memory store: clearing does NOT touch status (the
+        # caller re-sets it via the cosign-resolve path).
+        self._cases.update(
+            existing.case_id, existing.tenant_id,
+            {"pending_override": None,
+             "updated_at": datetime.now(timezone.utc).isoformat()},
+        )
+        return self.get(case_id)  # type: ignore[return-value]
+
+    def clear(self) -> None:
+        """Test helper: drop cases + correlation keys. Append-only
+        case_classification_history (V020 trigger) cannot be truncated,
+        so a full reset uses a fresh database; this clears the mutable
+        case state for in-process test reuse."""
+        with self._adapter.cursor(None) as cur:
+            cur.execute("DELETE FROM case_correlation_keys")
+            cur.execute("DELETE FROM order_case")
+
+
+def _create_case_store():
+    """Mirror ``_create_store`` (exceptions): DB-backed when DATABASE_URL
+    is set (Azure / preprod), in-memory otherwise (dev / vitest)."""
+    import os
+    database_url = os.getenv("DATABASE_URL", "")
+    if database_url:
+        return DatabaseBackedCaseStore(database_url)
+    return CaseStore()
+
+
+# Module-level singleton — DB-backed when DATABASE_URL is set (Phase H.7),
+# else in-memory. Mirrors the exception_store factory above.
+case_store = _create_case_store()
