@@ -24,3 +24,11 @@ To add a scenario, drop a `<name>.event.json` here. It must be a valid
 `ResolveRequest` payload; carry `metadata.synthetic = true` and
 `metadata.source = "seed-demo-cases"` so the audit chain can distinguish
 demo traffic from real ingestion.
+
+## Durability caveat
+
+Seeded cases are **not durable**. OrderCases live only in the in-memory
+`CaseStore` (DB-backed persistence is deferred to Phase H.7), so they are
+lost on every container restart/scale event and are per-replica. Pin
+`maxReplicas=1` for the demo window and re-seed after any restart. See
+the header of `scripts/seed-demo-cases.sh` for the full explanation.

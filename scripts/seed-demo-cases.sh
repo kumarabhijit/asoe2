@@ -21,6 +21,21 @@
 # into `order_case` would NOT work: GET /api/v1/cases reads the in-memory
 # CaseStore, which is only populated by a pipeline run in-process.)
 #
+# ⚠ DURABILITY / MULTI-REPLICA CAVEAT (read before relying on this)
+# -----------------------------------------------------------------
+# OrderCases are NOT persisted to Postgres yet — the DB-backed CaseStore
+# is deferred to "Phase H.7" (api/store.py:1429). The in-memory CaseStore
+# is per-process, per-replica, and is wiped on every container restart,
+# deploy, crash, or scale-in. Implications for this seeder:
+#   * Seeded cases DO NOT survive a restart — re-run after each one.
+#   * Azure runs minReplicas=1/maxReplicas=2; each replica has its OWN
+#     CaseStore. The UI reads round-robin, so a page served by the
+#     replica that didn't receive the seed shows an empty/partial list.
+#     For a COHERENT demo, pin maxReplicas=1 for the demo window
+#     (infra/parameters.sandbox.json) before seeding.
+# The right fix is to land Phase H.7 (DB-backed cases); this seeder is a
+# stopgap on top of that gap, not a substitute for it.
+#
 # WHAT IT SEEDS (mirrors the mock supergroup / verdict spread)
 #   * tests/fixtures/synthetic/*.event.json  — 10 deterministic intents:
 #       CONTRACTUAL_CORRECTION, CREDIT_BLOCK, DUPLICATE_PO, EDI_MISMATCH,
@@ -48,9 +63,15 @@
 #                    need manager/admin). Default jane@acme.com.
 #   USER_PASSWORD    Any non-empty string in V1 stub auth. Default
 #                    'seed-demo-cases' so it shows up in audit logs.
-#   RESET_TENANT     1 (default) wipes the tenant first so re-runs are
-#                    idempotent — DESTRUCTIVE, sandbox/pre-prod only.
-#                    Set 0 to seed additively on top of existing data.
+#   RESET_TENANT     0 (default). Set 1 to attempt /_sandbox/tenant/reset
+#                    first. NOTE: that route only clears the in-memory
+#                    ExceptionStore's _records; against the DB-backed
+#                    store it is a NO-OP (no _records attr) and it never
+#                    clears the CaseStore at all (api/routes/sandbox.py).
+#                    So it does NOT make re-runs idempotent on Azure —
+#                    each re-run accumulates duplicate exceptions in
+#                    Postgres. Prefer redeploy (fresh container = empty
+#                    in-memory cases) over relying on reset.
 #   SEED_SYNTHETIC   1 (default) ingest tests/fixtures/synthetic.
 #   SEED_DEMO_EXTRA  1 (default) ingest scripts/seed-fixtures.
 #   SEED_MANUAL_INTAKE 1 (default) seed the email order-intake cases.
@@ -62,7 +83,7 @@ set -euo pipefail
 : "${API_URL:=https://asoepreprodapi.orangerock-0b3a1691.centralus.azurecontainerapps.io}"
 : "${USER_EMAIL:=jane@acme.com}"
 : "${USER_PASSWORD:=seed-demo-cases}"
-: "${RESET_TENANT:=1}"
+: "${RESET_TENANT:=0}"
 : "${SEED_SYNTHETIC:=1}"
 : "${SEED_DEMO_EXTRA:=1}"
 : "${SEED_MANUAL_INTAKE:=1}"
@@ -100,7 +121,9 @@ if [[ "${RESET_TENANT}" == "1" ]]; then
             -d '{}' \
             "${API_URL}/api/v1/_sandbox/tenant/reset" \
             >/dev/null 2>&1; then
-        echo "  tenant reset: ok (clean slate)"
+        echo "  tenant reset: route accepted (NOTE: clears in-memory"
+        echo "                exception _records only — NO-OP on the"
+        echo "                DB-backed store; never clears cases)"
     else
         echo "  tenant reset: skipped (route unavailable; not sandbox env or insufficient role)"
     fi
