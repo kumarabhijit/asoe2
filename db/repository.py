@@ -104,6 +104,7 @@ class ExceptionRepository:
         divergence_reason: Optional[str] = None,
         sap_block_field: Optional[str] = None,
         scope: Optional[str] = None,
+        parent_case_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         record_id = _uuid()
         now = _now()
@@ -125,15 +126,15 @@ class ExceptionRepository:
                     original_event, reanalysis_history, enrichment_context,
                     supergroup_code, intent_code, divergence_reason,
                     sap_block_field, scope,
-                    created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    created_at, updated_at, parent_case_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (record_id, tenant_id, order_id, event_type, intent,
                  lifecycle_state, shadow_verdict, selected_recipe,
                  final_status, trace_id, res_data,
                  original_event_json, history_json, enrichment_json,
                  supergroup_code, intent_code, divergence_reason,
                  sap_block_field, scope,
-                 now, now),
+                 now, now, parent_case_id),
             )
 
         return {
@@ -150,6 +151,7 @@ class ExceptionRepository:
             "divergence_reason": divergence_reason,
             "sap_block_field": sap_block_field, "scope": scope,
             "created_at": now, "updated_at": now,
+            "parent_case_id": parent_case_id,
         }
 
     def get(
@@ -165,7 +167,7 @@ class ExceptionRepository:
                         original_event, reanalysis_history, enrichment_context,
                         supergroup_code, intent_code, divergence_reason,
                         sap_block_field, scope,
-                        created_at, updated_at
+                        created_at, updated_at, parent_case_id
                  FROM exceptions
                  WHERE id = ? AND tenant_id = ?"""
         if _cursor is not None:
@@ -205,7 +207,7 @@ class ExceptionRepository:
                            original_event, reanalysis_history, enrichment_context,
                            supergroup_code, intent_code, divergence_reason,
                            sap_block_field, scope,
-                           created_at, updated_at
+                           created_at, updated_at, parent_case_id
                     FROM exceptions
                     WHERE {where}
                     ORDER BY created_at DESC
@@ -320,6 +322,9 @@ class ExceptionRepository:
         "supergroup_code", "intent_code", "divergence_reason",
         "sap_block_field", "scope",
         "created_at", "updated_at",
+        # V009 (corrected) — child→parent case edge. Phase H.7 persists it
+        # so the link survives a restart on the DB-backed path.
+        "parent_case_id",
     )
 
     def _to_dict(self, row) -> Dict[str, Any]:
@@ -502,7 +507,269 @@ class ClassificationHistoryRepository:
                 """,
                 (tenant_id, case_id),
             )
-            return [_row_to_dict(r, self._COLUMNS) for r in cur.fetchall()]
+            rows = [_row_to_dict(r, self._COLUMNS) for r in cur.fetchall()]
+        # child_case_id is a UUID column (V020 FK → exceptions.id); Postgres
+        # returns a uuid.UUID object. Coerce to str so the Python contract
+        # (ClassificationEvent.child_case_id: Optional[str]) holds on both
+        # backends.
+        for r in rows:
+            v = r.get("child_case_id")
+            if v is not None and not isinstance(v, str):
+                r["child_case_id"] = str(v)
+        return rows
+
+
+# ---------------------------------------------------------------------------
+# OrderCase Repository (Phase H.7 — durable case persistence)
+# ---------------------------------------------------------------------------
+
+class OrderCaseRepository:
+    """CRUD for the ``order_case`` table (V009/V014/V018/V019/V021).
+
+    Mirrors the in-memory ``CaseStore`` field surface so cases survive a
+    container restart on the DB-backed (Azure) path. ``pending_override``
+    is stored as a single JSON column (V021); ``will_miss_rdd`` round-trips
+    bool↔int across SQLite/Postgres. All write methods accept ``_cursor``
+    so the DB-backed store can run find/create/update in one transaction
+    (the lookup-or-create and forward-only-override atomicity guarantees).
+    """
+
+    _COLUMNS = (
+        "case_id", "tenant_id", "customer_id", "origin", "source_channel",
+        "supergroup_code", "predecessor_case_id", "will_miss_rdd",
+        "customer_po_number", "sales_order_id", "edi_transaction_id",
+        "source_email_id", "opened_at", "closed_at", "updated_at", "status",
+        "sla_deadline", "sla_due_at", "tier", "working_memory_summary",
+        "last_compaction_at", "bundle_version_at_open", "pending_override",
+    )
+
+    def __init__(self, adapter=None):
+        self._adapter = adapter or create_adapter()
+
+    @staticmethod
+    def _encode_override(value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value
+        return _json_dumps(value)
+
+    def _to_dict(self, row) -> Dict[str, Any]:
+        r = _row_to_dict(row, self._COLUMNS)
+        # pending_override: JSONB on Postgres may already be a dict; TEXT
+        # on SQLite arrives as a JSON string.
+        if isinstance(r.get("pending_override"), str):
+            r["pending_override"] = _json_loads(r["pending_override"])
+        # will_miss_rdd: Postgres returns bool, SQLite returns 0/1.
+        if r.get("will_miss_rdd") is not None:
+            r["will_miss_rdd"] = bool(r["will_miss_rdd"])
+        for ts_col in ("opened_at", "closed_at", "updated_at",
+                       "sla_deadline", "sla_due_at"):
+            v = r.get(ts_col)
+            if v is not None and not isinstance(v, str):
+                r[ts_col] = v.isoformat() if hasattr(v, "isoformat") else str(v)
+        return r
+
+    def create(
+        self, tenant_id: str, values: Dict[str, Any],
+        *, _cursor: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """Insert one order_case row. ``values`` is a column→value map
+        (e.g. ``OrderCase.model_dump()``); only whitelisted columns are
+        written. ``tenant_id`` is passed explicitly (tenant-isolation
+        guardrail) and overrides any ``tenant_id`` in ``values``."""
+        values = {**values, "tenant_id": tenant_id}
+        cols = [c for c in self._COLUMNS if c in values]
+        params = [
+            self._encode_override(values[c]) if c == "pending_override"
+            else values[c]
+            for c in cols
+        ]
+        placeholders = ", ".join("?" for _ in cols)
+        sql = (
+            f"INSERT INTO order_case ({', '.join(cols)}) "
+            f"VALUES ({placeholders})"
+        )
+        if _cursor is not None:
+            _cursor.execute(sql, tuple(params))
+        else:
+            with self._adapter.cursor(tenant_id) as cur:
+                cur.execute(sql, tuple(params))
+        return self.get(values["case_id"], tenant_id, _cursor=_cursor) or dict(values)
+
+    def get(
+        self, case_id: str, tenant_id: Optional[str] = None,
+        *, _cursor: Optional[Any] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch one case by id. ``tenant_id`` optional: the in-memory
+        ``CaseStore.get`` takes only ``case_id`` and route call-sites
+        check tenant after fetch, so an unscoped lookup (case_id is the
+        PK) preserves that contract."""
+        sql = f"SELECT {', '.join(self._COLUMNS)} FROM order_case WHERE case_id = ?"
+        params: list = [case_id]
+        if tenant_id is not None:
+            sql += " AND tenant_id = ?"
+            params.append(tenant_id)
+
+        if _cursor is not None:
+            _cursor.execute(sql, tuple(params))
+            row = _cursor.fetchone()
+        else:
+            with self._adapter.cursor(tenant_id) as cur:
+                cur.execute(sql, tuple(params))
+                row = cur.fetchone()
+        return self._to_dict(row) if row else None
+
+    def list_by_tenant(
+        self, tenant_id: str, *, _cursor: Optional[Any] = None,
+    ) -> List[Dict[str, Any]]:
+        sql = (
+            f"SELECT {', '.join(self._COLUMNS)} FROM order_case "
+            f"WHERE tenant_id = ? ORDER BY opened_at"
+        )
+        if _cursor is not None:
+            _cursor.execute(sql, (tenant_id,))
+            rows = _cursor.fetchall()
+        else:
+            with self._adapter.cursor(tenant_id) as cur:
+                cur.execute(sql, (tenant_id,))
+                rows = cur.fetchall()
+        return [self._to_dict(r) for r in rows]
+
+    def update(
+        self, case_id: str, tenant_id: str, fields: Dict[str, Any],
+        *, _cursor: Optional[Any] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Apply a partial column update. Only whitelisted columns are
+        written; ``case_id`` / ``tenant_id`` are never updated here."""
+        cols = [
+            c for c in fields
+            if c in self._COLUMNS and c not in ("case_id", "tenant_id")
+        ]
+        if not cols:
+            return self.get(case_id, tenant_id, _cursor=_cursor)
+        set_clause = ", ".join(f"{c} = ?" for c in cols)
+        params = [
+            self._encode_override(fields[c]) if c == "pending_override"
+            else fields[c]
+            for c in cols
+        ]
+        params.extend([case_id, tenant_id])
+        sql = (
+            f"UPDATE order_case SET {set_clause} "
+            f"WHERE case_id = ? AND tenant_id = ?"
+        )
+        if _cursor is not None:
+            _cursor.execute(sql, tuple(params))
+        else:
+            with self._adapter.cursor(tenant_id) as cur:
+                cur.execute(sql, tuple(params))
+        return self.get(case_id, tenant_id, _cursor=_cursor)
+
+    def set_pending_override_cas(
+        self, case_id: str, tenant_id: str, override_json: Optional[str],
+        updated_at: str, *, _cursor: Any,
+    ) -> int:
+        """Forward-only compare-and-set: attach the override only when
+        none is in flight. Single conditional UPDATE — atomic on both
+        backends (the ``pending_override IS NULL`` guard serialises a
+        second initiator without ``SELECT ... FOR UPDATE``, which SQLite
+        lacks). Returns the affected row count (0 = case missing or an
+        override already exists)."""
+        _cursor.execute(
+            "UPDATE order_case SET pending_override = ?, "
+            "status = 'OPEN_AWAITING_HUMAN', updated_at = ? "
+            "WHERE case_id = ? AND tenant_id = ? AND pending_override IS NULL",
+            (override_json, updated_at, case_id, tenant_id),
+        )
+        return _cursor.rowcount
+
+
+# ---------------------------------------------------------------------------
+# Case Correlation Repository (V010) — event→case dedup keys
+# ---------------------------------------------------------------------------
+
+class CaseCorrelationRepository:
+    """CRUD for ``case_correlation_keys`` (V010).
+
+    Resolves an inbound event to an existing case via the four key types
+    in ADR-038 §6.2 priority order. ``register`` upserts (last-writer-wins)
+    to mirror the in-memory dict assignment, which silently overwrites a
+    duplicate key.
+    """
+
+    _PRIORITY = (
+        "sales_order_id", "customer_po_number",
+        "edi_transaction_id", "source_email_id",
+    )
+
+    def __init__(self, adapter=None):
+        self._adapter = adapter or create_adapter()
+
+    def register(
+        self, tenant_id: str, case_id: str, key_type: str, key_value: str,
+        *, _cursor: Optional[Any] = None,
+    ) -> None:
+        # Upsert: a re-seen key re-points at the (same) case, matching the
+        # in-memory ``self._correlation[(...)] = case_id`` overwrite.
+        sql = (
+            "INSERT INTO case_correlation_keys "
+            "(tenant_id, key_type, key_value, case_id, registered_at) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT (tenant_id, key_type, key_value) "
+            "DO UPDATE SET case_id = excluded.case_id"
+        )
+        params = (tenant_id, key_type, key_value, case_id, _now())
+        if _cursor is not None:
+            _cursor.execute(sql, params)
+        else:
+            with self._adapter.cursor(tenant_id) as cur:
+                cur.execute(sql, params)
+
+    def find_case_id(
+        self, tenant_id: str, key_type: str, key_value: str,
+        *, _cursor: Optional[Any] = None,
+    ) -> Optional[str]:
+        sql = (
+            "SELECT case_id FROM case_correlation_keys "
+            "WHERE tenant_id = ? AND key_type = ? AND key_value = ?"
+        )
+        params = (tenant_id, key_type, key_value)
+        if _cursor is not None:
+            _cursor.execute(sql, params)
+            row = _cursor.fetchone()
+        else:
+            with self._adapter.cursor(tenant_id) as cur:
+                cur.execute(sql, params)
+                row = cur.fetchone()
+        if not row:
+            return None
+        return row["case_id"] if hasattr(row, "keys") else row[0]
+
+    def find_by_priority(
+        self, tenant_id: str, *,
+        sales_order_id: Optional[str] = None,
+        customer_po_number: Optional[str] = None,
+        edi_transaction_id: Optional[str] = None,
+        source_email_id: Optional[str] = None,
+        _cursor: Optional[Any] = None,
+    ) -> Optional[str]:
+        """First non-null key in SO→PO→EDI→email order that resolves to a
+        case wins (ADR-038 §6.2). Returns ``case_id`` or None."""
+        candidates = {
+            "sales_order_id": sales_order_id,
+            "customer_po_number": customer_po_number,
+            "edi_transaction_id": edi_transaction_id,
+            "source_email_id": source_email_id,
+        }
+        for key_type in self._PRIORITY:
+            key_value = candidates[key_type]
+            if not key_value:
+                continue
+            cid = self.find_case_id(tenant_id, key_type, key_value, _cursor=_cursor)
+            if cid is not None:
+                return cid
+        return None
 
 
 # ---------------------------------------------------------------------------
