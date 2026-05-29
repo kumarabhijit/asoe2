@@ -576,6 +576,14 @@ if [[ "${DEPLOY_UI}" == "1" ]]; then
     # Run az acr build from inside the asoe-ui checkout so `--file Dockerfile .`
     # is unambiguous regardless of how az resolves --file for sibling-path
     # source contexts. Subshell so we don't leave the user's CWD changed.
+    #
+    # NEXT_PUBLIC_* are inlined by `next build`, so pass every flag that
+    # must diverge from the Dockerfile ARG defaults explicitly:
+    #   * USE_REAL_API=1            — pre-prod hits the live backend.
+    #   * SHOW_PREVIEW_FEATURES=true — keep the SAP Data / Change Analysis
+    #     tabs visible for parity with dev + Vercel preview. The Dockerfile
+    #     default is `false`; without this the tabs silently vanish on the
+    #     only real-data environment while the surface is still under review.
     (
         cd "${ASOE_UI_PATH}"
         az acr build \
@@ -585,6 +593,7 @@ if [[ "${DEPLOY_UI}" == "1" ]]; then
             --file Dockerfile \
             --build-arg "NEXT_PUBLIC_API_URL=https://${FQDN}" \
             --build-arg "NEXT_PUBLIC_USE_REAL_API=1" \
+            --build-arg "NEXT_PUBLIC_SHOW_PREVIEW_FEATURES=true" \
             .
     )
 

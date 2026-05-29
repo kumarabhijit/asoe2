@@ -969,6 +969,23 @@ _cases_v2_ttfa_dwell_buckets: List[int] = [0] * (len(_DWELL_BUCKETS_S) + 1)
 _cases_v2_ttfa_dwell_sum: float = 0.0
 _cases_v2_ttfa_count: int = 0
 
+# Dwell histogram for time-to-action-submit (S2 sprint 2026-05-28
+# finding #8). Distinct from time-to-first-action: this is the dwell
+# from case-open to the moment the operator CONFIRMS an action (after
+# typing any comment + picking any mandatory reason_tag), so the delta
+# between the two distributions is the comment-dialog dwell. Re-uses
+# the same automation-bias bucket edges so the gate-review dashboards
+# can overlay all three. `with_reason_tag` is a bounded-cardinality
+# count (present vs absent) — per-tag series are deliberately NOT
+# emitted to avoid Prometheus label explosion on open-ended tags.
+_cases_v2_ttas_by_action: Dict[str, int] = {
+    "approve": 0, "reject": 0, "reanalyze": 0,
+}
+_cases_v2_ttas_dwell_buckets: List[int] = [0] * (len(_DWELL_BUCKETS_S) + 1)
+_cases_v2_ttas_dwell_sum: float = 0.0
+_cases_v2_ttas_count: int = 0
+_cases_v2_ttas_with_reason_tag: int = 0
+
 # Analysis-scroll-depth histogram. 21 buckets matching the V2
 # observer's threshold sweep (5% resolution).
 _SCROLL_BUCKETS = 21
@@ -1019,6 +1036,41 @@ def record_cases_time_to_first_action(
         _cases_v2_ttfa_count += 1
 
 
+def record_cases_time_to_action_submit(
+    *, dwell_ms: float, action: str, reason_tag: Optional[str] = None,
+) -> None:
+    """One time-to-action-submit sample. `action` is one of
+    approve / reject / reanalyze (the comment-dialog action set;
+    override / escalate are one-step and report through their own
+    channels). No-op on a negative / NaN / non-numeric dwell
+    (matches the time-to-first-action contract). Unknown `action`
+    still contributes to the histogram so the metric never
+    silently drops samples. `reason_tag` only increments a bounded
+    present/absent counter — its open-ended value is never used as
+    a Prometheus label."""
+    global _cases_v2_ttas_dwell_sum, _cases_v2_ttas_count
+    global _cases_v2_ttas_with_reason_tag
+    try:
+        dwell_s = float(dwell_ms) / 1000.0
+    except (TypeError, ValueError):
+        return
+    if dwell_s != dwell_s or dwell_s < 0:  # NaN or negative
+        return
+    with _cases_v2_lock:
+        if action in _cases_v2_ttas_by_action:
+            _cases_v2_ttas_by_action[action] += 1
+        for i, edge in enumerate(_DWELL_BUCKETS_S):
+            if dwell_s <= edge:
+                _cases_v2_ttas_dwell_buckets[i] += 1
+                break
+        else:
+            _cases_v2_ttas_dwell_buckets[-1] += 1
+        _cases_v2_ttas_dwell_sum += dwell_s
+        _cases_v2_ttas_count += 1
+        if reason_tag:
+            _cases_v2_ttas_with_reason_tag += 1
+
+
 def record_cases_analysis_scroll_depth(
     *, max_scroll_pct: float, acted: bool,
 ) -> None:
@@ -1051,6 +1103,8 @@ def reset_cases_v2_telemetry() -> None:
     """Test helper — drop all V2 telemetry samples."""
     global _cases_v2_row_clicks, _cases_v2_ttfa_dwell_sum
     global _cases_v2_ttfa_count, _cases_v2_scroll_count, _cases_v2_scroll_acted
+    global _cases_v2_ttas_dwell_sum, _cases_v2_ttas_count
+    global _cases_v2_ttas_with_reason_tag
     with _cases_v2_lock:
         _cases_v2_row_clicks = 0
         for k in _cases_v2_row_clicks_by_verdict:
@@ -1061,6 +1115,13 @@ def reset_cases_v2_telemetry() -> None:
             _cases_v2_ttfa_dwell_buckets[i] = 0
         _cases_v2_ttfa_dwell_sum = 0.0
         _cases_v2_ttfa_count = 0
+        for k in _cases_v2_ttas_by_action:
+            _cases_v2_ttas_by_action[k] = 0
+        for i in range(len(_cases_v2_ttas_dwell_buckets)):
+            _cases_v2_ttas_dwell_buckets[i] = 0
+        _cases_v2_ttas_dwell_sum = 0.0
+        _cases_v2_ttas_count = 0
+        _cases_v2_ttas_with_reason_tag = 0
         for i in range(_SCROLL_BUCKETS):
             _cases_v2_scroll_buckets[i] = 0
         _cases_v2_scroll_count = 0
@@ -1098,6 +1159,29 @@ def render_cases_v2_telemetry_metrics() -> str:
         lines.append(
             f"cases_v2_time_to_first_action_dwell_sum_seconds "
             f"{_cases_v2_ttfa_dwell_sum:.3f}"
+        )
+
+        lines.append(
+            "# HELP cases_v2_time_to_action_submit_total "
+            "Cases V2 time-to-action-submit samples (case-open to "
+            "confirm, post comment + reason_tag)."
+        )
+        lines.append("# TYPE cases_v2_time_to_action_submit_total counter")
+        lines.append(
+            f"cases_v2_time_to_action_submit_total {_cases_v2_ttas_count}"
+        )
+        for action, count in _cases_v2_ttas_by_action.items():
+            lines.append(
+                f'cases_v2_time_to_action_submit_by_action_total'
+                f'{{action="{action}"}} {count}'
+            )
+        lines.append(
+            f"cases_v2_time_to_action_submit_with_reason_tag_total "
+            f"{_cases_v2_ttas_with_reason_tag}"
+        )
+        lines.append(
+            f"cases_v2_time_to_action_submit_dwell_sum_seconds "
+            f"{_cases_v2_ttas_dwell_sum:.3f}"
         )
 
         lines.append(
