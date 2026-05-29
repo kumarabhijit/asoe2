@@ -1789,13 +1789,35 @@ class DraftReplyEdit(BaseModel):
     after: Optional[str] = None
 
 
+class DraftReplyRevision(BaseModel):
+    """One entry in the versioned history of a reply draft (operator edit +
+    versioned history). The chain is append-only: version 1 is the AI-generated
+    draft; each operator edit appends a new revision. The last element is always
+    the current draft (mirrored onto the top-level `DraftReply` fields for
+    back-compat). `source` ∈ AI_GENERATED | OPERATOR_EDIT records WHO authored
+    the revision — the SOX who/what/when of a financially-relevant buyer reply."""
+
+    version: int  # 1-based, monotonic; last element is the current draft
+    subject: Optional[str] = None
+    body: Optional[str] = None
+    # Field-level before/after for THIS revision (vs. the previous revision).
+    edits_applied: List[DraftReplyEdit] = Field(default_factory=list)
+    author: str  # AI service id for the generated draft, or operator sub for an edit
+    authored_at: str  # ISO-8601
+    source: str  # "AI_GENERATED" | "OPERATOR_EDIT"
+
+
 class DraftReply(BaseModel):
     """AI Draft Reply evidence (ADR-042 Phase 4 contract; surfaced on the
     analysis in Phase 7). The current generated reply for the case, projected by
     the composer from `resolution_data["reply_draft"]` (the ReplyDraftRecipe
     output a DRAFT_REPLY disposition persisted). `status` ∈ DRAFTED | REJECTED;
     a REJECTED draft carries a `reason` and no body. Read-only evidence — sending
-    is a separate Shadow-gated disposition (SEND_REPLY)."""
+    is a separate Shadow-gated disposition (SEND_REPLY).
+
+    `revisions` is the append-only version history (operator edit + versioned
+    history); the top-level `subject`/`body`/`edits_applied` always mirror the
+    LATEST revision so existing readers keep working."""
 
     status: str
     reason: Optional[str] = None
@@ -1806,6 +1828,7 @@ class DraftReply(BaseModel):
     edits_applied: List[DraftReplyEdit] = Field(default_factory=list)
     drafted_by: Optional[str] = None
     drafted_at: Optional[str] = None
+    revisions: List[DraftReplyRevision] = Field(default_factory=list)
 
 
 class AnalysisResponse(BaseModel):

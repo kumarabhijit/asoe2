@@ -30,6 +30,7 @@ from api.schemas import (
     ChangeAnalysis,
     DraftReply,
     DraftReplyEdit,
+    DraftReplyRevision,
     Edi850Document,
     EntitiesAnalysisData,
     EntityProfile,
@@ -219,15 +220,9 @@ def compose_draft_reply(record: ChildCase) -> Optional[DraftReply]:
         return None
     draft = ctx.get("draft") if isinstance(ctx.get("draft"), dict) else {}
     try:
-        edits = [
-            DraftReplyEdit(
-                field=str(e.get("field", "")),
-                before=_opt_str(e.get("before")),
-                after=_opt_str(e.get("after")),
-            )
-            for e in (ctx.get("edits_applied") or [])
-            if isinstance(e, dict)
-        ]
+        edits = [_to_reply_edit(e) for e in (ctx.get("edits_applied") or [])
+                 if isinstance(e, dict)]
+        revisions = _compose_reply_revisions(ctx, draft, edits)
         return DraftReply(
             status=ctx["status"],
             reason=_opt_str(ctx.get("reason")),
@@ -238,9 +233,60 @@ def compose_draft_reply(record: ChildCase) -> Optional[DraftReply]:
             edits_applied=edits,
             drafted_by=_opt_str(ctx.get("drafted_by")),
             drafted_at=_opt_str(ctx.get("drafted_at")),
+            revisions=revisions,
         )
     except (TypeError, ValueError):
         return None
+
+
+def _to_reply_edit(e: Dict[str, Any]) -> DraftReplyEdit:
+    return DraftReplyEdit(
+        field=str(e.get("field", "")),
+        before=_opt_str(e.get("before")),
+        after=_opt_str(e.get("after")),
+    )
+
+
+def _compose_reply_revisions(
+    ctx: Dict[str, Any], draft: Dict[str, Any], edits: List[DraftReplyEdit],
+) -> List[DraftReplyRevision]:
+    """Project the append-only revision history (operator edit + versioned
+    history). A draft persisted by the versioned persist layer carries a
+    `revisions` chain; project it as-is. A draft that PREDATES versioning has no
+    `revisions` key — synthesize a single version-1 AI_GENERATED revision from
+    the existing fields so the contract is always populated. A REJECTED draft
+    (no subject/body, nothing to version) yields an empty list."""
+    raw = ctx.get("revisions")
+    if isinstance(raw, list) and raw:
+        return [
+            DraftReplyRevision(
+                version=int(r.get("version", 0)),
+                subject=_opt_str(r.get("subject")),
+                body=_opt_str(r.get("body")),
+                edits_applied=[_to_reply_edit(e) for e in (r.get("edits_applied") or [])
+                               if isinstance(e, dict)],
+                author=str(r.get("author", "")),
+                authored_at=str(r.get("authored_at", "")),
+                source=str(r.get("source", "")),
+            )
+            for r in raw
+            if isinstance(r, dict)
+        ]
+    # Legacy draft (pre-versioning). Synthesize v1 only when there is a draft
+    # body to version — a REJECTED draft has nothing to record.
+    if ctx.get("status") != "DRAFTED":
+        return []
+    return [
+        DraftReplyRevision(
+            version=1,
+            subject=_opt_str(draft.get("subject")),
+            body=_opt_str(draft.get("body")),
+            edits_applied=edits,
+            author=_opt_str(ctx.get("drafted_by")) or "ai:ReplyDraftRecipe.py",
+            authored_at=_opt_str(ctx.get("drafted_at")) or "",
+            source="AI_GENERATED",
+        )
+    ]
 
 
 def _opt_str(value: Any) -> Optional[str]:
