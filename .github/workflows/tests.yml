@@ -88,6 +88,72 @@ jobs:
       - name: Run pytest
         run: pytest -q tests/
 
+  # Phase H.7 — Postgres-backed path gate.
+  #
+  # The Postgres migration chain (apply_postgres) and the DB-backed
+  # stores were NEVER exercised in CI before this job — only the SQLite
+  # mirror ran. That masked a real chain bug (V009/V011 referenced a
+  # non-existent `exception_record` table, aborting the chain on real
+  # Postgres). This job spins up a Postgres service, runs the full
+  # migration chain against it, and runs the DB-backed tests with
+  # ASOE_TEST_POSTGRES_URL set so parity/durability suites execute on
+  # real Postgres — not just SQLite.
+  pytest-postgres:
+    name: pytest (Postgres-backed)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: asoe
+          POSTGRES_PASSWORD: asoe
+          POSTGRES_DB: asoe_test
+        ports:
+          - 5432:5432
+        # Wait until Postgres is accepting connections before the job
+        # steps run, so the migration step doesn't race the container.
+        options: >-
+          --health-cmd "pg_isready -U asoe"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ASOE_TEST_POSTGRES_URL: postgresql://asoe:asoe@localhost:5432/asoe_test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Install package + dev + postgres extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,postgres]"
+
+      - name: Apply pydantic 3.14 typing patch
+        run: bash scripts/apply-patches.sh python
+
+      - name: Validate the Postgres migration chain (apply_postgres)
+        # Headline gate: a clean apply of V001→V0NN against real
+        # Postgres. This step alone would have caught the
+        # exception_record table-name bug. Run twice to assert
+        # idempotency (every migration is version-guarded).
+        run: |
+          python -c "from db.migrations.runner import apply_postgres; apply_postgres('${ASOE_TEST_POSTGRES_URL}')"
+          python -c "from db.migrations.runner import apply_postgres; apply_postgres('${ASOE_TEST_POSTGRES_URL}')"
+
+      - name: Run DB-backed tests against Postgres
+        # Parity / durability / repository suites read
+        # ASOE_TEST_POSTGRES_URL and run against real Postgres when set,
+        # falling back to SQLite tmp files locally. -k keeps the job
+        # fast and focused on the storage layer.
+        run: |
+          pytest -q tests/ -k "postgres or parity or durability or repository or migration or order_case or case_store"
+
   # PARITY-0 Phase 0a — security CI gates (Security review).
   # Advisory (continue-on-error: true) for the first deploys so PARITY-0
   # isn't blocked on pre-existing CVEs / detected secrets. Promote to
