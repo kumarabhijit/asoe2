@@ -161,6 +161,7 @@ echo "Building UI image (NEXT_PUBLIC_API_URL=https://${API_FQDN}) ..."
         --file Dockerfile \
         --build-arg "NEXT_PUBLIC_API_URL=https://${API_FQDN}" \
         --build-arg "NEXT_PUBLIC_USE_REAL_API=1" \
+        --build-arg "NEXT_PUBLIC_SHOW_PREVIEW_FEATURES=true" \
         .
 )
 

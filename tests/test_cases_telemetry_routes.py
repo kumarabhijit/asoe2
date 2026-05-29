@@ -178,6 +178,104 @@ class TestTimeToFirstAction:
 
 
 # ---------------------------------------------------------------------------
+# Time-to-action-submit endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestTimeToActionSubmit:
+    def test_happy_path_returns_202(self, client, analyst_token):
+        r = client.post(
+            "/api/v1/metrics/cases/time-to-action-submit",
+            headers=_auth(analyst_token),
+            json={
+                "case_id": "case-1",
+                "dwell_ms": 8200,
+                "action": "approve",
+                "reason_tag": "PRICE_WITHIN_TOLERANCE",
+            },
+        )
+        assert r.status_code == 202
+        assert r.json() == {"ok": True}
+
+    def test_reason_tag_optional(self, client, analyst_token):
+        r = client.post(
+            "/api/v1/metrics/cases/time-to-action-submit",
+            headers=_auth(analyst_token),
+            json={
+                "case_id": "case-1",
+                "dwell_ms": 3000,
+                "action": "reanalyze",
+            },
+        )
+        assert r.status_code == 202
+
+    def test_records_into_counter(self, client, analyst_token):
+        initial = metrics_mod._cases_v2_ttas_count
+        initial_tagged = metrics_mod._cases_v2_ttas_with_reason_tag
+        r = client.post(
+            "/api/v1/metrics/cases/time-to-action-submit",
+            headers=_auth(analyst_token),
+            json={
+                "case_id": "case-1",
+                "dwell_ms": 1200,
+                "action": "reject",
+                "reason_tag": "DISPUTED_TERMS",
+            },
+        )
+        assert r.status_code == 202
+        assert metrics_mod._cases_v2_ttas_count == initial + 1
+        assert metrics_mod._cases_v2_ttas_by_action["reject"] >= 1
+        assert metrics_mod._cases_v2_ttas_with_reason_tag == initial_tagged + 1
+
+    @pytest.mark.parametrize(
+        "action,expected_status",
+        [
+            ("approve", 202),
+            ("reject", 202),
+            ("reanalyze", 202),
+            # override / escalate are one-step actions that report
+            # through their own channels — not the comment-dialog set.
+            ("override", 422),
+            ("escalate", 422),
+            ("APPROVE", 422),  # case-sensitive
+        ],
+    )
+    def test_action_vocab(
+        self, client, analyst_token, action, expected_status,
+    ):
+        r = client.post(
+            "/api/v1/metrics/cases/time-to-action-submit",
+            headers=_auth(analyst_token),
+            json={
+                "case_id": "case-1",
+                "dwell_ms": 500,
+                "action": action,
+            },
+        )
+        assert r.status_code == expected_status
+
+    def test_negative_dwell_rejected(self, client, analyst_token):
+        r = client.post(
+            "/api/v1/metrics/cases/time-to-action-submit",
+            headers=_auth(analyst_token),
+            json={
+                "case_id": "case-1",
+                "dwell_ms": -1,
+                "action": "approve",
+            },
+        )
+        assert r.status_code == 422
+
+    def test_viewer_forbidden(self, client, viewer_token):
+        r = client.post(
+            "/api/v1/metrics/cases/time-to-action-submit",
+            headers=_auth(viewer_token),
+            json={"case_id": "case-1", "dwell_ms": 100, "action": "approve"},
+        )
+        assert r.status_code == 403
+
+
+# ---------------------------------------------------------------------------
 # Analysis-scroll-depth endpoint
 # ---------------------------------------------------------------------------
 
@@ -250,9 +348,15 @@ def test_metrics_endpoint_exposes_v2_telemetry_counters(
         headers=_auth(analyst_token),
         json={"case_id": "c1", "max_scroll_pct": 0.5, "acted": True},
     )
+    client.post(
+        "/api/v1/metrics/cases/time-to-action-submit",
+        headers=_auth(analyst_token),
+        json={"case_id": "c1", "dwell_ms": 6000, "action": "approve"},
+    )
     r = client.get("/api/v1/metrics", headers=_auth(analyst_token))
     assert r.status_code == 200
     body = r.text
     assert "cases_v2_row_clicks_total" in body
     assert "cases_v2_time_to_first_action_total" in body
+    assert "cases_v2_time_to_action_submit_total" in body
     assert "cases_v2_analysis_scroll_depth_total" in body

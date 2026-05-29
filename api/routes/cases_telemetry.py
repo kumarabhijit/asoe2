@@ -1,6 +1,6 @@
 """ADR-041 P3e Phase 3 sign-off gate #5 — cases V2 telemetry receivers.
 
-Three best-effort metric endpoints the asoe-ui V2 surfaces emit
+Four best-effort metric endpoints the asoe-ui V2 surfaces emit
 to. Each is:
 
   * authenticated (analyst+ — reviewer actions, not background noise)
@@ -25,6 +25,7 @@ from api.deps import require_role
 from api.metrics import (
     record_cases_analysis_scroll_depth,
     record_cases_row_click,
+    record_cases_time_to_action_submit,
     record_cases_time_to_first_action,
 )
 from api.observability.audit_bearing import audit_bearing
@@ -96,6 +97,45 @@ async def time_to_first_action(req: TimeToFirstActionRequest) -> dict:
     record_cases_time_to_first_action(
         dwell_ms=req.dwell_ms,
         first_action=req.first_action,
+    )
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/metrics/cases/time-to-action-submit
+# ---------------------------------------------------------------------------
+
+
+class TimeToActionSubmitRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    case_id: str = Field(min_length=1)
+    dwell_ms: float = Field(ge=0)
+    # Comment-dialog action set only — override / escalate are
+    # one-step and report through their own channels.
+    action: str = Field(pattern=r"^(approve|reject|reanalyze)$")
+    # Optional: the mandatory reason_tag the operator picked on the
+    # YELLOW/RED gate (S2 #7). Open-ended value; the recorder only
+    # tracks present/absent to keep Prometheus cardinality bounded.
+    reason_tag: str | None = Field(default=None)
+
+
+@router.post(
+    "/time-to-action-submit",
+    status_code=status.HTTP_202_ACCEPTED,
+    include_in_schema=False,
+    dependencies=[Depends(require_role("analyst", "manager", "admin"))],
+)
+@audit_bearing(
+    reason="records the dwell from case-open to action-confirm "
+           "(post comment + reason_tag) for the S2 sprint finding #8 "
+           "end-to-end CSA-time metric — the P50/P90 the dashboard "
+           "rolls up for the Phase 3 gate.",
+)
+async def time_to_action_submit(req: TimeToActionSubmitRequest) -> dict:
+    record_cases_time_to_action_submit(
+        dwell_ms=req.dwell_ms,
+        action=req.action,
+        reason_tag=req.reason_tag,
     )
     return {"ok": True}
 
