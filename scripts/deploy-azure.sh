@@ -631,6 +631,10 @@ fi
 echo
 echo "Rotate the Anthropic key without redeploying infra:"
 echo "  ANTHROPIC_API_KEY='sk-ant-NEW' ./scripts/set-secrets.sh"
+echo
+echo "Seed a representational catalog so All Cases mirrors the Vercel demo"
+echo "(drives synthetic events through the real pipeline; RESET_TENANT=1 wipes first):"
+echo "  API_URL=https://${FQDN} ./scripts/seed-demo-cases.sh"
 if [[ "${DEPLOY_UI}" != "1" ]]; then
     echo
     echo "To deploy the UI Container App alongside the API, re-run with:"
