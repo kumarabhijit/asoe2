@@ -62,6 +62,18 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+# DUPLICATE_PO rows must satisfy the V007 metadata contract (the
+# validate_duplicate_po_metadata_contract trigger requires these four
+# resolution_data keys). Any DUPLICATE_PO exception inserted in a test
+# must carry this payload or the insert is rejected on Postgres.
+_DUP_PO_RESOLUTION = {
+    "signal_breakdown": {"po_number": 1.0, "amount": 0.9, "timestamp": 0.8},
+    "composite_score": 0.95,
+    "classification": "EXACT_DUPLICATE",
+    "recommended_action": "BLOCK_AND_NOTIFY",
+}
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -80,9 +92,20 @@ def pg_adapter():
     with adapter.connection() as conn:
         cur = conn.cursor()
         cur.execute("SET app.current_tenant_id = 'cleanup'")
-        # Disable triggers temporarily for cleanup
+        # Disable append-only / immutability triggers for cleanup. The
+        # case_classification_history table (V020) blocks TRUNCATE via
+        # tg_cch_no_truncate; TRUNCATE ... exceptions CASCADE reaches it
+        # through the child_case_id FK, so it must be quieted too. The
+        # case tables are added to the truncate set so case rows don't
+        # leak across tests now that the V009→V021 chain materialises them.
         cur.execute("ALTER TABLE policy_audit_log DISABLE TRIGGER trg_policy_audit_immutable")
-        cur.execute("TRUNCATE traces, policy_audit_log, policy_overrides, checkpoints, exceptions CASCADE")
+        cur.execute("ALTER TABLE case_classification_history DISABLE TRIGGER USER")
+        cur.execute(
+            "TRUNCATE traces, policy_audit_log, policy_overrides, checkpoints, "
+            "exceptions, case_classification_history, case_correlation_keys, "
+            "order_case CASCADE"
+        )
+        cur.execute("ALTER TABLE case_classification_history ENABLE TRIGGER USER")
         cur.execute("ALTER TABLE policy_audit_log ENABLE TRIGGER trg_policy_audit_immutable")
         conn.commit()
         cur.close()
@@ -302,7 +325,7 @@ class TestSOXAuditImmutability:
             value=1, created_by="admin",
         )
 
-        with pytest.raises(Exception, match="immutable"):
+        with pytest.raises(Exception, match="append-only"):
             with pg_adapter.connection("t1") as conn:
                 cur = conn.cursor()
                 cur.execute(
@@ -319,7 +342,7 @@ class TestSOXAuditImmutability:
             value=1, created_by="admin",
         )
 
-        with pytest.raises(Exception, match="immutable"):
+        with pytest.raises(Exception, match="append-only"):
             with pg_adapter.connection("t1") as conn:
                 cur = conn.cursor()
                 cur.execute(
@@ -377,6 +400,7 @@ class TestExceptionRepositoryPostgres:
         exception_repo.create(
             tenant_id="t1", order_id="PO-B", event_type="T",
             trace_id=_uid(), intent="DUPLICATE_PO", final_status="BLOCKED",
+            resolution_data=_DUP_PO_RESOLUTION,
         )
         # Filter by intent
         records, _, _ = exception_repo.list("t1", intent="DUPLICATE_PO")
@@ -444,6 +468,7 @@ class TestExceptionRepositoryPostgres:
         exception_repo.create(
             tenant_id="t1", order_id="S2", event_type="T",
             trace_id=_uid(), intent="DUPLICATE_PO", final_status="BLOCKED",
+            resolution_data=_DUP_PO_RESOLUTION,
         )
         exception_repo.create(
             tenant_id="t1", order_id="S3", event_type="T",
@@ -457,19 +482,24 @@ class TestExceptionRepositoryPostgres:
         assert "CONTRACTUAL_CORRECTION" in stats["by_intent"]
         assert "DUPLICATE_PO" in stats["by_intent"]
 
-    def test_intent_check_constraint(self, exception_repo):
-        """Only valid intents are accepted."""
-        exception_repo.create(
-            tenant_id="t1", order_id="PO-CHK",
+    def test_intent_not_db_constrained(self, exception_repo):
+        """The intent column is NOT pinned by a DB CHECK constraint.
+
+        V005 (V005__drop_intent_check.sql) deliberately dropped the
+        enum CHECK so new intents can ship without a migration —
+        Guardrail #1 routes the allowed vocabulary through the runtime
+        /health contract, not the database. An unrecognised intent must
+        therefore be accepted at the storage layer (validation lives
+        upstream). The previous version of this test asserted the
+        opposite and had never run against Postgres (test_postgres.py is
+        gated on ASOE_TEST_POSTGRES_URL), so the staleness was masked.
+        """
+        record = exception_repo.create(
+            tenant_id="t1", order_id="PO-NEW-INTENT",
             event_type="T", trace_id=_uid(),
-            intent="CONTRACTUAL_CORRECTION",
+            intent="SOME_FUTURE_INTENT",
         )
-        with pytest.raises(Exception):
-            exception_repo.create(
-                tenant_id="t1", order_id="PO-BAD",
-                event_type="T", trace_id=_uid(),
-                intent="INVALID_INTENT",
-            )
+        assert record["intent"] == "SOME_FUTURE_INTENT"
 
 
 class TestTraceRepositoryPostgres:
@@ -582,6 +612,7 @@ class TestDatabaseBackedStorePostgres:
         store.create(
             tenant_id="t1", order_id="B", event_type="T",
             trace_id=_uid(), intent="DUPLICATE_PO", final_status="BLOCKED",
+            resolution_data=_DUP_PO_RESOLUTION,
         )
         records, _, _ = store.list("t1")
         assert len(records) == 2
