@@ -1673,7 +1673,7 @@
         "type": "object"
       },
       "DraftReply": {
-        "description": "AI Draft Reply evidence (ADR-042 Phase 4 contract; surfaced on the\nanalysis in Phase 7). The current generated reply for the case, projected by\nthe composer from `resolution_data[\"reply_draft\"]` (the ReplyDraftRecipe\noutput a DRAFT_REPLY disposition persisted). `status` \u2208 DRAFTED | REJECTED;\na REJECTED draft carries a `reason` and no body. Read-only evidence \u2014 sending\nis a separate Shadow-gated disposition (SEND_REPLY).",
+        "description": "AI Draft Reply evidence (ADR-042 Phase 4 contract; surfaced on the\nanalysis in Phase 7). The current generated reply for the case, projected by\nthe composer from `resolution_data[\"reply_draft\"]` (the ReplyDraftRecipe\noutput a DRAFT_REPLY disposition persisted). `status` \u2208 DRAFTED | REJECTED;\na REJECTED draft carries a `reason` and no body. Read-only evidence \u2014 sending\nis a separate Shadow-gated disposition (SEND_REPLY).\n\n`revisions` is the append-only version history (operator edit + versioned\nhistory); the top-level `subject`/`body`/`edits_applied` always mirror the\nLATEST revision so existing readers keep working.",
         "properties": {
           "body": {
             "anyOf": [
@@ -1736,6 +1736,13 @@
               }
             ],
             "title": "Recipient"
+          },
+          "revisions": {
+            "items": {
+              "$ref": "#/components/schemas/DraftReplyRevision"
+            },
+            "title": "Revisions",
+            "type": "array"
           },
           "status": {
             "title": "Status",
@@ -1804,6 +1811,64 @@
           "field"
         ],
         "title": "DraftReplyEdit",
+        "type": "object"
+      },
+      "DraftReplyRevision": {
+        "description": "One entry in the versioned history of a reply draft (operator edit +\nversioned history). The chain is append-only: version 1 is the AI-generated\ndraft; each operator edit appends a new revision. The last element is always\nthe current draft (mirrored onto the top-level `DraftReply` fields for\nback-compat). `source` \u2208 AI_GENERATED | OPERATOR_EDIT records WHO authored\nthe revision \u2014 the SOX who/what/when of a financially-relevant buyer reply.",
+        "properties": {
+          "author": {
+            "title": "Author",
+            "type": "string"
+          },
+          "authored_at": {
+            "title": "Authored At",
+            "type": "string"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body"
+          },
+          "edits_applied": {
+            "items": {
+              "$ref": "#/components/schemas/DraftReplyEdit"
+            },
+            "title": "Edits Applied",
+            "type": "array"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "author",
+          "authored_at",
+          "source"
+        ],
+        "title": "DraftReplyRevision",
         "type": "object"
       },
       "DuplicateDetectionData": {

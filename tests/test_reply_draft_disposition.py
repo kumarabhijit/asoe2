@@ -107,6 +107,62 @@ def test_operator_edits_override_the_draft(client) -> None:
     assert any(e["field"] == "subject" for e in rd["edits_applied"])
 
 
+def test_first_draft_seeds_v1_ai_generated_revision(client) -> None:
+    rec = _seed()
+    _draft(client, rec.id, reply={"recipient": "orders@walmart.example"})
+    rd = exception_store.get(rec.id, "tenant-a").resolution_data["reply_draft"]
+    assert len(rd["revisions"]) == 1
+    rev = rd["revisions"][0]
+    assert rev["version"] == 1
+    assert rev["source"] == "AI_GENERATED"
+    assert rev["author"] == "ai:ReplyDraftRecipe.py"
+    assert rev["edits_applied"] == []  # nothing to diff for the seed
+    assert rev["subject"] == rd["draft"]["subject"]
+
+
+def test_operator_edit_appends_v2_revision_with_before_after(client) -> None:
+    rec = _seed()
+    # v1 — AI-generated draft.
+    _draft(client, rec.id, reply={"recipient": "orders@walmart.example"})
+    v1 = exception_store.get(rec.id, "tenant-a").resolution_data["reply_draft"]
+    v1_subject = v1["draft"]["subject"]
+    # v2 — operator edits the subject.
+    _draft(client, rec.id, reply={
+        "recipient": "orders@walmart.example",
+        "edits": {"subject": "Quick question on PO 0093847612"},
+    })
+    rd = exception_store.get(rec.id, "tenant-a").resolution_data["reply_draft"]
+    assert [r["version"] for r in rd["revisions"]] == [1, 2]
+    v2 = rd["revisions"][1]
+    assert v2["source"] == "OPERATOR_EDIT"
+    assert v2["author"] == "user-A"  # operator sub, not the AI service id
+    assert v2["subject"] == "Quick question on PO 0093847612"
+    # before/after computed vs the PREVIOUS revision (v1), not the template.
+    edit = next(e for e in v2["edits_applied"] if e["field"] == "subject")
+    assert edit["before"] == v1_subject
+    assert edit["after"] == "Quick question on PO 0093847612"
+    # Top-level mirrors the latest revision so existing readers keep working.
+    assert rd["draft"]["subject"] == "Quick question on PO 0093847612"
+    assert any(e["field"] == "subject" for e in rd["edits_applied"])
+
+
+def test_operator_edit_emits_reply_edited_audit_event(client) -> None:
+    rec = _seed()
+    _draft(client, rec.id, reply={"recipient": "orders@walmart.example"})
+    _draft(client, rec.id, reply={
+        "recipient": "orders@walmart.example",
+        "edits": {"subject": "Quick question on PO 0093847612"},
+    })
+    keys = [e["policy_key"] for e in exception_store.get_audit_log("tenant-a")]
+    assert "EXCEPTION_REPLY_DRAFTED" in keys   # v1 generation
+    assert "EXCEPTION_REPLY_EDITED" in keys     # v2 operator edit
+    edited = [e for e in exception_store.get_audit_log("tenant-a")
+              if e["policy_key"] == "EXCEPTION_REPLY_EDITED"]
+    assert edited[-1]["new_value"]["revision_version"] == 2
+    assert edited[-1]["new_value"]["revision_source"] == "OPERATOR_EDIT"
+    assert edited[-1]["changed_by"] == "user-A"
+
+
 def test_missing_recipient_is_rejected_not_sent(client) -> None:
     rec = _seed()
     r = _draft(client, rec.id)  # no reply params → no recipient

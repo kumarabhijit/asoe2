@@ -870,22 +870,92 @@ def _run_reply_draft(record, tenant_id: str, reply_params):
     return _run_graph_safe(state)
 
 
+# AI service id recorded as the `author` of an AI-generated reply revision
+# (operator edit + versioned history). Sentinel form mirrors the `system:*`
+# actor convention so an auditor can tell a generated draft from an operator
+# edit (whose author is the user's sub).
+_REPLY_DRAFT_AI_AUTHOR = "ai:ReplyDraftRecipe.py"
+
+
+def _diff_reply_fields(prev, curr):
+    """Field-level before/after between two draft snapshots (operator edit +
+    versioned history). Compares `subject`/`body` of the previous revision
+    against the current draft; returns the changed fields only. `prev` is None
+    for the first (AI-generated) revision — every populated field is "new"
+    rather than a before/after, so the seed revision carries no edits."""
+    edits = []
+    for field in ("subject", "body"):
+        before = (prev or {}).get(field)
+        after = (curr or {}).get(field)
+        if prev is not None and before != after:
+            edits.append({"field": field, "before": before, "after": after})
+    return edits
+
+
+def _append_reply_revision(prior_entry, draft, status, user_sub, now):
+    """Build the append-only revision chain (operator edit + versioned history).
+
+    The first persisted draft seeds version 1 with source="AI_GENERATED" and
+    author=the recipe/service id. Every subsequent persist that carries a
+    changed subject/body APPENDS a version (prev max + 1) with
+    source="OPERATOR_EDIT", author=the operator's sub, and the field-level
+    before/after computed against the previous revision. A REJECTED compose
+    (empty draft) does not append a revision — there is nothing to version."""
+    prior = list((prior_entry or {}).get("revisions") or [])
+    if status != "DRAFTED":
+        return prior
+    prev_rev = prior[-1] if prior else None
+    edits = _diff_reply_fields(prev_rev, draft)
+    if prev_rev is not None and not edits:
+        # Re-draft with no field change — keep the chain stable.
+        return prior
+    revision = {
+        "version": (prev_rev["version"] + 1) if prev_rev else 1,
+        "subject": draft.get("subject"),
+        "body": draft.get("body"),
+        "edits_applied": edits,
+        "author": _REPLY_DRAFT_AI_AUTHOR if prev_rev is None else user_sub,
+        "authored_at": now,
+        "source": "AI_GENERATED" if prev_rev is None else "OPERATOR_EDIT",
+    }
+    prior.append(revision)
+    return prior
+
+
 def _persist_reply_draft(exception_id, tenant_id, record, result, user_sub, notes):
     """Persist a composed draft to resolution_data.reply_draft + emit audit.
 
     The record lifecycle is unchanged: a draft is not a resolution — the
     operator still reviews / edits / sends. A REJECTED compose (no recipient /
-    unknown template) is recorded with its reason, not masked as success."""
+    unknown template) is recorded with its reason, not masked as success.
+
+    Persistence is append-only versioned (operator edit + versioned history):
+    the first draft seeds revision 1 (AI_GENERATED); each subsequent edit
+    appends an OPERATOR_EDIT revision under `reply_draft.revisions`. The
+    top-level `subject`/`body`/`edits_applied` always mirror the LATEST revision
+    so existing readers keep working."""
     outputs = result.execution_log.outputs if result.execution_log else {}
     status = outputs.get("status")
     draft = outputs.get("draft") or {}
+    now = _utc_now_iso()
+    prior_entry = (record.resolution_data or {}).get("reply_draft")
+    revisions = _append_reply_revision(prior_entry, draft, status, user_sub, now)
+    latest = revisions[-1] if revisions else None
+    is_operator_edit = bool(latest and latest["source"] == "OPERATOR_EDIT")
+    # Top-level edits_applied mirrors the latest revision's edits when present,
+    # else the recipe's own (operator overrides vs the rendered template).
+    edits_applied = (
+        latest["edits_applied"] if is_operator_edit
+        else outputs.get("edits_applied", [])
+    )
     entry = {
         "status": status,
         "reason": outputs.get("reason"),
         "draft": draft,
-        "edits_applied": outputs.get("edits_applied", []),
+        "edits_applied": edits_applied,
         "drafted_by": user_sub,
-        "drafted_at": _utc_now_iso(),
+        "drafted_at": now,
+        "revisions": revisions,
     }
     merged = dict(record.resolution_data or {})
     merged["reply_draft"] = entry
@@ -893,10 +963,15 @@ def _persist_reply_draft(exception_id, tenant_id, record, result, user_sub, note
     if not updated:
         raise ASOEError(code="UPDATE_FAILED",
                         message="Failed to persist reply draft.", status_code=500)
+    if is_operator_edit:
+        policy_key = "EXCEPTION_REPLY_EDITED"
+    elif status == "DRAFTED":
+        policy_key = "EXCEPTION_REPLY_DRAFTED"
+    else:
+        policy_key = "EXCEPTION_REPLY_DRAFT_REJECTED"
     exception_store.log_audit_event(
         tenant_id=tenant_id,
-        policy_key="EXCEPTION_REPLY_DRAFTED" if status == "DRAFTED"
-        else "EXCEPTION_REPLY_DRAFT_REJECTED",
+        policy_key=policy_key,
         previous_value={"exception_id": exception_id},
         new_value={
             "reply_status": status,
@@ -904,6 +979,8 @@ def _persist_reply_draft(exception_id, tenant_id, record, result, user_sub, note
             "recipient": draft.get("recipient"),
             "edits_applied": entry["edits_applied"],
             "drafted_by": user_sub,
+            "revision_version": latest["version"] if latest else None,
+            "revision_source": latest["source"] if latest else None,
         },
         changed_by=user_sub, change_reason=notes,
     )

@@ -1025,6 +1025,121 @@ ImpactMetrics:
       line-items list, MUST agree with it.
 
 # ---------------------------------------------------------------------------
+# DraftReply / DraftReplyRevision (ADR-042 Phase 4 — operator edit +
+# versioned history). NEEDS COMPLIANCE REVIEW (@kumarabhijit @linkinrustle).
+#
+# The reply draft is a financially-relevant buyer communication; the
+# versioned history records WHO changed WHAT WHEN (SOX who/what/when).
+# These two classes sit OUTSIDE the *AnalysisData family (the coverage
+# fitness test does not auto-check them), but the summary tally below
+# DOES count every row here. Tiers chosen conservatively: the
+# provenance fields (revisions / version / author / authored_at /
+# source) are audit-bearing; the rendered text and recipient/template
+# plumbing are contextual (the auditable substance is the chain of
+# who-edited-what-when, not the prose itself).
+# ---------------------------------------------------------------------------
+DraftReply:
+  status:
+    tier: audit-bearing
+    source: recipe-output
+    rationale: >-
+      DRAFTED | REJECTED — the state the operator is acting on. A
+      REJECTED draft carries a reason and no body; the auditor must see
+      which state the reply was persisted in.
+  reason:
+    tier: contextual
+    source: derived
+    rationale: Human-readable reject reason; regenerable from the rejecting branch.
+  template_name:
+    tier: contextual
+    source: recipe-input
+    rationale: Which reply template was rendered; plumbing, not a binding control.
+  recipient:
+    tier: contextual
+    source: recipe-input
+    rationale: >-
+      Buyer address the draft is addressed to. The binding control on
+      a SEND is recorded separately on reply_sent; on a draft it is
+      contextual (no email leaves the system).
+  subject:
+    tier: contextual
+    source: derived
+    rationale: >-
+      Rendered subject of the LATEST revision. Mirrors revisions[-1];
+      the audit unit is the revision chain, not this projection.
+  body:
+    tier: contextual
+    source: derived
+    rationale: >-
+      Rendered body of the LATEST revision. Mirrors revisions[-1]; the
+      audit unit is the revision chain, not this projection.
+  edits_applied:
+    tier: contextual
+    source: derived
+    rationale: >-
+      Field-level before/after of the LATEST revision. Mirrors
+      revisions[-1].edits_applied; the durable audit record is the
+      per-revision edits inside the chain.
+  drafted_by:
+    tier: audit-bearing
+    source: control
+    rationale: >-
+      Actor who triggered the persist of the current draft (operator
+      sub). Who-did-it for the latest state; the full who/what/when is
+      in revisions.
+  drafted_at:
+    tier: audit-bearing
+    source: control
+    rationale: ISO-8601 timestamp of the current draft's persist — SOX chronology.
+  revisions:
+    tier: audit-bearing
+    source: control
+    rationale: >-
+      Append-only version history of the reply draft. The SOX
+      who/what/when of a financially-relevant buyer communication — an
+      auditor reconstructs every operator edit from this chain. NEEDS
+      COMPLIANCE REVIEW (@kumarabhijit @linkinrustle).
+
+DraftReplyRevision:
+  version:
+    tier: audit-bearing
+    source: control
+    rationale: >-
+      1-based monotonic version number. Establishes the order of edits
+      in the chain — the auditor cites "version N" of the reply.
+  subject:
+    tier: contextual
+    source: derived
+    rationale: Rendered subject for this revision; the audit unit is edits_applied.
+  body:
+    tier: contextual
+    source: derived
+    rationale: Rendered body for this revision; the audit unit is edits_applied.
+  edits_applied:
+    tier: audit-bearing
+    source: control
+    rationale: >-
+      Field-level before/after for THIS revision (vs. the previous
+      revision). The WHAT-changed of the SOX who/what/when.
+  author:
+    tier: audit-bearing
+    source: control
+    rationale: >-
+      WHO authored the revision — the AI service id for the generated
+      draft, the operator's sub for an edit. SOX attribution.
+  authored_at:
+    tier: audit-bearing
+    source: control
+    rationale: ISO-8601 timestamp the revision was authored — SOX WHEN.
+  source:
+    tier: audit-bearing
+    source: control
+    rationale: >-
+      AI_GENERATED | OPERATOR_EDIT — distinguishes a machine-generated
+      draft from a human edit. Drives the operator-vs-AI provenance the
+      auditor relies on.
+
+# ---------------------------------------------------------------------------
 # DuplicatePOEnvelope (ADR-028 G2 / action item A6) — V1 PR-B.
 # ---------------------------------------------------------------------------
 # Single-round-trip canonical envelope returned by
@@ -1327,9 +1442,16 @@ summary:
   # PII-free tombstone routed into the audit chain by erase_attachment).
   # 6 audit-bearing (attachment_id, tenant_id, sha256, case_id, erased_at,
   # erased_by) + 3 contextual (size_bytes, mime_type, reason).
-  total_fields: 186
-  audit_bearing: 136
+  # 2026-05-29: +17 rows for DraftReply (10) + DraftReplyRevision (7)
+  # (ADR-042 Phase 4 — operator edit + versioned history). 9 audit-bearing
+  # (DraftReply: status, drafted_by, drafted_at, revisions; DraftReplyRevision:
+  # version, edits_applied, author, authored_at, source — the SOX
+  # who/what/when of a buyer reply), 8 contextual (rendered text +
+  # template/recipient plumbing + the latest-revision mirrors).
+  # NEEDS COMPLIANCE REVIEW (@kumarabhijit @linkinrustle).
+  total_fields: 203
+  audit_bearing: 145
   conditional: 7
-  contextual: 43
+  contextual: 51
   backend_gap_fields: 0
   gateway_dependent_fields: 17

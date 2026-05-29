@@ -47,7 +47,11 @@ _SECTION_FIELDS: dict[str, set[str]] = {
     "KnowledgeGraphPayload": {"nodes", "edges", "root_id"},
     "DraftReply": {
         "status", "reason", "template_name", "recipient", "subject", "body",
-        "edits_applied", "drafted_by", "drafted_at",
+        "edits_applied", "drafted_by", "drafted_at", "revisions",
+    },
+    "DraftReplyRevision": {
+        "version", "subject", "body", "edits_applied", "author",
+        "authored_at", "source",
     },
 }
 
