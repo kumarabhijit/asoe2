@@ -532,6 +532,80 @@ def _apply_sqlite_v009(conn: sqlite3.Connection) -> None:
     logger.info("SQLite schema V009 applied (order_case parent entity)")
 
 
+def _apply_sqlite_v010(conn: sqlite3.Connection) -> None:
+    """V010 — case_correlation_keys table (ADR-038 Phase H.2).
+
+    Mirrors V010__case_correlation_keys.sql. Previously the SQLite path
+    jumped V009 → V012, so the correlation table never existed on the
+    test backend — which meant a DB-backed CaseStore (Phase H.7) could
+    not be exercised in CI at all. Added so the DB-backed case path is
+    testable on SQLite. The PK (tenant_id, key_type, key_value) and the
+    case_id FK match the Postgres DDL; key_type vocabulary stays an
+    application-layer Literal (V005 enum-decoupling convention).
+    """
+    if not _sqlite_table_exists(conn, "case_correlation_keys"):
+        conn.executescript(
+            """
+            CREATE TABLE case_correlation_keys (
+                tenant_id      TEXT NOT NULL,
+                key_type       TEXT NOT NULL,
+                key_value      TEXT NOT NULL,
+                case_id        TEXT NOT NULL REFERENCES order_case(case_id),
+                registered_at  TEXT NOT NULL,
+                PRIMARY KEY (tenant_id, key_type, key_value)
+            );
+            CREATE INDEX IF NOT EXISTS idx_case_corr_case_id
+                ON case_correlation_keys (case_id);
+            """
+        )
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+        ("V010", datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    logger.info("SQLite schema V010 applied (case correlation keys)")
+
+
+def _apply_sqlite_v014(conn: sqlite3.Connection) -> None:
+    """V014 — order_case.updated_at (issue #133 PO #17).
+
+    Mirrors V014__order_case_updated_at.sql. Was missing from the SQLite
+    path (V009 → V012 skip), so order_case had no updated_at column on
+    the test backend — the CaseStore bumps it on every mutation.
+    """
+    if not _sqlite_column_exists(conn, "order_case", "updated_at"):
+        conn.execute("ALTER TABLE order_case ADD COLUMN updated_at TEXT")
+        conn.execute(
+            "UPDATE order_case SET updated_at = opened_at WHERE updated_at IS NULL"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_order_case_updated ON order_case (updated_at)"
+        )
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+        ("V014", datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    logger.info("SQLite schema V014 applied (order_case.updated_at)")
+
+
+def _apply_sqlite_v021(conn: sqlite3.Connection) -> None:
+    """V021 — order_case.pending_override durable cosign state (Phase H.7).
+
+    Mirrors V021__order_case_pending_override.sql. SQLite has no JSONB;
+    the column is TEXT and the repository json.dumps/json.loads it (same
+    pattern as enrichment_context / resolution_data). NULL = no override.
+    """
+    if not _sqlite_column_exists(conn, "order_case", "pending_override"):
+        conn.execute("ALTER TABLE order_case ADD COLUMN pending_override TEXT")
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+        ("V021", datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    logger.info("SQLite schema V021 applied (order_case.pending_override)")
+
+
 def _apply_sqlite_v012(conn: sqlite3.Connection) -> None:
     """V012 — case_events replay log (ADR-038 Phase H.5)."""
     conn.executescript(
@@ -1096,6 +1170,17 @@ def apply_sqlite(conn: sqlite3.Connection) -> None:
     _apply_sqlite_v007(conn)
     _apply_sqlite_v008(conn)
     _apply_sqlite_v009(conn)
+    _apply_sqlite_v010(conn)
+    _apply_sqlite_v014(conn)
+    # V011 (orphan-case backfill) is Postgres-only and deliberately not
+    # mirrored: fresh test DBs have no orphan rows, and its SQL uses
+    # Postgres-specific sha256/bytea/interval. Record the version so
+    # backend bookkeeping stays in sync.
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+        ("V011", datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
     _apply_sqlite_v012(conn)
     _apply_sqlite_v013(conn)
     _apply_sqlite_v015(conn)
@@ -1104,6 +1189,7 @@ def apply_sqlite(conn: sqlite3.Connection) -> None:
     _apply_sqlite_v018(conn)
     _apply_sqlite_v019(conn)
     _apply_sqlite_v020(conn)
+    _apply_sqlite_v021(conn)
 
 
 def apply_postgres(database_url: str) -> None:
@@ -1174,6 +1260,7 @@ def apply_postgres(database_url: str) -> None:
             ("V018", "V018__case_origin_supergroup.sql", "PostgreSQL schema V018 applied (case origin + supergroup_code + leaf intent_code)"),
             ("V019", "V019__drop_legacy_case_columns.sql", "PostgreSQL schema V019 applied (dropped deprecated case columns)"),
             ("V020", "V020__case_classification_history.sql", "PostgreSQL schema V020 applied (case classification history append-only)"),
+            ("V021", "V021__order_case_pending_override.sql", "PostgreSQL schema V021 applied (order_case.pending_override durable cosign state)"),
         ):
             cur.execute(
                 "SELECT version FROM schema_migrations WHERE version = %s",

@@ -1,0 +1,30 @@
+{
+  "order_id": "SEED-MPE-001",
+  "line_item": 1,
+  "po_price": 13.20,
+  "sap_base_price": 14.88,
+  "event_type": "MASS_PRICING_RECALC",
+  "retailer_id": "R-04",
+  "line_count": 12,
+  "sku": "SKU-0042",
+  "metadata": {
+    "synthetic": true,
+    "source": "seed-demo-cases",
+    "demo_only": true,
+    "note": "line_count > MASS_UPDATE_LINE_COUNT_THRESHOLD (10) → deterministic MASS_PRICING_ERROR. No mapped recipe by design → FAIL_TO_HUMAN. Mirrors the Vercel mock FAILED mass-pricing cases (exc-022 / exc-023). Kept OUT of tests/fixtures/synthetic so scripts/smoke-e2e.sh assertions stay green (see that dir's README).",
+    "line_items": [
+      { "line_id": "L1",  "sku": "SKU-0042", "description": "12-pk Cola",        "uom": "CS", "quantity": 240, "erp_price": 14.88, "po_price": 13.20 },
+      { "line_id": "L2",  "sku": "SKU-0043", "description": "12-pk Diet Cola",   "uom": "CS", "quantity": 120, "erp_price": 14.88, "po_price": 13.20 },
+      { "line_id": "L3",  "sku": "SKU-0051", "description": "12-pk Zero Sugar",  "uom": "CS", "quantity":  96, "erp_price": 14.88, "po_price": 13.20 },
+      { "line_id": "L4",  "sku": "SKU-0061", "description": "6-pk Lemon Soda",   "uom": "CS", "quantity":  80, "erp_price": 11.40, "po_price":  9.90 },
+      { "line_id": "L5",  "sku": "SKU-0062", "description": "6-pk Orange Soda",  "uom": "CS", "quantity":  80, "erp_price": 11.40, "po_price":  9.90 },
+      { "line_id": "L6",  "sku": "SKU-0071", "description": "2L Cola",           "uom": "CS", "quantity": 144, "erp_price":  9.60, "po_price":  8.40 },
+      { "line_id": "L7",  "sku": "SKU-0072", "description": "2L Diet Cola",      "uom": "CS", "quantity": 144, "erp_price":  9.60, "po_price":  8.40 },
+      { "line_id": "L8",  "sku": "SKU-0081", "description": "Sparkling Water",   "uom": "CS", "quantity": 200, "erp_price":  7.20, "po_price":  6.30 },
+      { "line_id": "L9",  "sku": "SKU-0082", "description": "Flavored Seltzer",  "uom": "CS", "quantity": 200, "erp_price":  7.20, "po_price":  6.30 },
+      { "line_id": "L10", "sku": "SKU-0091", "description": "Energy Drink 4pk",  "uom": "CS", "quantity":  60, "erp_price": 18.00, "po_price": 15.50 },
+      { "line_id": "L11", "sku": "SKU-0092", "description": "Energy Drink 8pk",  "uom": "CS", "quantity":  60, "erp_price": 32.00, "po_price": 28.00 },
+      { "line_id": "L12", "sku": "SKU-0099", "description": "Variety Pack 24ct", "uom": "CS", "quantity":  40, "erp_price": 26.40, "po_price": 22.90 }
+    ]
+  }
+}

@@ -22,8 +22,12 @@ CREATE TABLE IF NOT EXISTS case_classification_history (
     tenant_id           TEXT NOT NULL,
     case_id             TEXT NOT NULL REFERENCES order_case(case_id),
     -- NULL for parent-level (case) reclassifications; populated for any
-    -- per-child reclassification.
-    child_case_id       TEXT REFERENCES exceptions(id),
+    -- per-child reclassification. Typed UUID to match exceptions.id
+    -- (V001 PK is UUID) — a TEXT column cannot form this FK on Postgres
+    -- ("incompatible types: text and uuid"). The bug was masked because
+    -- CI only exercised the SQLite mirror, where typing is loose. The
+    -- repository casts to text on read so the Python contract stays str.
+    child_case_id       UUID REFERENCES exceptions(id),
     supergroup_code     TEXT NOT NULL REFERENCES case_supergroup(code),
     -- NULL when this row records a parent-level supergroup change with
     -- no concurrent leaf classification.

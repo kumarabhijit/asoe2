@@ -78,7 +78,7 @@ SELECT
     (er.created_at::timestamptz + INTERVAL '48 hours')::text AS sla_deadline,
     2                                             AS tier,
     'legacy-pre-h2'                               AS bundle_version_at_open
-FROM exception_record er
+FROM exceptions er
 WHERE er.parent_case_id IS NULL
 ON CONFLICT (case_id) DO NOTHING;
 
@@ -94,13 +94,13 @@ SELECT
     er.order_id                                   AS key_value,
     substr(encode(sha256((er.tenant_id || ':' || er.order_id)::bytea), 'hex'), 1, 16) AS case_id,
     NOW()::text                                   AS registered_at
-FROM exception_record er
+FROM exceptions er
 WHERE er.parent_case_id IS NULL
 ON CONFLICT (tenant_id, key_type, key_value) DO NOTHING;
 
 -- 3. Point the orphan records at their newly-materialised cases.
 
-UPDATE exception_record er
+UPDATE exceptions er
 SET    parent_case_id = substr(
             encode(sha256((er.tenant_id || ':' || er.order_id)::bytea), 'hex'),
             1, 16

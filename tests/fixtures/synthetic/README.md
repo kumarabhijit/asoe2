@@ -21,9 +21,17 @@ smoke when an event happens to land in a different policy bucket would
 be a flake, not a bug — so we constrain to the closed set and let the
 exact value vary.
 
-`MASS_PRICING_ERROR` is intentionally not represented: it has no mapped
-recipe (routes to FAIL_TO_HUMAN by design). The `BLOCKED` path is
-exercised via the YELLOW/RED branches of other intents.
+`MASS_PRICING_ERROR` is intentionally not represented here: it has no
+mapped recipe (routes to FAIL_TO_HUMAN by design), so it would break the
+smoke `selected_recipe` assertion. The `BLOCKED` path is exercised via
+the YELLOW/RED branches of other intents.
+
+Seeding vs smoke: `scripts/seed-demo-cases.sh` reuses these same fixtures
+(plus demo-only extras under `scripts/seed-fixtures/`, including the
+`MASS_PRICING_ERROR` FAILED-case representation) to POPULATE a deployed
+All Cases surface for parity with the asoe-ui Vercel mock. That seeder
+never asserts; this directory stays the pass/fail contract set for
+`scripts/smoke-e2e.sh`.
 
 Synthetic vs production data: every event carries `metadata.synthetic`
 and `metadata.source = "smoke-e2e"` so the audit chain can distinguish

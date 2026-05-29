@@ -42,15 +42,22 @@ CREATE INDEX IF NOT EXISTS idx_order_case_status
 CREATE INDEX IF NOT EXISTS idx_order_case_sla
     ON order_case (sla_deadline);
 
--- 2. exception_record gains parent_case_id ------------------------
+-- 2. exceptions gains parent_case_id ------------------------------
 --
 -- Nullable: Tier-1 stateless records (clean Automated events that
 -- auto-resolve to COMPLETE) never materialise a case. Per ADR-038
 -- §7.2, lazy materialisation runs only on non-clean terminal states
 -- and Manual Orders.
+--
+-- Table is `exceptions` (V001). The original V009/V011 referenced a
+-- non-existent `exception_record` table, which aborts the Postgres
+-- chain at this step (masked because CI only exercised the SQLite
+-- mirror, which used the correct name — see V018 note). Corrected to
+-- `exceptions` so the DB-backed (Azure) path actually applies;
+-- prerequisite for Phase H.7 durable cases.
 
-ALTER TABLE exception_record
+ALTER TABLE exceptions
     ADD COLUMN IF NOT EXISTS parent_case_id TEXT REFERENCES order_case(case_id);
 
 CREATE INDEX IF NOT EXISTS idx_exception_parent_case
-    ON exception_record (parent_case_id);
+    ON exceptions (parent_case_id);
