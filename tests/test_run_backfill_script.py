@@ -56,6 +56,10 @@ def _make_orphan_record(*, order_id: str, tenant_id: str = "tenant-a") -> ChildC
 
 
 def _run(argv: list[str]) -> tuple[int, str, str]:
+    # Backfill is now tenant-scoped (--tenant required). Every fixture
+    # here seeds tenant-a, so inject it unless a test sets its own.
+    if "--tenant" not in argv:
+        argv = ["--tenant", "tenant-a", *argv]
     out, err = io.StringIO(), io.StringIO()
     with redirect_stdout(out), redirect_stderr(err):
         rc = run_backfill_main(argv)
@@ -89,7 +93,10 @@ class TestPass1:
         rc2, stdout, _ = _run(["--pass", "1"])
         assert rc2 == 0
         report = json.loads(stdout)["reports"][0]
-        assert report["records_scanned"] == 1
+        # Idempotent: the link is persisted, so the second run finds no
+        # orphans to scan at all (list_orphans returns only NULL-parent
+        # rows) — strictly better than the old scan-all-then-skip.
+        assert report["records_scanned"] == 0
         assert report["cases_opened"] == 0
 
     def test_skipped_when_original_event_missing(self):

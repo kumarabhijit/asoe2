@@ -253,6 +253,19 @@ class ExceptionRepository:
                 cur.execute(sql, tuple(values))
         return self.get(exception_id, tenant_id, _cursor=_cursor)
 
+    def list_orphans(self, tenant_id: str) -> List[Dict[str, Any]]:
+        """All exceptions for a tenant with ``parent_case_id IS NULL`` —
+        the Phase H.7 backfill input set. Tenant-scoped so RLS / app-layer
+        isolation holds; the ops runner iterates per tenant."""
+        sql = (
+            f"SELECT {', '.join(self._COLUMNS)} FROM exceptions "
+            f"WHERE tenant_id = ? AND parent_case_id IS NULL "
+            f"ORDER BY created_at"
+        )
+        with self._adapter.cursor(tenant_id) as cur:
+            cur.execute(sql, (tenant_id,))
+            return [self._to_dict(r) for r in cur.fetchall()]
+
     def stats(self, tenant_id: str) -> Dict[str, Any]:
         with self._adapter.cursor(tenant_id) as cur:
             cur.execute(
@@ -665,6 +678,32 @@ class OrderCaseRepository:
             with self._adapter.cursor(tenant_id) as cur:
                 cur.execute(sql, tuple(params))
         return self.get(case_id, tenant_id, _cursor=_cursor)
+
+    def delete(
+        self, case_id: str, tenant_id: str, *, _cursor: Optional[Any] = None,
+    ) -> None:
+        """Remove a case and its correlation keys. Used by the Phase H.7
+        Pass-2 merge to drop a duplicate orphan case after its children
+        have been re-pointed. A freshly-backfilled case has no
+        classification-history rows, so the V020 FK is not violated;
+        children must be re-pointed first or the parent_case_id FK blocks
+        the delete (explicit failure — CLAUDE.md §5)."""
+        def _run(cur):
+            cur.execute(
+                "DELETE FROM case_correlation_keys "
+                "WHERE case_id = ? AND tenant_id = ?",
+                (case_id, tenant_id),
+            )
+            cur.execute(
+                "DELETE FROM order_case WHERE case_id = ? AND tenant_id = ?",
+                (case_id, tenant_id),
+            )
+
+        if _cursor is not None:
+            _run(_cursor)
+        else:
+            with self._adapter.cursor(tenant_id) as cur:
+                _run(cur)
 
     def set_pending_override_cas(
         self, case_id: str, tenant_id: str, override_json: Optional[str],
