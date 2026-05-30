@@ -472,6 +472,45 @@ class IntentDecision(BaseModel):
     rationale: Optional[str] = None
 
 
+# ADR-036 — customer-origin email supergroup classification.
+#
+# The CUSTOMER intake path assigns the case supergroup *directly* from
+# intake classification (requirements acceptance #1, §8.5: supergroup is
+# a case-level rollup, never a routing key), in contrast to the API path
+# which derives it from the SAP block code → leaf intent. The 12 codes
+# below are the CUSTOMER supergroups; this Literal is hand-maintained
+# (like AllowedIntent) and locked against SUPERGROUPS_BY_ORIGIN["CUSTOMER"]
+# by tests/test_email_supergroup_classifier.py so it cannot drift from the
+# governed taxonomy SoT.
+AllowedCustomerSupergroup = Literal[
+    "SG_NEW_ORDER",
+    "SG_ORDER_CHANGE",
+    "SG_ORDER_STATUS_INQUIRY",
+    "SG_SHIPMENT_DISCREPANCY",
+    "SG_RETURN_RGA",
+    "SG_LOGISTICS_CHANGE",
+    "SG_BILLING_DISPUTE",
+    "SG_DOCUMENTATION",
+    "SG_COMPLAINT_SERVICE",
+    "SG_COMPLAINT_PRODUCT",
+    "SG_EDI_ESCALATION",
+    "SG_NEEDS_TRIAGE",
+]
+
+
+class EmailSupergroupDecision(BaseModel):
+    """Constrained output of the customer-email supergroup classifier
+    (ADR-036). ``supergroup_code`` is constrained to the CUSTOMER
+    supergroups at generation time; ``confidence`` gates whether the
+    decision is recorded as a MODEL classification (≥ threshold) or
+    routed to SG_NEEDS_TRIAGE."""
+
+    model_config = ConfigDict(extra="forbid")
+    supergroup_code: AllowedCustomerSupergroup
+    confidence: float = Field(ge=0.0, le=1.0)
+    rationale: Optional[str] = None
+
+
 class ShadowDecisionSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
     status: AllowedShadowStatus

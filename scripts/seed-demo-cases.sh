@@ -245,6 +245,44 @@ seed_manual_intake() {
     seeded=$(( seeded + 1 ))
 }
 
+# B3 — customer-email supergroup variety (ADR-036). The manual-intake
+# producer is the labelled stand-in for the email-intelligence-agent;
+# passing an `email_supergroup_hint` on metadata drives the Phase-1
+# deterministic supergroup classifier (skills/email_supergroup_classifier),
+# so the case opens under the given CUSTOMER supergroup with a MODEL
+# classification — the same variety the asoe-ui mock fabricates, now on
+# the real path. The hint rides metadata_extra (a free-form passthrough);
+# the endpoint is unchanged.
+seed_email_supergroup() {
+    local order_id="$1"
+    local supergroup="$2"
+    set +e
+    local response http_status body
+    response=$(curl -sS --max-time 60 \
+        -X POST \
+        -H "${auth_header}" \
+        -H "content-type: application/json" \
+        -d "$(jq -nc --arg o "${order_id}" --arg sg "${supergroup}" \
+              '{order_id:$o, composite_confidence:0.9, metadata_extra:{email_supergroup_hint:$sg}}')" \
+        -w "\n__HTTP_STATUS__:%{http_code}" \
+        "${API_URL}/api/v1/_sandbox/seed/manual-order-intake")
+    local curl_rc=$?
+    set -e
+    http_status=$(awk -F: '/^__HTTP_STATUS__:/ {print $2}' <<<"${response}")
+    body=$(awk '/^__HTTP_STATUS__:/ {exit} {print}' <<<"${response}")
+    if [[ ${curl_rc} -ne 0 ]] || [[ "${http_status}" != "200" ]]; then
+        echo "  email-supergroup ${supergroup}: ERROR (HTTP ${http_status:-curl_rc=${curl_rc}})"
+        echo "    body: $(head -c 300 <<<"${body}")"
+        errors=$(( errors + 1 ))
+        error_items+=("email-supergroup:${supergroup}")
+        return
+    fi
+    local exc
+    exc=$(jq -r '.exception_id // "—"' <<<"${body}")
+    echo "  email-supergroup ${supergroup}: ok (exception_id=${exc})"
+    seeded=$(( seeded + 1 ))
+}
+
 if [[ "${SEED_MANUAL_INTAKE}" == "1" ]]; then
     echo "── email order-intake (SG_NEW_ORDER) ──"
     seed_manual_intake "EML-SEED-GREEN-001"  0.97 "GREEN(auto)"
@@ -257,20 +295,23 @@ if [[ "${SEED_MANUAL_INTAKE}" == "1" ]]; then
     # record cases. The case status rolls up to its least-settled child.
     seed_manual_intake "EML-SEED-MULTI-001"  0.95 "multi-record #1"
     seed_manual_intake "EML-SEED-MULTI-001"  0.83 "multi-record #2 (same PO)"
+
+    # B3 — customer-email supergroup variety (ADR-036, Phase 1). Drives
+    # the deterministic supergroup classifier so the Customer Inbox shows
+    # the same variety on Azure that the asoe-ui mock fabricates for the
+    # preview. These are MODEL classifications on the real path — the
+    # honest replacement for the previously-faked variety. When the live
+    # email-intelligence-agent (ADR-036 Phase 3) lands, the hint is
+    # replaced by real classification; the seed calls stay valid.
+    echo "── customer-email supergroups (B3 / ADR-036) ──"
+    seed_email_supergroup "EML-SG-CHANGE-001"  "SG_ORDER_CHANGE"
+    seed_email_supergroup "EML-SG-INQUIRY-001" "SG_ORDER_STATUS_INQUIRY"
+    seed_email_supergroup "EML-SG-SHIP-001"    "SG_SHIPMENT_DISCREPANCY"
+    seed_email_supergroup "EML-SG-COMPLAINT-001" "SG_COMPLAINT_SERVICE"
+    seed_email_supergroup "EML-SG-DOC-001"     "SG_DOCUMENTATION"
+    seed_email_supergroup "EML-SG-BILLING-001" "SG_BILLING_DISPUTE"
 fi
 
-# B3 — customer email-shape variety (SG_ORDER_CHANGE /
-# SG_ORDER_STATUS_INQUIRY / SG_COMPLAINT_SERVICE / SG_DOCUMENTATION) is
-# NOT seedable today: the only customer-origin producer is
-# manual-order-intake (→ MANUAL_ORDER_INTAKE → SG_NEW_ORDER), and those
-# customer supergroups have empty intent lists in the taxonomy SoT
-# (db/seeds/case_taxonomy.yaml) — there is no email-intelligence
-# classifier wiring an inbound email to those shapes. The asoe-ui mock
-# fabricates this variety from event_type for the preview; the backend
-# cannot reproduce it without building the customer-email intake
-# classifier/producer. Seeding fake events would misrepresent prod
-# behaviour, so this is left as a flagged feature gap, not seed data.
-#
 # B5 — draft replies render via the analysis composer
 # (compose_draft_reply, api/routes/exceptions.py) for every record; the
 # seeded intake cases above exercise that surface. No separate seed step.
