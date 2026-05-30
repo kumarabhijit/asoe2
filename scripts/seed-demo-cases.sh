@@ -249,7 +249,31 @@ if [[ "${SEED_MANUAL_INTAKE}" == "1" ]]; then
     echo "── email order-intake (SG_NEW_ORDER) ──"
     seed_manual_intake "EML-SEED-GREEN-001"  0.97 "GREEN(auto)"
     seed_manual_intake "EML-SEED-REVIEW-001" 0.88 "YELLOW(review)"
+
+    # B4 — multi-record case. Two intake events sharing one PO
+    # (order_id == customer_po in V1) materialise onto the SAME case, so
+    # the demo exercises the case roll-up + record-picker surface
+    # (/cases/[id]?record=<id>) on real data instead of only single-
+    # record cases. The case status rolls up to its least-settled child.
+    seed_manual_intake "EML-SEED-MULTI-001"  0.95 "multi-record #1"
+    seed_manual_intake "EML-SEED-MULTI-001"  0.83 "multi-record #2 (same PO)"
 fi
+
+# B3 — customer email-shape variety (SG_ORDER_CHANGE /
+# SG_ORDER_STATUS_INQUIRY / SG_COMPLAINT_SERVICE / SG_DOCUMENTATION) is
+# NOT seedable today: the only customer-origin producer is
+# manual-order-intake (→ MANUAL_ORDER_INTAKE → SG_NEW_ORDER), and those
+# customer supergroups have empty intent lists in the taxonomy SoT
+# (db/seeds/case_taxonomy.yaml) — there is no email-intelligence
+# classifier wiring an inbound email to those shapes. The asoe-ui mock
+# fabricates this variety from event_type for the preview; the backend
+# cannot reproduce it without building the customer-email intake
+# classifier/producer. Seeding fake events would misrepresent prod
+# behaviour, so this is left as a flagged feature gap, not seed data.
+#
+# B5 — draft replies render via the analysis composer
+# (compose_draft_reply, api/routes/exceptions.py) for every record; the
+# seeded intake cases above exercise that surface. No separate seed step.
 
 # ────────────────────────────────────── 5. Summary
 
