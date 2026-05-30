@@ -1,0 +1,164 @@
+{
+  "edges": [
+    {
+      "conditional": false,
+      "from_node": "apply_effects",
+      "to_node": "build_analysis",
+      "verdict_label": null
+    },
+    {
+      "conditional": true,
+      "from_node": "classify",
+      "to_node": "build_analysis",
+      "verdict_label": "cross_check_disagreement"
+    },
+    {
+      "conditional": false,
+      "from_node": "classify",
+      "to_node": "load_skill",
+      "verdict_label": null
+    },
+    {
+      "conditional": false,
+      "from_node": "execute_recipe",
+      "to_node": "apply_effects",
+      "verdict_label": null
+    },
+    {
+      "conditional": false,
+      "from_node": "ingest",
+      "to_node": "classify",
+      "verdict_label": null
+    },
+    {
+      "conditional": false,
+      "from_node": "load_skill",
+      "to_node": "validate_circuit_breaker",
+      "verdict_label": null
+    },
+    {
+      "conditional": true,
+      "from_node": "resolve_dependencies",
+      "to_node": "build_analysis",
+      "verdict_label": "required_gw_fail"
+    },
+    {
+      "conditional": true,
+      "from_node": "resolve_dependencies",
+      "to_node": "validate_types",
+      "verdict_label": "ok"
+    },
+    {
+      "conditional": true,
+      "from_node": "select_recipe",
+      "to_node": "build_analysis",
+      "verdict_label": "no_recipe"
+    },
+    {
+      "conditional": true,
+      "from_node": "select_recipe",
+      "to_node": "resolve_dependencies",
+      "verdict_label": "ok"
+    },
+    {
+      "conditional": true,
+      "from_node": "shadow_audit",
+      "to_node": "build_analysis",
+      "verdict_label": "red"
+    },
+    {
+      "conditional": true,
+      "from_node": "shadow_audit",
+      "to_node": "build_analysis",
+      "verdict_label": "yellow"
+    },
+    {
+      "conditional": true,
+      "from_node": "shadow_audit",
+      "to_node": "execute_recipe",
+      "verdict_label": "green"
+    },
+    {
+      "conditional": true,
+      "from_node": "validate_circuit_breaker",
+      "to_node": "build_analysis",
+      "verdict_label": "breach"
+    },
+    {
+      "conditional": true,
+      "from_node": "validate_circuit_breaker",
+      "to_node": "select_recipe",
+      "verdict_label": "ok"
+    },
+    {
+      "conditional": true,
+      "from_node": "validate_types",
+      "to_node": "build_analysis",
+      "verdict_label": "invocation_fail"
+    },
+    {
+      "conditional": true,
+      "from_node": "validate_types",
+      "to_node": "shadow_audit",
+      "verdict_label": "ok"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "apply_effects",
+      "kind": "node",
+      "label": "apply_effects"
+    },
+    {
+      "id": "build_analysis",
+      "kind": "terminal",
+      "label": "build_analysis"
+    },
+    {
+      "id": "classify",
+      "kind": "node",
+      "label": "classify"
+    },
+    {
+      "id": "execute_recipe",
+      "kind": "node",
+      "label": "execute_recipe"
+    },
+    {
+      "id": "ingest",
+      "kind": "node",
+      "label": "ingest"
+    },
+    {
+      "id": "load_skill",
+      "kind": "node",
+      "label": "load_skill"
+    },
+    {
+      "id": "resolve_dependencies",
+      "kind": "node",
+      "label": "resolve_dependencies"
+    },
+    {
+      "id": "select_recipe",
+      "kind": "node",
+      "label": "select_recipe"
+    },
+    {
+      "id": "shadow_audit",
+      "kind": "node",
+      "label": "shadow_audit"
+    },
+    {
+      "id": "validate_circuit_breaker",
+      "kind": "node",
+      "label": "validate_circuit_breaker"
+    },
+    {
+      "id": "validate_types",
+      "kind": "node",
+      "label": "validate_types"
+    }
+  ],
+  "topology_hash": "8ce902321a0fc272f274f75fad832a4b78398e9b93638de45d55efdbcd0e0b63"
+}
