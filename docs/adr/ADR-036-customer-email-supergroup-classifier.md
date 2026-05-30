@@ -108,6 +108,14 @@ case_classification_history  ◄── exactly one row (§8.6)
 
 The classifier is **non-executing**: it classifies and routes, it does not run a recipe or a compliance shadow inside itself (CLAUDE.md Reasoning Boundaries). Recipes remain driven by the leaf `intent_code`; this classifier only fills the case-level supergroup.
 
+### 3.1 Layering — where the email-intelligence engine lives (and why not `skills/`)
+
+This component reasons (Phase 3 is an LLM backend + OCR backend + rule fallbacks over free-text email bodies and attachments), so the intuitive home is `skills/`. It is **deliberately not** there, and the distinction is worth stating because it will recur every time someone adds a classifier:
+
+* `skills/` in this repo does **not** mean "anything that does AI reasoning." It means **reasoning whose output is the routing key** — `IntentClassifier` emits a leaf `intent` that *directly selects a recipe*. That is why `skills/` (with `recipes/` and `orchestration/`) is a **routing layer**, guarded by the routing-on-leaf invariant lock (`tests/test_routing_on_leaf_only.py`), which forbids the token `supergroup_code` anywhere in those three directories so nobody can dispatch a recipe on a supergroup (§8.5).
+* The discriminator is **output semantics, not input sophistication.** The email classifier's output is the **supergroup** — a reporting/rollup axis that, by §8.5, *never* reaches recipe dispatch. So however sophisticated its internals become, it is **not** a routing skill. The API path's `supergroup_for_intent` and the persistence-side `record_classification` write supergroup from the `api/` layer for the same reason; this classifier is their sibling.
+* **Phase 1 (this PR) lives in `api/email_supergroup_classifier.py`** — correct, because the shim is ~30 lines of intake plumbing that relays a producer hint. **Phase 3 should NOT pile an LLM/OCR/rules inference pipeline into `api/`** (otherwise routes + persistence + intake orchestration). The clean Phase-3 home is a **dedicated non-routing reasoning module** — e.g. `email_intelligence/` (LLM backend, OCR backend, rule fallbacks) — sibling in spirit to `skills/` but outside the three routing directories, so the lock keeps holding. `api/case_resolver.py` calls into it through the **same seam** it uses for the shim today (`EmailSupergroupClassifier(backend=…).classify(state)`); only the backend swaps. The decision that matters is "**not in the routing layer**," not "`api/` specifically."
+
 New `EmailSupergroupDecision` schema (sibling to `IntentDecision`):
 
 ```python
@@ -118,7 +126,7 @@ class EmailSupergroupDecision(BaseModel):
     rationale: Optional[str] = None
 ```
 
-`AllowedCustomerSupergroup` is generated from `SUPERGROUPS_BY_ORIGIN["CUSTOMER"]` so it cannot drift from the taxonomy SoT (the same drift-lock discipline as the taxonomy constants and the pipeline-topology snapshot).
+`AllowedCustomerSupergroup` is a hand-maintained `Literal` in `constraints/specs.py` (the same pattern as `AllowedIntent`), **locked by test** against `SUPERGROUPS_BY_ORIGIN["CUSTOMER"]` so it cannot drift from the taxonomy SoT — the same drift-lock guarantee as the generated taxonomy constants, without coupling the schema module to the codegen step.
 
 ## 4. Consequences
 
@@ -146,9 +154,9 @@ class EmailSupergroupDecision(BaseModel):
 
 ## 6. Implementation phases
 
-1. **(this ADR + bootstrap shim)** `EmailSupergroupDecision` schema + generated `AllowedCustomerSupergroup`; deterministic backend; `classify_email_supergroup`; wire into `resolve_or_open_case` for CUSTOMER origin; parametrize the sandbox producer to emit the category hint; classification-history write; tests + a constrained-output lock. Behaviour driven by the deterministic backend (honest, governed bootstrap).
+1. **(this ADR + bootstrap shim)** `EmailSupergroupDecision` schema + test-locked `AllowedCustomerSupergroup`; deterministic backend; `EmailSupergroupClassifier`; wire into `resolve_or_open_case` for CUSTOMER origin; the sandbox producer emits the category hint via its existing `metadata_extra` passthrough; classification-history write; tests + a constrained-output lock. Behaviour driven by the deterministic backend (honest, governed bootstrap). Lands in `api/` as intake plumbing (§3.1).
 2. **(steward, separate)** Phase-0 customer leaf intents (D2b) → `case_taxonomy.yaml` → regenerate.
-3. **(platform, separate)** Live `OutlinesConstrainedBackend` + email-body sanitizer + calibration; flip from shim to model once ECE-calibrated; retire the shim.
+3. **(platform, separate)** Live LLM/OCR/rules engine. Per §3.1 this lands as a **dedicated non-routing module** (e.g. `email_intelligence/`), *not* inside `api/` and *not* inside the routing layer (`skills/`/`recipes/`/`orchestration/`), so the routing-on-leaf lock keeps holding; `case_resolver` calls it through the same `EmailSupergroupClassifier(backend=…)` seam. Includes `OutlinesConstrainedBackend` (or equivalent) + email-body/attachment sanitizer + confidence calibration; flip from shim to model once ECE-calibrated; retire the shim.
 
 ## 7. Provenance
 
