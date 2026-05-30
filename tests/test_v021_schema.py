@@ -104,7 +104,7 @@ def test_migration_versions_recorded(db: sqlite3.Connection) -> None:
     recorded = {
         r[0] for r in db.execute("SELECT version FROM schema_migrations").fetchall()
     }
-    assert {"V010", "V011", "V014", "V021"} <= recorded
+    assert {"V010", "V011", "V014", "V021", "V022"} <= recorded
 
 
 def test_reapply_is_idempotent(db: sqlite3.Connection) -> None:
