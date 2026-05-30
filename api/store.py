@@ -309,6 +309,15 @@ class ExceptionStore:
                 if r.tenant_id == tenant_id and r.parent_case_id == case_id
             ]
 
+    def list_orphans(self, tenant_id: str) -> List[ChildCase]:
+        """Exceptions for a tenant with no parent case — Phase H.7
+        backfill input. Mirrors ``DatabaseBackedStore.list_orphans``."""
+        with self._lock:
+            return [
+                r for r in self._records.values()
+                if r.tenant_id == tenant_id and r.parent_case_id is None
+            ]
+
     def update(
         self,
         exception_id: str,
@@ -693,6 +702,15 @@ class DatabaseBackedStore:
         )
         records = [self._dict_to_record(r) for r in rows]
         return [r for r in records if r.parent_case_id == case_id]
+
+    def list_orphans(self, tenant_id: str) -> List[ChildCase]:
+        """Exceptions for a tenant with ``parent_case_id IS NULL`` —
+        Phase H.7 backfill input. DB-backed; mirrors
+        ``ExceptionStore.list_orphans``."""
+        return [
+            self._dict_to_record(r)
+            for r in self._exceptions.list_orphans(tenant_id)
+        ]
 
     def update(
         self,
@@ -1419,6 +1437,17 @@ class CaseStore:
             self._cases[case_id] = updated
             return updated
 
+    def delete(self, case_id: str) -> None:
+        """Remove a case and any correlation keys pointing at it. Used by
+        the Phase H.7 Pass-2 merge to drop a duplicate orphan case after
+        its children are re-pointed. Classification history (``_history``)
+        is append-only and left intact."""
+        with self._lock:
+            self._cases.pop(case_id, None)
+            self._correlation = {
+                k: v for k, v in self._correlation.items() if v != case_id
+            }
+
     def clear(self) -> None:
         """Test-helper: reset the in-memory store."""
         with self._lock:
@@ -1771,6 +1800,17 @@ class DatabaseBackedCaseStore:
              "updated_at": datetime.now(timezone.utc).isoformat()},
         )
         return self.get(case_id)  # type: ignore[return-value]
+
+    def delete(self, case_id: str) -> None:
+        """Remove a case + its correlation keys (Phase H.7 Pass-2 merge).
+        Children must be re-pointed first or the parent_case_id FK blocks
+        the delete; classification-history rows (append-only) would also
+        block it, which is correct — a case with audit history is not a
+        backfill duplicate."""
+        tenant_id = self._resolve_tenant(case_id)
+        if tenant_id is None:
+            return
+        self._cases.delete(case_id, tenant_id)
 
     def clear(self) -> None:
         """Test helper: drop cases + correlation keys. Append-only

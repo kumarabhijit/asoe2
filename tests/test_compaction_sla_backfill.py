@@ -467,7 +467,7 @@ class TestBackfill:
 
     def test_backfill_opens_case_per_record(self):
         record = self._seed_orphan_record()
-        report = backfill_orphan_cases()
+        report = backfill_orphan_cases("t1")
         assert report.records_scanned == 1
         assert report.cases_opened == 1
         assert report.records_skipped_no_event == 0
@@ -478,7 +478,7 @@ class TestBackfill:
     def test_backfill_attaches_records_with_same_po_to_one_case(self):
         record_a = self._seed_orphan_record(order_id="PO-DUP-7")
         record_b = self._seed_orphan_record(order_id="PO-DUP-7")
-        report = backfill_orphan_cases()
+        report = backfill_orphan_cases("t1")
         assert record_a.parent_case_id == record_b.parent_case_id, (
             "Records sharing customer_po should attach to a single case"
         )
@@ -498,15 +498,15 @@ class TestBackfill:
         )
         # Inject into store bypassing create() so original_event stays None.
         exception_store._records[record.id] = record  # type: ignore[attr-defined]
-        report = backfill_orphan_cases()
+        report = backfill_orphan_cases("t1")
         assert report.records_skipped_no_event == 1
         assert report.cases_opened == 0
         assert record.parent_case_id is None  # untouched
 
     def test_backfill_is_idempotent(self):
         self._seed_orphan_record()
-        report1 = backfill_orphan_cases()
-        report2 = backfill_orphan_cases()
+        report1 = backfill_orphan_cases("t1")
+        report2 = backfill_orphan_cases("t1")
         assert report1.cases_opened == 1
         # Second run is a no-op — every record now has parent_case_id.
         assert report2.cases_opened == 0
@@ -515,6 +515,7 @@ class TestBackfill:
     def test_backfill_uses_customer_tier_lookup_for_sla(self):
         record = self._seed_orphan_record(tenant_id="strategic-tenant")
         backfill_orphan_cases(
+            "strategic-tenant",
             customer_tier_lookup={"strategic-tenant": "Strategic"},
         )
         case = case_store.get(record.parent_case_id)
@@ -542,7 +543,7 @@ class TestBackfill:
             update={"customer_po_number": "PO-MERGE"},
         )
 
-        report = merge_orphan_cases_by_correlation(dry_run=True)
+        report = merge_orphan_cases_by_correlation("t1", dry_run=True)
         assert report.cases_merged == 1
         # Both cases still present in the store (dry run).
         assert case_store.get(case_a.case_id) is not None
@@ -561,7 +562,7 @@ class TestBackfill:
             update={"customer_po_number": "PO-MERGE-2"},
         )
 
-        report = merge_orphan_cases_by_correlation()
+        report = merge_orphan_cases_by_correlation("t1")
         assert report.cases_merged == 1
         # Earlier-opened case wins; later one is dropped.
         assert case_store.get(case_a.case_id) is not None

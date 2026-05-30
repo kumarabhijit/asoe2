@@ -157,7 +157,7 @@ jobs:
         # falling back to SQLite tmp files locally. -k keeps the job
         # fast and focused on the storage layer.
         run: |
-          pytest -q tests/ -k "postgres or parity or durability or repository or migration or order_case or case_store"
+          pytest -q tests/ -k "postgres or parity or durability or repository or migration or order_case or case_store or backfill"
 
   # PARITY-0 Phase 0a — security CI gates (Security review).
   # Advisory (continue-on-error: true) for the first deploys so PARITY-0

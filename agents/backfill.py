@@ -1,28 +1,33 @@
-"""ADR-038 Phase H.7 — backfill of legacy ChildCase rows.
+"""ADR-038 Phase H.7 — backfill of orphan ChildCase rows.
 
-Existing flat ``ChildCase`` rows ship with ``parent_case_id =
-None`` (T1 stateless path or pre-Phase-H.3 records). Per ADR-038
-§7.7 we auto-generate an orphan ``OrderCase`` per record so the
-data model is uniform; an optional second pass batch-merges
-records sharing ``(tenant, customer_id, customer_po)`` onto a
-single case.
+Existing flat ``ChildCase`` rows ship with ``parent_case_id = None``
+(T1 stateless path or pre-Phase-H.3 records). Per ADR-038 §7.7 we
+materialise an ``OrderCase`` per record so the data model is uniform;
+an optional second pass merges records sharing ``(tenant, customer_po)``
+onto a single case.
 
-This module operates on the in-memory store; the SQL-backed
-equivalent lives in ``db/migrations/V011__backfill_orphan_cases.sql``
-(authored alongside this commit but executed by ops on the Postgres
-path). The two implementations agree on the policy: same record
-→ same case_id derivation.
+Both passes operate through the **store public API** (not private
+``_records`` / ``_cases`` dicts) so they work identically against the
+in-memory and the DB-backed stores (Phase H.7 durable cases). The
+SQL companion ``db/migrations/V011__backfill_orphan_cases.sql`` is the
+Postgres-deploy equivalent of Pass 1; both agree on the policy.
+
+Tenant-scoped: each call backfills one tenant (the DB path is
+tenant-isolated via RLS / app-layer filtering, and the ops runner
+iterates the tenant list). Stores are injectable for testing; they
+default to the module singletons wired off ``DATABASE_URL``.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from agents.sla import stamp_sla_deadline
 from api.case_resolver import derive_origin_and_channel
-from api.store import case_store, exception_store
-from contracts.models import OrderCase, OrderEvent
+from api.store import case_store as _default_case_store
+from api.store import exception_store as _default_exception_store
+from contracts.models import OrderEvent
 
 
 # ---------------------------------------------------------------------------
@@ -32,9 +37,9 @@ from contracts.models import OrderCase, OrderEvent
 
 def _event_from_record(record) -> Optional[OrderEvent]:
     """Reconstruct an OrderEvent from a record's persisted
-    ``original_event`` payload. Returns None when the payload is
-    absent (pre-Phase-19 records). Backfill skips those — they're
-    orphan-only without source-channel inference."""
+    ``original_event`` payload. Returns None when the payload is absent
+    (pre-Phase-19 records); backfill skips those — they're orphan-only
+    without source-channel inference."""
     if not record.original_event:
         return None
     try:
@@ -66,37 +71,37 @@ class BackfillReport:
 
 
 def backfill_orphan_cases(
+    tenant_id: str,
     *,
     customer_tier_lookup: Optional[Dict[str, str]] = None,
     bundle_version_at_open: str = "legacy-pre-h2",
+    exception_store: Any = None,
+    case_store: Any = None,
 ) -> BackfillReport:
-    """Materialise an OrderCase for every ChildCase with
-    ``parent_case_id is None``. Records with the same
-    ``(tenant_id, customer_id, customer_po_number)`` attach to one
-    case (correlation lookup-or-create handles this naturally).
+    """Materialise an OrderCase for every orphan ChildCase in ``tenant_id``
+    and persist the ``parent_case_id`` link back onto the record. Records
+    sharing ``(tenant, customer_po)`` attach to one case (correlation
+    lookup-or-create handles this naturally).
 
-    Returns a typed report. Idempotent: a second run is a no-op
-    because every record now has ``parent_case_id`` set.
+    Idempotent: a second run scans nothing because every record now has
+    ``parent_case_id`` set (``list_orphans`` returns only NULL-parent rows).
 
     Args:
-        customer_tier_lookup: optional ``customer_id → tier_name``
-            map used to compute SLA deadlines per ADR-038 Phase H.7.
-            Falls back to the policy's ``default_sla_hours`` when
-            absent or the customer isn't in the map.
-        bundle_version_at_open: the L0 bundle version stamped on
-            backfilled cases. Defaults to a sentinel that auditors
-            recognise as "this case was materialised retroactively".
+        tenant_id: the tenant to backfill (one call per tenant).
+        customer_tier_lookup: optional ``customer_id → tier_name`` map for
+            SLA-deadline computation; falls back to the policy default.
+        bundle_version_at_open: L0 bundle-version sentinel stamped on
+            backfilled cases (audit-recognisable as retroactive).
+        exception_store / case_store: injectable stores (default: the
+            module singletons). Pass both from the SAME backing store.
     """
+    exc_store = exception_store or _default_exception_store
+    cse_store = case_store or _default_case_store
     customer_tier_lookup = customer_tier_lookup or {}
     report = BackfillReport()
 
-    # Iterate the in-memory record store. The DB-backed path uses
-    # the same logic via the SQL companion.
-    records = list(getattr(exception_store, "_records", {}).values())  # type: ignore[attr-defined]
-    for record in records:
+    for record in exc_store.list_orphans(tenant_id):
         report.records_scanned += 1
-        if record.parent_case_id is not None:
-            continue
 
         event = _event_from_record(record)
         if event is None:
@@ -115,7 +120,7 @@ def backfill_orphan_cases(
             customer_tier=tier_name,
         )
 
-        case, opened_now = case_store.lookup_or_create(
+        case, opened_now = cse_store.lookup_or_create(
             tenant_id=record.tenant_id,
             origin=origin,
             source_channel=channel,
@@ -127,7 +132,10 @@ def backfill_orphan_cases(
             sla_deadline=sla_deadline,
             bundle_version_at_open=bundle_version_at_open,
         )
-        record.parent_case_id = case.case_id
+        # Persist the link (DB-backed path writes the column; in-memory
+        # path mutates the record). This is the step the old in-memory-only
+        # implementation skipped on the DB path.
+        exc_store.update(record.id, record.tenant_id, parent_case_id=case.case_id)
         report.record_to_case[record.id] = case.case_id
         if opened_now:
             report.cases_opened += 1
@@ -138,56 +146,57 @@ def backfill_orphan_cases(
 
 
 # ---------------------------------------------------------------------------
-# Pass 2 — optional merge of cases sharing (tenant, customer, customer_po)
+# Pass 2 — optional merge of cases sharing (tenant, customer_po)
 # ---------------------------------------------------------------------------
 
 
 def merge_orphan_cases_by_correlation(
+    tenant_id: str,
     *,
     dry_run: bool = False,
+    exception_store: Any = None,
+    case_store: Any = None,
 ) -> BackfillReport:
-    """Optional second pass — when Pass 1 opened multiple cases for
-    the same ``(tenant, customer_po)`` because the records arrived
-    in interleaved order, merge them into one case.
+    """Optional second pass — when Pass 1 opened multiple cases for the
+    same ``(tenant, customer_po)`` because records arrived in interleaved
+    order (e.g. the PO field was empty on the first record but populated
+    on the second), merge them into the earliest-opened case.
 
-    Pass 1's lookup-or-create already does this for records that
-    arrived in the right order. Pass 2 catches edge cases (e.g. the
-    PO field was empty on the first record but populated on the
-    second).
+    Pass 1's lookup-or-create already dedups records that arrived in the
+    right order; Pass 2 catches the edge cases. It is a SEPARATE function
+    because most deployments never need it and running it requires a
+    maintenance window (case merges re-point existing references and
+    change downstream URLs).
 
-    Phase H.7 deliberately makes Pass 2 a *separate* function. Most
-    deployments never need it; running it requires a maintenance
-    window because case merges affect existing references.
-
-    Returns a report; ``dry_run=True`` makes it report-only without
-    actually merging.
+    ``dry_run=True`` reports merge candidates without mutating anything.
     """
+    exc_store = exception_store or _default_exception_store
+    cse_store = case_store or _default_case_store
     report = BackfillReport()
 
-    # Group cases by (tenant, customer_po). Skip cases with no PO.
-    by_key: Dict[tuple, List[OrderCase]] = {}
-    for case in list(case_store._cases.values()):  # type: ignore[attr-defined]
+    by_po: Dict[str, List[Any]] = {}
+    for case in cse_store.list_by_tenant(tenant_id):
         if not case.customer_po_number:
             continue
-        key = (case.tenant_id, case.customer_po_number)
-        by_key.setdefault(key, []).append(case)
+        by_po.setdefault(case.customer_po_number, []).append(case)
 
-    for key, cases in by_key.items():
+    for cases in by_po.values():
         if len(cases) < 2:
             continue
-        # Sort by opened_at — earliest case wins; later cases merge into it.
+        # Earliest-opened case wins; later cases merge into it.
         cases_sorted = sorted(cases, key=lambda c: c.opened_at)
         primary = cases_sorted[0]
         for duplicate in cases_sorted[1:]:
             report.cases_merged += 1
             if dry_run:
                 continue
-            # Re-point every record that was attached to the duplicate.
-            for record in getattr(exception_store, "_records", {}).values():  # type: ignore[attr-defined]
-                if record.parent_case_id == duplicate.case_id:
-                    record.parent_case_id = primary.case_id
-                    report.record_to_case[record.id] = primary.case_id
-            # Drop the duplicate case from the store.
-            case_store._cases.pop(duplicate.case_id, None)  # type: ignore[attr-defined]
+            # Re-point every child of the duplicate onto the primary, then
+            # drop the now-childless duplicate case.
+            for child in exc_store.list_by_case(tenant_id, duplicate.case_id):
+                exc_store.update(
+                    child.id, tenant_id, parent_case_id=primary.case_id,
+                )
+                report.record_to_case[child.id] = primary.case_id
+            cse_store.delete(duplicate.case_id)
 
     return report

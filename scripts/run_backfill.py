@@ -75,6 +75,14 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--tenant",
+        required=True,
+        help=(
+            "Tenant id to backfill. Backfill is tenant-scoped (the "
+            "DB path is tenant-isolated via RLS); run once per tenant."
+        ),
+    )
+    parser.add_argument(
         "--pass",
         dest="pass_",
         choices=("1", "2", "both"),
@@ -135,6 +143,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.pass_ in ("1", "both"):
             log.info("Running Pass 1 — orphan-case-per-record backfill.")
             r1 = backfill_orphan_cases(
+                args.tenant,
                 customer_tier_lookup=tier_map,
                 bundle_version_at_open=args.bundle_version_at_open,
             )
@@ -145,7 +154,9 @@ def main(argv: Optional[list[str]] = None) -> int:
                 "(dry_run=%s).",
                 args.dry_run,
             )
-            r2 = merge_orphan_cases_by_correlation(dry_run=args.dry_run)
+            r2 = merge_orphan_cases_by_correlation(
+                args.tenant, dry_run=args.dry_run,
+            )
             reports.append(_report_to_dict(r2, label="2"))
     except Exception:
         log.exception("backfill failed")
