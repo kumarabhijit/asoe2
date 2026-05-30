@@ -12,13 +12,28 @@ from __future__ import annotations
 # expanders) and tests; they must not be required by graph callers.
 
 from contracts.models import GraphState
-from constraints.specs import IntentDecision, RecipeProposal, ShadowDecisionSchema
+from constraints.specs import (
+    EmailSupergroupDecision,
+    IntentDecision,
+    RecipeProposal,
+    ShadowDecisionSchema,
+)
 from llm.backends import get_outlines_model
 
 
 class OutlinesConstrainedBackend:
     def __init__(self, model_name: str | None = None):
         self.model = get_outlines_model(model_name)
+
+    def classify_email_supergroup(self, state: GraphState) -> EmailSupergroupDecision:
+        # ADR-036 Phase 3. The local Outlines path for customer-email
+        # classification is not built out (it needs an email-tuned local
+        # model); delegate to the deterministic hint-relay so provider=
+        # outlines deployments still satisfy the email_supergroup contract
+        # rather than raising AttributeError.
+        from constraints.fallback_backend import DeterministicFallbackBackend
+
+        return DeterministicFallbackBackend().classify_email_supergroup(state)
 
     def classify_intent(self, state: GraphState) -> IntentDecision:
         prompt = self.intent_prompt(state)

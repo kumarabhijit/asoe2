@@ -12,14 +12,19 @@ from typing import get_args
 import pytest
 
 from constraints.specs import AllowedCustomerSupergroup, EmailSupergroupDecision
+from constraints.fallback_backend import DeterministicFallbackBackend
 from contracts._generated.taxonomy_constants import SUPERGROUPS_BY_ORIGIN
 from contracts.models import GraphState, OrderEvent
-from api.email_supergroup_classifier import (
+from email_intelligence import (
     DEFAULT_CONFIDENCE_THRESHOLD,
     EMAIL_CATEGORY_HINT_KEY,
-    DeterministicEmailSupergroupBackend,
     EmailSupergroupClassifier,
 )
+
+# Phase 3: the deterministic email classifier is now a method on the
+# canonical DeterministicFallbackBackend (the router's fall-closed net),
+# replacing the Phase-1 standalone DeterministicEmailSupergroupBackend.
+DeterministicEmailSupergroupBackend = DeterministicFallbackBackend
 
 
 # ---------------------------------------------------------------------------

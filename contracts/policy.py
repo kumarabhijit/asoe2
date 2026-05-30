@@ -307,10 +307,13 @@ base_url=<vllm-url>. Qwen on HF Inference Endpoints =
 provider=huggingface. This keeps the enum stable as new clouds
 appear."""
 
-LLMTask = Literal["intent", "recipe", "shadow"]
-"""The three trio methods served by a constraint backend. Each is
-independently routable so an operator can pin shadow to deterministic
-while letting intent and recipe go through a remote LLM."""
+LLMTask = Literal["intent", "recipe", "shadow", "email_supergroup"]
+"""The constraint-backend tasks. The first three are the classic trio
+(classify_intent / propose_recipe / shadow_decision). ``email_supergroup``
+(ADR-036 Phase 3) classifies a customer email into a CUSTOMER supergroup;
+it is independently routable so an operator can run it on a remote LLM
+while the trio stays deterministic — or vice versa. Like every task it
+falls closed to DeterministicFallbackBackend when unconfigured."""
 
 LLM_PROVIDER_DEFAULT: LLMProvider = "fallback"
 """Default provider when ASOE_LLM_PROVIDER is unset. Production deploys

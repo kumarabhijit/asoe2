@@ -15,10 +15,47 @@ from contracts.policy import (
     PRICE_HOLD_HARD_BLOCK_PCT,
     PRICE_HOLD_TOLERANCE_PCT,
 )
-from constraints.specs import IntentDecision, RecipeProposal, ShadowDecisionSchema
+from constraints.specs import (
+    AllowedCustomerSupergroup,
+    EmailSupergroupDecision,
+    IntentDecision,
+    RecipeProposal,
+    ShadowDecisionSchema,
+)
+
+# ADR-036 — the upstream producer / email-intelligence stand-in stamps a
+# proposed CUSTOMER supergroup on event.metadata under this key. The
+# deterministic backend relays it (constrained to AllowedCustomerSupergroup);
+# the live RemoteLLMBackend replaces the hint with real classification.
+EMAIL_SUPERGROUP_HINT_KEY = "email_supergroup_hint"
+
+_CUSTOMER_SUPERGROUPS: frozenset[str] = frozenset(
+    AllowedCustomerSupergroup.__args__  # type: ignore[attr-defined]
+)
 
 
 class DeterministicFallbackBackend:
+    def classify_email_supergroup(self, state: GraphState) -> EmailSupergroupDecision:
+        """ADR-036 D5 bootstrap. Relays the producer's supergroup hint as a
+        high-confidence decision; a missing/unknown hint yields a low-
+        confidence SG_NEEDS_TRIAGE so the threshold sink is exercised
+        honestly. Pure code — no prompt-injection surface, always available.
+        This is the net the router falls closed to for the email_supergroup
+        task when no model is configured (local / CI / Vercel preview)."""
+        meta = (state.event.metadata or {}) if state.event else {}
+        hint = meta.get(EMAIL_SUPERGROUP_HINT_KEY)
+        if hint in _CUSTOMER_SUPERGROUPS and hint != "SG_NEEDS_TRIAGE":
+            return EmailSupergroupDecision(
+                supergroup_code=hint,
+                confidence=0.95,
+                rationale=f"deterministic backend: producer hint {hint!r}",
+            )
+        return EmailSupergroupDecision(
+            supergroup_code="SG_NEEDS_TRIAGE",
+            confidence=0.0,
+            rationale="no usable supergroup hint — routed to triage",
+        )
+
     def classify_intent(self, state: GraphState) -> IntentDecision:
         if state.event.line_count > MASS_UPDATE_LINE_COUNT_THRESHOLD:
             return IntentDecision(intent="MASS_PRICING_ERROR", confidence=0.95, rationale=f"line_count > {MASS_UPDATE_LINE_COUNT_THRESHOLD}")
