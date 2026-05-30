@@ -1,6 +1,6 @@
 # ADR-036: Customer-Origin Email Supergroup Classifier
 
-**Status:** Proposed (2026-05-30)
+**Status:** Accepted (2026-05-30) — Phases 1–3 built; live-model promotion (shadow→gate) pending calibration.
 **Date:** 2026-05-30
 **Deciders (proposed reviewer chain):** Principal AI/Agentic Engineering Architect; Domain Modeller / Taxonomy Steward; Compliance Engineer; Product Owner; CS Ops business lead.
 **Applies to:**
@@ -154,9 +154,9 @@ class EmailSupergroupDecision(BaseModel):
 
 ## 6. Implementation phases
 
-1. **(this ADR + bootstrap shim)** `EmailSupergroupDecision` schema + test-locked `AllowedCustomerSupergroup`; deterministic backend; `EmailSupergroupClassifier`; wire into `resolve_or_open_case` for CUSTOMER origin; the sandbox producer emits the category hint via its existing `metadata_extra` passthrough; classification-history write; tests + a constrained-output lock. Behaviour driven by the deterministic backend (honest, governed bootstrap). Lands in `api/` as intake plumbing (§3.1).
-2. **(steward, separate)** Phase-0 customer leaf intents (D2b) → `case_taxonomy.yaml` → regenerate.
-3. **(platform, separate)** Live LLM/OCR/rules engine. Per §3.1 this lands as a **dedicated non-routing module** (e.g. `email_intelligence/`), *not* inside `api/` and *not* inside the routing layer (`skills/`/`recipes/`/`orchestration/`), so the routing-on-leaf lock keeps holding; `case_resolver` calls it through the same `EmailSupergroupClassifier(backend=…)` seam. Includes `OutlinesConstrainedBackend` (or equivalent) + email-body/attachment sanitizer + confidence calibration; flip from shim to model once ECE-calibrated; retire the shim.
+1. **✅ Done (PR #194) — bootstrap shim.** `EmailSupergroupDecision` schema + test-locked `AllowedCustomerSupergroup`; deterministic backend; `EmailSupergroupClassifier`; wire into `resolve_or_open_case` for CUSTOMER origin; the sandbox producer emits the category hint via its existing `metadata_extra` passthrough; classification-history write; tests + a constrained-output lock. (The classifier later moved from `api/` into `email_intelligence/` in Phase 3 — see below.)
+2. **✅ Done — PO-ratified customer leaf intents.** 36 leaves across 11 CUSTOMER supergroups added to `case_taxonomy.yaml` (proposal: `docs/specs/customer-leaf-intent-proposal.md`, ratified 2026-05-30) and regenerated. All `phase_zero_pending`; reclassification/reporting leaves only — **no recipe, not in `AllowedIntent`** (D1), so the intent↔recipe parity contract is untouched. Hand-edited (the seed's documented workflow) rather than the `steward_change` CLI, whose `yaml.safe_dump` round-trip would have stripped the file's comments.
+3. **✅ Done — live engine (shadow until calibrated).** Built the dedicated **`email_intelligence/`** module (§3.1 home): `classifier.py` (router-wired), `shadow.py` (observe harness), `calibration.py` (ECE instrumentation). Added an `email_supergroup` `LLMTask`: `DeterministicFallbackBackend.classify_email_supergroup` (the fall-closed net) + `RemoteLLMBackend.classify_email_supergroup` (live, with the email text fenced by the existing `sanitize_email_text_for_llm`) + an `OutlinesConstrainedBackend` delegate. Selection is via `constraints.router.get_constrained_backend("email_supergroup")`, so it **gracefully falls back to the deterministic shim** when no provider/key is configured (local / CI / Vercel preview) and uses a real endpoint when `ASOE_LLM_PROVIDER[_EMAIL_SUPERGROUP]` is set — honouring kill-switch / explain-mode / per-task disable. Per D4 the live model runs in **shadow/observe** (`ASOE_EMAIL_SUPERGROUP_SHADOW=1`, default) — recorded for ECE, deterministic shim gates — until calibration; set `=0` to promote it to the gate. **Remaining (not code): join human-confirmed outcomes to compute ECE, then flip shadow off; the email-body sanitizer is wired but its allowlist tuning + OCR-derived attachment text remain ops follow-ups.**
 
 ## 7. Provenance
 

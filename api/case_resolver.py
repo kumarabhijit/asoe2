@@ -30,7 +30,7 @@ from api.case_events import (
 )
 from api.store import case_store, exception_store
 from contracts.taxonomy import intent_code_for, supergroup_for_intent
-from api.email_supergroup_classifier import EmailSupergroupClassifier
+from email_intelligence import EmailSupergroupClassifier
 from contracts.models import (
     STATUS_TO_LIFECYCLE,
     CaseStatus,
@@ -142,8 +142,11 @@ def should_materialise(
     return True
 
 
-# ADR-036 — module-level singleton; the Phase-1 deterministic backend is
-# stateless and cheap. Phase 3 swaps in the live constrained backend here.
+# ADR-036 — module-level singleton. The classifier resolves its backend
+# per-call via constraints.router (deterministic shim ⇄ live LLM, by env),
+# so this needs no swap for Phase 3: setting ASOE_LLM_PROVIDER_EMAIL_SUPERGROUP
+# promotes it to the live model; unset, it stays on the deterministic shim
+# (local / CI / Vercel preview). The classifier object is stateless + cheap.
 _email_supergroup_classifier = EmailSupergroupClassifier()
 
 

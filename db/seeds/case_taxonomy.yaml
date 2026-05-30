@@ -15,7 +15,7 @@
 # VBAK/VBAP/VBUK × TVLST/TVFST/TVAGT joined to actual block frequency.
 # Mark `phase_zero_pending: true` on rows whose mapping is provisional.
 
-version: "2026-05-27-v1"
+version: "2026-05-30-v2"
 
 # ---------------------------------------------------------------------------
 # Supergroups (parent-level classification). PO sign-off: §4 Q4 (API list) +
@@ -226,6 +226,236 @@ intents:
     description: "Net-new customer order received via the customer intake path."
     sap_block_code: null
     sap_block_field: null
+  # --- CUSTOMER leaf intents (ADR-036 Phase 2; PO-ratified 2026-05-30,
+  #     docs/specs/customer-leaf-intent-proposal.md). Reclassification /
+  #     reporting leaves — no recipe, not in AllowedIntent (ADR-036 D1).
+  #     phase_zero_pending until a real 90-day corpus confirms frequency. ---
+  # --- SG_ORDER_CHANGE ---
+  - code: INT_QTY_CHANGE
+    supergroup_code: SG_ORDER_CHANGE
+    description: "Change to ordered quantity on an existing line."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_DATE_CHANGE
+    supergroup_code: SG_ORDER_CHANGE
+    description: "Change to requested delivery / ship date."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_SKU_CHANGE
+    supergroup_code: SG_ORDER_CHANGE
+    description: "Add, remove, or substitute a SKU on an existing order."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_ORDER_CANCEL
+    supergroup_code: SG_ORDER_CHANGE
+    description: "Cancel an existing order or order line."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  # --- SG_ORDER_STATUS_INQUIRY (PO-added reporting granularity) ---
+  - code: INT_ORDER_TRACKING
+    supergroup_code: SG_ORDER_STATUS_INQUIRY
+    description: "Tracking / shipment-location request."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_ORDER_ETA
+    supergroup_code: SG_ORDER_STATUS_INQUIRY
+    description: "Delivery ETA / date question."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_DELIVERY_CONFIRMATION
+    supergroup_code: SG_ORDER_STATUS_INQUIRY
+    description: "Order receipt / delivery-confirmation question."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  # --- SG_SHIPMENT_DISCREPANCY ---
+  - code: INT_SHORT_SHIP
+    supergroup_code: SG_SHIPMENT_DISCREPANCY
+    description: "Fewer units received than ordered / shipped."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_OVER_SHIP
+    supergroup_code: SG_SHIPMENT_DISCREPANCY
+    description: "More units received than ordered."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_DAMAGED_TRANSIT
+    supergroup_code: SG_SHIPMENT_DISCREPANCY
+    description: "Goods damaged in transit."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_MISSING_SHIPMENT
+    supergroup_code: SG_SHIPMENT_DISCREPANCY
+    description: "Shipment or POD not received / not located."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  # --- SG_RETURN_RGA ---
+  - code: INT_RETURN_REQUEST
+    supergroup_code: SG_RETURN_RGA
+    description: "Customer requests authorisation to return goods."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_RGA_STATUS
+    supergroup_code: SG_RETURN_RGA
+    description: "Status / follow-up on an existing RGA / RMA."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_RECALL_RECONCILIATION
+    supergroup_code: SG_RETURN_RGA
+    description: "Reconcile returned quantities against a recall."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  # --- SG_LOGISTICS_CHANGE ---
+  - code: INT_SHIPTO_CHANGE
+    supergroup_code: SG_LOGISTICS_CHANGE
+    description: "Ship-to address change."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_ROUTING_CHANGE
+    supergroup_code: SG_LOGISTICS_CHANGE
+    description: "Routing / lane change request."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_DELIVERY_WINDOW_CHANGE
+    supergroup_code: SG_LOGISTICS_CHANGE
+    description: "Delivery-window / appointment change."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_CARRIER_CHANGE
+    supergroup_code: SG_LOGISTICS_CHANGE
+    description: "Carrier change request."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  # --- SG_BILLING_DISPUTE ---
+  - code: INT_INVOICE_DISPUTE
+    supergroup_code: SG_BILLING_DISPUTE
+    description: "Invoice amount / line dispute."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_PAYMENT_TERMS_DISPUTE
+    supergroup_code: SG_BILLING_DISPUTE
+    description: "Payment-terms disagreement."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_FREIGHT_DISPUTE
+    supergroup_code: SG_BILLING_DISPUTE
+    description: "Freight / accessorial charge dispute."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_DEDUCTION_RECONCILIATION
+    supergroup_code: SG_BILLING_DISPUTE
+    description: "Reconcile a customer deduction / chargeback."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  # --- SG_DOCUMENTATION ---
+  - code: INT_COA_REQUEST
+    supergroup_code: SG_DOCUMENTATION
+    description: "Certificate of Analysis request."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_MSDS_REQUEST
+    supergroup_code: SG_DOCUMENTATION
+    description: "MSDS / SDS request."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_TAX_CERT_REQUEST
+    supergroup_code: SG_DOCUMENTATION
+    description: "Tax / exemption certificate request."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_CUSTOMS_DOC_REQUEST
+    supergroup_code: SG_DOCUMENTATION
+    description: "Customs / export paperwork request."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_SAMPLE_REQUEST
+    supergroup_code: SG_DOCUMENTATION
+    description: "Product sample request."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  # --- SG_COMPLAINT_SERVICE ---
+  - code: INT_SERVICE_RESPONSIVENESS
+    supergroup_code: SG_COMPLAINT_SERVICE
+    description: "Response-time / SLA complaint."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_SERVICE_MISINFORMATION
+    supergroup_code: SG_COMPLAINT_SERVICE
+    description: "Wrong information given by service."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_SERVICE_MISSED_FOLLOWUP
+    supergroup_code: SG_COMPLAINT_SERVICE
+    description: "Missed callback / follow-up."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  # --- SG_COMPLAINT_PRODUCT ---
+  - code: INT_PRODUCT_QUALITY
+    supergroup_code: SG_COMPLAINT_PRODUCT
+    description: "Product-quality defect complaint."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_FOOD_SAFETY_REPORT
+    supergroup_code: SG_COMPLAINT_PRODUCT
+    description: "Food-safety report (regulatory-sensitive)."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_RECALL_TRIGGER
+    supergroup_code: SG_COMPLAINT_PRODUCT
+    description: "Complaint that may trigger a recall."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  # --- SG_EDI_ESCALATION ---
+  - code: INT_EDI_850_FAILURE
+    supergroup_code: SG_EDI_ESCALATION
+    description: "Inbound 850 (PO) failure reported by customer."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_EDI_855_FAILURE
+    supergroup_code: SG_EDI_ESCALATION
+    description: "855 (PO ack) failure reported by customer."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
+  - code: INT_EDI_810_FAILURE
+    supergroup_code: SG_EDI_ESCALATION
+    description: "810 (invoice) failure reported by customer."
+    sap_block_code: null
+    sap_block_field: null
+    phase_zero_pending: true
   # --- SG_NEEDS_TRIAGE ---
   - code: INT_UNKNOWN
     supergroup_code: SG_NEEDS_TRIAGE
@@ -346,6 +576,115 @@ labels:
   - code: INT_MANUAL_ORDER_INTAKE
     domain: INTENT
     display_name: "Manual Order Intake"
+  # --- CUSTOMER leaf-intent labels (ADR-036 Phase 2) ---
+  - code: INT_QTY_CHANGE
+    domain: INTENT
+    display_name: "Quantity Change"
+  - code: INT_DATE_CHANGE
+    domain: INTENT
+    display_name: "Date Change"
+  - code: INT_SKU_CHANGE
+    domain: INTENT
+    display_name: "SKU Change"
+  - code: INT_ORDER_CANCEL
+    domain: INTENT
+    display_name: "Order Cancellation"
+  - code: INT_ORDER_TRACKING
+    domain: INTENT
+    display_name: "Tracking Request"
+  - code: INT_ORDER_ETA
+    domain: INTENT
+    display_name: "Delivery ETA Question"
+  - code: INT_DELIVERY_CONFIRMATION
+    domain: INTENT
+    display_name: "Delivery Confirmation"
+  - code: INT_SHORT_SHIP
+    domain: INTENT
+    display_name: "Short Shipment"
+  - code: INT_OVER_SHIP
+    domain: INTENT
+    display_name: "Over Shipment"
+  - code: INT_DAMAGED_TRANSIT
+    domain: INTENT
+    display_name: "Damaged in Transit"
+  - code: INT_MISSING_SHIPMENT
+    domain: INTENT
+    display_name: "Missing Shipment"
+  - code: INT_RETURN_REQUEST
+    domain: INTENT
+    display_name: "Return Request"
+  - code: INT_RGA_STATUS
+    domain: INTENT
+    display_name: "RGA Status"
+  - code: INT_RECALL_RECONCILIATION
+    domain: INTENT
+    display_name: "Recall Reconciliation"
+  - code: INT_SHIPTO_CHANGE
+    domain: INTENT
+    display_name: "Ship-To Change"
+  - code: INT_ROUTING_CHANGE
+    domain: INTENT
+    display_name: "Routing Change"
+  - code: INT_DELIVERY_WINDOW_CHANGE
+    domain: INTENT
+    display_name: "Delivery Window Change"
+  - code: INT_CARRIER_CHANGE
+    domain: INTENT
+    display_name: "Carrier Change"
+  - code: INT_INVOICE_DISPUTE
+    domain: INTENT
+    display_name: "Invoice Dispute"
+  - code: INT_PAYMENT_TERMS_DISPUTE
+    domain: INTENT
+    display_name: "Payment Terms Dispute"
+  - code: INT_FREIGHT_DISPUTE
+    domain: INTENT
+    display_name: "Freight Dispute"
+  - code: INT_DEDUCTION_RECONCILIATION
+    domain: INTENT
+    display_name: "Deduction Reconciliation"
+  - code: INT_COA_REQUEST
+    domain: INTENT
+    display_name: "COA Request"
+  - code: INT_MSDS_REQUEST
+    domain: INTENT
+    display_name: "MSDS Request"
+  - code: INT_TAX_CERT_REQUEST
+    domain: INTENT
+    display_name: "Tax Certificate Request"
+  - code: INT_CUSTOMS_DOC_REQUEST
+    domain: INTENT
+    display_name: "Customs Doc Request"
+  - code: INT_SAMPLE_REQUEST
+    domain: INTENT
+    display_name: "Sample Request"
+  - code: INT_SERVICE_RESPONSIVENESS
+    domain: INTENT
+    display_name: "Service Responsiveness"
+  - code: INT_SERVICE_MISINFORMATION
+    domain: INTENT
+    display_name: "Service Misinformation"
+  - code: INT_SERVICE_MISSED_FOLLOWUP
+    domain: INTENT
+    display_name: "Missed Follow-Up"
+  - code: INT_PRODUCT_QUALITY
+    domain: INTENT
+    display_name: "Product Quality"
+  - code: INT_FOOD_SAFETY_REPORT
+    domain: INTENT
+    display_name: "Food Safety Report"
+  - code: INT_RECALL_TRIGGER
+    domain: INTENT
+    display_name: "Recall Trigger"
+  - code: INT_EDI_850_FAILURE
+    domain: INTENT
+    display_name: "EDI 850 Failure"
+  - code: INT_EDI_855_FAILURE
+    domain: INTENT
+    display_name: "EDI 855 Failure"
+  - code: INT_EDI_810_FAILURE
+    domain: INTENT
+    display_name: "EDI 810 Failure"
   - code: INT_UNKNOWN
     domain: INTENT
     display_name: "Unknown (Needs Triage)"
