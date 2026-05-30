@@ -29,6 +29,7 @@ from api.case_events import (
     publish_case_update,
 )
 from api.store import case_store, exception_store
+from contracts.taxonomy import intent_code_for, supergroup_for_intent
 from contracts.models import (
     STATUS_TO_LIFECYCLE,
     CaseStatus,
@@ -145,11 +146,19 @@ def resolve_or_open_case(
     event: OrderEvent,
     *,
     bundle_version_at_open: Optional[str] = None,
+    intent: Optional[str] = None,
 ) -> Tuple[OrderCase, bool]:
     """Lookup-or-create the case for this event.
 
     Caller is responsible for checking ``should_materialise`` first;
     this helper assumes the policy decision has already been made.
+
+    When ``intent`` (the child's classified intent) is supplied, the
+    case is opened with the supergroup the governed taxonomy assigns to
+    that intent — a deterministic ``RULE`` classification recorded in
+    ``case_classification_history``. Unmapped/absent intents leave the
+    supergroup unset (no guessing). On the attach path (case already
+    exists) ``lookup_or_create`` keeps the case's existing supergroup.
     """
     # ADR-034 §6.2 — observe inbound event_type. The deprecation
     # counter trends toward zero across the transitional window;
@@ -168,6 +177,15 @@ def resolve_or_open_case(
     edi_transaction_id = meta.get("edi_transaction_id")
     source_email_id = meta.get("source_email_id")
 
+    # Resolve the supergroup from the governed taxonomy SoT (RULE
+    # classification). intent_code is the taxonomy form of the same
+    # intent; both are None when the intent is absent or unmapped, in
+    # which case the case opens without a supergroup (unchanged).
+    supergroup_code = supergroup_for_intent(intent)
+    intent_code = (
+        intent_code_for(intent) if (intent and supergroup_code) else None
+    )
+
     return case_store.lookup_or_create(
         tenant_id=tenant_id,
         origin=origin,
@@ -178,6 +196,8 @@ def resolve_or_open_case(
         edi_transaction_id=edi_transaction_id,
         source_email_id=source_email_id,
         bundle_version_at_open=bundle_version_at_open,
+        supergroup_code=supergroup_code,
+        intent_code=intent_code,
     )
 
 
@@ -336,17 +356,24 @@ def materialise_for_event(
     final_status: Optional[str],
     *,
     bundle_version_at_open: Optional[str] = None,
+    intent: Optional[str] = None,
 ) -> Optional[OrderCase]:
     """High-level entry point for the persistence path.
 
     Returns the case (existing or newly opened) when the event
     materialises one; None otherwise. The harness uses the returned
     case's ``case_id`` to populate ``ChildCase.parent_case_id``.
+
+    ``intent`` is the child record's classified intent; when supplied
+    it drives the case's supergroup classification at open (see
+    ``resolve_or_open_case``).
     """
     if not should_materialise(event, final_status):
         return None
     case, opened_now = resolve_or_open_case(
-        tenant_id, event, bundle_version_at_open=bundle_version_at_open,
+        tenant_id, event,
+        bundle_version_at_open=bundle_version_at_open,
+        intent=intent,
     )
     # ADR-038 §6.1 — roll the case status up from its child records.
     # This event's record persists immediately after this call, so its

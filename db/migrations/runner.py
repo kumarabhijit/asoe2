@@ -1190,6 +1190,14 @@ def apply_sqlite(conn: sqlite3.Connection) -> None:
     _apply_sqlite_v019(conn)
     _apply_sqlite_v020(conn)
     _apply_sqlite_v021(conn)
+    # V022 (RLS on case tables) is Postgres-only — SQLite has no RLS, and
+    # the SQLite path already filters by tenant in every query. Record the
+    # version so backend bookkeeping stays in sync.
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+        ("V022", datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
 
 
 def apply_postgres(database_url: str) -> None:
@@ -1261,6 +1269,7 @@ def apply_postgres(database_url: str) -> None:
             ("V019", "V019__drop_legacy_case_columns.sql", "PostgreSQL schema V019 applied (dropped deprecated case columns)"),
             ("V020", "V020__case_classification_history.sql", "PostgreSQL schema V020 applied (case classification history append-only)"),
             ("V021", "V021__order_case_pending_override.sql", "PostgreSQL schema V021 applied (order_case.pending_override durable cosign state)"),
+            ("V022", "V022__case_tables_rls.sql", "PostgreSQL schema V022 applied (RLS on the case tables)"),
         ):
             cur.execute(
                 "SELECT version FROM schema_migrations WHERE version = %s",

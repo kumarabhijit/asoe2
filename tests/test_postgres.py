@@ -265,6 +265,38 @@ class TestRowLevelSecurity:
             rls_enabled = cur.fetchone()[0]
         assert rls_enabled is True
 
+    @pytest.mark.parametrize(
+        "table",
+        ["order_case", "case_correlation_keys", "case_classification_history"],
+    )
+    def test_rls_enabled_on_case_tables(self, pg_adapter, table):
+        """V022 — RLS is enabled on the case tables (parity with the
+        exceptions/traces posture from V001)."""
+        with pg_adapter.cursor() as cur:
+            cur.execute(
+                "SELECT rowsecurity FROM pg_tables WHERE tablename = %s",
+                (table,),
+            )
+            assert cur.fetchone()[0] is True
+
+    @pytest.mark.parametrize(
+        "policy,table",
+        [
+            ("tenant_isolation_order_case", "order_case"),
+            ("tenant_isolation_case_correlation_keys", "case_correlation_keys"),
+            ("tenant_isolation_case_classification_history",
+             "case_classification_history"),
+        ],
+    )
+    def test_rls_policy_exists_on_case_tables(self, pg_adapter, policy, table):
+        """The tenant_isolation policy exists on each case table."""
+        with pg_adapter.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM pg_policies WHERE tablename = %s AND policyname = %s",
+                (table, policy),
+            )
+            assert cur.fetchone() is not None
+
     def test_rls_tenant_isolation_via_repository(self, exception_repo):
         """Tenant A cannot see Tenant B's exceptions through the repository."""
         # Create exception for tenant-a

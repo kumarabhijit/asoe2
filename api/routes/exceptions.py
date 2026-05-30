@@ -462,6 +462,7 @@ def _persist_exception(
     )
     parent_case = materialise_for_event(
         tenant_id, state.event, final_status_value,
+        intent=state.intent.value if state.intent else None,
     )
     parent_case_id = parent_case.case_id if parent_case else None
 
