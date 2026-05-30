@@ -30,6 +30,7 @@ from api.case_events import (
 )
 from api.store import case_store, exception_store
 from contracts.taxonomy import intent_code_for, supergroup_for_intent
+from api.email_supergroup_classifier import EmailSupergroupClassifier
 from contracts.models import (
     STATUS_TO_LIFECYCLE,
     CaseStatus,
@@ -141,6 +142,27 @@ def should_materialise(
     return True
 
 
+# ADR-036 — module-level singleton; the Phase-1 deterministic backend is
+# stateless and cheap. Phase 3 swaps in the live constrained backend here.
+_email_supergroup_classifier = EmailSupergroupClassifier()
+
+
+def _classify_email_supergroup(event: OrderEvent, tenant_id: str):
+    """Run the ADR-036 customer-email supergroup classifier for *event*.
+
+    Returns the EmailSupergroupDecision, or None on any failure — a
+    classifier error must never block case materialisation (the case
+    simply opens without a supergroup, exactly as before ADR-036).
+    """
+    from contracts.models import GraphState
+
+    try:
+        state = GraphState(event=event, tenant_id=tenant_id)
+        return _email_supergroup_classifier.classify(state)
+    except Exception:  # pragma: no cover - defensive; never block intake
+        return None
+
+
 def resolve_or_open_case(
     tenant_id: str,
     event: OrderEvent,
@@ -185,6 +207,25 @@ def resolve_or_open_case(
     intent_code = (
         intent_code_for(intent) if (intent and supergroup_code) else None
     )
+    classified_by = "system:case_intake"
+    classifier_type = "RULE"
+
+    # ADR-036 — CUSTOMER-origin email supergroup classification. The spec
+    # (acceptance #1 / §8.5) assigns the CUSTOMER case supergroup *from
+    # intake classification*, so a confident email classification is
+    # authoritative for the case-level supergroup and takes precedence
+    # over the leaf derivation. It runs FIRST on the CUSTOMER path; the
+    # leaf-derived value (above) is the fallback when the classifier
+    # can't decide (low confidence → SG_NEEDS_TRIAGE), which preserves
+    # the MANUAL_ORDER_INTAKE → SG_NEW_ORDER RULE path for un-hinted
+    # intake. The API path is untouched (classifier is CUSTOMER-only).
+    if origin == "CUSTOMER":
+        decision = _classify_email_supergroup(event, tenant_id)
+        if decision is not None and decision.supergroup_code != "SG_NEEDS_TRIAGE":
+            supergroup_code = decision.supergroup_code
+            intent_code = None  # parent-level classification; no leaf (§8.6)
+            classified_by = "system:email_supergroup_classifier"
+            classifier_type = "MODEL"
 
     return case_store.lookup_or_create(
         tenant_id=tenant_id,
@@ -198,6 +239,8 @@ def resolve_or_open_case(
         bundle_version_at_open=bundle_version_at_open,
         supergroup_code=supergroup_code,
         intent_code=intent_code,
+        classified_by=classified_by,
+        classifier_type=classifier_type,
     )
 
 
