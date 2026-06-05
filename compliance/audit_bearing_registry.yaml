@@ -852,7 +852,9 @@ EntitiesAnalysisData:
     rationale: >-
       Entities the AI intake agent extracted from the email / attachments,
       surfaced to the operator as evidence (each with an optional
-      source_span for provenance). Not itself a binding control field.
+      source_span for provenance, and an optional evidence_ref that links
+      the entity to its in-document EvidenceAnchor for verify-against-source
+      highlighting). Not itself a binding control field.
 
 SapDataAnalysisData:
   # ADR-042 Phase 2 — Customer Inbox SAP Data tab. The SAP system of record,

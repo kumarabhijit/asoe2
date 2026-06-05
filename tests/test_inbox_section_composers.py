@@ -62,6 +62,30 @@ def test_entities_none_on_malformed_rows() -> None:
     assert compose_entities_analysis(rec) is None
 
 
+def test_entities_evidence_ref_passes_through_when_producer_emits_it() -> None:
+    # ADR-043 field↔source linking: evidence_ref is a pass-through from the
+    # extraction producer (it stamps the same ref it put on the matching
+    # EvidenceAnchor.supports_ref). The composer must carry it verbatim — it
+    # does NOT synthesise the pairing (Guardrail #6, backend-authoritative).
+    rec = _record(
+        enrichment_context={
+            "inbox_entities": {
+                "extracted": [
+                    {"key": "primary", "value": "4500023421", "kind": "order_id",
+                     "source_span": "order 4500023421",
+                     "evidence_ref": "order_entry.primary"},
+                    {"key": "po", "value": "0093847612", "kind": "po"},
+                ]
+            }
+        }
+    )
+    out = compose_entities_analysis(rec)
+    assert out is not None
+    assert out.extracted[0].evidence_ref == "order_entry.primary"
+    # Absent in the source row → None (optional provenance, no fabrication).
+    assert out.extracted[1].evidence_ref is None
+
+
 # ── SAP Data ────────────────────────────────────────────────────────────────
 
 def test_sap_none_when_context_absent_or_incomplete() -> None:

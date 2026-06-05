@@ -1480,6 +1480,17 @@ class ExtractedEntity(BaseModel):
     kind: str
     confidence: Optional[float] = None
     source_span: Optional[str] = None
+    # ADR-043 / ADR-045 field↔source linking. The deterministic locate key
+    # of the EvidenceAnchor that supports this entity — i.e. the anchor's
+    # `supports_ref`. When present, the UI couples this entity row to its
+    # in-document highlight (click the entity → the safety bar / overlay
+    # highlights the source span). Pure provenance, never a binding control:
+    # it is a pass-through from the extraction producer (the gateway emits
+    # the same ref it stamped on the matching anchor), NOT synthesised by the
+    # composer — keeping the field↔anchor pairing backend-authoritative
+    # (Guardrail #6, no UI-side ref derivation). None until the producer
+    # populates it.
+    evidence_ref: Optional[str] = None
 
 
 class EntitiesAnalysisData(BaseModel):
