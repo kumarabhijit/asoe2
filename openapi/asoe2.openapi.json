@@ -4516,6 +4516,27 @@
       "OrderEntryLineItem": {
         "description": "One extracted order line. `mdm_matched` = matched against material\nmaster; None when the master lookup hasn't run.",
         "properties": {
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "confidence_signal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfidenceSignal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "description": {
             "anyOf": [
               {
@@ -5659,6 +5680,110 @@
           "exception_id"
         ],
         "title": "ResolveResponse",
+        "type": "object"
+      },
+      "ReviewerActivityByHighlight": {
+        "properties": {
+          "not_shown": {
+            "$ref": "#/components/schemas/ReviewerActivityCohort"
+          },
+          "shown": {
+            "$ref": "#/components/schemas/ReviewerActivityCohort"
+          }
+        },
+        "required": [
+          "shown",
+          "not_shown"
+        ],
+        "title": "ReviewerActivityByHighlight",
+        "type": "object"
+      },
+      "ReviewerActivityCohort": {
+        "properties": {
+          "decisions": {
+            "title": "Decisions",
+            "type": "integer"
+          },
+          "layer2_open_rate": {
+            "title": "Layer2 Open Rate",
+            "type": "number"
+          }
+        },
+        "required": [
+          "decisions",
+          "layer2_open_rate"
+        ],
+        "title": "ReviewerActivityCohort",
+        "type": "object"
+      },
+      "ReviewerActivityDwellBucket": {
+        "description": "Cumulative histogram bucket. `le_seconds` is the upper edge; None is the\n+Inf overflow bucket.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "le_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Le Seconds"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "title": "ReviewerActivityDwellBucket",
+        "type": "object"
+      },
+      "ReviewerActivitySnapshot": {
+        "description": "Automation-bias review-scrutiny SLIs (the \"reviewing vs rubber-stamping\"\nsignal). Process-local since restart; the fleet view is in Grafana.",
+        "properties": {
+          "by_highlight": {
+            "$ref": "#/components/schemas/ReviewerActivityByHighlight"
+          },
+          "decisions": {
+            "title": "Decisions",
+            "type": "integer"
+          },
+          "dwell_seconds_histogram": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewerActivityDwellBucket"
+            },
+            "title": "Dwell Seconds Histogram",
+            "type": "array"
+          },
+          "dwell_seconds_sum": {
+            "title": "Dwell Seconds Sum",
+            "type": "number"
+          },
+          "layer2_open_rate": {
+            "title": "Layer2 Open Rate",
+            "type": "number"
+          },
+          "layer2_opened": {
+            "title": "Layer2 Opened",
+            "type": "integer"
+          },
+          "scope": {
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "decisions",
+          "layer2_opened",
+          "layer2_open_rate",
+          "dwell_seconds_sum",
+          "by_highlight"
+        ],
+        "title": "ReviewerActivitySnapshot",
         "type": "object"
       },
       "RoundUpPlanLine": {
@@ -9582,7 +9707,7 @@
     },
     "/api/v1/metrics/reviewer-activity": {
       "get": {
-        "description": "Structured snapshot of the automation-bias review-quality SLIs.",
+        "description": "Structured snapshot of the automation-bias review-quality SLIs.\n\nTyped response (not a bare dict) so the OpenAPI contract carries the shape\nand the UI's generated type can't drift between the mock payload (local /\nVercel) and the live endpoint (Azure).",
         "operationId": "reviewer_activity_read_api_v1_metrics_reviewer_activity_get",
         "parameters": [
           {
@@ -9607,9 +9732,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Reviewer Activity Read Api V1 Metrics Reviewer Activity Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ReviewerActivitySnapshot"
                 }
               }
             },

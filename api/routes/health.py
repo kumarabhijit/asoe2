@@ -112,6 +112,7 @@ from pydantic import BaseModel, ConfigDict, Field  # noqa: E402
 from api.deps import require_role  # noqa: E402
 from api.metrics import record_reviewer_activity, reviewer_activity_snapshot  # noqa: E402
 from api.observability.audit_bearing import audit_bearing  # noqa: E402
+from api.schemas import ReviewerActivitySnapshot  # noqa: E402
 
 
 class ReviewerActivityRequest(BaseModel):
@@ -157,11 +158,16 @@ async def reviewer_activity(req: ReviewerActivityRequest) -> dict:
 # reliability diagram, which have no request-time data source yet.
 @router.get(
     "/metrics/reviewer-activity",
+    response_model=ReviewerActivitySnapshot,
     dependencies=[Depends(require_role("manager", "admin"))],
 )
-async def reviewer_activity_read() -> dict:
-    """Structured snapshot of the automation-bias review-quality SLIs."""
-    return reviewer_activity_snapshot()
+async def reviewer_activity_read() -> ReviewerActivitySnapshot:
+    """Structured snapshot of the automation-bias review-quality SLIs.
+
+    Typed response (not a bare dict) so the OpenAPI contract carries the shape
+    and the UI's generated type can't drift between the mock payload (local /
+    Vercel) and the live endpoint (Azure)."""
+    return ReviewerActivitySnapshot(**reviewer_activity_snapshot())
 
 
 # ---------------------------------------------------------------------------

@@ -37,7 +37,7 @@ _CTX = {
     "customer_bp": "300001",
     "line_items": [
         {"line_num": "001", "material": "BEV-COLA-12PK", "quantity": 480,
-         "uom": "CS", "unit_price": 8.64, "mdm_matched": True},
+         "uom": "CS", "unit_price": 8.64, "mdm_matched": True, "confidence": 0.72},
     ],
     "validation_flags": [
         {"field": "line 003", "severity": "WARNING", "message": "promo allowance"},
@@ -71,6 +71,11 @@ def test_compose_projects_from_context() -> None:
     assert out.confidence_signal is not None
     assert out.confidence_signal.value == 0.94
     assert out.confidence_signal.calibrated is False
+    # Per-line signal projected from the line's own confidence (so the operator
+    # sees which line the model was unsure about).
+    assert out.line_items[0].confidence_signal is not None
+    assert out.line_items[0].confidence_signal.value == 0.72
+    assert out.line_items[0].confidence_signal.calibrated is False
 
 
 def test_compose_none_on_malformed() -> None:
