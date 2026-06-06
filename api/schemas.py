@@ -1842,11 +1842,58 @@ class DraftReply(BaseModel):
     revisions: List[DraftReplyRevision] = Field(default_factory=list)
 
 
+class ConfidenceSignal(BaseModel):
+    """A confidence score plus its calibration provenance (trust surface).
+
+    `value` is the canonical 0.0–1.0 score. `calibrated` states whether
+    `value` has been calibrated to an observed-accuracy definition (ECE /
+    Brier per ADR-032) — until that loop ships it is False, and the UI must
+    frame the number as a raw model score, never a validated probability of
+    correctness. `method` names the producer so an auditor can reconstruct
+    WHICH scorer produced the number; `sample_n` is the cohort size behind a
+    calibrated band (None for a raw single score).
+
+    Honesty rule (Verdict 2026-04-22 / Guardrail #6): the projector restates
+    the raw model score with calibrated=False — it never fabricates a
+    calibration claim, and it returns None for a missing / non-positive score
+    so the surface stays absent rather than showing a synthetic 0 the operator
+    can't distinguish from a real low-confidence reading."""
+
+    value: float
+    calibrated: bool
+    method: Optional[str] = None
+    sample_n: Optional[int] = None
+
+    @classmethod
+    def from_raw(cls, raw: Any, *, method: str) -> Optional["ConfidenceSignal"]:
+        """Project a raw producer score (expected 0.0–1.0) into an
+        uncalibrated signal. Returns None when the score is missing or
+        non-positive (mirrors the AnalysisResponse.confidence "stay at 0,
+        UI hides the bar" rule — no fabricated mid-range default). The value
+        is clamped to [0, 1] so a malformed score can never paint an
+        over-wide bar."""
+        if not isinstance(raw, (int, float)) or isinstance(raw, bool) or raw <= 0:
+            return None
+        return cls(
+            value=max(0.0, min(1.0, float(raw))),
+            calibrated=False,
+            method=method,
+        )
+
+
 class AnalysisResponse(BaseModel):
     """GET /api/v1/exceptions/{id}/analysis"""
 
     diagnosis: str
     confidence: int
+    # ADR-032 trust surface — the same confidence as a typed signal carrying
+    # its calibration provenance. Optional + None when no real classifier
+    # confidence is available (mirrors `confidence == 0`), so the UI frames
+    # the score honestly (raw model score vs calibrated probability) without a
+    # fabricated default. Projected from the classifier score in the read path
+    # via `ConfidenceSignal.from_raw`; the scalar `confidence` is retained for
+    # back-compat (Guardrail #7 — additive, not a replacement).
+    confidence_signal: Optional[ConfidenceSignal] = None
     risk: str
     resolution: str
     lines: List[LineAnalysis] = Field(default_factory=list)
