@@ -2630,6 +2630,16 @@
             "title": "Composite Confidence",
             "type": "number"
           },
+          "composite_confidence_signal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfidenceSignal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "floor_breaches": {
             "default": [],
             "items": {
@@ -3523,6 +3533,16 @@
             ],
             "title": "Confidence"
           },
+          "confidence_signal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfidenceSignal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "evidence_ref": {
             "anyOf": [
               {
@@ -4336,6 +4356,16 @@
           "confidence": {
             "title": "Confidence",
             "type": "number"
+          },
+          "confidence_signal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfidenceSignal"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "customer_bp": {
             "anyOf": [

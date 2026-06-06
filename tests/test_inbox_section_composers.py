@@ -86,6 +86,27 @@ def test_entities_evidence_ref_passes_through_when_producer_emits_it() -> None:
     assert out.extracted[1].evidence_ref is None
 
 
+def test_entities_confidence_signal_projected_from_scalar() -> None:
+    # ADR-032 — per-entity calibration signal projected from the scalar
+    # confidence; uncalibrated until the loop ships. Entities without a
+    # confidence stay signal-free (no fabrication).
+    rec = _record(
+        enrichment_context={
+            "inbox_entities": {
+                "extracted": [
+                    {"key": "primary", "value": "X", "kind": "order_id", "confidence": 0.97},
+                    {"key": "po", "value": "Y", "kind": "po"},  # no confidence
+                ]
+            }
+        }
+    )
+    out = compose_entities_analysis(rec)
+    assert out is not None
+    sig = out.extracted[0].confidence_signal
+    assert sig is not None and sig.value == 0.97 and sig.calibrated is False
+    assert out.extracted[1].confidence_signal is None
+
+
 # ── SAP Data ────────────────────────────────────────────────────────────────
 
 def test_sap_none_when_context_absent_or_incomplete() -> None:

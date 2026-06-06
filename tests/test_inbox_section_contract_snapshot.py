@@ -23,8 +23,8 @@ from api import schemas
 # contract changes; the diff is the audit record of that change.
 _SECTION_FIELDS: dict[str, set[str]] = {
     "OrderEntryExtraction": {
-        "source_type", "confidence", "header", "customer_name",
-        "customer_bp", "line_items", "validation_flags",
+        "source_type", "confidence", "confidence_signal", "header",
+        "customer_name", "customer_bp", "line_items", "validation_flags",
     },
     "Edi850Document": {
         "standard", "transaction_set", "envelope", "header", "parties",

@@ -37,6 +37,7 @@ from api.schemas import (
     BackOrderAnalysisData,
     ComparisonLineItem,
     ComparisonOrder,
+    ConfidenceSignal,
     DeliveryDelayAnalysisData,
     DuplicateDetectionData,
     EdiMismatchAnalysisData,
@@ -1301,8 +1302,14 @@ def _eoe_from_outputs(
     if not isinstance(breaches, list):
         breaches = []
     try:
+        composite = float(outputs.get("composite_confidence") or 0.0)
         return EmailOrderEntryAnalysisData(
-            composite_confidence=float(outputs.get("composite_confidence") or 0.0),
+            composite_confidence=composite,
+            # ADR-032 — same composite score as a typed signal carrying its
+            # calibration provenance (uncalibrated until the loop ships).
+            composite_confidence_signal=ConfidenceSignal.from_raw(
+                composite, method="email_order_intake_composite_raw"
+            ),
             classification=classification,
             recommended_action=str(outputs.get("recommended_action", "")),
             autonomy_level=autonomy_level,

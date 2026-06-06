@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from api.schemas import (
     ChangeAnalysis,
+    ConfidenceSignal,
     DraftReply,
     DraftReplyEdit,
     DraftReplyRevision,
@@ -119,6 +120,22 @@ def compose_entities_analysis(
         return None
     if not entities:
         return None
+    # ADR-032 — project the per-entity calibration signal from each entity's
+    # scalar confidence (uncalibrated until the loop ships). from_raw returns
+    # None for a missing/non-positive score, so entities without a confidence
+    # stay signal-free. Preserves a producer-supplied signal if one was passed.
+    entities = [
+        ent
+        if ent.confidence_signal is not None
+        else ent.model_copy(
+            update={
+                "confidence_signal": ConfidenceSignal.from_raw(
+                    ent.confidence, method="entity_extraction_raw"
+                )
+            }
+        )
+        for ent in entities
+    ]
     return EntitiesAnalysisData(extracted=entities)
 
 
@@ -153,9 +170,21 @@ def compose_order_entry_extraction(
     if not isinstance(ctx, dict) or not ctx:
         return None
     try:
-        return OrderEntryExtraction(**ctx)
+        out = OrderEntryExtraction(**ctx)
     except (TypeError, ValueError):
         return None
+    # ADR-032 — project the calibration signal from the extraction confidence
+    # (uncalibrated until the loop ships). Kept in the composer (the sole
+    # assembler) — preserves a producer-supplied signal if one was passed.
+    if out.confidence_signal is None:
+        return out.model_copy(
+            update={
+                "confidence_signal": ConfidenceSignal.from_raw(
+                    out.confidence, method="order_entry_extraction_raw"
+                )
+            }
+        )
+    return out
 
 
 def compose_edi_850_document(
