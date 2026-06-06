@@ -212,6 +212,83 @@ class TestAdaptDuplicateSynthesisFallback:
         assert result.confidence == 0.0
 
 
+class TestAdaptDuplicateSynthesisHonoursTenantWeights:
+    """Regression (V&V audit 2026-06-06): the synthetic projection used on
+    the explain / shadow-gated path (empty resolution_data) MUST resolve the
+    same tenant-specific signal weights (ADR-029) that the live execution
+    path plumbs into detect_duplicate_po(weights=...) at
+    orchestration/nodes.py::validate_types. Otherwise the confidence /
+    recommended_action shown to the operator silently diverges from the
+    tenant's configured policy for any tenant with non-default weights.
+
+    Signal scores below fire only po_number (1.0) and line_items (1.0); every
+    other signal is 0.0. With the platform-default _WEIGHTS the composite is
+    0.30 + 0.20 = 0.50 (confidence 50.0). The tenant weight map below shifts
+    weight off those two signals, so the faithful composite is
+    0.10 + 0.10 = 0.20 (confidence 20.0). A build that ignores the resolved
+    weights would report 50.0.
+    """
+
+    _ONLY_PO_AND_LINES_EVENT = {
+        "order_id": "PO-DUP-001",
+        "retailer_id": "R-10",
+        "metadata": {
+            "signal_scores": {
+                "po_number": 1.0,
+                "customer_id": 0.0,
+                "line_items": 1.0,
+                "amount": 0.0,
+                "timestamp": 0.0,
+                "ship_to": 0.0,
+                "channel": 0.0,
+                "delivery_date": 0.0,
+            },
+        },
+    }
+
+    # Valid ADR-029 map (same keys, sums to 1.0) that de-emphasises the two
+    # signals the event fires.
+    _TENANT_WEIGHTS = {
+        "po_number": 0.10,
+        "customer_id": 0.30,
+        "line_items": 0.10,
+        "amount": 0.10,
+        "timestamp": 0.10,
+        "ship_to": 0.10,
+        "channel": 0.10,
+        "delivery_date": 0.10,
+    }
+
+    def test_synthesis_uses_resolved_tenant_weights(self):
+        record = _record(
+            enrichment_context={
+                "matched_po_details": _matched_payload(),
+                "tenant_config": {"weights": self._TENANT_WEIGHTS},
+            },
+            resolution_data={},
+            original_event=self._ONLY_PO_AND_LINES_EVENT,
+        )
+        result = adapt_duplicate(record)
+        assert result is not None
+        # 0.10*1.0 (po_number) + 0.10*1.0 (line_items) = 0.20 → *100 display.
+        assert result.confidence == 20.0
+        assert result.confidence_signal is not None
+        assert result.confidence_signal.value == 0.20
+
+    def test_synthesis_falls_back_to_platform_weights_when_absent(self):
+        """No tenant_config → weights=None → recipe's module-default
+        _WEIGHTS, matching orchestration's `tenant_config.get("weights")`
+        (which yields None) behaviour. Composite 0.30 + 0.20 = 0.50."""
+        record = _record(
+            enrichment_context={"matched_po_details": _matched_payload()},
+            resolution_data={},
+            original_event=self._ONLY_PO_AND_LINES_EVENT,
+        )
+        result = adapt_duplicate(record)
+        assert result is not None
+        assert result.confidence == 50.0
+
+
 class TestAdaptOrderComparison:
     def test_synthesises_two_orders_from_matched_payload(self):
         record = _record(
