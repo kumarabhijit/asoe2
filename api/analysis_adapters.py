@@ -817,6 +817,21 @@ def _synthesize_duplicate_outputs(
     signal_scores = metadata.get("signal_scores") or {}
     if not isinstance(signal_scores, dict):
         return {}
+    # ADR-029 — the live execution path resolves tenant-specific signal
+    # weights via the tenant_config gateway and plumbs them into
+    # detect_duplicate_po(weights=...) at orchestration/nodes.py::validate_types
+    # (see line ~807). The synthetic projection MUST pass the same weights or
+    # the composite_score it computes (→ confidence, recommended_action,
+    # autonomy_applied) will silently diverge from the tenant's configured
+    # policy for any tenant with non-default weights. weights=None preserves
+    # the recipe's module-default fallback, exactly as orchestration does.
+    enrichment = record.enrichment_context or {}
+    tenant_config = enrichment.get("tenant_config")
+    weights = (
+        tenant_config.get("weights")
+        if isinstance(tenant_config, dict)
+        else None
+    )
     try:
         return detect_duplicate_po(
             incoming_po_number=str(event.get("order_id", "")),
@@ -831,6 +846,7 @@ def _synthesize_duplicate_outputs(
             has_revision_indicator=matched.get("has_revision_indicator"),
             line_items_identical=matched.get("line_items_identical"),
             autonomy_levels=DUPLICATE_PO_AUTONOMY_LEVELS,
+            weights=weights,
         )
     except (TypeError, ValueError):
         return {}
