@@ -110,7 +110,7 @@ from fastapi import Depends, status  # noqa: E402
 from pydantic import BaseModel, ConfigDict, Field  # noqa: E402
 
 from api.deps import require_role  # noqa: E402
-from api.metrics import record_reviewer_activity  # noqa: E402
+from api.metrics import record_reviewer_activity, reviewer_activity_snapshot  # noqa: E402
 from api.observability.audit_bearing import audit_bearing  # noqa: E402
 
 
@@ -144,6 +144,24 @@ async def reviewer_activity(req: ReviewerActivityRequest) -> dict:
         highlight_shown=req.highlight_shown,
     )
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/metrics/reviewer-activity — Review-Quality read surface.
+# ---------------------------------------------------------------------------
+# Read projection of the automation-bias SLI counters for the Review-Quality
+# console (manager+/admin). This is the "are operators scrutinising or rubber-
+# stamping?" signal that gates a safe path to autonomy. Returns ONLY real,
+# request-time-readable in-process counters (process-local since restart; the
+# fleet view is in Grafana) — no counterfactual STP and no calibration
+# reliability diagram, which have no request-time data source yet.
+@router.get(
+    "/metrics/reviewer-activity",
+    dependencies=[Depends(require_role("manager", "admin"))],
+)
+async def reviewer_activity_read() -> dict:
+    """Structured snapshot of the automation-bias review-quality SLIs."""
+    return reviewer_activity_snapshot()
 
 
 # ---------------------------------------------------------------------------

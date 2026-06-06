@@ -9580,6 +9580,58 @@
         ]
       }
     },
+    "/api/v1/metrics/reviewer-activity": {
+      "get": {
+        "description": "Structured snapshot of the automation-bias review-quality SLIs.",
+        "operationId": "reviewer_activity_read_api_v1_metrics_reviewer_activity_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reviewer Activity Read Api V1 Metrics Reviewer Activity Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reviewer Activity Read",
+        "tags": [
+          "health"
+        ]
+      }
+    },
     "/api/v1/pipeline/topology": {
       "get": {
         "description": "Return the live-graph topology + per-gate verdict labels.\n\nAuthentication required; no additional permission. ADR-027 \u00a7\n\"Backend changes\" #2: adding `dashboard:read` here would be\npermission theater (no per-tenant data to leak).",
