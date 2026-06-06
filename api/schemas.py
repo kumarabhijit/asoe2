@@ -1592,6 +1592,12 @@ class OrderEntryLineItem(BaseModel):
     uom: Optional[str] = None
     unit_price: Optional[float] = None
     mdm_matched: Optional[bool] = None
+    # ADR-032 — per-line extraction confidence so the operator sees WHICH line
+    # the model was unsure about (the section-level score alone hides that).
+    # Additive + optional (Guardrail #7); `confidence_signal` carries the
+    # calibration provenance, projected by the composer via from_raw.
+    confidence: Optional[float] = None
+    confidence_signal: Optional[ConfidenceSignal] = None
 
 
 class OrderEntryValidationFlag(BaseModel):
@@ -1896,6 +1902,44 @@ class DraftReply(BaseModel):
     drafted_by: Optional[str] = None
     drafted_at: Optional[str] = None
     revisions: List[DraftReplyRevision] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Review-Quality console (Phase 4) — typed response for
+# GET /api/v1/metrics/reviewer-activity. Typed (not a bare dict) so the
+# contract is enforced across local/Vercel (mock) and Azure (real): the UI
+# generates its type from this schema, so the autonomy console cannot drift
+# between the mock payload and the live endpoint.
+# ---------------------------------------------------------------------------
+class ReviewerActivityCohort(BaseModel):
+    decisions: int
+    layer2_open_rate: float
+
+
+class ReviewerActivityDwellBucket(BaseModel):
+    """Cumulative histogram bucket. `le_seconds` is the upper edge; None is the
+    +Inf overflow bucket."""
+
+    le_seconds: Optional[float] = None
+    count: int
+
+
+class ReviewerActivityByHighlight(BaseModel):
+    shown: ReviewerActivityCohort
+    not_shown: ReviewerActivityCohort
+
+
+class ReviewerActivitySnapshot(BaseModel):
+    """Automation-bias review-scrutiny SLIs (the "reviewing vs rubber-stamping"
+    signal). Process-local since restart; the fleet view is in Grafana."""
+
+    scope: str
+    decisions: int
+    layer2_opened: int
+    layer2_open_rate: float
+    dwell_seconds_histogram: List[ReviewerActivityDwellBucket] = Field(default_factory=list)
+    dwell_seconds_sum: float
+    by_highlight: ReviewerActivityByHighlight
 
 
 class AnalysisResponse(BaseModel):

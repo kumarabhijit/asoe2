@@ -173,18 +173,28 @@ def compose_order_entry_extraction(
         out = OrderEntryExtraction(**ctx)
     except (TypeError, ValueError):
         return None
-    # ADR-032 — project the calibration signal from the extraction confidence
-    # (uncalibrated until the loop ships). Kept in the composer (the sole
-    # assembler) — preserves a producer-supplied signal if one was passed.
-    if out.confidence_signal is None:
-        return out.model_copy(
+    # ADR-032 — project the calibration signal from the extraction confidence,
+    # at the section level AND per line item (so the operator sees which line
+    # the model was unsure about). Uncalibrated until the loop ships. Kept in
+    # the composer (the sole assembler); preserves any producer-supplied signal.
+    new_lines = [
+        li
+        if li.confidence_signal is not None
+        else li.model_copy(
             update={
                 "confidence_signal": ConfidenceSignal.from_raw(
-                    out.confidence, method="order_entry_extraction_raw"
+                    li.confidence, method="order_entry_line_raw"
                 )
             }
         )
-    return out
+        for li in out.line_items
+    ]
+    updates: dict = {"line_items": new_lines}
+    if out.confidence_signal is None:
+        updates["confidence_signal"] = ConfidenceSignal.from_raw(
+            out.confidence, method="order_entry_extraction_raw"
+        )
+    return out.model_copy(update=updates)
 
 
 def compose_edi_850_document(

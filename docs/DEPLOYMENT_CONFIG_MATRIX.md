@@ -82,6 +82,19 @@ These are enforced, not just documented:
   facing `ASOE_*` / `CORS_*` / `AZURE_*` env var read in non-test source is
   documented in `.env.example`, so this matrix and the example file cannot
   silently fall behind the code.
+- **Confidence-honesty parity (ADR-032).** `confidence_signal` is projected by
+  the composer/route/adapters (`ConfidenceSignal.from_raw`, `calibrated=False`
+  until the loop ships), so the "model score / not a calibrated probability"
+  framing renders identically in mock (local / Vercel preview) and live
+  (Azure) — it is not a mock-only affordance.
+- **Review-Quality console parity (Phase 4).**
+  `GET /api/v1/metrics/reviewer-activity` returns a typed
+  `ReviewerActivitySnapshot` `response_model`, and the UI mock is locked to the
+  OpenAPI-generated schema by
+  `asoe-ui/tests/contract/reviewer_activity_parity.test.ts`, so the autonomy
+  console cannot render differently between the mock payload and the live
+  endpoint. (The numbers differ — mock fixture vs. process-local live counters,
+  which the page labels — but the contract is identical.)
 
 ---
 
@@ -96,3 +109,13 @@ this repo** — they are platform/ops actions:
 3. Live gateway **transports** (Graph / Azure DI / S/4HANA / OMS) land behind
    the nightly `-m live` pytest mark; the live-vs-stub routers + canary
    plumbing are already shipped.
+4. **Field↔source provenance is preview-only off-mock.** The verify-against-
+   source affordances — `ExtractedEntity.evidence_ref` (entity → in-document
+   highlight) and `OrderEntryLineItem.confidence` / per-line `confidence_signal`
+   — render in mock (local / Vercel preview) but are **absent on Azure** until
+   the extraction gateway (Azure DI) emits the provenance refs and per-field
+   confidence. The UI degrades gracefully — no dead affordance: the "Show in
+   source" control and per-line confidence simply do not render when the
+   producer omits them (Guardrail #6 / #7). This is a producer gap, not a UI
+   code gap; the contract + rendering are already shipped and light up the
+   moment the gateway populates them.
