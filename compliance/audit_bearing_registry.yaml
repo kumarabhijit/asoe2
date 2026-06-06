@@ -319,6 +319,15 @@ EmailOrderEntryAnalysisData:
       Composite extraction + resolution score that drives the
       classification band. Reviewer cannot authorise the action without
       seeing the score the agent acted on.
+  composite_confidence_signal:
+    tier: contextual
+    source: control
+    rationale: >-
+      ADR-032 calibration provenance for composite_confidence (the same
+      score, plus whether it has been calibrated and which scorer produced
+      it). Metadata about the already-audit-bearing score, not a separate
+      binding control; None until projected. Lets the operator weigh a raw
+      model score vs a calibrated probability.
   classification:
     tier: audit-bearing
     source: recipe-output
@@ -694,6 +703,14 @@ DuplicateDetectionData:
     tier: audit-bearing
     source: recipe-output
     rationale: Operator trusts/rejects based on this number.
+  confidence_signal:
+    tier: contextual
+    source: control
+    rationale: >-
+      ADR-032 calibration provenance for confidence (same score in canonical
+      0-1 units, plus whether it has been calibrated and which scorer produced
+      it). Metadata about the already-audit-bearing score, not a separate
+      binding control; None until projected.
   recommended_action:
     tier: audit-bearing
     source: recipe-output
@@ -852,7 +869,9 @@ EntitiesAnalysisData:
     rationale: >-
       Entities the AI intake agent extracted from the email / attachments,
       surfaced to the operator as evidence (each with an optional
-      source_span for provenance). Not itself a binding control field.
+      source_span for provenance, and an optional evidence_ref that links
+      the entity to its in-document EvidenceAnchor for verify-against-source
+      highlighting). Not itself a binding control field.
 
 SapDataAnalysisData:
   # ADR-042 Phase 2 — Customer Inbox SAP Data tab. The SAP system of record,
@@ -1449,9 +1468,9 @@ summary:
   # who/what/when of a buyer reply), 8 contextual (rendered text +
   # template/recipient plumbing + the latest-revision mirrors).
   # NEEDS COMPLIANCE REVIEW (@kumarabhijit @linkinrustle).
-  total_fields: 203
+  total_fields: 205
   audit_bearing: 145
   conditional: 7
-  contextual: 51
+  contextual: 53
   backend_gap_fields: 0
   gateway_dependent_fields: 17

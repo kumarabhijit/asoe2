@@ -128,6 +128,10 @@ class TestAdaptEmailOrderEntryHappyPath:
         assert result.recommended_action == "REQUEST_CLARIFICATION"
         assert result.autonomy_level == "L2"
         assert result.composite_confidence == 0.88
+        # ADR-032 — composite score projected as an uncalibrated signal.
+        assert result.composite_confidence_signal is not None
+        assert result.composite_confidence_signal.value == 0.88
+        assert result.composite_confidence_signal.calibrated is False
         assert result.validation_failures == ["ambiguous_ship_to"]
         assert result.floor_breaches == []
         assert result.reject_reason_code is None

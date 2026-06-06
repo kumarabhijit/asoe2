@@ -910,6 +910,45 @@ class EmailSourceData(BaseModel):
     Empty when no attachment is stored or no locatable evidence exists."""
 
 
+class ConfidenceSignal(BaseModel):
+    """A confidence score plus its calibration provenance (trust surface).
+
+    `value` is the canonical 0.0–1.0 score. `calibrated` states whether
+    `value` has been calibrated to an observed-accuracy definition (ECE /
+    Brier per ADR-032) — until that loop ships it is False, and the UI must
+    frame the number as a raw model score, never a validated probability of
+    correctness. `method` names the producer so an auditor can reconstruct
+    WHICH scorer produced the number; `sample_n` is the cohort size behind a
+    calibrated band (None for a raw single score).
+
+    Honesty rule (Verdict 2026-04-22 / Guardrail #6): the projector restates
+    the raw model score with calibrated=False — it never fabricates a
+    calibration claim, and it returns None for a missing / non-positive score
+    so the surface stays absent rather than showing a synthetic 0 the operator
+    can't distinguish from a real low-confidence reading."""
+
+    value: float
+    calibrated: bool
+    method: Optional[str] = None
+    sample_n: Optional[int] = None
+
+    @classmethod
+    def from_raw(cls, raw: Any, *, method: str) -> Optional["ConfidenceSignal"]:
+        """Project a raw producer score (expected 0.0–1.0) into an
+        uncalibrated signal. Returns None when the score is missing or
+        non-positive (mirrors the AnalysisResponse.confidence "stay at 0,
+        UI hides the bar" rule — no fabricated mid-range default). The value
+        is clamped to [0, 1] so a malformed score can never paint an
+        over-wide bar."""
+        if not isinstance(raw, (int, float)) or isinstance(raw, bool) or raw <= 0:
+            return None
+        return cls(
+            value=max(0.0, min(1.0, float(raw))),
+            calibrated=False,
+            method=method,
+        )
+
+
 class EmailOrderEntryAnalysisData(BaseModel):
     """EmailOrderEntryRecipe → UI `email_order_entry_analysis`
     (ADR-034 Phase B).
@@ -930,6 +969,11 @@ class EmailOrderEntryAnalysisData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     composite_confidence: float
+    # ADR-032 — the composite score as a typed signal with calibration
+    # provenance. Optional + additive (the scalar above is retained,
+    # Guardrail #7); None until a real score exists. Projected by the
+    # adapter via ConfidenceSignal.from_raw (uncalibrated until the loop ships).
+    composite_confidence_signal: Optional[ConfidenceSignal] = None
     classification: Literal[
         "ONE_CLICK_APPROVE", "STANDARD_REVIEW", "LOW_CONFIDENCE", "FATAL_REJECT",
     ]
@@ -1385,6 +1429,10 @@ class DuplicateDetectionData(BaseModel):
     detection_method: Optional[str] = None  # contextual
     days_between: int
     confidence: float  # 0-100
+    # ADR-032 — detection confidence as a typed signal (canonical 0-1) with
+    # calibration provenance. Additive (scalar retained, Guardrail #7);
+    # projected by the adapter from the 0-1 composite_score.
+    confidence_signal: Optional[ConfidenceSignal] = None
     recommended_action: str
     cancellation_target: str
     autonomy_applied: str
@@ -1479,7 +1527,22 @@ class ExtractedEntity(BaseModel):
     value: str
     kind: str
     confidence: Optional[float] = None
+    # ADR-032 — per-entity confidence as a typed signal with calibration
+    # provenance. Optional + additive (scalar retained, Guardrail #7);
+    # projected by compose_entities_analysis via ConfidenceSignal.from_raw.
+    confidence_signal: Optional[ConfidenceSignal] = None
     source_span: Optional[str] = None
+    # ADR-043 / ADR-045 field↔source linking. The deterministic locate key
+    # of the EvidenceAnchor that supports this entity — i.e. the anchor's
+    # `supports_ref`. When present, the UI couples this entity row to its
+    # in-document highlight (click the entity → the safety bar / overlay
+    # highlights the source span). Pure provenance, never a binding control:
+    # it is a pass-through from the extraction producer (the gateway emits
+    # the same ref it stamped on the matching anchor), NOT synthesised by the
+    # composer — keeping the field↔anchor pairing backend-authoritative
+    # (Guardrail #6, no UI-side ref derivation). None until the producer
+    # populates it.
+    evidence_ref: Optional[str] = None
 
 
 class EntitiesAnalysisData(BaseModel):
@@ -1549,6 +1612,10 @@ class OrderEntryExtraction(BaseModel):
 
     source_type: str
     confidence: float
+    # ADR-032 — extraction confidence as a typed signal with calibration
+    # provenance. Optional + additive (scalar retained, Guardrail #7);
+    # projected by compose_order_entry_extraction via ConfidenceSignal.from_raw.
+    confidence_signal: Optional[ConfidenceSignal] = None
     header: OrderEntryHeader
     customer_name: Optional[str] = None
     customer_bp: Optional[str] = None
@@ -1836,6 +1903,14 @@ class AnalysisResponse(BaseModel):
 
     diagnosis: str
     confidence: int
+    # ADR-032 trust surface — the same confidence as a typed signal carrying
+    # its calibration provenance. Optional + None when no real classifier
+    # confidence is available (mirrors `confidence == 0`), so the UI frames
+    # the score honestly (raw model score vs calibrated probability) without a
+    # fabricated default. Projected from the classifier score in the read path
+    # via `ConfidenceSignal.from_raw`; the scalar `confidence` is retained for
+    # back-compat (Guardrail #7 — additive, not a replacement).
+    confidence_signal: Optional[ConfidenceSignal] = None
     risk: str
     resolution: str
     lines: List[LineAnalysis] = Field(default_factory=list)

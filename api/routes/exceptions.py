@@ -73,6 +73,7 @@ from api.schemas import (
     AnalysisResponse,
     AsyncResolveResponse,
     ChallengeRequest,
+    ConfidenceSignal,
     CosignRequest,
     DispositionRequest,
     EscalateRequest,
@@ -2454,6 +2455,10 @@ async def get_analysis(
     # Build analysis from trace_data if available, else from record fields
     diagnosis = "No analysis available"
     confidence = 0
+    # ADR-032 trust surface — typed confidence + calibration provenance.
+    # Projected from the same raw classifier score as `confidence`; stays
+    # None when no real score exists (no fabricated default).
+    confidence_signal: Optional[ConfidenceSignal] = None
     risk = "unknown"
     resolution = "pending"
     lines: list[LineAnalysis] = []
@@ -2476,6 +2481,11 @@ async def get_analysis(
             confidence = max(0, min(100, int(round(raw_conf * 100))))
         else:
             confidence = 0
+        # Same raw score, restated as a typed signal with its calibration
+        # provenance (uncalibrated until ADR-032 ships). None when absent.
+        confidence_signal = ConfidenceSignal.from_raw(
+            raw_conf, method="llm_intent_classifier_raw"
+        )
         resolution = trace_data.get("final_status") or resolution
 
         # Extract per-line analysis if present
@@ -2567,6 +2577,7 @@ async def get_analysis(
     return AnalysisResponse(
         diagnosis=diagnosis,
         confidence=confidence,
+        confidence_signal=confidence_signal,
         risk=risk,
         resolution=resolution,
         lines=lines,

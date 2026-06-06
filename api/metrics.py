@@ -618,6 +618,53 @@ def reset_reviewer_activity() -> None:
             _ab_layer2_by_hl[k] = 0
 
 
+def reviewer_activity_snapshot() -> dict:
+    """Read-only structured snapshot of the automation-bias SLI counters.
+
+    The exact same in-process counters `render_reviewer_activity_metrics`
+    exposes to Prometheus, projected as JSON for the read API that backs the
+    Review-Quality console. Pure projection — no business logic, no fabricated
+    values. Scope is process-local since the last restart (the fleet-aggregated
+    view lives in Grafana over the Prometheus scrape); the caller labels that.
+    """
+    with _ab_lock:
+        decisions = _ab_decisions
+        opened = _ab_layer2_opened
+        buckets = list(_ab_dwell_buckets)
+        dwell_sum = _ab_dwell_sum
+        decisions_by_hl = dict(_ab_decisions_by_hl)
+        layer2_by_hl = dict(_ab_layer2_by_hl)
+
+    def _rate(num: int, den: int) -> float:
+        return round(num / den, 4) if den else 0.0
+
+    # Cumulative histogram (le edge → cumulative count), mirroring the
+    # Prometheus bucket semantics in render_reviewer_activity_metrics.
+    cumulative = 0
+    dwell_hist: list[dict] = []
+    for i, edge in enumerate(_DWELL_BUCKETS_S):
+        cumulative += buckets[i]
+        dwell_hist.append({"le_seconds": float(edge), "count": cumulative})
+    cumulative += buckets[-1]
+    dwell_hist.append({"le_seconds": None, "count": cumulative})  # +Inf
+
+    return {
+        "scope": "process_local_since_restart",
+        "decisions": decisions,
+        "layer2_opened": opened,
+        "layer2_open_rate": _rate(opened, decisions),
+        "dwell_seconds_histogram": dwell_hist,
+        "dwell_seconds_sum": round(dwell_sum, 3),
+        "by_highlight": {
+            ("shown" if shown else "not_shown"): {
+                "decisions": decisions_by_hl[shown],
+                "layer2_open_rate": _rate(layer2_by_hl[shown], decisions_by_hl[shown]),
+            }
+            for shown in (True, False)
+        },
+    }
+
+
 def render_reviewer_activity_metrics() -> str:
     lines: list[str] = []
     with _ab_lock:

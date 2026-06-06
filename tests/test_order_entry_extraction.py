@@ -67,6 +67,10 @@ def test_compose_projects_from_context() -> None:
     assert out.header.customer_po == "0093847612"
     assert out.line_items[0].material == "BEV-COLA-12PK"
     assert out.validation_flags[0].severity == "WARNING"
+    # ADR-032 — extraction confidence projected as an uncalibrated signal.
+    assert out.confidence_signal is not None
+    assert out.confidence_signal.value == 0.94
+    assert out.confidence_signal.calibrated is False
 
 
 def test_compose_none_on_malformed() -> None:

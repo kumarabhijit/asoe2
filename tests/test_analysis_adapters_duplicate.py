@@ -121,6 +121,11 @@ class TestAdaptDuplicateHappyPath:
         assert result.cancellation_target == "SO-DUP-002"
         # Recipe-output audit-bearing fields
         assert result.confidence == 95.0
+        # ADR-032 — signal projected from the 0-1 composite_score (not the
+        # *100 display value), uncalibrated until the loop ships.
+        assert result.confidence_signal is not None
+        assert result.confidence_signal.value == 0.95
+        assert result.confidence_signal.calibrated is False
         assert result.recommended_action == "BLOCK_AND_NOTIFY"
         assert result.autonomy_applied == "L3 — BLOCK_AND_NOTIFY"
         # Contextual

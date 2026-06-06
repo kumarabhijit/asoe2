@@ -205,6 +205,16 @@
             "title": "Confidence",
             "type": "integer"
           },
+          "confidence_signal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfidenceSignal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "delivery_delay_analysis": {
             "anyOf": [
               {
@@ -1159,6 +1169,47 @@
         "title": "ComparisonOrder",
         "type": "object"
       },
+      "ConfidenceSignal": {
+        "description": "A confidence score plus its calibration provenance (trust surface).\n\n`value` is the canonical 0.0\u20131.0 score. `calibrated` states whether\n`value` has been calibrated to an observed-accuracy definition (ECE /\nBrier per ADR-032) \u2014 until that loop ships it is False, and the UI must\nframe the number as a raw model score, never a validated probability of\ncorrectness. `method` names the producer so an auditor can reconstruct\nWHICH scorer produced the number; `sample_n` is the cohort size behind a\ncalibrated band (None for a raw single score).\n\nHonesty rule (Verdict 2026-04-22 / Guardrail #6): the projector restates\nthe raw model score with calibrated=False \u2014 it never fabricates a\ncalibration claim, and it returns None for a missing / non-positive score\nso the surface stays absent rather than showing a synthetic 0 the operator\ncan't distinguish from a real low-confidence reading.",
+        "properties": {
+          "calibrated": {
+            "title": "Calibrated",
+            "type": "boolean"
+          },
+          "method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method"
+          },
+          "sample_n": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sample N"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "value",
+          "calibrated"
+        ],
+        "title": "ConfidenceSignal",
+        "type": "object"
+      },
       "ConfigAuditEntry": {
         "additionalProperties": false,
         "properties": {
@@ -1887,6 +1938,16 @@
             "title": "Confidence",
             "type": "number"
           },
+          "confidence_signal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfidenceSignal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "days_between": {
             "title": "Days Between",
             "type": "integer"
@@ -2578,6 +2639,16 @@
           "composite_confidence": {
             "title": "Composite Confidence",
             "type": "number"
+          },
+          "composite_confidence_signal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfidenceSignal"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "floor_breaches": {
             "default": [],
@@ -3472,6 +3543,27 @@
             ],
             "title": "Confidence"
           },
+          "confidence_signal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfidenceSignal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "evidence_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Ref"
+          },
           "key": {
             "title": "Key",
             "type": "string"
@@ -4274,6 +4366,16 @@
           "confidence": {
             "title": "Confidence",
             "type": "number"
+          },
+          "confidence_signal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfidenceSignal"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "customer_bp": {
             "anyOf": [
@@ -9473,6 +9575,58 @@
           }
         },
         "summary": "Health",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/api/v1/metrics/reviewer-activity": {
+      "get": {
+        "description": "Structured snapshot of the automation-bias review-quality SLIs.",
+        "operationId": "reviewer_activity_read_api_v1_metrics_reviewer_activity_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reviewer Activity Read Api V1 Metrics Reviewer Activity Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reviewer Activity Read",
         "tags": [
           "health"
         ]
