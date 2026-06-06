@@ -1429,6 +1429,10 @@ class DuplicateDetectionData(BaseModel):
     detection_method: Optional[str] = None  # contextual
     days_between: int
     confidence: float  # 0-100
+    # ADR-032 — detection confidence as a typed signal (canonical 0-1) with
+    # calibration provenance. Additive (scalar retained, Guardrail #7);
+    # projected by the adapter from the 0-1 composite_score.
+    confidence_signal: Optional[ConfidenceSignal] = None
     recommended_action: str
     cancellation_target: str
     autonomy_applied: str

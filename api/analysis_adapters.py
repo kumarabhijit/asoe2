@@ -874,6 +874,12 @@ def adapt_duplicate(record: ChildCase) -> Optional[DuplicateDetectionData]:
             detection_method=matched.get("detection_method"),
             days_between=int(matched.get("days_between") or 0),
             confidence=_as_float(outputs.get("composite_score")) * 100.0,
+            # ADR-032 — project from the canonical 0-1 composite_score (before
+            # the *100 display scaling) so the signal value stays in [0, 1].
+            confidence_signal=ConfidenceSignal.from_raw(
+                _as_float(outputs.get("composite_score")),
+                method="duplicate_detection_composite_raw",
+            ),
             recommended_action=str(outputs.get("recommended_action") or ""),
             cancellation_target=str(matched.get("cancellation_target") or ""),
             autonomy_applied=_format_autonomy(

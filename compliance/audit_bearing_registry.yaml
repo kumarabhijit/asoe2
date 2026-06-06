@@ -703,6 +703,14 @@ DuplicateDetectionData:
     tier: audit-bearing
     source: recipe-output
     rationale: Operator trusts/rejects based on this number.
+  confidence_signal:
+    tier: contextual
+    source: control
+    rationale: >-
+      ADR-032 calibration provenance for confidence (same score in canonical
+      0-1 units, plus whether it has been calibrated and which scorer produced
+      it). Metadata about the already-audit-bearing score, not a separate
+      binding control; None until projected.
   recommended_action:
     tier: audit-bearing
     source: recipe-output
@@ -1460,9 +1468,9 @@ summary:
   # who/what/when of a buyer reply), 8 contextual (rendered text +
   # template/recipient plumbing + the latest-revision mirrors).
   # NEEDS COMPLIANCE REVIEW (@kumarabhijit @linkinrustle).
-  total_fields: 204
+  total_fields: 205
   audit_bearing: 145
   conditional: 7
-  contextual: 52
+  contextual: 53
   backend_gap_fields: 0
   gateway_dependent_fields: 17
