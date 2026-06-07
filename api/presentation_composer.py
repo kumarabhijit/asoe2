@@ -49,7 +49,17 @@ def compose_presentation(record: Any) -> PresentationContract:
     composer assembles, recipes do not).
     """
     intent = getattr(record, "intent", None)
+    # Reuse the governed per-intent one-liner — the SAME plain-language
+    # the /cases queue rows show — so the Situation headline never
+    # drifts from queue vocabulary. Lazy import mirrors compose_case_summary
+    # (avoids a module-load cycle). `case` is unused by every template's
+    # field projection, so None is safe.
+    from api.case_summary_templates import render_template
+
+    headline = render_template(record, None).one_liner
+
     return PresentationContract(
+        situation_headline=headline,
         show_intent=intent_discriminates(intent),
         audit=PresentationAudit(
             recipe_name=getattr(record, "selected_recipe", None),

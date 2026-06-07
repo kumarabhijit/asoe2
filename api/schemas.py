@@ -2004,6 +2004,14 @@ class PresentationContract(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    # The business event in plain language — the Situation tier headline
+    # (`presentation_tier: operator`). Reuses the governed per-intent
+    # one-liner templates (`api.case_summary_templates`) so it never
+    # drifts from the queue-row vocabulary. None when the intent has no
+    # template / recipe output is too sparse — the UI structurally omits
+    # it (no fabricated headline).
+    situation_headline: Optional[str] = None
+
     # Does the classified intent DISCRIMINATE the decision (name a
     # problem like CREDIT_BLOCK / DUPLICATE_PO) or merely restate the
     # arrival channel (MANUAL_ORDER_INTAKE)? Only discriminating intents

@@ -18,8 +18,12 @@ from api.presentation_composer import (
 )
 
 
-def _record(intent=None, recipe=None):
-    return SimpleNamespace(intent=intent, selected_recipe=recipe)
+def _record(intent=None, recipe=None, enrichment_context=None):
+    return SimpleNamespace(
+        intent=intent,
+        selected_recipe=recipe,
+        enrichment_context=enrichment_context,
+    )
 
 
 @pytest.mark.parametrize(
@@ -78,3 +82,29 @@ def test_compose_presentation_missing_fields():
     assert c.show_intent is False
     assert c.audit.recipe_name is None
     assert c.audit.intent_code is None
+    assert c.situation_headline is None
+
+
+def test_situation_headline_reuses_governed_one_liner():
+    """The Situation headline is the SAME governed per-intent one-liner
+    the queue rows use — not a separately-authored string (single source
+    of truth, no drift)."""
+    rec = _record(
+        intent="MANUAL_ORDER_INTAKE",
+        recipe="ManualOrderIntakeRecipe",
+        enrichment_context={
+            "email_source": {
+                "subject": "PO 7781 — 200 cases",
+                "classification": "NEW_ORDER",
+            }
+        },
+    )
+    c = compose_presentation(rec)
+    assert c.situation_headline == "New Order: PO 7781 — 200 cases"
+
+
+def test_situation_headline_none_when_template_sparse():
+    # MANUAL_ORDER_INTAKE with no email-source enrichment → no honest
+    # headline → None (structurally omitted on the UI, never fabricated).
+    c = compose_presentation(_record(intent="MANUAL_ORDER_INTAKE"))
+    assert c.situation_headline is None
