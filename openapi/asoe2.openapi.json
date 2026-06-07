@@ -3728,9 +3728,22 @@
             "title": "Autonomy Vocab Version",
             "type": "string"
           },
+          "display_labels": {
+            "$ref": "#/components/schemas/TaxonomyDisplayLabels"
+          },
           "explain_mode": {
             "title": "Explain Mode",
             "type": "boolean"
+          },
+          "intents_by_supergroup": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Intents By Supergroup",
+            "type": "object"
           },
           "kill_switch": {
             "title": "Kill Switch",
@@ -6256,6 +6269,27 @@
           "acceptance_rate"
         ],
         "title": "SubstituteSKU",
+        "type": "object"
+      },
+      "TaxonomyDisplayLabels": {
+        "description": "Operator-facing display strings for taxonomy codes (ADR-045).\n\nProjected from ``db/seeds/case_taxonomy.yaml`` through the generated\nconstants \u2014 the codes remain the single source of truth for control\nflow, these are the *human* strings. The UI is a pure projector: it\nrenders these and never invents its own label for a code (Guardrail\n#2). Adding/renaming a supergroup or intent in the YAML surfaces here\nwith zero UI code change. Keys are taxonomy codes (``SG_*`` / ``INT_*``).",
+        "properties": {
+          "intents": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Intents",
+            "type": "object"
+          },
+          "supergroups": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Supergroups",
+            "type": "object"
+          }
+        },
+        "title": "TaxonomyDisplayLabels",
         "type": "object"
       },
       "TenantConfigDeleteRequest": {

@@ -9,7 +9,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from api.schemas import AutonomyLevelInfo, HealthResponse
+from api.schemas import AutonomyLevelInfo, HealthResponse, TaxonomyDisplayLabels
+from contracts._generated.taxonomy_constants import (
+    INTENT_LABELS,
+    INTENTS_BY_SUPERGROUP,
+    SUPERGROUP_LABELS,
+)
 from contracts.autonomy import (
     CURRENT_AUTONOMY_VOCAB_VERSION,
     allowed_autonomy_levels,
@@ -38,6 +43,14 @@ _REASON_TAGS_BY_INTENT = {k: list(v) for k, v in INTENT_REASON_TAGS.items()}
 # in the UI Guardrail #1 lock before it silently empties a chip group.
 _ALLOWED_CASE_STATUSES = list(CaseStatus.__args__)  # type: ignore[attr-defined]
 _ALLOWED_CASE_ORIGINS = list(Origin.__args__)  # type: ignore[attr-defined]
+# ADR-045 — operator display strings + fan-out map, projected from the
+# governed taxonomy (db/seeds/case_taxonomy.yaml) so the UI never
+# hand-authors a label that can drift from the contract (Guardrail #2).
+_DISPLAY_LABELS = TaxonomyDisplayLabels(
+    supergroups=dict(SUPERGROUP_LABELS),
+    intents=dict(INTENT_LABELS),
+)
+_INTENTS_BY_SUPERGROUP = {sg: list(codes) for sg, codes in INTENTS_BY_SUPERGROUP.items()}
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -59,6 +72,8 @@ async def health() -> HealthResponse:
         allowed_autonomy_levels=[
             AutonomyLevelInfo(**entry) for entry in allowed_autonomy_levels()
         ],
+        display_labels=_DISPLAY_LABELS,
+        intents_by_supergroup=_INTENTS_BY_SUPERGROUP,
     )
 
 
