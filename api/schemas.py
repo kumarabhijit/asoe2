@@ -205,6 +205,21 @@ class AutonomyLevelInfo(BaseModel):
     rank: int
 
 
+class TaxonomyDisplayLabels(BaseModel):
+    """Operator-facing display strings for taxonomy codes (ADR-045).
+
+    Projected from ``db/seeds/case_taxonomy.yaml`` through the generated
+    constants — the codes remain the single source of truth for control
+    flow, these are the *human* strings. The UI is a pure projector: it
+    renders these and never invents its own label for a code (Guardrail
+    #2). Adding/renaming a supergroup or intent in the YAML surfaces here
+    with zero UI code change. Keys are taxonomy codes (``SG_*`` / ``INT_*``).
+    """
+
+    supergroups: Dict[str, str] = Field(default_factory=dict)
+    intents: Dict[str, str] = Field(default_factory=dict)
+
+
 class HealthResponse(BaseModel):
     """GET /api/v1/health"""
 
@@ -238,6 +253,15 @@ class HealthResponse(BaseModel):
     # under (records stamp their own version; this is the current display set).
     autonomy_vocab_version: str = ""
     allowed_autonomy_levels: List[AutonomyLevelInfo] = Field(default_factory=list)
+    # ADR-045 — operator-facing display strings + the supergroup→intent
+    # fan-out map. `display_labels` lets the UI render humanised names for
+    # taxonomy codes without a hand-authored label map (which had drifted:
+    # MANUAL_ORDER_INTAKE was mislabelled "Email Order Intake" on an EDI
+    # order). `intents_by_supergroup` drives the summary qualifier rule —
+    # the intent chip is shown only when its supergroup fans out to >1
+    # intent, so a 1:1 bucket like SG_NEW_ORDER reads as just "New Order".
+    display_labels: TaxonomyDisplayLabels = Field(default_factory=TaxonomyDisplayLabels)
+    intents_by_supergroup: Dict[str, List[str]] = Field(default_factory=dict)
 
 
 class ResolveResponse(BaseModel):
