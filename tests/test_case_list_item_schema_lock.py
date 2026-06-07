@@ -53,6 +53,42 @@ def test_case_list_item_projection_fields_are_optional():
         )
 
 
+def test_attention_state_is_present_and_constrained():
+    """Council 2026-06-07 — the queue groups by `attention_state`.
+
+    Unlike the seven nullable projection fields, this disposition is
+    ALWAYS present (every case has a lifecycle state) and constrained
+    to the three queue dispositions. Mirror:
+    `asoe-ui/tests/architectural/case_summary_projection_fields.test.ts`.
+    """
+    import pytest
+
+    assert "attention_state" in CaseListItem.model_fields
+
+    for valid in ("NEEDS_HUMAN", "IN_FLIGHT", "DONE"):
+        item = CaseListItem(
+            case_id="c1",
+            tenant_id="t1",
+            origin="API",
+            source_channel="edi_x12_850",
+            opened_at="2026-05-28T00:00:00Z",
+            status="OPEN_AWAITING_HUMAN",
+            attention_state=valid,
+        )
+        assert item.attention_state == valid
+
+    with pytest.raises(Exception):
+        CaseListItem(
+            case_id="c1",
+            tenant_id="t1",
+            origin="API",
+            source_channel="edi_x12_850",
+            opened_at="2026-05-28T00:00:00Z",
+            status="OPEN_AWAITING_HUMAN",
+            attention_state="MAYBE",
+        )
+
+
 def test_dollar_impact_shape_requires_amount_cents_and_currency():
     """Compliance Guardrail #6 — a bare amount without currency is
     a partial-truth state. Both fields must be required on the

@@ -386,6 +386,16 @@
               }
             ]
           },
+          "presentation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PresentationContract"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "price_analysis": {
             "anyOf": [
               {
@@ -5156,6 +5166,63 @@
           "value"
         ],
         "title": "PolicyUpdateRequest",
+        "type": "object"
+      },
+      "PresentationAudit": {
+        "additionalProperties": false,
+        "description": "Engine internals \u2014 `presentation_tier: audit` (council 2026-06-07).\n\nThe recipe that ran and the raw intent enum. These reconstruct HOW\nthe system decided; they are never operator-facing Layer 1 \u2014 they\nlive in the Diagnostics & Audit surface. Emitted (Guardrail #7:\navailable, not removed), just not shown front-and-center.",
+        "properties": {
+          "intent_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intent Code"
+          },
+          "recipe_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipe Name"
+          }
+        },
+        "title": "PresentationAudit",
+        "type": "object"
+      },
+      "PresentationContract": {
+        "additionalProperties": false,
+        "description": "Deterministic presentation projection (council 2026-06-07).\n\nTells the UI WHERE the contested elements belong so placement is\nbackend-owned, not per-session UI taste (asoe-ui Guardrail #0). The\nUI honors this; it never re-derives it.",
+        "properties": {
+          "audit": {
+            "$ref": "#/components/schemas/PresentationAudit"
+          },
+          "show_intent": {
+            "default": false,
+            "title": "Show Intent",
+            "type": "boolean"
+          },
+          "situation_headline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Situation Headline"
+          }
+        },
+        "title": "PresentationContract",
         "type": "object"
       },
       "PriceAnalysisData": {

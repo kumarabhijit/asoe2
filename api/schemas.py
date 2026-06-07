@@ -1979,6 +1979,48 @@ class ReviewerActivitySnapshot(BaseModel):
     by_highlight: ReviewerActivityByHighlight
 
 
+class PresentationAudit(BaseModel):
+    """Engine internals — `presentation_tier: audit` (council 2026-06-07).
+
+    The recipe that ran and the raw intent enum. These reconstruct HOW
+    the system decided; they are never operator-facing Layer 1 — they
+    live in the Diagnostics & Audit surface. Emitted (Guardrail #7:
+    available, not removed), just not shown front-and-center.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    recipe_name: Optional[str] = None
+    intent_code: Optional[str] = None
+
+
+class PresentationContract(BaseModel):
+    """Deterministic presentation projection (council 2026-06-07).
+
+    Tells the UI WHERE the contested elements belong so placement is
+    backend-owned, not per-session UI taste (asoe-ui Guardrail #0). The
+    UI honors this; it never re-derives it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # The business event in plain language — the Situation tier headline
+    # (`presentation_tier: operator`). Reuses the governed per-intent
+    # one-liner templates (`api.case_summary_templates`) so it never
+    # drifts from the queue-row vocabulary. None when the intent has no
+    # template / recipe output is too sparse — the UI structurally omits
+    # it (no fabricated headline).
+    situation_headline: Optional[str] = None
+
+    # Does the classified intent DISCRIMINATE the decision (name a
+    # problem like CREDIT_BLOCK / DUPLICATE_PO) or merely restate the
+    # arrival channel (MANUAL_ORDER_INTAKE)? Only discriminating intents
+    # earn a place in Layer 1; the raw enum always lives in `audit`.
+    show_intent: bool = False
+
+    audit: PresentationAudit = Field(default_factory=PresentationAudit)
+
+
 class AnalysisResponse(BaseModel):
     """GET /api/v1/exceptions/{id}/analysis"""
 
@@ -2080,6 +2122,15 @@ class AnalysisResponse(BaseModel):
     # "no hardcoded enum dispatch" envelope on the UI side.
     primary_section: Optional[str] = None
 
+    # ── Presentation contract (council 2026-06-07) ──────────────────
+    # Deterministic placement projection: `show_intent` (does the intent
+    # discriminate the decision?) and the audit bundle (recipe name, raw
+    # intent enum — `presentation_tier: audit`). Composed by
+    # `api.presentation_composer`; the UI honors it (asoe-ui Guardrail
+    # #0) and never re-decides placement. Optional only so a pre-3b
+    # stored payload deserialises; the route always sets it.
+    presentation: Optional[PresentationContract] = None
+
 
 # ---------------------------------------------------------------------------
 # OrderCase responses — ADR-038 Phase H.6 (case-centric surface)
@@ -2159,6 +2210,14 @@ class CaseListItem(BaseModel):
     intent: Optional[str] = None
     dollar_impact: Optional[CaseSummaryDollarImpact] = None
     audit_verdict_color: Optional[Literal["R", "A", "G"]] = None
+
+    # Council 2026-06-07 — backend-owned needs-human vs already-done
+    # disposition. Derived deterministically from the case lifecycle by
+    # `api.case_summary._attention_of`; the /cases queue groups by this
+    # field so the UI never switches on `status` (Guardrail #1). Always
+    # present (every case has a lifecycle state); defaulted for
+    # tolerance of pre-projection rows on the permissive wire shape.
+    attention_state: Literal["NEEDS_HUMAN", "IN_FLIGHT", "DONE"] = "NEEDS_HUMAN"
 
 
 class CaseListResponse(BaseModel):

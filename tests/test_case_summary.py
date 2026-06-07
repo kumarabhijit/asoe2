@@ -350,6 +350,7 @@ def test_summary_to_dict_wire_shape():
         intent="PRICE_DISCREPANCY",
         dollar_impact=DollarImpact(amount_cents=4147, currency="USD"),
         audit_verdict_color="R",
+        attention_state="NEEDS_HUMAN",
     )
     assert summary.to_dict() == {
         "customer_name": "acme-corp",
@@ -359,6 +360,7 @@ def test_summary_to_dict_wire_shape():
         "intent": "PRICE_DISCREPANCY",
         "dollar_impact": {"amount_cents": 4147, "currency": "USD"},
         "audit_verdict_color": "R",
+        "attention_state": "NEEDS_HUMAN",
     }
 
 
@@ -374,5 +376,6 @@ def test_summary_to_dict_null_dollar_impact_becomes_none():
         intent=None,
         dollar_impact=None,
         audit_verdict_color=None,
+        attention_state="DONE",
     )
     assert summary.to_dict()["dollar_impact"] is None
