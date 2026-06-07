@@ -2529,6 +2529,12 @@ async def get_analysis(
     # consumers know the surface is partial.
     composed = compose_analysis(record)
     extras: Dict[str, Any] = {}
+    # Presentation hint — the field the primary projection lands on, so
+    # the UI can auto-expand that comparison section first. Set only when
+    # the primary projection is surfaced below (i.e. cleared audit
+    # coverage); stays None otherwise so the UI never points at a section
+    # it isn't given (Guardrail #6 — no partial-truth pointers).
+    primary_section: Optional[str] = None
     if composed.class_name and composed.projection is not None:
         # Find the AnalysisResponse field this projection lands on.
         # Adapter registry's second element is the target field name
@@ -2543,6 +2549,7 @@ async def get_analysis(
             # handles that at the classifier level).
             if composed.is_complete:
                 extras[field_name] = composed.projection
+                primary_section = field_name
                 # Secondary projections share the primary's attestation
                 # target (registry rationale "same attestation target").
                 # Only surface when the primary cleared audit coverage
@@ -2592,5 +2599,6 @@ async def get_analysis(
         change_analysis=change_analysis,
         knowledge_graph=knowledge_graph,
         draft_reply=draft_reply,
+        primary_section=primary_section,
         **extras,
     )

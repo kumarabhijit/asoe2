@@ -406,6 +406,17 @@
               }
             ]
           },
+          "primary_section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Section"
+          },
           "recommendation": {
             "anyOf": [
               {

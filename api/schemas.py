@@ -2062,6 +2062,24 @@ class AnalysisResponse(BaseModel):
     # resolution_data["reply_draft"]). Absent until a DRAFT_REPLY disposition runs.
     draft_reply: Optional[DraftReply] = None
 
+    # ── Presentation hint: the primary comparison section ────────────
+    # The AnalysisResponse FIELD NAME of this record's primary
+    # enrichment projection (e.g. "price_hold_analysis"). It is the
+    # recipe-authoritative comparison the operator should see first —
+    # the read path sets it to the field the primary ANALYSIS_ADAPTER
+    # lands on when (and only when) that projection cleared audit
+    # coverage. None for records with no primary adapter projection
+    # (e.g. an auto-resolved EDI order with no discrepancy delta).
+    #
+    # This is a PRESENTATION hint, not a control field: it carries no
+    # business/compliance semantics and never gates routing. The UI
+    # uses it to auto-expand the matching `*Section` (Priority-2
+    # comparison delta) instead of leaving every enrichment section
+    # collapsed. Derived deterministically from the resolved adapter
+    # key — no heuristic ranking, so it stays inside the Guardrail-#1
+    # "no hardcoded enum dispatch" envelope on the UI side.
+    primary_section: Optional[str] = None
+
 
 # ---------------------------------------------------------------------------
 # OrderCase responses — ADR-038 Phase H.6 (case-centric surface)
