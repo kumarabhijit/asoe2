@@ -119,6 +119,48 @@ typed contract; section components in the UI are dumb projectors.
 If you feel tempted to combine recipe output + event data +
 gateway results inside a recipe to produce a "ready-to-render"
 payload, you're violating Pillar 2 — stop and use the composer.
+
+**Available vs shown — the presentation axis (council 2026-06-07).**
+"UI richness" means every audit-bearing field is *available* and
+*traceable*. It does **not** mean every field is *shown by default*
+on the operator's primary surface. The operator consumes a
+*cockpit* (the deciding subset, in business language); the full
+ledger lives in a Diagnostics & Audit drawer. To keep "what shows
+where" deterministic rather than per-session UI taste, the registry
+carries a second, **orthogonal** axis:
+
+  `presentation_tier: operator | evidence | audit`
+
+  * `operator` — Layer 1; changes what the human does (recommendation,
+    confidence, $ impact, the action).
+  * `evidence` — Layer 2 collapsed; the deltas / comparisons /
+    source documents that justify the recommendation.
+  * `audit`    — Diagnostics & Audit drawer; engine internals and
+    provenance (recipe name, raw intent enum, taxonomy version,
+    trace, correlation id, classification history). Still
+    audit-bearing; still emitted; just not front-and-center.
+
+This is **orthogonal** to `tier` (audit-bearing | conditional |
+contextual), which governs *whether a field must be populated*, not
+*where it is shown*. A field may be `tier: audit-bearing` and
+`presentation_tier: audit` simultaneously (e.g. the recipe name).
+The `build_analysis` composer projects `presentation_tier` onto the
+payload; the UI honors it and never re-decides placement.
+Demoting a field to `presentation_tier: audit` is the **sanctioned**
+way to declutter Layer 1 — it is NOT the silent removal this
+guardrail forbids (Majors' ruling: nothing is removed; the drawer
+is the reconstruction surface).
+
+**Needs-human vs already-done (Reis ruling, council 2026-06-07).**
+"Does this record need a human?" is a backend disposition, not a UI
+inference. A successfully auto-resolved record (e.g. a clean new
+order that processed straight through) is detection/processing
+*output*, not a resolution *exception* the operator must triage. The
+backend exposes an explicit `attention` disposition on the case /
+exception so the queue can separate "needs you" from "handled by
+agents." The UI groups by this field; it must not switch on
+`lifecycle_state` to derive attention (the UI Guardrail #1 forbids
+that, and the detection/resolution boundary must stay backend-owned).
 ---
 ## Reasoning Boundaries
 You may reason about:
