@@ -529,6 +529,16 @@ OverMaxAnalysisData:
     tier: audit-bearing
     source: recipe-output
     rationale: The attested per-line recommendation.
+  trimmed_total:
+    tier: audit-bearing
+    source: recipe-output
+    derivation: sum(trim_plan[].trimmed_to)
+    rationale: Attested total post-trim quantity the authorization commits to (server-computed roll-up; the UI must not derive it client-side).
+  delta_total:
+    tier: audit-bearing
+    source: recipe-output
+    derivation: sum(trim_plan[].delta)
+    rationale: Total quantity removed by the trim — the magnitude being authorized.
 
 MOQAnalysisData:
   ordered_qty:
@@ -1468,8 +1478,8 @@ summary:
   # who/what/when of a buyer reply), 8 contextual (rendered text +
   # template/recipient plumbing + the latest-revision mirrors).
   # NEEDS COMPLIANCE REVIEW (@kumarabhijit @linkinrustle).
-  total_fields: 205
-  audit_bearing: 145
+  total_fields: 207
+  audit_bearing: 147
   conditional: 7
   contextual: 53
   backend_gap_fields: 0
