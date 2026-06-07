@@ -66,6 +66,7 @@ from api.profile_composer import (
     compose_order_entry_extraction,
     compose_sap_data_analysis,
 )
+from api.presentation_composer import compose_presentation
 from api.errors import ASOEError
 from api.observability.audit_bearing import audit_bearing
 from api.schemas import (
@@ -2580,6 +2581,9 @@ async def get_analysis(
     change_analysis = compose_change_analysis(record)
     knowledge_graph = compose_knowledge_graph(record)
     draft_reply = compose_draft_reply(record)
+    # Council 2026-06-07 — deterministic placement projection
+    # (show_intent + audit bundle). The UI honors it (Guardrail #0).
+    presentation = compose_presentation(record)
 
     return AnalysisResponse(
         diagnosis=diagnosis,
@@ -2600,5 +2604,6 @@ async def get_analysis(
         knowledge_graph=knowledge_graph,
         draft_reply=draft_reply,
         primary_section=primary_section,
+        presentation=presentation,
         **extras,
     )

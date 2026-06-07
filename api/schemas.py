@@ -1979,6 +1979,40 @@ class ReviewerActivitySnapshot(BaseModel):
     by_highlight: ReviewerActivityByHighlight
 
 
+class PresentationAudit(BaseModel):
+    """Engine internals — `presentation_tier: audit` (council 2026-06-07).
+
+    The recipe that ran and the raw intent enum. These reconstruct HOW
+    the system decided; they are never operator-facing Layer 1 — they
+    live in the Diagnostics & Audit surface. Emitted (Guardrail #7:
+    available, not removed), just not shown front-and-center.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    recipe_name: Optional[str] = None
+    intent_code: Optional[str] = None
+
+
+class PresentationContract(BaseModel):
+    """Deterministic presentation projection (council 2026-06-07).
+
+    Tells the UI WHERE the contested elements belong so placement is
+    backend-owned, not per-session UI taste (asoe-ui Guardrail #0). The
+    UI honors this; it never re-derives it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Does the classified intent DISCRIMINATE the decision (name a
+    # problem like CREDIT_BLOCK / DUPLICATE_PO) or merely restate the
+    # arrival channel (MANUAL_ORDER_INTAKE)? Only discriminating intents
+    # earn a place in Layer 1; the raw enum always lives in `audit`.
+    show_intent: bool = False
+
+    audit: PresentationAudit = Field(default_factory=PresentationAudit)
+
+
 class AnalysisResponse(BaseModel):
     """GET /api/v1/exceptions/{id}/analysis"""
 
@@ -2079,6 +2113,15 @@ class AnalysisResponse(BaseModel):
     # key — no heuristic ranking, so it stays inside the Guardrail-#1
     # "no hardcoded enum dispatch" envelope on the UI side.
     primary_section: Optional[str] = None
+
+    # ── Presentation contract (council 2026-06-07) ──────────────────
+    # Deterministic placement projection: `show_intent` (does the intent
+    # discriminate the decision?) and the audit bundle (recipe name, raw
+    # intent enum — `presentation_tier: audit`). Composed by
+    # `api.presentation_composer`; the UI honors it (asoe-ui Guardrail
+    # #0) and never re-decides placement. Optional only so a pre-3b
+    # stored payload deserialises; the route always sets it.
+    presentation: Optional[PresentationContract] = None
 
 
 # ---------------------------------------------------------------------------
