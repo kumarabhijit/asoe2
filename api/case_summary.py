@@ -66,6 +66,49 @@ from typing import Iterable, Literal, Optional
 
 VerdictColor = Literal["R", "A", "G"]
 
+# ---------------------------------------------------------------------------
+# Attention disposition (council 2026-06-07, Reis ruling)
+# ---------------------------------------------------------------------------
+# "Does this case need a human?" is a backend-owned disposition, NOT a
+# UI inference. The /cases queue groups by `attention_state` so it can
+# separate work awaiting human judgement from auto-resolved / in-flight
+# work; the UI must NOT switch on `status` to derive this (asoe-ui
+# Guardrail #1, and the detection/resolution boundary stays backend-
+# owned).
+#
+#   * NEEDS_HUMAN — the operator must act or be aware: an awaiting-human
+#     review, a FAILED pipeline (FAIL_TO_HUMAN), or a compliance BLOCK.
+#     A control tower foregrounds compliance blocks — hiding a RED-
+#     blocked financial action would defeat its purpose (Majors).
+#   * IN_FLIGHT   — agents/systems/external parties are working; no
+#     operator action is pending right now.
+#   * DONE        — resolved; informational only.
+#
+# This mapping IS the policy. Changing the disposition of a lifecycle
+# state is a one-line edit here, open to compliance refinement; it is
+# deliberately the only place the mapping lives.
+AttentionState = Literal["NEEDS_HUMAN", "IN_FLIGHT", "DONE"]
+
+_ATTENTION_BY_STATUS: dict[str, AttentionState] = {
+    "OPEN_AWAITING_HUMAN": "NEEDS_HUMAN",
+    "FAILED": "NEEDS_HUMAN",
+    "BLOCKED": "NEEDS_HUMAN",
+    "OPEN_AGENT_PROCESSING": "IN_FLIGHT",
+    "OPEN_AWAITING_BUYER": "IN_FLIGHT",
+    "OPEN_AWAITING_ERP": "IN_FLIGHT",
+    "RESOLVED": "DONE",
+}
+
+
+def _attention_of(case) -> AttentionState:
+    """Deterministic case lifecycle → attention disposition.
+
+    Unknown / unmapped states default to NEEDS_HUMAN: an unclassifiable
+    case is exactly what a human should look at, never something the
+    queue silently buries. Pure function — no I/O.
+    """
+    return _ATTENTION_BY_STATUS.get(getattr(case, "status", None), "NEEDS_HUMAN")
+
 
 @dataclass(frozen=True)
 class DollarImpact:
@@ -100,6 +143,11 @@ class CaseSummary:
     intent: Optional[str]
     dollar_impact: Optional[DollarImpact]
     audit_verdict_color: Optional[VerdictColor]
+    # Council 2026-06-07 — backend-owned needs-human vs already-done
+    # disposition the /cases queue groups by. Always present (never
+    # null): every case has a lifecycle state, so it always has a
+    # disposition.
+    attention_state: AttentionState
 
     def to_dict(self) -> dict:
         """Serialise to the wire shape consumed by `CaseListItem`."""
@@ -113,6 +161,7 @@ class CaseSummary:
                 self.dollar_impact.to_dict() if self.dollar_impact else None
             ),
             "audit_verdict_color": self.audit_verdict_color,
+            "attention_state": self.attention_state,
         }
 
 
@@ -166,6 +215,7 @@ def compute_case_summary(case, records: Iterable) -> CaseSummary:
         intent=intent,
         dollar_impact=_dollar_impact_of(primary),
         audit_verdict_color=gated_color,
+        attention_state=_attention_of(case),
     )
 
 

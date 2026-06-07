@@ -2160,6 +2160,14 @@ class CaseListItem(BaseModel):
     dollar_impact: Optional[CaseSummaryDollarImpact] = None
     audit_verdict_color: Optional[Literal["R", "A", "G"]] = None
 
+    # Council 2026-06-07 — backend-owned needs-human vs already-done
+    # disposition. Derived deterministically from the case lifecycle by
+    # `api.case_summary._attention_of`; the /cases queue groups by this
+    # field so the UI never switches on `status` (Guardrail #1). Always
+    # present (every case has a lifecycle state); defaulted for
+    # tolerance of pre-projection rows on the permissive wire shape.
+    attention_state: Literal["NEEDS_HUMAN", "IN_FLIGHT", "DONE"] = "NEEDS_HUMAN"
+
 
 class CaseListResponse(BaseModel):
     """GET /api/v1/cases — list response.
