@@ -1096,11 +1096,24 @@ class OverMaxAnalysisData(BaseModel):
     at_risk: float = 0.0
     order_lines: List[OverMaxLine] = Field(default_factory=list)
     trim_plan: List[TrimPlanLine] = Field(default_factory=list)
+    # Trim-plan roll-ups — audit-bearing. Computed authoritatively here (the
+    # composer's typed contract) from `trim_plan` so the displayed totals are a
+    # single server-side source of truth, not a client-side `reduce` in the UI
+    # projector (UI Guardrail #6 — no audit totals derived in the section
+    # component). Any inbound value is overridden by the deterministic sum.
+    trimmed_total: float = 0.0
+    delta_total: float = 0.0
     # Grandfathered audit-bearing — populated when the SAP contract
     # gateway lands.
     contract_ref: Optional[str] = None
     block_status: Optional[str] = None
     block_reason: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _compute_trim_totals(self) -> "OverMaxAnalysisData":
+        self.trimmed_total = sum(line.trimmed_to for line in self.trim_plan)
+        self.delta_total = sum(line.delta for line in self.trim_plan)
+        return self
 
 
 class RoundUpPlanLine(BaseModel):

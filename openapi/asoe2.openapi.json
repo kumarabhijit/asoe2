@@ -4708,6 +4708,11 @@
             ],
             "title": "Contract Ref"
           },
+          "delta_total": {
+            "default": 0.0,
+            "title": "Delta Total",
+            "type": "number"
+          },
           "exceedance_pct": {
             "title": "Exceedance Pct",
             "type": "number"
@@ -4737,6 +4742,11 @@
             },
             "title": "Trim Plan",
             "type": "array"
+          },
+          "trimmed_total": {
+            "default": 0.0,
+            "title": "Trimmed Total",
+            "type": "number"
           },
           "uom": {
             "default": "",
