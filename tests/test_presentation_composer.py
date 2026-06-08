@@ -103,6 +103,15 @@ def test_situation_headline_reuses_governed_one_liner():
     assert c.situation_headline == "New Order: PO 7781 — 200 cases"
 
 
+def test_compose_presentation_emits_section_tiers():
+    # The composer projects the full placement authority so the UI can
+    # route any rendered section deterministically.
+    c = compose_presentation(_record(intent="CREDIT_BLOCK"))
+    assert c.section_tiers["price_analysis"] == "evidence"
+    assert c.section_tiers["edi_850_audit"] == "audit"
+    assert c.section_tiers["knowledge_graph"] == "audit"
+
+
 def test_situation_headline_none_when_template_sparse():
     # MANUAL_ORDER_INTAKE with no email-source enrichment → no honest
     # headline → None (structurally omitted on the UI, never fabricated).

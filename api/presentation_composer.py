@@ -58,9 +58,12 @@ def compose_presentation(record: Any) -> PresentationContract:
 
     headline = render_template(record, None).one_liner
 
+    from api.presentation_tiers import section_tiers
+
     return PresentationContract(
         situation_headline=headline,
         show_intent=intent_discriminates(intent),
+        section_tiers=section_tiers(),
         audit=PresentationAudit(
             recipe_name=getattr(record, "selected_recipe", None),
             intent_code=intent,
