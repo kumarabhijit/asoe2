@@ -2018,6 +2018,15 @@ class PresentationContract(BaseModel):
     # earn a place in Layer 1; the raw enum always lives in `audit`.
     show_intent: bool = False
 
+    # Per-section placement authority (council 2026-06-07). Maps each
+    # analysis section key to where the UI shows it:
+    # operator (Layer 1) | evidence (Layer 2) | audit (drawer). Projected
+    # by `api.presentation_tiers`; the UI honors it and never re-decides
+    # placement (asoe-ui Guardrail #0/#1).
+    section_tiers: Dict[str, Literal["operator", "evidence", "audit"]] = Field(
+        default_factory=dict
+    )
+
     audit: PresentationAudit = Field(default_factory=PresentationAudit)
 
 

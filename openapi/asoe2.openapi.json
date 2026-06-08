@@ -5205,6 +5205,18 @@
           "audit": {
             "$ref": "#/components/schemas/PresentationAudit"
           },
+          "section_tiers": {
+            "additionalProperties": {
+              "enum": [
+                "operator",
+                "evidence",
+                "audit"
+              ],
+              "type": "string"
+            },
+            "title": "Section Tiers",
+            "type": "object"
+          },
           "show_intent": {
             "default": false,
             "title": "Show Intent",
