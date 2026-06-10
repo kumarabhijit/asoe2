@@ -2025,6 +2025,39 @@ class PresentationAudit(BaseModel):
     its execution trace for audit reconstruction."""
 
 
+class SituationContext(BaseModel):
+    """Facts that ride the Situation hero sub-line (audit finding #2,
+    sign-off 2026-06-10, option C).
+
+    Which facts appear directly under the Situation headline is a
+    backend placement decision, not per-session UI taste (asoe-ui
+    Guardrail #0/#6) — this block IS that decision: the composer
+    re-projects the chosen record/case fields here and the UI renders
+    them as given. Option C deliberately carries SLA + lifecycle state
+    only; the $ figure keeps its Priority-1 home in the ImpactBar so
+    no fact is rendered twice and nothing leaves Layer 1.
+
+    Every field is a pure projection of an already-decided value and is
+    None when the source has no honest value — the UI structurally
+    omits that segment (no placeholder, no fabricated text).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    sla_due_at: Optional[str] = None
+    """Parent case SLA timestamp (ISO 8601, `OrderCase.sla_due_at`).
+    Emitted as a timestamp — never a pre-rendered relative label — so
+    the UI's existing SLA ticker renders a live "due in 3h 12m" that
+    cannot go stale. None for records without a parent case (Tier-1
+    stateless) or when the case carries no SLA."""
+
+    lifecycle_state: Optional[str] = None
+    """The record's lifecycle state, re-projected so the sub-line's
+    membership is backend-owned. The UI renders it through the governed
+    humanizer ("Pending Review"); the raw enum stays available in the
+    Diagnostics & Audit drawer."""
+
+
 class PresentationContract(BaseModel):
     """Deterministic presentation projection (council 2026-06-07).
 
@@ -2059,6 +2092,11 @@ class PresentationContract(BaseModel):
     )
 
     audit: PresentationAudit = Field(default_factory=PresentationAudit)
+
+    # Situation hero sub-line facts (audit finding #2, option C). The
+    # composer decides WHICH facts ride the sub-line; the UI projects
+    # them as given and never re-decides membership.
+    situation_context: SituationContext = Field(default_factory=SituationContext)
 
 
 class AnalysisResponse(BaseModel):

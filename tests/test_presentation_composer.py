@@ -183,3 +183,45 @@ def test_provenance_all_none_when_record_bare():
     assert a.supergroup_code is None
     assert a.taxonomy_version is None
     assert a.correlation_id is None
+
+
+# ── Situation sub-line (audit finding #2, option C — sign-off 2026-06-10) ──
+# The sub-line's membership is backend-owned: SLA (from the parent case)
+# + lifecycle state only. The $ figure deliberately does NOT ride here —
+# it keeps its single home in impact_metrics / ImpactBar.
+
+
+def test_situation_context_projects_case_sla_and_record_state():
+    rec = _record(intent="CREDIT_BLOCK")
+    rec.lifecycle_state = "PENDING_REVIEW"
+    case = SimpleNamespace(sla_due_at="2026-06-10T18:30:00+00:00")
+    sc = compose_presentation(rec, case).situation_context
+    assert sc.sla_due_at == "2026-06-10T18:30:00+00:00"
+    assert sc.lifecycle_state == "PENDING_REVIEW"
+
+
+def test_situation_context_sla_none_without_parent_case():
+    # Tier-1 stateless records (no parent OrderCase) → no SLA segment;
+    # lifecycle state still rides (it lives on the record itself).
+    rec = _record(intent="CREDIT_BLOCK")
+    rec.lifecycle_state = "RESOLVED"
+    sc = compose_presentation(rec, None).situation_context
+    assert sc.sla_due_at is None
+    assert sc.lifecycle_state == "RESOLVED"
+
+
+def test_situation_context_emits_timestamp_not_rendered_label():
+    # The contract carries the ISO timestamp, never a pre-rendered
+    # relative label ("due in 3h 12m") that would go stale — the UI's
+    # SLA ticker owns live formatting.
+    case = SimpleNamespace(sla_due_at="2026-06-11T09:00:00+00:00")
+    sc = compose_presentation(_record(intent="DUPLICATE_PO"), case).situation_context
+    assert sc.sla_due_at == "2026-06-11T09:00:00+00:00"
+
+
+def test_situation_context_all_none_when_bare():
+    # Bare record, no case → both facts None → the UI structurally
+    # omits the whole sub-line (no placeholder, no fabricated text).
+    sc = compose_presentation(_record()).situation_context
+    assert sc.sla_due_at is None
+    assert sc.lifecycle_state is None

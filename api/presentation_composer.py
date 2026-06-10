@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from api.schemas import PresentationAudit, PresentationContract
+from api.schemas import PresentationAudit, PresentationContract, SituationContext
 
 
 # Intents that merely restate the arrival / intake channel rather than
@@ -41,12 +41,18 @@ def intent_discriminates(intent: Any) -> bool:
     return str(intent) not in _NON_DISCRIMINATING_INTENTS
 
 
-def compose_presentation(record: Any) -> PresentationContract:
+def compose_presentation(record: Any, case: Any = None) -> PresentationContract:
     """Project a record into its presentation contract.
 
     Pure projection over already-decided record fields — no recipe
     execution, no shadow re-evaluation (Verdict 2026-04-22: the
     composer assembles, recipes do not).
+
+    `case` is the record's parent OrderCase (or None for Tier-1
+    stateless records that never materialised one). It contributes the
+    case-level SLA timestamp to the Situation sub-line (audit finding
+    #2, option C); every projection from it is a read of an
+    already-decided field.
     """
     intent = getattr(record, "intent", None)
     # Reuse the governed per-intent one-liner — the SAME plain-language
@@ -71,6 +77,13 @@ def compose_presentation(record: Any) -> PresentationContract:
         situation_headline=headline,
         show_intent=intent_discriminates(intent),
         section_tiers=section_tiers(),
+        # Situation hero sub-line (audit finding #2, option C — sign-off
+        # 2026-06-10): SLA + lifecycle state only. The $ figure stays in
+        # impact_metrics / ImpactBar so it is rendered exactly once.
+        situation_context=SituationContext(
+            sla_due_at=getattr(case, "sla_due_at", None) if case else None,
+            lifecycle_state=getattr(record, "lifecycle_state", None),
+        ),
         audit=PresentationAudit(
             recipe_name=getattr(record, "selected_recipe", None),
             intent_code=intent,

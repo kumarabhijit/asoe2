@@ -2603,7 +2603,18 @@ async def get_analysis(
     draft_reply = compose_draft_reply(record)
     # Council 2026-06-07 — deterministic placement projection
     # (show_intent + audit bundle). The UI honors it (Guardrail #0).
-    presentation = compose_presentation(record)
+    # The parent OrderCase (None for Tier-1 stateless records)
+    # contributes the case-level SLA to the Situation sub-line
+    # (audit finding #2, option C). Tenant-guarded: a cross-tenant
+    # parent id (data fault) yields None rather than leaking a case.
+    from api.store import case_store
+
+    parent_case = (
+        case_store.get(record.parent_case_id) if record.parent_case_id else None
+    )
+    if parent_case is not None and parent_case.tenant_id != tenant_id:
+        parent_case = None
+    presentation = compose_presentation(record, parent_case)
 
     return AnalysisResponse(
         diagnosis=diagnosis,
