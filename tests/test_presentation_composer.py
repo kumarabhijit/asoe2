@@ -18,11 +18,24 @@ from api.presentation_composer import (
 )
 
 
-def _record(intent=None, recipe=None, enrichment_context=None):
+def _record(
+    intent=None,
+    recipe=None,
+    enrichment_context=None,
+    *,
+    event_type=None,
+    shadow_verdict=None,
+    supergroup_code=None,
+    trace_id=None,
+):
     return SimpleNamespace(
         intent=intent,
         selected_recipe=recipe,
         enrichment_context=enrichment_context,
+        event_type=event_type,
+        shadow_verdict=shadow_verdict,
+        supergroup_code=supergroup_code,
+        trace_id=trace_id,
     )
 
 
@@ -117,3 +130,56 @@ def test_situation_headline_none_when_template_sparse():
     # headline → None (structurally omitted on the UI, never fabricated).
     c = compose_presentation(_record(intent="MANUAL_ORDER_INTAKE"))
     assert c.situation_headline is None
+
+
+# ── Provenance card (council 2026-06-10) ──────────────────────────────
+# The Diagnostics & Audit "Provenance" bundle is a pure projection of
+# already-decided record fields. These lock that projection: present →
+# emitted; absent → None (UI omits the row, never fabricates).
+
+
+def test_provenance_projects_record_fields():
+    c = compose_presentation(
+        _record(
+            intent="DUPLICATE_PO",
+            recipe="DuplicatePORecipe",
+            event_type="EDI_850_PRICE_MISMATCH",
+            shadow_verdict="YELLOW",
+            supergroup_code="cpg.beverage.dup-po",
+            trace_id="8c9f-f828-41d0-9a2b",
+        )
+    )
+    a = c.audit
+    assert a.recipe_name == "DuplicatePORecipe"
+    assert a.intent_code == "DUPLICATE_PO"
+    assert a.event_type == "EDI_850_PRICE_MISMATCH"
+    assert a.shadow_verdict == "YELLOW"
+    assert a.supergroup_code == "cpg.beverage.dup-po"
+    assert a.correlation_id == "8c9f-f828-41d0-9a2b"
+
+
+def test_provenance_taxonomy_version_emitted_only_with_classification():
+    from contracts._generated.taxonomy_constants import TAXONOMY_VERSION
+
+    # Classified → taxonomy version snapshot travels with the supergroup.
+    classified = compose_presentation(
+        _record(intent="CREDIT_BLOCK", supergroup_code="cpg.credit.block")
+    )
+    assert classified.audit.taxonomy_version == TAXONOMY_VERSION
+
+    # Unclassified → no supergroup → version is None (UI omits the row;
+    # a bare version with no classification would be misleading provenance).
+    unclassified = compose_presentation(_record(intent="CREDIT_BLOCK"))
+    assert unclassified.audit.supergroup_code is None
+    assert unclassified.audit.taxonomy_version is None
+
+
+def test_provenance_all_none_when_record_bare():
+    # A record with no provenance fields set yields an all-None bundle —
+    # every row structurally omitted on the UI, never a fabricated value.
+    a = compose_presentation(_record(intent="CREDIT_BLOCK")).audit
+    assert a.event_type is None
+    assert a.shadow_verdict is None
+    assert a.supergroup_code is None
+    assert a.taxonomy_version is None
+    assert a.correlation_id is None

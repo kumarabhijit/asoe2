@@ -1982,16 +1982,47 @@ class ReviewerActivitySnapshot(BaseModel):
 class PresentationAudit(BaseModel):
     """Engine internals — `presentation_tier: audit` (council 2026-06-07).
 
-    The recipe that ran and the raw intent enum. These reconstruct HOW
-    the system decided; they are never operator-facing Layer 1 — they
-    live in the Diagnostics & Audit surface. Emitted (Guardrail #7:
-    available, not removed), just not shown front-and-center.
+    The provenance bundle that reconstructs HOW the system decided: the
+    recipe that ran, the raw intent enum, and (council 2026-06-10) the
+    originating event, shadow verdict, taxonomy classification + version,
+    and the trace correlation id — the "Provenance" card in the
+    Diagnostics & Audit drawer. These are never operator-facing Layer 1;
+    they are emitted (Guardrail #7: available, not removed), just not
+    shown front-and-center.
+
+    Every field is a pure projection of an already-decided record field
+    (Verdict 2026-04-22: the composer assembles, recipes do not) and is
+    None when the record has no honest value, so the UI structurally
+    omits that row rather than fabricating a placeholder.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     recipe_name: Optional[str] = None
     intent_code: Optional[str] = None
+
+    # ── Provenance card (council 2026-06-10) ────────────────────────
+    event_type: Optional[str] = None
+    """Originating event kind (e.g. EDI_850_PRICE_MISMATCH,
+    EMAIL_ORDER_ENTRY_REQUEST) — the record's `event_type`."""
+
+    shadow_verdict: Optional[str] = None
+    """Compliance Shadow verdict (GREEN | YELLOW | RED) as audit
+    provenance. The operator-facing verdict already lives on the
+    Recommendation; this is the reconstruction-surface copy."""
+
+    supergroup_code: Optional[str] = None
+    """Taxonomy classification node assigned to the record
+    (`case_taxonomy.yaml` supergroup) — the record's `supergroup_code`."""
+
+    taxonomy_version: Optional[str] = None
+    """Deployed taxonomy version that classified the record. Emitted only
+    alongside a classification (supergroup_code present); None when
+    unclassified so the UI omits the row."""
+
+    correlation_id: Optional[str] = None
+    """Pipeline trace / correlation id (`trace_id`) — ties this record to
+    its execution trace for audit reconstruction."""
 
 
 class PresentationContract(BaseModel):
