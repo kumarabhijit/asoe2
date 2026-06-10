@@ -26,6 +26,14 @@
 # `repo:kumarabhijit/asoe2:ref:refs/heads/main` for the role
 # `AZURE_CLIENT_ID` ↔ `AZURE_TENANT_ID` ↔ `AZURE_SUBSCRIPTION_ID`.
 # No long-lived `AZURE_CREDENTIALS` JSON; rotation is automatic.
+#
+# Unconfigured target: when the three OIDC secrets are not set (runs
+# 37-40 all died at `azure/login` with "Not all values are present"),
+# the `preflight` job detects it and the deploy SKIPS with a summary
+# naming the missing pieces, instead of failing every push to main.
+# Adding the secrets re-enables deploys with no workflow change.
+# Secrets resolve through `environment: production`, so preflight
+# runs in that same environment to see the same scope.
 
 name: Deploy (Azure Container Apps)
 
@@ -63,6 +71,52 @@ permissions:
   contents: read
 
 jobs:
+  # ── 0. Is the Azure target configured at all? ─────────────────────
+  # The `secrets` context is not allowed in a job-level `if:`, so a
+  # tiny job projects "are the OIDC secrets present" into an output
+  # the deploy job can gate on. Same `environment` as the deploy so
+  # environment-scoped secrets are visible to the check.
+  preflight:
+    name: Check Azure deploy configuration
+    runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - name: Check OIDC secrets are present
+        id: check
+        run: |
+          set -euo pipefail
+          MISSING=()
+          [[ -n "${AZURE_CLIENT_ID:-}" ]]       || MISSING+=("secrets.AZURE_CLIENT_ID")
+          [[ -n "${AZURE_TENANT_ID:-}" ]]       || MISSING+=("secrets.AZURE_TENANT_ID")
+          [[ -n "${AZURE_SUBSCRIPTION_ID:-}" ]] || MISSING+=("secrets.AZURE_SUBSCRIPTION_ID")
+          if [[ ${#MISSING[@]} -eq 0 ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "Azure OIDC credentials present — deploy will run."
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Azure deploy skipped — target not configured"
+              echo ""
+              echo "The following are not set (repo or \`production\` environment):"
+              for m in "${MISSING[@]}"; do echo "- \`${m}\`"; done
+              echo ""
+              echo "Also required once those are added: vars \`AZURE_RESOURCE_GROUP\`,"
+              echo "\`AZURE_LOCATION\`, \`AZURE_ACR_NAME\`, \`AZURE_APP_NAME\`; secrets"
+              echo "\`PG_ADMIN_PASSWORD\`, \`ANTHROPIC_API_KEY\`, \`ASOE_JWT_SECRET\`;"
+              echo "and an Azure federated credential bound to"
+              echo "\`repo:kumarabhijit/asoe2:ref:refs/heads/main\` (workflow banner)."
+              echo ""
+              echo "Adding them re-enables deploys automatically — no workflow change needed."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Azure OIDC credentials missing (${MISSING[*]}) — deploy will be skipped." >&2
+          fi
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
   # ── 1. Wait for the same-SHA test gate before shipping ────────────
   await-tests:
     name: Wait for tests to pass
@@ -84,9 +138,13 @@ jobs:
     # On workflow_dispatch `await-tests` is skipped (its `if:` gates
     # on `push`). The `if:` below treats `skipped` as "no gate" so the
     # manual path still runs; on `push` the gate must end in `success`.
-    needs: [await-tests]
+    # Either way the Azure target must be configured (preflight) — an
+    # unconfigured target skips the deploy (green) rather than failing
+    # at `azure/login` on every push to main.
+    needs: [await-tests, preflight]
     if: |
       always() &&
+      needs.preflight.outputs.configured == 'true' &&
       (
         (github.event_name == 'workflow_dispatch' && needs.await-tests.result == 'skipped') ||
         (github.event_name == 'push' && needs.await-tests.result == 'success')
