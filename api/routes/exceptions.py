@@ -462,18 +462,37 @@ def _persist_exception(
     final_status_value = (
         state.final_status.value if state.final_status else None
     )
+    intent_value = state.intent.value if state.intent else None
     parent_case = materialise_for_event(
         tenant_id, state.event, final_status_value,
-        intent=state.intent.value if state.intent else None,
+        intent=intent_value,
     )
     parent_case_id = parent_case.case_id if parent_case else None
+
+    # Taxonomy supergroup is set at CREATE time — `ExceptionStore.update`
+    # treats the NULL state as "never classified" and forbids
+    # reclassify-to-NULL (store §8.6). Mirror the parent case's
+    # classification when a case was materialised (it already incorporates
+    # the RULE leaf derivation + any CUSTOMER-origin MODEL override in
+    # `case_resolver`); for clean records that open no case (lazy
+    # materialisation), fall back to the deterministic RULE mapping from
+    # intent so the record's provenance still carries its supergroup
+    # (PresentationAudit.supergroup_code — Guardrail #6: available, not
+    # dropped). None only when the intent itself is absent/unmapped.
+    if parent_case is not None:
+        record_supergroup = parent_case.supergroup_code
+    elif intent_value:
+        from contracts.taxonomy import supergroup_for_intent
+        record_supergroup = supergroup_for_intent(intent_value)
+    else:
+        record_supergroup = None
 
     record = exception_store.create(
         tenant_id=tenant_id,
         order_id=state.event.order_id,
         event_type=state.event.event_type,
         trace_id=trace_id or str(uuid4()),
-        intent=state.intent.value if state.intent else None,
+        intent=intent_value,
         shadow_verdict=state.shadow.status.value if state.shadow else None,
         selected_recipe=state.selected_recipe,
         final_status=final_status_value,
@@ -483,6 +502,7 @@ def _persist_exception(
         original_event=state.event.model_dump(mode="json"),
         enrichment_context=ctx,
         parent_case_id=parent_case_id,
+        supergroup_code=record_supergroup,
     )
 
     # Verdict Pillar 2.3: capture a structured audit-gap snapshot on
