@@ -82,6 +82,30 @@
         "title": "AdminReleaseRequest",
         "type": "object"
       },
+      "AgentDomainActivity": {
+        "additionalProperties": false,
+        "properties": {
+          "domain": {
+            "title": "Domain",
+            "type": "string"
+          },
+          "resolved_today": {
+            "default": 0,
+            "title": "Resolved Today",
+            "type": "integer"
+          },
+          "resolving_now": {
+            "default": 0,
+            "title": "Resolving Now",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "domain"
+        ],
+        "title": "AgentDomainActivity",
+        "type": "object"
+      },
       "AlternateDeliveryOption": {
         "additionalProperties": false,
         "description": "One ranked alternate delivery option from\nDeliveryDelayResolutionRecipe._rank_options.",
@@ -380,6 +404,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/PalletAnalysisData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "precedents": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrecedentsAnalysis"
               },
               {
                 "type": "null"
@@ -1567,6 +1601,96 @@
         "title": "ConstraintEvaluation",
         "type": "object"
       },
+      "ControlTowerKpis": {
+        "additionalProperties": false,
+        "properties": {
+          "auto_resolved_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Resolved Pct"
+          },
+          "avg_resolution_time_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Resolution Time Seconds"
+          },
+          "dollar_at_risk": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DollarAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "open_needs_human": {
+            "default": 0,
+            "title": "Open Needs Human",
+            "type": "integer"
+          }
+        },
+        "title": "ControlTowerKpis",
+        "type": "object"
+      },
+      "ControlTowerResponse": {
+        "additionalProperties": false,
+        "description": "GET /api/v1/exceptions/control-tower",
+        "properties": {
+          "agent_activity": {
+            "items": {
+              "$ref": "#/components/schemas/AgentDomainActivity"
+            },
+            "title": "Agent Activity",
+            "type": "array"
+          },
+          "generated_at": {
+            "title": "Generated At",
+            "type": "string"
+          },
+          "kpis": {
+            "$ref": "#/components/schemas/ControlTowerKpis"
+          },
+          "mix_by_intent": {
+            "items": {
+              "$ref": "#/components/schemas/IntentDollarMix"
+            },
+            "title": "Mix By Intent",
+            "type": "array"
+          },
+          "sla_risk": {
+            "items": {
+              "$ref": "#/components/schemas/SlaRiskRow"
+            },
+            "title": "Sla Risk",
+            "type": "array"
+          },
+          "throughput": {
+            "items": {
+              "$ref": "#/components/schemas/ThroughputBucket"
+            },
+            "title": "Throughput",
+            "type": "array"
+          }
+        },
+        "required": [
+          "generated_at"
+        ],
+        "title": "ControlTowerResponse",
+        "type": "object"
+      },
       "CosignRequest": {
         "additionalProperties": false,
         "description": "POST /api/v1/exceptions/{id}/override/cosign \u2014 second-reviewer decision\non a pending high-value override (Phase 2 four-eyes control).\n\n``approve=True`` applies the pending override (lifecycle \u2192 RESOLVED);\n``approve=False`` rejects it and restores the prior lifecycle. Notes\nare mandatory (SOX) in both cases.\n\nThe cosigner's identity comes from the authenticated user and must\ndiffer from the initiator \u2014 same-person cosign is a SOD violation.",
@@ -1742,6 +1866,26 @@
           "reason_tag"
         ],
         "title": "DispositionRequest",
+        "type": "object"
+      },
+      "DollarAmount": {
+        "additionalProperties": false,
+        "description": "Integer cents + ISO 4217 currency (mirrors CaseSummary's\nDollarImpact wire shape \u2014 no float drift, no currency-less\npartial-truth amounts).",
+        "properties": {
+          "amount_cents": {
+            "title": "Amount Cents",
+            "type": "integer"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount_cents",
+          "currency"
+        ],
+        "title": "DollarAmount",
         "type": "object"
       },
       "DraftReply": {
@@ -3966,6 +4110,24 @@
         "title": "InboundOrder",
         "type": "object"
       },
+      "IntentDollarMix": {
+        "additionalProperties": false,
+        "properties": {
+          "dollar_at_risk": {
+            "$ref": "#/components/schemas/DollarAmount"
+          },
+          "intent": {
+            "title": "Intent",
+            "type": "string"
+          }
+        },
+        "required": [
+          "intent",
+          "dollar_at_risk"
+        ],
+        "title": "IntentDollarMix",
+        "type": "object"
+      },
       "KnowledgeGraphEdge": {
         "description": "A directed relationship between two `KnowledgeGraphNode` ids (ADR-042\nPhase 7). `relation` is the decoded edge label (e.g. ``places`` /\n``contains`` / ``validated_by``).",
         "properties": {
@@ -5168,6 +5330,145 @@
         "title": "PolicyUpdateRequest",
         "type": "object"
       },
+      "PrecedentCase": {
+        "additionalProperties": false,
+        "description": "One 'Similar past case' row (sign-off 2026-06-10).\n\nA pure projection of an already-resolved record the operator can\nconsult as precedent. Advisory retrieval ONLY: no recipe, shadow,\nor routing decision ever reads precedents \u2014 they are Layer-2\nevidence for the human (presentation_tier: evidence).",
+        "properties": {
+          "case_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Case Id"
+          },
+          "customer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Name"
+          },
+          "embedding_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Embedding Model"
+          },
+          "intent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intent"
+          },
+          "match_basis": {
+            "enum": [
+              "semantic",
+              "correlate"
+            ],
+            "title": "Match Basis",
+            "type": "string"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
+          "outcome_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome Summary"
+          },
+          "record_id": {
+            "title": "Record Id",
+            "type": "string"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "similarity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Similarity"
+          }
+        },
+        "required": [
+          "record_id",
+          "match_basis"
+        ],
+        "title": "PrecedentCase",
+        "type": "object"
+      },
+      "PrecedentsAnalysis": {
+        "additionalProperties": false,
+        "description": "`AnalysisResponse.precedents` \u2014 the 'Similar past cases' card.\n\nAssembled ONLY by the analysis composition path (Verdict\n2026-04-22); the UI is a dumb projector. None on the response when\nno precedent exists (structural omission, never an empty shell).",
+        "properties": {
+          "generated_at": {
+            "title": "Generated At",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PrecedentCase"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "query_basis": {
+            "title": "Query Basis",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query_basis",
+          "generated_at"
+        ],
+        "title": "PrecedentsAnalysis",
+        "type": "object"
+      },
       "PresentationAudit": {
         "additionalProperties": false,
         "description": "Engine internals \u2014 `presentation_tier: audit` (council 2026-06-07).\n\nThe provenance bundle that reconstructs HOW the system decided: the\nrecipe that ran, the raw intent enum, and (council 2026-06-10) the\noriginating event, shadow verdict, taxonomy classification + version,\nand the trace correlation id \u2014 the \"Provenance\" card in the\nDiagnostics & Audit drawer. These are never operator-facing Layer 1;\nthey are emitted (Guardrail #7: available, not removed), just not\nshown front-and-center.\n\nEvery field is a pure projection of an already-decided record field\n(Verdict 2026-04-22: the composer assembles, recipes do not) and is\nNone when the record has no honest value, so the UI structurally\nomits that row rather than fabricating a placeholder.",
@@ -6335,6 +6636,57 @@
         "title": "SituationContext",
         "type": "object"
       },
+      "SlaRiskRow": {
+        "additionalProperties": false,
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "customer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Name"
+          },
+          "dollar_impact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DollarAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "intent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intent"
+          },
+          "sla_due_at": {
+            "title": "Sla Due At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "case_id",
+          "sla_due_at"
+        ],
+        "title": "SlaRiskRow",
+        "type": "object"
+      },
       "StatsResponse": {
         "description": "GET /api/v1/exceptions/stats \u2014 dashboard metrics.",
         "properties": {
@@ -6600,6 +6952,30 @@
           }
         },
         "title": "TenantResetRequest",
+        "type": "object"
+      },
+      "ThroughputBucket": {
+        "additionalProperties": false,
+        "properties": {
+          "by_agents": {
+            "default": 0,
+            "title": "By Agents",
+            "type": "integer"
+          },
+          "by_humans": {
+            "default": 0,
+            "title": "By Humans",
+            "type": "integer"
+          },
+          "hour_start": {
+            "title": "Hour Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hour_start"
+        ],
+        "title": "ThroughputBucket",
         "type": "object"
       },
       "TraceResponse": {
@@ -8922,6 +9298,55 @@
           }
         },
         "summary": "List Exceptions",
+        "tags": [
+          "exceptions"
+        ]
+      }
+    },
+    "/api/v1/exceptions/control-tower": {
+      "get": {
+        "operationId": "control_tower_api_v1_exceptions_control_tower_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlTowerResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Control Tower",
         "tags": [
           "exceptions"
         ]

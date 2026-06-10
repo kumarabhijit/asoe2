@@ -82,6 +82,7 @@ from api.schemas import (
     ExceptionListResponse,
     LineAnalysis,
     LineItem,
+    ControlTowerResponse,
     LineItemsResponse,
     ReanalyzeRequest,
     ResolveRequest,
@@ -1424,6 +1425,58 @@ async def stats(tenant_id: str = Depends(get_tenant_id)) -> StatsResponse:
 
 
 # ---------------------------------------------------------------------------
+# GET /api/v1/exceptions/control-tower — operator dashboard payload
+# ---------------------------------------------------------------------------
+# Registered BEFORE /exceptions/{exception_id} so the literal segment
+# isn't captured as an id. Composition is entirely backend-side
+# (asoe-ui Guardrail #6): the route gathers tenant records + the
+# CaseSummary projections the /cases surface already computes, and the
+# pure composer rolls them up.
+
+
+@router.get(
+    "/exceptions/control-tower",
+    response_model=ControlTowerResponse,
+    dependencies=[Depends(require_role("analyst", "manager", "admin", "viewer"))],
+)
+async def control_tower(
+    tenant_id: str = Depends(get_tenant_id),
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> ControlTowerResponse:
+    from api.case_summary import compute_case_summary
+    from api.control_tower_composer import compose_control_tower
+    from api.store import case_store
+
+    records, _cursor, _more = exception_store.list(tenant_id, limit=500)
+    cases = case_store.list_by_tenant(tenant_id)
+    case_summaries = [
+        (
+            case,
+            compute_case_summary(
+                case, exception_store.list_by_case(tenant_id, case.case_id)
+            ),
+        )
+        for case in cases
+    ]
+    response = compose_control_tower(records, case_summaries)
+
+    # ADR-041 P3e §3.4 — the same RBAC dollar strip the CaseSummary
+    # projection applies on /cases: callers without approve/override
+    # see the tower without money (None / empty, structurally omitted
+    # UI-side — never zeroed amounts masquerading as data).
+    expose_dollar_impact = (
+        "exceptions:approve" in user.permissions
+        or "exceptions:override" in user.permissions
+    )
+    if not expose_dollar_impact:
+        response.kpis.dollar_at_risk = None
+        response.mix_by_intent = []
+        for row in response.sla_risk:
+            row.dollar_impact = None
+    return response
+
+
+# ---------------------------------------------------------------------------
 # GET /api/v1/exceptions/{id} — Exception detail
 # ---------------------------------------------------------------------------
 
@@ -2616,6 +2669,26 @@ async def get_analysis(
         parent_case = None
     presentation = compose_presentation(record, parent_case)
 
+    # 'Similar past cases' (sign-off 2026-06-10) — advisory precedents
+    # for the operator, evidence tier. Candidates: this tenant's
+    # already-resolved records; the composer handles semantic vs the
+    # deterministic correlate fallback and returns None when there is
+    # nothing honest to show.
+    from api.precedents_composer import compose_precedents
+    from llm.embeddings import get_embedder
+
+    candidate_records, _cursor, _more = exception_store.list(
+        tenant_id, limit=500
+    )
+    terminal_candidates = [
+        r
+        for r in candidate_records
+        if r.lifecycle_state in ("RESOLVED", "CLOSED") and r.id != record.id
+    ]
+    precedents = compose_precedents(
+        record, terminal_candidates, get_embedder()
+    )
+
     return AnalysisResponse(
         diagnosis=diagnosis,
         confidence=confidence,
@@ -2636,5 +2709,6 @@ async def get_analysis(
         draft_reply=draft_reply,
         primary_section=primary_section,
         presentation=presentation,
+        precedents=precedents,
         **extras,
     )

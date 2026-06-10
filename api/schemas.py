@@ -439,6 +439,98 @@ class StatsResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Control Tower — /dashboard redesign (sign-off 2026-06-10)
+# ---------------------------------------------------------------------------
+# The operator dashboard payload, composed ENTIRELY backend-side
+# (asoe-ui Guardrail #6 — no UI aggregation). Every optional field is
+# None / empty when the backend cannot honestly compute it; the UI
+# structurally omits that surface. Dollar fields are RBAC-stripped at
+# the route for callers without exceptions:approve / exceptions:override
+# (same gate as the CaseSummary projection, ADR-041 P3e §3.4).
+
+
+class DollarAmount(BaseModel):
+    """Integer cents + ISO 4217 currency (mirrors CaseSummary's
+    DollarImpact wire shape — no float drift, no currency-less
+    partial-truth amounts)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    amount_cents: int
+    currency: str
+
+
+class ControlTowerKpis(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    auto_resolved_pct: Optional[float] = None
+    """Share of records that reached RESOLVED/CLOSED with no human
+    `resolved_by` (agents finished it alone). None when the tenant has
+    no records — never a fabricated 0%."""
+
+    open_needs_human: int = 0
+    """Cases whose attention disposition is NEEDS_HUMAN (Reis ruling —
+    backend disposition, not a UI lifecycle switch)."""
+
+    avg_resolution_time_seconds: Optional[float] = None
+    dollar_at_risk: Optional[DollarAmount] = None
+    """Summed dollar_impact across NEEDS_HUMAN cases. None when no
+    case carries an impact, when impacts mix currencies (an honest sum
+    is impossible), or when RBAC strips dollars for the caller."""
+
+
+class ThroughputBucket(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    hour_start: str
+    """ISO 8601 start of the hour bucket (UTC)."""
+    by_agents: int = 0
+    by_humans: int = 0
+
+
+class IntentDollarMix(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    intent: str
+    dollar_at_risk: DollarAmount
+
+
+class AgentDomainActivity(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    domain: str
+    """Taxonomy supergroup code — the UI renders the governed label,
+    never this raw token (Guardrail #1)."""
+    resolving_now: int = 0
+    resolved_today: int = 0
+
+
+class SlaRiskRow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    case_id: str
+    customer_name: Optional[str] = None
+    intent: Optional[str] = None
+    sla_due_at: str
+    """ISO timestamp — the UI's SLA ticker renders the live 'due in'
+    label (never pre-rendered backend-side)."""
+    dollar_impact: Optional[DollarAmount] = None
+
+
+class ControlTowerResponse(BaseModel):
+    """GET /api/v1/exceptions/control-tower"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kpis: ControlTowerKpis = Field(default_factory=ControlTowerKpis)
+    throughput: List[ThroughputBucket] = Field(default_factory=list)
+    mix_by_intent: List[IntentDollarMix] = Field(default_factory=list)
+    agent_activity: List[AgentDomainActivity] = Field(default_factory=list)
+    sla_risk: List[SlaRiskRow] = Field(default_factory=list)
+    generated_at: str
+
+
+# ---------------------------------------------------------------------------
 # ADR-027 — pipeline visualization (Phase A topology, Phase B trace)
 # ---------------------------------------------------------------------------
 #
@@ -2099,6 +2191,62 @@ class PresentationContract(BaseModel):
     situation_context: SituationContext = Field(default_factory=SituationContext)
 
 
+class PrecedentCase(BaseModel):
+    """One 'Similar past case' row (sign-off 2026-06-10).
+
+    A pure projection of an already-resolved record the operator can
+    consult as precedent. Advisory retrieval ONLY: no recipe, shadow,
+    or routing decision ever reads precedents — they are Layer-2
+    evidence for the human (presentation_tier: evidence).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    record_id: str
+    case_id: Optional[str] = None
+    customer_name: Optional[str] = None
+    intent: Optional[str] = None
+    resolved_at: Optional[str] = None
+    outcome: Optional[str] = None
+    """How the precedent ended — `resolved_action` when a human acted,
+    else the terminal `final_status`. The UI renders the governed
+    humanized label, never the raw token as-is."""
+
+    outcome_summary: Optional[str] = None
+    """Operator-authored resolution notes when present. None otherwise
+    (structural omission — never a fabricated narrative)."""
+
+    similarity: Optional[float] = None
+    """Cosine similarity (0..1) for semantic matches. None for
+    correlate matches — a fabricated score would be partial-truth."""
+
+    match_basis: Literal["semantic", "correlate"]
+    """Provenance of the match: pgvector cosine retrieval vs the
+    deterministic same-intent/same-customer fallback."""
+
+    embedding_model: Optional[str] = None
+    """Audit provenance: the embedding model id that produced the
+    semantic match. None for correlate matches."""
+
+
+class PrecedentsAnalysis(BaseModel):
+    """`AnalysisResponse.precedents` — the 'Similar past cases' card.
+
+    Assembled ONLY by the analysis composition path (Verdict
+    2026-04-22); the UI is a dumb projector. None on the response when
+    no precedent exists (structural omission, never an empty shell).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: List[PrecedentCase] = Field(default_factory=list)
+    query_basis: str
+    """The exact rendered document the match ran against — the audit
+    reconstruction of WHAT was compared."""
+
+    generated_at: str
+
+
 class AnalysisResponse(BaseModel):
     """GET /api/v1/exceptions/{id}/analysis"""
 
@@ -2208,6 +2356,11 @@ class AnalysisResponse(BaseModel):
     # #0) and never re-decides placement. Optional only so a pre-3b
     # stored payload deserialises; the route always sets it.
     presentation: Optional[PresentationContract] = None
+
+    # 'Similar past cases' precedents (sign-off 2026-06-10). Advisory
+    # retrieval for the human only — never a control field. None when
+    # no precedent exists (structural omission).
+    precedents: Optional[PrecedentsAnalysis] = None
 
 
 # ---------------------------------------------------------------------------
