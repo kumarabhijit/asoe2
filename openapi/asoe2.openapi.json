@@ -5170,8 +5170,30 @@
       },
       "PresentationAudit": {
         "additionalProperties": false,
-        "description": "Engine internals \u2014 `presentation_tier: audit` (council 2026-06-07).\n\nThe recipe that ran and the raw intent enum. These reconstruct HOW\nthe system decided; they are never operator-facing Layer 1 \u2014 they\nlive in the Diagnostics & Audit surface. Emitted (Guardrail #7:\navailable, not removed), just not shown front-and-center.",
+        "description": "Engine internals \u2014 `presentation_tier: audit` (council 2026-06-07).\n\nThe provenance bundle that reconstructs HOW the system decided: the\nrecipe that ran, the raw intent enum, and (council 2026-06-10) the\noriginating event, shadow verdict, taxonomy classification + version,\nand the trace correlation id \u2014 the \"Provenance\" card in the\nDiagnostics & Audit drawer. These are never operator-facing Layer 1;\nthey are emitted (Guardrail #7: available, not removed), just not\nshown front-and-center.\n\nEvery field is a pure projection of an already-decided record field\n(Verdict 2026-04-22: the composer assembles, recipes do not) and is\nNone when the record has no honest value, so the UI structurally\nomits that row rather than fabricating a placeholder.",
         "properties": {
+          "correlation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correlation Id"
+          },
+          "event_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Type"
+          },
           "intent_code": {
             "anyOf": [
               {
@@ -5193,6 +5215,39 @@
               }
             ],
             "title": "Recipe Name"
+          },
+          "shadow_verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shadow Verdict"
+          },
+          "supergroup_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supergroup Code"
+          },
+          "taxonomy_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taxonomy Version"
           }
         },
         "title": "PresentationAudit",

@@ -60,6 +60,13 @@ def compose_presentation(record: Any) -> PresentationContract:
 
     from api.presentation_tiers import section_tiers
 
+    # Taxonomy classification node assigned to this record. The deployed
+    # taxonomy version is only meaningful provenance alongside an actual
+    # classification, so it is emitted only when supergroup is present
+    # (else None → UI omits the row, never a fabricated version).
+    supergroup = getattr(record, "supergroup_code", None)
+    from contracts._generated.taxonomy_constants import TAXONOMY_VERSION
+
     return PresentationContract(
         situation_headline=headline,
         show_intent=intent_discriminates(intent),
@@ -67,5 +74,12 @@ def compose_presentation(record: Any) -> PresentationContract:
         audit=PresentationAudit(
             recipe_name=getattr(record, "selected_recipe", None),
             intent_code=intent,
+            # Provenance card (council 2026-06-10) — pure projections of
+            # already-decided record fields; None when absent.
+            event_type=getattr(record, "event_type", None),
+            shadow_verdict=getattr(record, "shadow_verdict", None),
+            supergroup_code=supergroup,
+            taxonomy_version=TAXONOMY_VERSION if supergroup else None,
+            correlation_id=getattr(record, "trace_id", None),
         ),
     )
