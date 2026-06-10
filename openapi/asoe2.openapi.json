@@ -5277,6 +5277,9 @@
             "title": "Show Intent",
             "type": "boolean"
           },
+          "situation_context": {
+            "$ref": "#/components/schemas/SituationContext"
+          },
           "situation_headline": {
             "anyOf": [
               {
@@ -6300,6 +6303,36 @@
           }
         },
         "title": "SeedManualOrderIntakeRequest",
+        "type": "object"
+      },
+      "SituationContext": {
+        "additionalProperties": false,
+        "description": "Facts that ride the Situation hero sub-line (audit finding #2,\nsign-off 2026-06-10, option C).\n\nWhich facts appear directly under the Situation headline is a\nbackend placement decision, not per-session UI taste (asoe-ui\nGuardrail #0/#6) \u2014 this block IS that decision: the composer\nre-projects the chosen record/case fields here and the UI renders\nthem as given. Option C deliberately carries SLA + lifecycle state\nonly; the $ figure keeps its Priority-1 home in the ImpactBar so\nno fact is rendered twice and nothing leaves Layer 1.\n\nEvery field is a pure projection of an already-decided value and is\nNone when the source has no honest value \u2014 the UI structurally\nomits that segment (no placeholder, no fabricated text).",
+        "properties": {
+          "lifecycle_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lifecycle State"
+          },
+          "sla_due_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sla Due At"
+          }
+        },
+        "title": "SituationContext",
         "type": "object"
       },
       "StatsResponse": {
