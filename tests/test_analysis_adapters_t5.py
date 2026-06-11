@@ -208,8 +208,19 @@ class TestClauseRetirement:
         assert "moq_gateway_gap" not in clauses
         # T4 retirement also gone.
         assert "price_analysis_gateway_gap" not in clauses
-        # No active clauses remain in this engagement.
-        assert clauses == {}
+        # Originally this asserted `clauses == {}` ("no active clauses
+        # remain in this engagement") — true at T5 sign-off only because
+        # the post-T5 clauses existed as prose comments, which parse to
+        # nothing (the Phase 3 2026-06-11 fix made them structured so
+        # the composer's deadline waiver actually works; see
+        # tests/test_grandfather_clauses.py). The retirement invariant
+        # is the four absences above; the active set is asserted
+        # exactly so a stray clause can't ride in unnoticed.
+        assert set(clauses) == {
+            "entity_profile_master_gap",
+            "impact_metrics_sla_gap",
+            "email_intake_gateway_stub_only",
+        }
 
     def test_recipes_have_t5_dependencies(self):
         from recipes.registry import REGISTRY

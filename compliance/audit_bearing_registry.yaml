@@ -1363,16 +1363,39 @@ DuplicatePOEnvelope:
     source: control
     rationale: State-of-record timestamp.
 
+# Structure contract (Phase 3 fix, 2026-06-11): each ACTIVE clause is a
+# mapping with `deadline` (ISO date — PyYAML parses it to datetime.date,
+# which `api/analysis_composer.py::_load_grandfathered_fields` requires)
+# and `fields` (dotted `<RegistrySection>.<field>` names to waive until
+# the deadline). The prose was previously the ONLY content under this
+# key, so the composer's reader iterated an empty mapping and the
+# documented "clauses expire automatically at deadline" mechanism was
+# dead code. Retired clauses stay as comments — do not give them
+# structured entries. Locked by tests/test_grandfather_clauses.py.
 grandfather_clauses:
   # entity_profile_master_gap (added 2026-05-02): customer_tier ships
   # from the seed Account table today, but vip_status, credit_standing,
   # and location have no producer. The fields stay declared so the UI
-  # can render them once a customer-master gateway lands.
-  # Deadline: 2026-08-01 (re-evaluate at next compliance workshop).
+  # can render them once a customer-master gateway lands. The two
+  # waived fields are `tier: contextual` today; the waiver activates
+  # if compliance reclassifies them to audit-bearing before the
+  # producer lands. Deadline: 2026-08-01 (re-evaluate at next
+  # compliance workshop).
+  entity_profile_master_gap:
+    added: 2026-05-02
+    deadline: 2026-08-01
+    fields:
+      - EntityProfile.vip_status
+      - EntityProfile.credit_standing
 
   # impact_metrics_sla_gap (added 2026-05-02): sla_deadline is
   # declared but unpopulated until the contract-SLA gateway lands.
   # Deadline: 2026-08-01.
+  impact_metrics_sla_gap:
+    added: 2026-05-02
+    deadline: 2026-08-01
+    fields:
+      - ImpactMetrics.sla_deadline
 
   # price_analysis_gateway_gap retired (T4, 2026-04-22): SAP doc /
   # contract / promotion gateways are wired on
@@ -1409,6 +1432,16 @@ grandfather_clauses:
   # supply deterministic, defensible default evidence for V1.
   # Deadline: 2026-08-04 (90-day re-evaluation at the next compliance
   # workshop) — drop the clause when the real connectors land.
+  #
+  # `fields` is INTENTIONALLY empty: this clause tracks data
+  # PROVENANCE (stub vs. real connector), not a population gap.
+  # floor_status is always populated by the StubGateway; waiving it
+  # would mask a broken gateway until the deadline instead of routing
+  # AUDIT_CONTEXT_MISSING.
+  email_intake_gateway_stub_only:
+    added: 2026-05-04
+    deadline: 2026-08-04
+    fields: []
 
 # ---------------------------------------------------------------------------
 # Summary tally (for CI fitness test + release-note generation).
