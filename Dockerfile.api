@@ -30,7 +30,10 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # ── Python deps — API runtime (no torch / transformers / outlines) ──────────
 # We install the same core set as Dockerfile.core plus FastAPI/uvicorn/redis,
-# and the anthropic SDK so ASOE_LLM_PROVIDER=anthropic works out of the box.
+# and the anthropic SDK so ASOE_LLM_PROVIDER=anthropic works out of the box,
+# plus the openai SDK so ASOE_EMBEDDING_PROVIDER=openai (precedents semantic
+# matching, sign-off 2026-06-10) and llmProvider=openai are enable-by-env —
+# feature parity with local/.env.example without an image rebuild.
 COPY pyproject.toml uv.lock ./
 RUN uv pip install --system --no-cache-dir \
     "langgraph>=0.2.0" \
@@ -41,6 +44,7 @@ RUN uv pip install --system --no-cache-dir \
     "pyyaml>=6.0" \
     "psycopg2-binary>=2.9.0" \
     "anthropic>=0.40.0" \
+    "openai>=1.50.0" \
     "langfuse>=2.0.0"
 
 # ── Compatibility patch (Python 3.14 typing API change) ─────────────────────

@@ -85,6 +85,20 @@ param pgAdminPassword string
 @secure()
 param anthropicApiKey string = 'placeholder-set-via-set-secrets-sh'
 
+@description('Precedents embedding provider (sign-off 2026-06-10). Empty (default) keeps semantic matching OFF — precedents fall back to the deterministic correlate match. Allowed: \'\' | openai.')
+@allowed([
+  ''
+  'openai'
+])
+param embeddingProvider string = ''
+
+@description('Embedding model id. Empty defers to the code default (text-embedding-3-small, 1536 dims — matches the V001 pgvector column).')
+param embeddingModel string = ''
+
+@description('OpenAI API key — required only when embeddingProvider=openai (or llmProvider=openai). Placeholder otherwise.')
+@secure()
+param openaiApiKey string = 'placeholder-set-via-set-secrets-sh'
+
 @description('JWT secret for ASOE auth (HS256, seed mode). Placeholder until set-secrets.sh is run. PARITY-4: rotated independently of the attachment signing key.')
 @secure()
 param asoeJwtSecret string = 'placeholder-set-via-set-secrets-sh'
@@ -716,6 +730,10 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (deployContainerApp) 
           value: anthropicApiKey
         }
         {
+          name: 'openai-api-key'
+          value: openaiApiKey
+        }
+        {
           name: 'asoe-jwt-secret'
           value: asoeJwtSecret
         }
@@ -760,6 +778,12 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (deployContainerApp) 
           env: [
             { name: 'ASOE_ENV',           value: asoeEnv }
             { name: 'ASOE_LLM_PROVIDER',  value: llmProvider }
+            // Precedents embedding provider (sign-off 2026-06-10).
+            // Empty = semantic OFF (correlate fallback) — parity with
+            // local/.env.example and the Vercel mock (correlate-only).
+            { name: 'ASOE_EMBEDDING_PROVIDER', value: embeddingProvider }
+            { name: 'ASOE_EMBEDDING_MODEL',    value: embeddingModel }
+            { name: 'OPENAI_API_KEY',          secretRef: 'openai-api-key' }
             { name: 'ASOE_KILL_SWITCH',   value: '0' }
             { name: 'ASOE_EXPLAIN_MODE',  value: '0' }
             { name: 'CORS_ALLOWED_ORIGIN',        value: corsAllowedOrigin }
