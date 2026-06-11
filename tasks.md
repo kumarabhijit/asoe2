@@ -2737,4 +2737,34 @@ places per `prompts/update_docs.md`.
 - [ ] **CI strict-gate promotion** — `pip-audit`, `gitleaks`, Trivy currently advisory (`continue-on-error: true`). Promotion needs a baseline-clean check first; documented findings go to a follow-up PR.
 - [ ] **Live deploy + smoke** (platform team) — `scripts/deploy-azure.sh`, 4 Playwright evidence journeys against the preprod URLs, UI seed user end-to-end.
 
+## Precedents ("Similar past cases") + Control Tower (asoe2 #208, sign-off 2026-06-10)
+
+Backend halves: `api/precedents_composer.py` (semantic embeddings +
+deterministic correlate fallback, advisory-only) and
+`api/control_tower_composer.py` (`GET /api/v1/exceptions/control-tower`).
+UI halves in asoe-ui #247. Deployment-parity plumbing (compose / bicep /
+deploy scripts) landed in the same PR.
+
+- [ ] **TODO — Embedding vector persistence + HNSW index (semantic
+      precedents, pre-prod readiness).** Vectors are currently memoised
+      in-process on `record.context_embedding` only; the DB-backed
+      store rebuilds records per request, so on Azure with
+      `ASOE_EMBEDDING_PROVIDER=openai` every analysis call lazily
+      re-embeds up to `EMBED_CANDIDATE_CAP` (50) newest candidates —
+      acceptable for shakeout, not for heavy semantic use. Close out
+      before enabling semantic matching in pre-prod:
+      1. Persist vectors to the V001 `exceptions.context_embedding`
+         VECTOR(1536) column (write-through in the DB-backed store;
+         pgvector adapter for list[float]).
+      2. Migration `V0xx__context_embedding_hnsw.sql` — HNSW (cosine)
+         index; mirror the SQLite-parity expectations in
+         `tests/test_schema_sqlite_postgres_parity.py` (SQLite keeps
+         the no-op column, brute-force path stays the fallback).
+      3. `scripts/backfill_embeddings.py` — one-shot backfill for
+         historical terminal records (budget-capped, resumable).
+      4. Retrieval via a store-level nearest-neighbour query
+         (`<=>` cosine) instead of the per-request brute-force loop;
+         keep the deterministic tie-break (similarity → recency → id).
+      5. Re-check `llm/budget.py` integration for embedding spend.
+
 `docs/plans/ga-preconditions.md` tracks the 13 items intentionally deferred from preprod to GA.
