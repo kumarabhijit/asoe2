@@ -49,6 +49,9 @@ SECTION_TIERS: Dict[str, PresentationTier] = {
     "order_entry_extraction": "evidence",
     "change_analysis": "evidence",
     "draft_reply": "evidence",
+    # 'Similar past cases' (sign-off 2026-06-10) — precedent records
+    # that inform (never decide) the operator's judgement.
+    "precedents": "evidence",
     # ── Audit: engine internals / deterministic reconstructions ───────
     # X12 850 reconstruction and the derived entity-projection graph are
     # engine artifacts, not the operator's decision evidence.

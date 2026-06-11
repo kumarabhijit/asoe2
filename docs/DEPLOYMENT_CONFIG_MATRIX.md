@@ -57,6 +57,7 @@ All vars are documented in [`.env.example`](../.env.example).
 | `ASOE_*_DRIVER` + `ASOE_CANARY_PCT_*` | — | O | default `recorded` / `0.0` → stubs, no real traffic |
 | Live-connector creds (`ASOE_GRAPH_*`, `ASOE_SAP_*`, `ASOE_OMS_*`, `AZURE_DI_*`) | — | R *iff* the matching driver is live | constructors fail loud without them |
 | `ASOE_EMAIL_SUPERGROUP_SHADOW` | O (`1`) | O (`1`) | keep `1` until ECE-calibrated, then `0` to gate on the live model |
+| `ASOE_EMBEDDING_PROVIDER` + `ASOE_EMBEDDING_MODEL` | — (correlate fallback) | O (`openai`) | unset → precedents use the deterministic correlate match; advisory retrieval only, never a control field |
 | `ASOE_TEST_POSTGRES_URL` | O (tests) | — | integration tests only; not a runtime var |
 
 ---
