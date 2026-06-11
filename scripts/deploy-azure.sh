@@ -314,6 +314,20 @@ if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
     fi
 fi
 
+# OPENAI_API_KEY: OPTIONAL (needed only when the precedents embedding
+# provider — or llmProvider=openai — is enabled). Preserved on re-runs
+# so a redeploy without the env var never rotates a live key back to
+# the placeholder; stays placeholder until the operator sets it.
+if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+    existing=$(read_existing_secret 'openai-api-key')
+    if [[ -n "${existing}" && "${existing}" != "${PLACEHOLDER}" ]]; then
+        OPENAI_API_KEY="${existing}"
+        echo "Preserving existing OPENAI_API_KEY (pass OPENAI_API_KEY=... to rotate)."
+    else
+        OPENAI_API_KEY="${PLACEHOLDER}"
+    fi
+fi
+
 # ASOE_JWT_SECRET: preserved on re-runs; auto-generated on first deploy
 # unless caller passed an explicit value (or 'auto' to force a new one).
 if [[ "${ASOE_JWT_SECRET:-}" == "auto" ]]; then
@@ -367,6 +381,7 @@ stage2_args=(
     "deployContainerApp=true"
     "containerImage=${FULL_IMAGE}"
     "anthropicApiKey=${ANTHROPIC_API_KEY}"
+    "openaiApiKey=${OPENAI_API_KEY}"
     "asoeJwtSecret=${ASOE_JWT_SECRET}"
     "databaseUrl=${DATABASE_URL}"
     "redisUrl=${REDIS_URL}"
@@ -376,6 +391,15 @@ stage2_args=(
 if [[ -n "${LANGFUSE_HOST:-}" ]]; then
     stage2_args+=("langfuseHost=${LANGFUSE_HOST}")
     echo "Overriding langfuseHost = ${LANGFUSE_HOST} (from LANGFUSE_HOST env)."
+fi
+# Precedents embedding provider (sign-off 2026-06-10) — optional; empty
+# keeps semantic matching OFF (deterministic correlate fallback).
+if [[ -n "${ASOE_EMBEDDING_PROVIDER:-}" ]]; then
+    stage2_args+=("embeddingProvider=${ASOE_EMBEDDING_PROVIDER}")
+    echo "Enabling precedents embedding provider = ${ASOE_EMBEDDING_PROVIDER}."
+fi
+if [[ -n "${ASOE_EMBEDDING_MODEL:-}" ]]; then
+    stage2_args+=("embeddingModel=${ASOE_EMBEDDING_MODEL}")
 fi
 bicep_deploy stage2 "${stage2_args[@]}"
 
@@ -599,16 +623,32 @@ if [[ "${DEPLOY_UI}" == "1" ]]; then
 
     UI_FULL_IMAGE="${ACR_NAME}.azurecr.io/${UI_IMAGE_NAME}:${UI_IMAGE_TAG}"
     echo "STAGE 3 bicep deploy: UI Container App with ${UI_FULL_IMAGE} (~3 min)..."
-    bicep_deploy stage3 \
-        "deployContainerApp=true" \
-        "deployUiContainerApp=true" \
-        "containerImage=${FULL_IMAGE}" \
-        "containerImageUi=${UI_FULL_IMAGE}" \
-        "anthropicApiKey=${ANTHROPIC_API_KEY}" \
-        "asoeJwtSecret=${ASOE_JWT_SECRET}" \
-        "databaseUrl=${DATABASE_URL}" \
-        "redisUrl=${REDIS_URL}" \
+    # Stage 3 re-applies the API Container App too, so it must carry the
+    # SAME optional args as stage 2 — otherwise this deploy would reset
+    # them to their bicep defaults (e.g. flip the embedding provider
+    # back off).
+    stage3_args=(
+        "deployContainerApp=true"
+        "deployUiContainerApp=true"
+        "containerImage=${FULL_IMAGE}"
+        "containerImageUi=${UI_FULL_IMAGE}"
+        "anthropicApiKey=${ANTHROPIC_API_KEY}"
+        "openaiApiKey=${OPENAI_API_KEY}"
+        "asoeJwtSecret=${ASOE_JWT_SECRET}"
+        "databaseUrl=${DATABASE_URL}"
+        "redisUrl=${REDIS_URL}"
         "nextAuthSecret=${NEXTAUTH_SECRET}"
+    )
+    if [[ -n "${LANGFUSE_HOST:-}" ]]; then
+        stage3_args+=("langfuseHost=${LANGFUSE_HOST}")
+    fi
+    if [[ -n "${ASOE_EMBEDDING_PROVIDER:-}" ]]; then
+        stage3_args+=("embeddingProvider=${ASOE_EMBEDDING_PROVIDER}")
+    fi
+    if [[ -n "${ASOE_EMBEDDING_MODEL:-}" ]]; then
+        stage3_args+=("embeddingModel=${ASOE_EMBEDDING_MODEL}")
+    fi
+    bicep_deploy stage3 "${stage3_args[@]}"
 
     UI_FQDN=$(az containerapp show --name "${UI_APP_NAME}" --resource-group "${RG}" \
         --query properties.configuration.ingress.fqdn -o tsv)

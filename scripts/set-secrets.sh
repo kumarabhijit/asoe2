@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# set-secrets.sh ─ Rotate ANTHROPIC_API_KEY, ASOE_JWT_SECRET, and/or the
-# LangFuse Cloud key pair on the running Container App without re-deploying
-# infra.
+# set-secrets.sh ─ Rotate ANTHROPIC_API_KEY, OPENAI_API_KEY,
+# ASOE_JWT_SECRET, and/or the LangFuse Cloud key pair on the running
+# Container App without re-deploying infra.
 #
 # DATABASE_URL and REDIS_URL are owned by deploy-azure.sh (derived from
 # infra outputs there); this helper is intentionally small. If you need
@@ -24,10 +24,11 @@ set -euo pipefail
 : "${NAME_PREFIX:=asoepreprod}"
 : "${APP_NAME:=${NAME_PREFIX}api}"
 
-if [[ -z "${ANTHROPIC_API_KEY:-}" && -z "${ASOE_JWT_SECRET:-}" \
+if [[ -z "${ANTHROPIC_API_KEY:-}" && -z "${OPENAI_API_KEY:-}" \
+   && -z "${ASOE_JWT_SECRET:-}" \
    && -z "${LANGFUSE_PUBLIC_KEY:-}" && -z "${LANGFUSE_SECRET_KEY:-}" ]]; then
-    echo "ERROR: pass at least one of ANTHROPIC_API_KEY, ASOE_JWT_SECRET," >&2
-    echo "       LANGFUSE_PUBLIC_KEY, or LANGFUSE_SECRET_KEY." >&2
+    echo "ERROR: pass at least one of ANTHROPIC_API_KEY, OPENAI_API_KEY," >&2
+    echo "       ASOE_JWT_SECRET, LANGFUSE_PUBLIC_KEY, or LANGFUSE_SECRET_KEY." >&2
     echo "       Example:" >&2
     echo "         ANTHROPIC_API_KEY='sk-ant-NEW' ./scripts/set-secrets.sh" >&2
     echo "         LANGFUSE_PUBLIC_KEY='pk-lf-...' LANGFUSE_SECRET_KEY='sk-lf-...' \\" >&2
@@ -52,6 +53,9 @@ fi
 # Build the --secrets list incrementally so we only touch what was passed.
 secret_args=()
 [[ -n "${ANTHROPIC_API_KEY:-}"    ]] && secret_args+=("anthropic-api-key=${ANTHROPIC_API_KEY}")
+# OPENAI_API_KEY backs the precedents embedding provider
+# (ASOE_EMBEDDING_PROVIDER=openai, sign-off 2026-06-10) and llmProvider=openai.
+[[ -n "${OPENAI_API_KEY:-}"       ]] && secret_args+=("openai-api-key=${OPENAI_API_KEY}")
 [[ -n "${ASOE_JWT_SECRET:-}"      ]] && secret_args+=("asoe-jwt-secret=${ASOE_JWT_SECRET}")
 [[ -n "${LANGFUSE_PUBLIC_KEY:-}"  ]] && secret_args+=("langfuse-public-key=${LANGFUSE_PUBLIC_KEY}")
 [[ -n "${LANGFUSE_SECRET_KEY:-}"  ]] && secret_args+=("langfuse-secret-key=${LANGFUSE_SECRET_KEY}")

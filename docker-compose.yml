@@ -28,6 +28,16 @@ x-core-env: &core-env
   DATABASE_URL: "postgresql://${POSTGRES_USER:-asoe}:${POSTGRES_PASSWORD:-asoe_dev}@postgres:5432/${POSTGRES_DB:-asoe}"
   # Redis (pub/sub, task queue, cache — architecture_v3.md §9.3)
   REDIS_URL: "redis://redis:6379/0"
+  # LLM + embedding providers (optional — set in .env; empty = the
+  # deterministic fallback everywhere, same default as .env.example and
+  # the Azure bicep params, so all three environments share one knob set)
+  ASOE_LLM_PROVIDER: "${ASOE_LLM_PROVIDER:-}"
+  ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+  # Precedents semantic matching (sign-off 2026-06-10) — empty keeps the
+  # deterministic correlate fallback.
+  ASOE_EMBEDDING_PROVIDER: "${ASOE_EMBEDDING_PROVIDER:-}"
+  ASOE_EMBEDDING_MODEL: "${ASOE_EMBEDDING_MODEL:-}"
+  OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
   # LangFuse observability (optional — set in .env or via Key Vault)
   LANGFUSE_PUBLIC_KEY: "${LANGFUSE_PUBLIC_KEY:-}"
   LANGFUSE_SECRET_KEY: "${LANGFUSE_SECRET_KEY:-}"
