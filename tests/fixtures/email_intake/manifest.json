@@ -1,0 +1,92 @@
+[
+  {
+    "file": "msg-2026-0001-new-order-sebev.eml",
+    "scenario": "NEW_ORDER",
+    "expected_classification": "EMAIL_ORDER_ENTRY_REQUEST",
+    "ref_po": "EML-PO-2026-0042",
+    "zemail_msg_id": "MSG-2026-0001",
+    "from": "po@sebev.example.com",
+    "date": "2026-04-30T10:12:00Z",
+    "note": "Standard-review band (exc-026): clean line items but the ship-to is ambiguous — 'our Atlanta warehouse' matches two addresses on file, so extraction should land in REQUEST_CLARIFICATION."
+  },
+  {
+    "file": "msg-2026-0008-new-order-kroger.eml",
+    "scenario": "NEW_ORDER",
+    "expected_classification": "EMAIL_ORDER_ENTRY_REQUEST",
+    "ref_po": "EDI-PO-2026-7781",
+    "zemail_msg_id": "MSG-2026-0008",
+    "from": "po@kroger.example.com",
+    "date": "2026-05-22T07:10:00Z",
+    "note": "Happy path (exc-046): unambiguous structured order with CSV attachment — should auto-post (the replica shows it as VBAK 0000090016, zemail COMPLETED)."
+  },
+  {
+    "file": "test-dup-0001-resend-sebev.eml",
+    "scenario": "DUPLICATE_PO",
+    "expected_classification": "EMAIL_ORDER_ENTRY_REQUEST",
+    "ref_po": "EML-PO-2026-0042",
+    "zemail_msg_id": null,
+    "from": "po@sebev.example.com",
+    "date": "2026-05-01T08:45:00Z",
+    "note": "Same-channel duplicate: identical PO number and lines as msg-2026-0001, sent ~22h later. Should be flagged duplicate against the pending intake, NOT entered as a second order."
+  },
+  {
+    "file": "test-dup-0002-crosschannel-kroger.eml",
+    "scenario": "DUPLICATE_PO",
+    "expected_classification": "EMAIL_ORDER_ENTRY_REQUEST",
+    "ref_po": "PO-88421",
+    "zemail_msg_id": null,
+    "from": "po@kroger.example.com",
+    "date": "2026-04-12T09:30:00Z",
+    "note": "Cross-channel duplicate: PO-88421 already arrived via EDI on 04-11 (zedi_850_in / SO 0000001042, itself a suspected duplicate of PO-88419). The email must match the existing order, not create a third."
+  },
+  {
+    "file": "msg-2026-0002-change-qty-sebev.eml",
+    "scenario": "ORDER_CHANGE",
+    "expected_classification": "EMAIL_ORDER_CHANGE_REQUEST",
+    "ref_po": "PO-SED-2026-0418",
+    "zemail_msg_id": "MSG-2026-0002",
+    "from": "po@sebev.example.com",
+    "date": "2026-05-18T09:02:00Z",
+    "note": "Quantity reduction (exc-040) against open order VBAK 0000090012 (600 cases of SKU-1180 in the replica)."
+  },
+  {
+    "file": "msg-2026-0003-change-expedite-sebev.eml",
+    "scenario": "ORDER_CHANGE",
+    "expected_classification": "EMAIL_ORDER_CHANGE_REQUEST",
+    "ref_po": "PO-SED-2026-0502",
+    "zemail_msg_id": "MSG-2026-0003",
+    "from": "po@sebev.example.com",
+    "date": "2026-05-18T11:20:00Z",
+    "note": "Expedite (exc-041): pull-in of the requested delivery date with a conditional freight approval the change analysis should surface."
+  },
+  {
+    "file": "msg-2026-0004-change-cancel-walmart.eml",
+    "scenario": "ORDER_CHANGE",
+    "expected_classification": "EMAIL_ORDER_CHANGE_REQUEST",
+    "ref_po": "PO-WMT-2026-1101",
+    "zemail_msg_id": "MSG-2026-0004",
+    "from": "orders@buying.walmart.example.com",
+    "date": "2026-05-19T08:15:00Z",
+    "note": "Full cancellation (exc-042, RED/escalated): high-value cancel with a no-partial-ship constraint; should escalate rather than auto-apply."
+  },
+  {
+    "file": "msg-2026-0005-change-sku-sub-kroger.eml",
+    "scenario": "ORDER_CHANGE",
+    "expected_classification": "EMAIL_ORDER_CHANGE_REQUEST",
+    "ref_po": "PO-KR-2026-0907",
+    "zemail_msg_id": "MSG-2026-0005",
+    "from": "po@kroger.example.com",
+    "date": "2026-05-19T13:40:00Z",
+    "note": "SKU substitution (exc-043): remove/add pair with a repricing condition — change analysis should pair the lines, not treat them as one cancel plus one new order."
+  },
+  {
+    "file": "test-new-0003-messy-order.eml",
+    "scenario": "NEW_ORDER",
+    "expected_classification": "EMAIL_ORDER_ENTRY_REQUEST",
+    "ref_po": "(none given)",
+    "zemail_msg_id": null,
+    "from": "purchasing@sunrisebev.example.com",
+    "date": "2026-05-23T16:42:00Z",
+    "note": "Messy intake: forwarded chain, no PO number, prose quantities ('twenty cases'), vague SKUs ('same as last time'). Should land in a low-confidence band and request clarification, not auto-post."
+  }
+]

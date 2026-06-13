@@ -26,13 +26,22 @@ tests/sandbox/
 │   ├── __init__.py
 │   └── app.py              <- Streamlit trace visualiser
 ├── cli.py                  <- headless CLI runner (direct + API modes)
-├── seed.py                 <- SQLite seeder (generates sandbox.db)
+├── seed.py                 <- SQLite seeder (builds sandbox.db from the catalog)
+├── test_catalog_coverage.py <- lock: seed >= fixtures/scenarios/catalog.yaml
 ├── requirements-sandbox.txt
 ├── .gitignore
 └── README.md               <- this file
 ```
 
 > `sandbox.db` is gitignored — only `seed.py` is committed.
+>
+> **Seed data is catalog-driven.** `seed.py` builds its 8 domain tables
+> from `fixtures/scenarios/catalog.yaml` — the single declarative source
+> shared with the asoe-ui mock layer (RFC:
+> `asoe-ui/docs/synthetic-data-placement-rfc.md`, Decision A). To add a
+> scenario, edit the catalog, not `seed.py`. `test_catalog_coverage.py`
+> locks `seed ⊇ catalog` and validates the catalog's intent / lifecycle /
+> shadow_verdict values against the `contracts.models` taxonomy.
 
 ---
 
@@ -48,7 +57,8 @@ pip install -r tests/sandbox/requirements-sandbox.txt
 
 ```bash
 python tests/sandbox/seed.py
-# -> tests/sandbox/sandbox.db  (18 EDI events covering all 4 intents)
+# -> tests/sandbox/sandbox.db  (EDI events covering every supported intent,
+#    generated from fixtures/scenarios/catalog.yaml)
 
 # Force recreate:
 python tests/sandbox/seed.py --reset

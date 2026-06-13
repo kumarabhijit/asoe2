@@ -1,0 +1,20 @@
+{
+  "case": "msg-2026-0005-change-sku-sub-kroger",
+  "gateway": "email_intake",
+  "operation": "fetch_message",
+  "source_eml": "raw/msg-2026-0005-change-sku-sub-kroger.eml",
+  "scenario": "ORDER_CHANGE",
+  "expected_classification": "EMAIL_ORDER_CHANGE_REQUEST",
+  "ref_po": "PO-KR-2026-0907",
+  "note": "SKU substitution (exc-043): remove/add pair with a repricing condition — change analysis should pair the lines, not treat them as one cancel plus one new order.",
+  "recorded_by": "scripts/convert_eml_fixtures.py",
+  "output": {
+    "source_email_id": "MSG-2026-0005",
+    "from_address": "Kroger Procurement <po@kroger.example.com>",
+    "received_at": "2026-05-19T13:40:00Z",
+    "subject": "SKU substitution on PO-KR-2026-0907",
+    "body_excerpt": "Hi, On open order PO-KR-2026-0907 we'd like to substitute: Remove: SKU-6110 Premium Lager 24pk 220 cases @ $19.80 Add: SKU-6120 Craft Lager 12pk 440 cases @ $9.95 Intent is to keep roughly the same retail unit volume (the 12pk is half the count of the 24pk). Please reprice at the",
+    "body_hash": "fc9b86bd245c265a8ea02e5981493d5527370a710101bcd8c93db958532e1296",
+    "attachment_manifest": []
+  }
+}

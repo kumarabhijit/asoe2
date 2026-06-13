@@ -1,0 +1,20 @@
+{
+  "case": "test-new-0003-messy-order",
+  "gateway": "email_intake",
+  "operation": "fetch_message",
+  "source_eml": "raw/test-new-0003-messy-order.eml",
+  "scenario": "NEW_ORDER",
+  "expected_classification": "EMAIL_ORDER_ENTRY_REQUEST",
+  "ref_po": "(none given)",
+  "note": "Messy intake: forwarded chain, no PO number, prose quantities ('twenty cases'), vague SKUs ('same as last time'). Should land in a low-confidence band and request clarification, not auto-post.",
+  "recorded_by": "scripts/convert_eml_fixtures.py",
+  "output": {
+    "source_email_id": "test-new-0003-messy-order",
+    "from_address": "Marco Reyes <purchasing@sunrisebev.example.com>",
+    "received_at": "2026-05-23T16:42:00Z",
+    "subject": "Fwd: order for next week",
+    "body_excerpt": "fyi see below, can you get this in? ---------- Forwarded message ---------- From: Pat (Store Ops) <pat.ops@sunrisebev.example.com> Date: Fri, May 22, 2026 at 4:15 PM Subject: order for next week Marco - we're running low again. can you order twenty cases of the 24-pack water and ",
+    "body_hash": "0c17132e3c9f2f679be4c755067b510ef075e34713f747c4deed927370319238",
+    "attachment_manifest": []
+  }
+}

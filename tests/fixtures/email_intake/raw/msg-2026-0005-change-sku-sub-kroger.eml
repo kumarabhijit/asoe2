@@ -1,0 +1,21 @@
+From: Kroger Procurement <po@kroger.example.com>
+To: ACME CPG Order Desk <orders@acme-cpg.example.com>
+Subject: SKU substitution on PO-KR-2026-0907
+Date: Tue, 19 May 2026 13:40:00 +0000
+Message-ID: <MSG-2026-0005@kroger.example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+Hi,
+
+On open order PO-KR-2026-0907 we'd like to substitute:
+
+  Remove:  SKU-6110  Premium Lager 24pk   220 cases @ $19.80
+  Add:     SKU-6120  Craft Lager 12pk     440 cases @  $9.95
+
+Intent is to keep roughly the same retail unit volume (the 12pk is
+half the count of the 24pk). Please reprice at the current contract
+rate for SKU-6120 and confirm availability before applying.
+
+Kroger Procurement Operations

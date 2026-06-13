@@ -1,0 +1,20 @@
+{
+  "case": "test-dup-0002-crosschannel-kroger",
+  "gateway": "email_intake",
+  "operation": "fetch_message",
+  "source_eml": "raw/test-dup-0002-crosschannel-kroger.eml",
+  "scenario": "DUPLICATE_PO",
+  "expected_classification": "EMAIL_ORDER_ENTRY_REQUEST",
+  "ref_po": "PO-88421",
+  "note": "Cross-channel duplicate: PO-88421 already arrived via EDI on 04-11 (zedi_850_in / SO 0000001042, itself a suspected duplicate of PO-88419). The email must match the existing order, not create a third.",
+  "recorded_by": "scripts/convert_eml_fixtures.py",
+  "output": {
+    "source_email_id": "test-dup-0002-crosschannel-kroger",
+    "from_address": "Kroger Procurement <po@kroger.example.com>",
+    "received_at": "2026-04-12T09:30:00Z",
+    "subject": "PO 88421 — please confirm entry",
+    "body_excerpt": "Hi, We had EDI transmission alarms on our side yesterday. To be safe, please make sure PO 88421 is entered: PO number: PO-88421 Ship-to: QuickMart Distribution, Dallas TX Line SKU Description Cases Unit price 1 SKU-1180 24-pk Water 500 $9.62 2 SKU-1181 12-pk Sparkling 200 $10.00 ",
+    "body_hash": "a81d200f2efaf955099dd0810a17b09f31b20dbf8fd6d28377cc027dc103a7ba",
+    "attachment_manifest": []
+  }
+}

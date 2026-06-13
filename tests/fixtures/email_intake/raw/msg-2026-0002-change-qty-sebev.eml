@@ -1,0 +1,22 @@
+From: Dana Whitfield <po@sebev.example.com>
+To: ACME CPG Order Desk <orders@acme-cpg.example.com>
+Subject: Change request: please reduce quantity on PO-SED-2026-0418
+Date: Mon, 18 May 2026 09:02:00 +0000
+Message-ID: <MSG-2026-0002@sebev.example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+Hi team,
+
+Our demand forecast for the water line came down. On open order
+PO-SED-2026-0418, please reduce:
+
+  SKU-1180  24-pk Water:  600 cases  ->  480 cases
+
+Everything else on the PO stays as-is. Please confirm the change and
+the updated invoice total.
+
+Thanks,
+Dana Whitfield
+Purchasing — Southeast Beverage Distributors

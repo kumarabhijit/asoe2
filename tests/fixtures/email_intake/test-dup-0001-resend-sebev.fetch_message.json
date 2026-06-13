@@ -1,0 +1,20 @@
+{
+  "case": "test-dup-0001-resend-sebev",
+  "gateway": "email_intake",
+  "operation": "fetch_message",
+  "source_eml": "raw/test-dup-0001-resend-sebev.eml",
+  "scenario": "DUPLICATE_PO",
+  "expected_classification": "EMAIL_ORDER_ENTRY_REQUEST",
+  "ref_po": "EML-PO-2026-0042",
+  "note": "Same-channel duplicate: identical PO number and lines as msg-2026-0001, sent ~22h later. Should be flagged duplicate against the pending intake, NOT entered as a second order.",
+  "recorded_by": "scripts/convert_eml_fixtures.py",
+  "output": {
+    "source_email_id": "test-dup-0001-resend-sebev",
+    "from_address": "Dana Whitfield <po@sebev.example.com>",
+    "received_at": "2026-05-01T08:45:00Z",
+    "subject": "RE: PO 2026-0042 — May order for Atlanta DC",
+    "body_excerpt": "Hi again, I didn't get a confirmation yesterday so I'm resending our PO 2026-0042 just in case it didn't go through. Same details as before: Item Cases Unit price SKU-1180 24-pk Water 400 $9.60 SKU-1181 12-pk Sparkling 240 $11.40 SKU-7800 Organic Kombucha 6pk 72 $21.50 Please con",
+    "body_hash": "14c66bc4e29903a82416e7406fb485e5135b8d67e1d0c835968a4410bb70758c",
+    "attachment_manifest": []
+  }
+}

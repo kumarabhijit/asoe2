@@ -1,0 +1,26 @@
+{
+  "case": "msg-2026-0008-new-order-kroger",
+  "gateway": "email_intake",
+  "operation": "fetch_message",
+  "source_eml": "raw/msg-2026-0008-new-order-kroger.eml",
+  "scenario": "NEW_ORDER",
+  "expected_classification": "EMAIL_ORDER_ENTRY_REQUEST",
+  "ref_po": "EDI-PO-2026-7781",
+  "note": "Happy path (exc-046): unambiguous structured order with CSV attachment — should auto-post (the replica shows it as VBAK 0000090016, zemail COMPLETED).",
+  "recorded_by": "scripts/convert_eml_fixtures.py",
+  "output": {
+    "source_email_id": "MSG-2026-0008",
+    "from_address": "Kroger Procurement <po@kroger.example.com>",
+    "received_at": "2026-05-22T07:10:00Z",
+    "subject": "New order — EDI-PO-2026-7781",
+    "body_excerpt": "Hello, Our EDI link is down for maintenance this morning; please process the attached purchase order manually. PO number: EDI-PO-2026-7781 Ship-to: Kroger Dallas DC, 4500 Commerce St, Dallas TX 75201 Requested DD: 2026-05-30 Line details are in the attached CSV. Regards, Kroger P",
+    "body_hash": "580a4aa067947f945dd4105899c12471353fe3637fd7a1bf3dc4d5cd0adf81e9",
+    "attachment_manifest": [
+      {
+        "name": "EDI-PO-2026-7781.csv",
+        "mime_type": "text/csv",
+        "bytes": 101
+      }
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "case": "msg-2026-0003-change-expedite-sebev",
+  "gateway": "email_intake",
+  "operation": "fetch_message",
+  "source_eml": "raw/msg-2026-0003-change-expedite-sebev.eml",
+  "scenario": "ORDER_CHANGE",
+  "expected_classification": "EMAIL_ORDER_CHANGE_REQUEST",
+  "ref_po": "PO-SED-2026-0502",
+  "note": "Expedite (exc-041): pull-in of the requested delivery date with a conditional freight approval the change analysis should surface.",
+  "recorded_by": "scripts/convert_eml_fixtures.py",
+  "output": {
+    "source_email_id": "MSG-2026-0003",
+    "from_address": "Dana Whitfield <po@sebev.example.com>",
+    "received_at": "2026-05-18T11:20:00Z",
+    "subject": "Expedite request — PO-SED-2026-0502",
+    "body_excerpt": "Hello, We have a regional promotion starting earlier than planned. Can you expedite PO-SED-2026-0502 (144 cases of SKU-7800 Organic Kombucha)? Current requested delivery: 2026-05-26 Needed by: 2026-05-19 We will accept reasonable expedited-freight charges — please quote before sh",
+    "body_hash": "9edbcfdfcd62f39602073f1929b5cdf127683cd629add4b471ae3d5254fcf365",
+    "attachment_manifest": []
+  }
+}
