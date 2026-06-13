@@ -1,0 +1,21 @@
+From: Walmart Replenishment <orders@buying.walmart.example.com>
+To: ACME CPG Order Desk <orders@acme-cpg.example.com>
+Subject: URGENT: cancel PO-WMT-2026-1101 in full
+Date: Tue, 19 May 2026 08:15:00 +0000
+Message-ID: <MSG-2026-0004@buying.walmart.example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+URGENT — please action today.
+
+Cancel purchase order PO-WMT-2026-1101 in full, effective immediately
+(500 cases, SKU-0042 12-pk Cola). The category reset this PO supported
+has been postponed to Q3.
+
+Do NOT ship any portion of this order. If any part has already left
+your DC, reply with shipment details immediately so we can refuse at
+the gate rather than process a return.
+
+Walmart Replenishment Team
+Ref: reset postponement notice RPN-2026-118

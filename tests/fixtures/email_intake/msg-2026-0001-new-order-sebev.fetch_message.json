@@ -1,0 +1,20 @@
+{
+  "case": "msg-2026-0001-new-order-sebev",
+  "gateway": "email_intake",
+  "operation": "fetch_message",
+  "source_eml": "raw/msg-2026-0001-new-order-sebev.eml",
+  "scenario": "NEW_ORDER",
+  "expected_classification": "EMAIL_ORDER_ENTRY_REQUEST",
+  "ref_po": "EML-PO-2026-0042",
+  "note": "Standard-review band (exc-026): clean line items but the ship-to is ambiguous — 'our Atlanta warehouse' matches two addresses on file, so extraction should land in REQUEST_CLARIFICATION.",
+  "recorded_by": "scripts/convert_eml_fixtures.py",
+  "output": {
+    "source_email_id": "MSG-2026-0001",
+    "from_address": "Dana Whitfield <po@sebev.example.com>",
+    "received_at": "2026-04-30T10:12:00Z",
+    "subject": "PO 2026-0042 — May order for Atlanta DC",
+    "body_excerpt": "Hi team, Please enter the following order against our account. PO number is 2026-0042, terms as per our standing agreement. Item Cases Unit price SKU-1180 24-pk Water 400 $9.60 SKU-1181 12-pk Sparkling 240 $11.40 SKU-7800 Organic Kombucha 6pk 72 $21.50 Requested delivery: week of",
+    "body_hash": "a512d78339094d21793f7fff009b2ad6bff1b4a2117750c90d0913fc0fc9b4cf",
+    "attachment_manifest": []
+  }
+}

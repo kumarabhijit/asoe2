@@ -1,0 +1,20 @@
+{
+  "case": "msg-2026-0002-change-qty-sebev",
+  "gateway": "email_intake",
+  "operation": "fetch_message",
+  "source_eml": "raw/msg-2026-0002-change-qty-sebev.eml",
+  "scenario": "ORDER_CHANGE",
+  "expected_classification": "EMAIL_ORDER_CHANGE_REQUEST",
+  "ref_po": "PO-SED-2026-0418",
+  "note": "Quantity reduction (exc-040) against open order VBAK 0000090012 (600 cases of SKU-1180 in the replica).",
+  "recorded_by": "scripts/convert_eml_fixtures.py",
+  "output": {
+    "source_email_id": "MSG-2026-0002",
+    "from_address": "Dana Whitfield <po@sebev.example.com>",
+    "received_at": "2026-05-18T09:02:00Z",
+    "subject": "Change request: please reduce quantity on PO-SED-2026-0418",
+    "body_excerpt": "Hi team, Our demand forecast for the water line came down. On open order PO-SED-2026-0418, please reduce: SKU-1180 24-pk Water: 600 cases -> 480 cases Everything else on the PO stays as-is. Please confirm the change and the updated invoice total. Thanks, Dana Whitfield Purchasing",
+    "body_hash": "43c649f134fd0f6f4c22e4298286e17aabce2716e9011bdeb9494f16461b689c",
+    "attachment_manifest": []
+  }
+}

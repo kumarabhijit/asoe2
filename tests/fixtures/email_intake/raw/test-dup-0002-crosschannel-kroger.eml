@@ -1,0 +1,24 @@
+From: Kroger Procurement <po@kroger.example.com>
+To: ACME CPG Order Desk <orders@acme-cpg.example.com>
+Subject: PO 88421 — please confirm entry
+Date: Sun, 12 Apr 2026 09:30:00 +0000
+Message-ID: <TEST-DUP-0002@kroger.example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+Hi,
+
+We had EDI transmission alarms on our side yesterday. To be safe,
+please make sure PO 88421 is entered:
+
+PO number: PO-88421
+Ship-to:   QuickMart Distribution, Dallas TX
+
+  Line  SKU       Description       Cases   Unit price
+  1     SKU-1180  24-pk Water         500      $9.62
+  2     SKU-1181  12-pk Sparkling     200     $10.00
+
+Disregard if already in your system.
+
+Kroger Procurement Operations

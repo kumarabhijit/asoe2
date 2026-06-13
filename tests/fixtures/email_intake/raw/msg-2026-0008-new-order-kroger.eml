@@ -1,0 +1,34 @@
+From: Kroger Procurement <po@kroger.example.com>
+To: ACME CPG Order Desk <orders@acme-cpg.example.com>
+Subject: New order — EDI-PO-2026-7781
+Date: Fri, 22 May 2026 07:10:00 +0000
+Message-ID: <MSG-2026-0008@kroger.example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="=_asoe_msg-2026-0008"
+
+--=_asoe_msg-2026-0008
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+Hello,
+
+Our EDI link is down for maintenance this morning; please process the
+attached purchase order manually.
+
+PO number:    EDI-PO-2026-7781
+Ship-to:      Kroger Dallas DC, 4500 Commerce St, Dallas TX 75201
+Requested DD: 2026-05-30
+
+Line details are in the attached CSV.
+
+Regards,
+Kroger Procurement Operations
+
+--=_asoe_msg-2026-0008
+Content-Type: text/csv; name="EDI-PO-2026-7781.csv"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="EDI-PO-2026-7781.csv"
+
+cG9fbnVtYmVyLGxpbmUsc2t1LGRlc2NyaXB0aW9uLHF0eV9jYXNlcyx1bml0X3ByaWNlCkVESS1Q
+Ty0yMDI2LTc3ODEsMSxTS1UtMTE4MCwyNC1wayBXYXRlciwyNTAsOS42MAo=
+--=_asoe_msg-2026-0008--

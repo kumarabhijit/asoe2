@@ -1,0 +1,20 @@
+{
+  "case": "msg-2026-0004-change-cancel-walmart",
+  "gateway": "email_intake",
+  "operation": "fetch_message",
+  "source_eml": "raw/msg-2026-0004-change-cancel-walmart.eml",
+  "scenario": "ORDER_CHANGE",
+  "expected_classification": "EMAIL_ORDER_CHANGE_REQUEST",
+  "ref_po": "PO-WMT-2026-1101",
+  "note": "Full cancellation (exc-042, RED/escalated): high-value cancel with a no-partial-ship constraint; should escalate rather than auto-apply.",
+  "recorded_by": "scripts/convert_eml_fixtures.py",
+  "output": {
+    "source_email_id": "MSG-2026-0004",
+    "from_address": "Walmart Replenishment <orders@buying.walmart.example.com>",
+    "received_at": "2026-05-19T08:15:00Z",
+    "subject": "URGENT: cancel PO-WMT-2026-1101 in full",
+    "body_excerpt": "URGENT — please action today. Cancel purchase order PO-WMT-2026-1101 in full, effective immediately (500 cases, SKU-0042 12-pk Cola). The category reset this PO supported has been postponed to Q3. Do NOT ship any portion of this order. If any part has already left your DC, reply ",
+    "body_hash": "a73c8a9786da3a111777dbda42a280fed035daa73a96361fee825ea25322ddc2",
+    "attachment_manifest": []
+  }
+}

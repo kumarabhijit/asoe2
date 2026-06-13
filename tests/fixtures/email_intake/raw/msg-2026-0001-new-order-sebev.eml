@@ -1,0 +1,25 @@
+From: Dana Whitfield <po@sebev.example.com>
+To: ACME CPG Order Desk <orders@acme-cpg.example.com>
+Subject: PO 2026-0042 — May order for Atlanta DC
+Date: Thu, 30 Apr 2026 10:12:00 +0000
+Message-ID: <MSG-2026-0001@sebev.example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+Hi team,
+
+Please enter the following order against our account. PO number is
+2026-0042, terms as per our standing agreement.
+
+  Item                          Cases   Unit price
+  SKU-1180  24-pk Water           400      $9.60
+  SKU-1181  12-pk Sparkling       240     $11.40
+  SKU-7800  Organic Kombucha 6pk   72     $21.50
+
+Requested delivery: week of May 11th, to our Atlanta warehouse.
+
+Thanks,
+Dana Whitfield
+Purchasing — Southeast Beverage Distributors
+(404) 555-0173
