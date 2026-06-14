@@ -3345,6 +3345,17 @@
             ],
             "title": "Resolved By"
           },
+          "sap_block_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sap Block Code"
+          },
           "sap_block_field": {
             "anyOf": [
               {
