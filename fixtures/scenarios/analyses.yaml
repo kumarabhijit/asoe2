@@ -9,11 +9,1110 @@
 # vendors a committed snapshot of this file and projects it into
 # src/lib/mock-data/__generated__/scenario_analyses.ts.
 #
-# Authored losslessly from the prior hand-authored UI mock via
-# asoe-ui/scripts/author-scenario-analyses.ts — do not hand-transcribe.
+# Projected from the prior hand-authored UI mock via
+# asoe-ui/scripts/author-scenario-analyses.ts (backend-contract fields
+# only; UI-only extras dropped, days_between int-coerced to mirror the
+# live adapter) — do not hand-transcribe.
 #
 version: 1
 analyses:
+  exc-001:
+    diagnosis: Two line items reference promo pricing from an expired Q4 trade promotion (ZPROM condition valid through 12/31). One line has a $0.02 EDI rounding variance within tolerance. Recommend auto-override for the rounding and promo reload for the expired conditions.
+    confidence: 92
+    confidence_signal:
+      value: 0.92
+      calibrated: false
+      method: llm_intent_classifier_raw
+    risk: MEDIUM
+    resolution: AUTO_OVERRIDE
+    root_cause: Promotional condition ZPROM/155 expired 12/31/2025. PO still references promo pricing.
+    recommendation: Adjust price to contract base — reload Q1 promotional conditions or approve at expired promo rate.
+    entity_profile:
+      customer_name: Metro Grocery Holdings
+      bp_number: BP-102440
+      customer_tier: Gold
+      vip_status: false
+      credit_standing: Good
+      location: Plant 4100 — Atlanta DC
+      region: Southeast
+    impact_metrics:
+      revenue_at_risk: 1218.24
+      delta_amount: 766.08
+      delta_percentage: 11.3
+      sla_priority: MEDIUM
+      sla_deadline: "2026-04-12T18:00:00Z"
+      affected_lines: 3
+    price_analysis:
+      erp_unit_price: 14.88
+      po_unit_price: 13.2
+      variance_amount: 1.68
+      variance_pct: 11.3
+      total_at_risk: 1218.24
+      total_quantity: 456
+      uom: CS
+      doc_type: Sales Order
+      doc_number: SO-1001
+      sku: SKU-0042
+      material_desc: 12-pk Cola
+      order_date: "2026-04-11T08:12:00Z"
+      rule_id: SO-PRICE-002
+      root_cause_category: PROMO_EXPIRED
+      contract_ref: "4600012840"
+      promotion_ref: ZPROM/155 (expired 12/31/2025)
+    lines:
+      - line_id: L1
+        diagnosis: TPR discount ZPROM expired 12/31. PO reflects promo price $13.20 but ERP reverted to base $14.88.
+        resolution: AUTO_OVERRIDE
+        risk: MEDIUM
+        waterfall:
+          - type: BASE
+            label: Base Price (PR00)
+            record: PR00/10
+            value: 14.88
+            running: 14.88
+            detail: SAP list price, material group 042, effective 01/01/2025
+          - type: CONTRACT
+            label: Contract Price (ZA01)
+            record: ZA01/620
+            value: 0
+            running: 14.88
+            detail: "Active contract #4600012840 — no additional discount at this tier"
+          - type: TPR
+            label: Trade Promo (ZPROM)
+            record: ZPROM/155
+            value: -1.68
+            running: 13.2
+            detail: "Q4 promo: 11.3% off-invoice. Valid 10/01–12/31/2025."
+          - type: ERROR
+            label: Promo Validity Check
+            record: ZPROM/155
+            value: null
+            running: null
+            detail: Condition expired 12/31/2025. Current date outside validity.
+            error: "Promotional condition expired. PO $13.20 reflects promo price, ERP $14.88 reflects reverted base. Delta: -$1.68/unit."
+          - type: RESULT
+            label: ERP Computed Price
+            record: —
+            value: 14.88
+            running: 14.88
+            detail: Final ERP price after condition chain (promo excluded)
+      - line_id: L2
+        diagnosis: Same expired ZPROM condition as L1. Identical root cause.
+        resolution: AUTO_OVERRIDE
+        risk: MEDIUM
+        waterfall: []
+      - line_id: L3
+        diagnosis: "EDI transmission rounding: $14.90 vs $14.88. Within ±$0.05 tolerance."
+        resolution: AUTO_OVERRIDE
+        risk: LOW
+        waterfall: []
+  exc-002:
+    diagnosis: "PO #PO-88421 matches existing PO #PO-88419 received 36 hours prior. Identical line items, quantities, and ship-to address. Likely EDI retransmission or buyer system retry."
+    confidence: 88
+    risk: MEDIUM
+    resolution: BLOCK_AND_NOTIFY
+    root_cause: Duplicate PO ID detected within 48-hour window. Identical SKUs, quantities, and delivery address.
+    recommendation: Block duplicate PO and notify buyer for confirmation before processing.
+    entity_profile:
+      customer_name: QuickMart Distribution
+      bp_number: BP-207815
+      customer_tier: Silver
+      vip_status: false
+      credit_standing: Good
+      location: Plant 5200 — Dallas DC
+      region: Central
+    impact_metrics:
+      revenue_at_risk: 6720
+      delta_amount: 0
+      delta_percentage: 0
+      fulfillment_gap_pct: 0
+      sla_priority: HIGH
+      sla_deadline: "2026-04-11T14:00:00Z"
+      affected_lines: 2
+    lines:
+      - line_id: L1
+        diagnosis: Exact duplicate of PO-88419/L1. Same SKU, qty, ship-to.
+        resolution: BLOCK_AND_NOTIFY
+        risk: MEDIUM
+        waterfall: []
+      - line_id: L2
+        diagnosis: Exact duplicate of PO-88419/L2. Same SKU, qty, ship-to.
+        resolution: BLOCK_AND_NOTIFY
+        risk: MEDIUM
+        waterfall: []
+    duplicate_detection:
+      original_order:
+        so_number: SO-1040
+        po_number: PO-88419
+        created_date: "2026-04-09T21:00:00Z"
+        total_value: 6720
+        line_count: 2
+        status: In Fulfillment
+      duplicate_order:
+        so_number: SO-1042
+        po_number: PO-88421
+        created_date: "2026-04-11T09:00:00Z"
+        total_value: 6720
+        line_count: 2
+        status: Pending
+      detection_method: Same customer + identical SKUs + identical quantities within 48-hour window
+      days_between: 1
+      confidence: 88
+      confidence_signal:
+        value: 0.88
+        calibrated: false
+        method: duplicate_detection_composite_raw
+      recommended_action: Block duplicate SO-1042 and notify buyer QuickMart for confirmation
+      cancellation_target: SO-1042
+      autonomy_applied: L2 — Review required, value $6,720 exceeds auto-block threshold ($1,000)
+    order_comparison:
+      orders:
+        - so_number: SO-1040
+          po_number: PO-88419
+          created_date: "2026-04-09T21:00:00Z"
+          customer: QuickMart Distribution
+          lines:
+            - sku: SKU-1180
+              description: 24-pk Water
+              qty: 500
+              unit_price: 9.6
+            - sku: SKU-1181
+              description: 12-pk Sparkling
+              qty: 200
+              unit_price: 11.4
+          total_value: 7080
+          status: In Fulfillment
+        - so_number: SO-1042
+          po_number: PO-88421
+          created_date: "2026-04-11T09:00:00Z"
+          customer: QuickMart Distribution
+          lines:
+            - sku: SKU-1180
+              description: 24-pk Water
+              qty: 500
+              unit_price: 9.62
+            - sku: SKU-1181
+              description: 12-pk Sparkling
+              qty: 200
+              unit_price: 10
+          total_value: 6810
+          status: Pending
+      matching_fields:
+        - customer_id
+        - ship_to_address
+        - sku_list
+        - quantities
+      differing_fields:
+        - po_number
+        - unit_prices
+  exc-003:
+    diagnosis: Customer credit exposure ($142,500) exceeds approved credit limit ($125,000) by $17,500 (14%). Four line items totalling $13,782 would push exposure to $156,282. Credit hold applied per policy CREDIT-001.
+    confidence: 99
+    risk: HIGH
+    resolution: ESCALATE
+    root_cause: Credit limit breach — current exposure 114% of approved limit. Order would push to 125%.
+    recommendation: Escalate to Credit Manager for limit review. Do not release hold until exposure is within policy.
+    entity_profile:
+      customer_name: FreshCo Wholesale Ltd
+      bp_number: BP-310092
+      customer_tier: Standard
+      vip_status: false
+      credit_standing: At Risk
+      location: Plant 3400 — Chicago DC
+      region: Midwest
+    impact_metrics:
+      revenue_at_risk: 13782
+      delta_amount: 17500
+      delta_percentage: 14
+      sla_priority: CRITICAL
+      sla_deadline: "2026-04-11T12:00:00Z"
+      affected_lines: 4
+    lines:
+      - line_id: L1
+        diagnosis: High-value snack bar order. Contributes $8,532 to credit exposure.
+        resolution: ESCALATE
+        risk: HIGH
+        waterfall: []
+      - line_id: L2
+        diagnosis: Protein bar line. Contributes $3,600 to credit exposure.
+        resolution: ESCALATE
+        risk: HIGH
+        waterfall: []
+      - line_id: L3
+        diagnosis: Granola bar line. No price delta but contributes to credit total.
+        resolution: ESCALATE
+        risk: MEDIUM
+        waterfall: []
+      - line_id: L4
+        diagnosis: Kids bar line. $600 delta adds $3,600 to exposure.
+        resolution: ESCALATE
+        risk: HIGH
+        waterfall: []
+  exc-004:
+    diagnosis: UOM conversion factor mismatch on both line items. Pack-size to case conversion not loaded in ERP master data.
+    confidence: 97
+    risk: LOW
+    resolution: AUTO_OVERRIDE
+    root_cause: UOM conversion factor CS→EA missing from material master. ERP prices in case units, PO in each units.
+    recommendation: Apply UOM correction factor and update material master to prevent recurrence.
+    entity_profile:
+      customer_name: ValuePack Stores Inc
+      bp_number: BP-445520
+      customer_tier: Platinum
+      vip_status: true
+      credit_standing: Good
+      location: Plant 7800 — LA DC
+      region: West
+    impact_metrics:
+      revenue_at_risk: 14940
+      delta_amount: 2520
+      delta_percentage: 14.3
+      sla_priority: HIGH
+      sla_deadline: "2026-04-11T16:00:00Z"
+      affected_lines: 2
+    price_analysis:
+      erp_unit_price: 42
+      po_unit_price: 36
+      variance_amount: 6
+      variance_pct: 14.3
+      total_at_risk: 14940
+      total_quantity: 270
+      uom: CS
+      doc_type: Sales Order
+      doc_number: SO-3100
+      sku: SKU-5521
+      material_desc: Family Pack x6
+      order_date: "2026-04-11T11:00:00Z"
+      rule_id: SO-PRICE-002
+      root_cause_category: UOM_ERROR
+    lines:
+      - line_id: L1
+        diagnosis: "UOM conversion factor mismatch: 6-pack case factor not loaded."
+        resolution: AUTO_OVERRIDE
+        risk: LOW
+        waterfall:
+          - type: BASE
+            label: Base Price (PR00)
+            record: PR00/55
+            value: 42
+            running: 42
+            detail: SAP list price per case (6-pack)
+          - type: UOM
+            label: UOM Conversion
+            record: QUOM/12
+            value: -6
+            running: 36
+            detail: Pack-size conversion factor CS→EA
+          - type: ERROR
+            label: UOM Validation
+            record: QUOM/12
+            value: null
+            running: null
+            detail: Conversion factor not loaded in material master.
+            error: UOM conversion factor missing. PO price $36.00 uses EA unit, ERP price $42.00 uses CS unit.
+          - type: RESULT
+            label: ERP Computed Price
+            record: —
+            value: 42
+            running: 42
+            detail: ERP price without UOM conversion applied
+      - line_id: L2
+        diagnosis: Same UOM conversion issue for 12-pack variant.
+        resolution: AUTO_OVERRIDE
+        risk: LOW
+        waterfall: []
+  exc-005:
+    diagnosis: Single line item — ERP base price not loaded for new SKU-0099. PO price matches contracted rate.
+    confidence: 95
+    risk: LOW
+    resolution: AUTO_OVERRIDE
+    root_cause: New SKU price record (PR00) not yet loaded in SAP condition table. Contract rate is correct.
+    recommendation: Approve PO price as contract rate and request SAP master data load for SKU-0099.
+    entity_profile:
+      customer_name: Sunrise Beverages Co
+      bp_number: BP-118903
+      customer_tier: Gold
+      vip_status: false
+      credit_standing: Good
+      location: Plant 2100 — Miami DC
+      region: Southeast
+    impact_metrics:
+      revenue_at_risk: 6220.8
+      delta_amount: 691.2
+      delta_percentage: 10
+      sla_priority: LOW
+      affected_lines: 1
+    lines:
+      - line_id: L1
+        diagnosis: ERP base price not loaded. PO price $17.28 is the correct contract rate.
+        resolution: AUTO_OVERRIDE
+        risk: LOW
+        waterfall: []
+  exc-006:
+    diagnosis: PO flagged as potential duplicate. Similar line items but different quantities — may be a legitimate reorder vs. duplicate transmission.
+    confidence: 72
+    risk: MEDIUM
+    resolution: REQUEST_BUYER_CONFIRMATION
+    root_cause: PO structure matches prior order within 72h window but quantities differ by 15%. Ambiguous duplicate.
+    recommendation: Request buyer confirmation — quantities differ enough to be a legitimate reorder.
+    entity_profile:
+      customer_name: PowerDrink Distributors
+      bp_number: BP-520871
+      customer_tier: Silver
+      vip_status: false
+      credit_standing: Good
+      location: Plant 6100 — Denver DC
+      region: Mountain
+    impact_metrics:
+      revenue_at_risk: 8092.8
+      delta_amount: 456
+      delta_percentage: 5.6
+      sla_priority: MEDIUM
+      sla_deadline: "2026-04-12T08:00:00Z"
+      affected_lines: 2
+    lines:
+      - line_id: L1
+        diagnosis: Similar to prior PO-91203/L1 but qty differs (480 vs 410). May be reorder.
+        resolution: REQUEST_BUYER_CONFIRMATION
+        risk: MEDIUM
+        waterfall: []
+      - line_id: L2
+        diagnosis: Similar to prior PO-91203/L2 but qty differs (240 vs 200).
+        resolution: REQUEST_BUYER_CONFIRMATION
+        risk: MEDIUM
+        waterfall: []
+    duplicate_detection:
+      original_order:
+        so_number: SO-5008
+        po_number: PO-91203
+        created_date: "2026-04-07T14:30:00Z"
+        total_value: 7876.8
+        line_count: 2
+        status: Shipped
+      duplicate_order:
+        so_number: SO-5010
+        po_number: PO-91210
+        created_date: "2026-04-09T16:45:00Z"
+        total_value: 8092.8
+        line_count: 2
+        status: Pending Review
+      detection_method: Same customer + overlapping SKUs within 72-hour window. Quantities differ by 15%.
+      days_between: 2
+      confidence: 72
+      recommended_action: Request buyer confirmation — quantities differ, may be legitimate reorder
+      cancellation_target: SO-5010
+      autonomy_applied: L3 — Buyer confirmation required, ambiguous duplicate with 72% confidence
+    order_comparison:
+      orders:
+        - so_number: SO-5008
+          po_number: PO-91203
+          created_date: "2026-04-07T14:30:00Z"
+          customer: PowerDrink Distributors
+          lines:
+            - sku: SKU-7701
+              description: Energy Drink 4pk
+              qty: 410
+              unit_price: 8.96
+            - sku: SKU-7705
+              description: Energy Drink 8pk
+              qty: 200
+              unit_price: 17.5
+          total_value: 7173.6
+          status: Shipped
+        - so_number: SO-5010
+          po_number: PO-91210
+          created_date: "2026-04-09T16:45:00Z"
+          customer: PowerDrink Distributors
+          lines:
+            - sku: SKU-7701
+              description: Energy Drink 4pk
+              qty: 480
+              unit_price: 8.5
+            - sku: SKU-7705
+              description: Energy Drink 8pk
+              qty: 240
+              unit_price: 16
+          total_value: 7920
+          status: Pending Review
+      matching_fields:
+        - customer_id
+        - sku_list
+        - ship_to_address
+      differing_fields:
+        - quantities
+        - unit_prices
+        - po_number
+        - total_value
+  exc-007:
+    diagnosis: Customer approaching credit limit. Current exposure $93,200 against $100,000 limit. This order ($5,040) would bring exposure to $98,240 — within limit but triggering the 90% warning threshold.
+    confidence: 85
+    risk: MEDIUM
+    resolution: ALLOW_BOTH
+    root_cause: Credit exposure at 93.2% of limit. Order is within limit but triggers 90% warning policy (CREDIT-002).
+    recommendation: Approve order — within credit limit. Flag account for proactive credit review within 7 days.
+    entity_profile:
+      customer_name: ActiveLife Health Stores
+      bp_number: BP-660134
+      customer_tier: Gold
+      vip_status: true
+      credit_standing: Watch
+      location: Plant 1500 — NYC DC
+      region: Northeast
+    impact_metrics:
+      revenue_at_risk: 5040
+      delta_amount: 640
+      delta_percentage: 12.7
+      sla_priority: HIGH
+      sla_deadline: "2026-04-11T10:00:00Z"
+      affected_lines: 1
+    lines:
+      - line_id: L1
+        diagnosis: Sports drink order. $1.60/unit delta. Within credit limit but near threshold.
+        resolution: ALLOW_BOTH
+        risk: MEDIUM
+        waterfall: []
+  exc-008:
+    diagnosis: One line with expired seasonal promotion, one line priced correctly. Auto-resolved — promo condition reloaded from Q1 trade plan.
+    confidence: 96
+    risk: LOW
+    resolution: AUTO_OVERRIDE
+    root_cause: Seasonal promo ZTEA/Q4 expired. Q1 replacement promo ZTEA/Q1 available in trade plan.
+    recommendation: No action required — auto-resolved. Q1 promo condition applied successfully.
+    entity_profile:
+      customer_name: GreenLeaf Natural Foods
+      bp_number: BP-890045
+      customer_tier: Standard
+      vip_status: false
+      credit_standing: Good
+      location: Plant 3200 — Portland DC
+      region: Pacific Northwest
+    impact_metrics:
+      revenue_at_risk: 3375
+      delta_amount: 375
+      delta_percentage: 11.1
+      sla_priority: LOW
+      affected_lines: 2
+    lines:
+      - line_id: L1
+        diagnosis: Seasonal promo ZTEA/Q4 expired. Q1 replacement promo available.
+        resolution: AUTO_OVERRIDE
+        risk: LOW
+        waterfall: []
+      - line_id: L2
+        diagnosis: Correctly priced at base rate. No action needed.
+        resolution: NONE
+        risk: LOW
+        waterfall: []
+  exc-009:
+    diagnosis: "PO #PO-55102 is an exact retransmission of PO #PO-55100 received 4 hours prior. Identical customer, SKU, quantity, and ship-to. Low-value order ($504) auto-blocked per L1 autonomy policy."
+    confidence: 98
+    risk: LOW
+    resolution: BLOCK_AND_NOTIFY
+    root_cause: EDI retransmission — identical PO received within 4 hours. Single line item, exact match on all fields.
+    recommendation: No action required — auto-resolved. Duplicate blocked and buyer notification sent.
+    entity_profile:
+      customer_name: CornerShop Express
+      bp_number: BP-330210
+      customer_tier: Standard
+      vip_status: false
+      credit_standing: Good
+      location: Plant 2500 — Houston DC
+      region: South
+    impact_metrics:
+      revenue_at_risk: 504
+      delta_amount: 0
+      delta_percentage: 0
+      sla_priority: LOW
+      affected_lines: 1
+    lines:
+      - line_id: L1
+        diagnosis: Exact duplicate of PO-55100/L1. Same SKU, qty, price, ship-to.
+        resolution: BLOCK_AND_NOTIFY
+        risk: LOW
+        waterfall: []
+    duplicate_detection:
+      original_order:
+        so_number: SO-8098
+        po_number: PO-55100
+        created_date: "2026-04-11T02:15:00Z"
+        total_value: 504
+        line_count: 1
+        status: In Fulfillment
+      duplicate_order:
+        so_number: SO-8100
+        po_number: PO-55102
+        created_date: "2026-04-11T06:20:00Z"
+        total_value: 504
+        line_count: 1
+        status: Blocked
+      detection_method: Exact match — same customer, SKU, quantity, price, and ship-to within 24-hour window
+      days_between: 0
+      confidence: 98
+      recommended_action: Auto-blocked duplicate SO-8100. Buyer notification sent.
+      cancellation_target: SO-8100
+      autonomy_applied: L1 — Auto-block, value $504 below auto-block threshold ($1,000)
+    order_comparison:
+      orders:
+        - so_number: SO-8098
+          po_number: PO-55100
+          created_date: "2026-04-11T02:15:00Z"
+          customer: CornerShop Express
+          lines:
+            - sku: SKU-4410
+              description: Sports Water 24pk
+              qty: 60
+              unit_price: 8.4
+          total_value: 504
+          status: In Fulfillment
+        - so_number: SO-8100
+          po_number: PO-55102
+          created_date: "2026-04-11T06:20:00Z"
+          customer: CornerShop Express
+          lines:
+            - sku: SKU-4410
+              description: Sports Water 24pk
+              qty: 60
+              unit_price: 8.4
+          total_value: 504
+          status: Blocked
+      matching_fields:
+        - customer_id
+        - sku_list
+        - quantities
+        - unit_prices
+        - ship_to_address
+      differing_fields:
+        - po_number
+  exc-010:
+    diagnosis: Customer ordered 800 CS of Premium Lager but only 480 CS available at primary DC. Gap of 320 CS (40%). Alternate DC in Denver has 200 CS with 3-day transit. Production order for 500 CS due in 8 days.
+    confidence: 84
+    risk: HIGH
+    resolution: SPLIT_SHIPMENT
+    root_cause: Seasonal demand spike exceeded ATP forecast. Primary DC depleted below safety stock.
+    recommendation: "Split shipment: ship 480 CS from Atlanta DC now, source 200 CS from Denver DC (3-day transit, +$0.45/CS freight), backorder remaining 120 CS against production order."
+    entity_profile:
+      customer_name: BevWorld Distributors
+      bp_number: BP-750320
+      customer_tier: Platinum
+      vip_status: true
+      credit_standing: Good
+      location: Plant 4100 — Atlanta DC
+      region: Southeast
+    impact_metrics:
+      revenue_at_risk: 21280
+      delta_amount: 5920
+      delta_percentage: 27.8
+      fulfillment_gap_pct: 40
+      sla_priority: CRITICAL
+      sla_deadline: "2026-04-13T18:00:00Z"
+      affected_lines: 2
+    lines:
+      - line_id: L1
+        diagnosis: "Premium Lager: 800 CS ordered, 480 CS available. 40% gap. Split shipment recommended."
+        resolution: SPLIT_SHIPMENT
+        risk: HIGH
+        waterfall: []
+      - line_id: L2
+        diagnosis: "Light Lager: 400 CS ordered, 400 CS available. Fully available — no gap."
+        resolution: FULFILL
+        risk: LOW
+        waterfall: []
+    backorder_analysis:
+      ordered_qty: 800
+      available_qty: 480
+      gap_qty: 320
+      gap_pct: 40
+      unit_price: 18.5
+      uom: CS
+      at_risk: 5920
+      atp_date: "2026-04-20T00:00:00Z"
+      primary_dc:
+        plant: "4100"
+        name: Atlanta Regional DC
+        region: Southeast
+        qty: 480
+      alternate_warehouses:
+        - plant: "6500"
+          name: Denver National DC
+          region: Mountain
+          qty: 200
+          eta_days: 3
+          freight_delta_per_unit: 0.45
+          freight_delta_total: 90
+        - plant: "7800"
+          name: LA Distribution Hub
+          region: West
+          qty: 150
+          eta_days: 5
+          freight_delta_per_unit: 0.82
+          freight_delta_total: 123
+        - plant: "1500"
+          name: NYC Metro DC
+          region: Northeast
+          qty: 80
+          eta_days: 4
+          freight_delta_per_unit: 0.65
+          freight_delta_total: 52
+      substitutes:
+        - sku: SKU-6110
+          description: Premium Lager 24pk
+          available_qty: 300
+          price_delta_pct: 8.5
+          acceptance_rate: 0.72
+          source: Same brewery
+          priority: 1
+        - sku: SKU-6120
+          description: Craft Lager 12pk
+          available_qty: 600
+          price_delta_pct: -5.2
+          acceptance_rate: 0.45
+          source: Alternate brand
+          priority: 2
+      production:
+        qty: 500
+        date: "2026-04-20T00:00:00Z"
+      inbound_po:
+        qty: 300
+        eta: "2026-04-18T00:00:00Z"
+        po_num: PO-99210
+      resolution_options:
+        - id: opt-1
+          type: SPLIT_SHIPMENT
+          title: Split Shipment (Atlanta + Denver)
+          description: Ship 480 CS from Atlanta DC immediately. Source 200 CS from Denver DC (3-day transit, +$0.45/CS). Backorder 120 CS against production due Apr 20.
+          composite_score: 0.87
+          scores:
+            service: 0.82
+            revenue: 0.9
+            logistics: 0.85
+            preference: 0.91
+          sap_steps:
+            - VA02 (split delivery)
+            - VL01N (create 2nd delivery)
+            - ME21N (interplant transfer)
+        - id: opt-2
+          type: FUTURE_DELIVERY
+          title: Full Order — Future Delivery
+          description: "Hold entire order for production completion (Apr 20). Ship full 800 CS from Atlanta. Customer SLA risk: 8-day delay."
+          composite_score: 0.68
+          scores:
+            service: 0.45
+            revenue: 0.95
+            logistics: 0.92
+            preference: 0.4
+          sap_steps:
+            - VA02 (change delivery date)
+            - ZPROD (reserve production)
+        - id: opt-3
+          type: SUBSTITUTE_SKU
+          title: Substitute with Premium Lager 24pk
+          description: Offer SKU-6110 (24pk) as substitute for 300 CS. 72% historical acceptance rate. 8.5% price premium requires approval.
+          composite_score: 0.61
+          scores:
+            service: 0.7
+            revenue: 0.55
+            logistics: 0.9
+            preference: 0.3
+          sap_steps:
+            - VA02 (line substitution)
+            - VK11 (price adjustment)
+            - ZPROM (promo check)
+        - id: opt-4
+          type: ALT_DC
+          title: Fulfill from LA Hub
+          description: Source full 800 CS from LA Distribution Hub. All stock available but 5-day transit and +$0.82/CS freight increases cost by $656.
+          composite_score: 0.52
+          scores:
+            service: 0.6
+            revenue: 0.4
+            logistics: 0.35
+            preference: 0.72
+          sap_steps:
+            - VL01N (delivery from 7800)
+            - ME21N (interplant)
+            - VA02 (reassign)
+  exc-011:
+    diagnosis: Customer ordered 200 CS of Craft IPA. Only 140 CS available at primary DC. Alternate DC in Chicago has 120 CS with 2-day transit. Auto-resolved via split shipment.
+    confidence: 94
+    risk: LOW
+    resolution: SPLIT_SHIPMENT
+    root_cause: Routine stock depletion — replenishment order in transit covers gap.
+    recommendation: "No action required — auto-resolved. Split shipment executed: 140 CS from Portland, 60 CS from Chicago."
+    entity_profile:
+      customer_name: Hop City Brewing Supply
+      bp_number: BP-220145
+      customer_tier: Gold
+      vip_status: false
+      credit_standing: Good
+      location: Plant 3200 — Portland DC
+      region: Pacific Northwest
+    impact_metrics:
+      revenue_at_risk: 4400
+      delta_amount: 1320
+      delta_percentage: 30
+      fulfillment_gap_pct: 30
+      sla_priority: MEDIUM
+      affected_lines: 1
+    lines:
+      - line_id: L1
+        diagnosis: "Craft IPA: 200 CS ordered, 140 CS at primary DC. Split shipment auto-executed."
+        resolution: SPLIT_SHIPMENT
+        risk: LOW
+        waterfall: []
+    backorder_analysis:
+      ordered_qty: 200
+      available_qty: 140
+      gap_qty: 60
+      gap_pct: 30
+      unit_price: 22
+      uom: CS
+      at_risk: 1320
+      atp_date: "2026-04-15T00:00:00Z"
+      primary_dc:
+        plant: "3200"
+        name: Portland DC
+        region: Pacific Northwest
+        qty: 140
+      alternate_warehouses:
+        - plant: "3400"
+          name: Chicago Central DC
+          region: Midwest
+          qty: 120
+          eta_days: 2
+          freight_delta_per_unit: 0.35
+          freight_delta_total: 21
+      substitutes: []
+      production:
+        qty: 400
+        date: "2026-04-17T00:00:00Z"
+      inbound_po: null
+      resolution_options:
+        - id: opt-1
+          type: SPLIT_SHIPMENT
+          title: Split Shipment (Portland + Chicago)
+          description: Ship 140 CS from Portland DC, 60 CS from Chicago DC (2-day transit, +$0.35/CS).
+          composite_score: 0.92
+          scores:
+            service: 0.9
+            revenue: 0.88
+            logistics: 0.95
+            preference: 0.95
+          sap_steps:
+            - VA02 (split delivery)
+            - VL01N (create 2nd delivery)
+  exc-012:
+    diagnosis: Total order quantity (2,600 CS) exceeds contract maximum (2,000 CS) by 600 CS (30%). Three line items, two exceeding per-line maximums. SAP block V4080 applied.
+    confidence: 91
+    risk: MEDIUM
+    resolution: TRIM
+    root_cause: Customer placed order 30% above contract max. SKU-9010 and SKU-9020 individually exceed line-level maximums.
+    recommendation: Apply AI trim plan to reduce order to contract maximum. Two lines need trimming; one is within limit.
+    entity_profile:
+      customer_name: AquaPure Distribution
+      bp_number: BP-880460
+      customer_tier: Gold
+      vip_status: false
+      credit_standing: Good
+      location: Plant 4100 — Atlanta DC
+      region: Southeast
+    impact_metrics:
+      revenue_at_risk: 30020
+      delta_amount: 8660
+      delta_percentage: 28.8
+      sla_priority: HIGH
+      sla_deadline: "2026-04-14T12:00:00Z"
+      affected_lines: 3
+    lines:
+      - line_id: L1
+        diagnosis: 1,200 CS ordered, max 900 CS. Excess 300 CS. Trim recommended.
+        resolution: TRIM
+        risk: MEDIUM
+        waterfall: []
+      - line_id: L2
+        diagnosis: 800 CS ordered, within max 800 CS. No action needed.
+        resolution: OK
+        risk: LOW
+        waterfall: []
+      - line_id: L3
+        diagnosis: 600 CS ordered, max 300 CS. Excess 300 CS. Even-layer item — trim to 288 CS (full layers).
+        resolution: TRIM
+        risk: MEDIUM
+        waterfall: []
+    overmax_analysis:
+      total_ordered: 2600
+      max_qty: 2000
+      excess_qty: 600
+      exceedance_pct: 30
+      uom: CS
+      at_risk: 8660
+      contract_ref: CTR-4600018820
+      block_status: V4080
+      block_reason: Order quantity exceeds contract maximum — automatic block per SD-OM-001
+      order_lines:
+        - sku: SKU-9010
+          description: Sparkling Mineral 12pk
+          qty: 1200
+          max_line_qty: 900
+          excess: 300
+          is_even_layer_item: false
+        - sku: SKU-9015
+          description: Still Mineral 12pk
+          qty: 800
+          max_line_qty: 800
+          excess: 0
+          is_even_layer_item: false
+        - sku: SKU-9020
+          description: Flavored Water 24pk
+          qty: 600
+          max_line_qty: 300
+          excess: 300
+          is_even_layer_item: true
+      trim_plan:
+        - sku: SKU-9010
+          description: Sparkling Mineral 12pk
+          ordered: 1200
+          trimmed_to: 900
+          delta: 300
+          action: TRIM
+        - sku: SKU-9015
+          description: Still Mineral 12pk
+          ordered: 800
+          trimmed_to: 800
+          delta: 0
+          action: OK
+        - sku: SKU-9020
+          description: Flavored Water 24pk
+          ordered: 600
+          trimmed_to: 288
+          delta: 312
+          action: TRIM
+      trimmed_total: 1988
+      delta_total: 612
+  exc-013:
+    diagnosis: "Order for 65 CS total (2 SKUs) is below the minimum order quantity of 100 CS for this distribution channel. SAP V4082 block applied. Two lines: one can be rounded up to MOQ, one needs escalation due to KNMT waiver requirement."
+    confidence: 89
+    risk: MEDIUM
+    resolution: ROUND_UP
+    root_cause: Order quantity 35% below channel MOQ. MOQ set via KNMT-MINBM for Direct Store Delivery channel.
+    recommendation: Round up SKU-7800 from 40 to 72 CS (full pallet layer). Escalate SKU-7810 for KNMT waiver — below individual MOQ of 48 CS.
+    entity_profile:
+      customer_name: Fermented Foods Co
+      bp_number: BP-990215
+      customer_tier: Silver
+      vip_status: false
+      credit_standing: Good
+      location: Plant 2100 — Miami DC
+      region: Southeast
+    impact_metrics:
+      revenue_at_risk: 1790
+      delta_amount: 625
+      delta_percentage: 34.9
+      sla_priority: MEDIUM
+      sla_deadline: "2026-04-15T12:00:00Z"
+      affected_lines: 2
+    lines:
+      - line_id: L1
+        diagnosis: 40 CS ordered, MOQ 48 CS. Shortfall 8 CS. Round up to 72 CS (full layer = 24 CS/layer × 3).
+        resolution: ROUND_UP
+        risk: LOW
+        waterfall: []
+      - line_id: L2
+        diagnosis: 25 CS ordered, MOQ 48 CS. Shortfall 23 CS. Below 50% of MOQ — requires KNMT waiver.
+        resolution: ESCALATE
+        risk: MEDIUM
+        waterfall: []
+    moq_analysis:
+      ordered_qty: 65
+      moq_qty: 100
+      shortfall_qty: 35
+      shortfall_pct: 35
+      sku: SKU-7800
+      description: Organic Kombucha 6pk
+      unit_cost: 28.5
+      uom: CS
+      at_risk: 1790
+      moq_source: KNMT-MINBM
+      channel: Direct Store Delivery
+      block_message: Order quantity 65 CS is below minimum order quantity 100 CS for DSD channel. Block V4082 applied per SD-MOQ-001.
+      contract_ref: CTR-4600022150
+      block_status: V4082
+      round_up_plan:
+        - sku: SKU-7800
+          description: Organic Kombucha 6pk
+          ordered: 40
+          round_up_to: 72
+          delta: 32
+          action: ROUND_UP
+        - sku: SKU-7810
+          description: Ginger Kombucha 6pk
+          ordered: 25
+          round_up_to: 25
+          delta: 0
+          action: ESCALATE
+  exc-014:
+    diagnosis: Order has 3 SKUs with pallet alignment violations. 2 broken layers and 1 partial pallet. Total 37 loose cases requiring manual handling — estimated 1.5 extra labor hours and 8.2% freight waste.
+    confidence: 93
+    risk: MEDIUM
+    resolution: PALLET_ALIGN
+    root_cause: Ordered quantities do not align to full pallet layers. Broken layers on SKU-3500 and SKU-3520; partial pallet on SKU-3510.
+    recommendation: "Apply AI suggested plan: round SKU-3500 from 170 to 168 (7 full layers), round SKU-3510 from 85 to 84 (6 full layers), round SKU-3520 from 50 to 48 (4 full layers)."
+    entity_profile:
+      customer_name: CafeBrew Supply Co
+      bp_number: BP-410830
+      customer_tier: Gold
+      vip_status: false
+      credit_standing: Good
+      location: Plant 3400 — Chicago DC
+      region: Midwest
+    impact_metrics:
+      revenue_at_risk: 11162.5
+      delta_amount: 267
+      delta_percentage: 2.4
+      sla_priority: MEDIUM
+      sla_deadline: "2026-04-15T16:00:00Z"
+      affected_lines: 3
+    lines:
+      - line_id: L1
+        diagnosis: 170 CS ordered, layer qty 24. 7 full layers = 168, 2 loose. Broken layer.
+        resolution: ROUND_DOWN
+        risk: LOW
+        waterfall: []
+      - line_id: L2
+        diagnosis: 85 CS ordered, layer qty 14. 6 full layers = 84, 1 loose. Broken layer.
+        resolution: ROUND_DOWN
+        risk: LOW
+        waterfall: []
+      - line_id: L3
+        diagnosis: 50 CS ordered, layer qty 12. 4 full layers = 48, 2 loose. Partial pallet.
+        resolution: ROUND_DOWN
+        risk: LOW
+        waterfall: []
+    pallet_analysis:
+      classification: MIXED_VIOLATION
+      total_ordered_cases: 305
+      loose_cases_total: 37
+      order_line_count: 3
+      lines:
+        - sku: SKU-3500
+          description: Premium Coffee 12oz 24pk
+          uom: CS
+          layer_qty: 24
+          pallet_qty: 168
+          ordered_qty: 170
+          complete_layers: 7
+          loose_qty: 2
+          full_pallets: 1
+          pallet_fill_pct: 101.2
+          violation_type: Broken Layer
+        - sku: SKU-3510
+          description: Decaf Coffee 12oz 24pk
+          uom: CS
+          layer_qty: 14
+          pallet_qty: 84
+          ordered_qty: 85
+          complete_layers: 6
+          loose_qty: 1
+          full_pallets: 1
+          pallet_fill_pct: 101.2
+          violation_type: Broken Layer
+        - sku: SKU-3520
+          description: Cold Brew 10oz 12pk
+          uom: CS
+          layer_qty: 12
+          pallet_qty: 48
+          ordered_qty: 50
+          complete_layers: 4
+          loose_qty: 2
+          full_pallets: 1
+          pallet_fill_pct: 104.2
+          violation_type: Partial Pallet
+      suggested_plan:
+        - sku: SKU-3500
+          description: Premium Coffee 24pk
+          current: 170
+          suggested: 168
+          delta: -2
+          layers: 7
+          full_pallets: 1
+          reason: Round down to full layers (24 CS/layer × 7)
+        - sku: SKU-3510
+          description: Decaf Coffee 24pk
+          current: 85
+          suggested: 84
+          delta: -1
+          layers: 6
+          full_pallets: 1
+          reason: Round down to full layers (14 CS/layer × 6)
+        - sku: SKU-3520
+          description: Cold Brew 12pk
+          current: 50
+          suggested: 48
+          delta: -2
+          layers: 4
+          full_pallets: 1
+          reason: Round down to full layers (12 CS/layer × 4)
+  exc-016:
+    diagnosis: Shipment is 6 days behind the contracted delivery window. Root cause is a carrier hub closure in the Southwest corridor. SLA breach is imminent; three alternate routing options available.
+    confidence: 88
+    risk: HIGH
+    resolution: ALTERNATE_ROUTING
+    root_cause: Carrier DHL regional hub closure (weather-driven) — affected all southbound lanes for 48h.
+    recommendation: Re-route via FedEx Express through Memphis hub; restores ETA to within 1 day of planned, +$620 freight.
+    entity_profile:
+      customer_name: Target Supply Co
+      bp_number: BP-TGT-002
+      customer_tier: Strategic
+      vip_status: true
+      credit_standing: Excellent
+      location: DC-042 — Dallas
+      region: Southwest
+    impact_metrics:
+      revenue_at_risk: 48600
+      delta_amount: 2430
+      delta_percentage: 5
+      sla_priority: HIGH
+      sla_deadline: "2026-04-22T18:00:00Z"
+      affected_lines: 4
+    lines:
+      - line_id: L1
+        diagnosis: 12,000 CS of grocery SKUs held at DHL Phoenix hub.
+        resolution: RE-ROUTE
+        risk: MEDIUM
+        waterfall: []
+    delivery_delay_analysis:
+      planned_date: "2026-04-18T00:00:00Z"
+      projected_eta: "2026-04-24T00:00:00Z"
+      days_late: 6
+      rule_id: SD-DELAY-002
+      delay_category: CARRIER_DELAY
+      delay_reason: DHL Phoenix regional hub was closed Apr 16–18 due to severe weather. 12,000 CS of strategic-tier inventory waiting on outbound line-haul. Ripple effect on 3 downstream POs.
+      affected_lines: 4
+      at_risk: 48600
+      carrier: DHL Ground
+      route: LGB → PHX → DAL
+      sla_deadline: "2026-04-22T18:00:00Z"
+      alternate_options:
+        - id: opt-1
+          type: EXPEDITE
+          title: Re-route via FedEx Memphis hub
+          description: Swap to FedEx Express line-haul through MEM; bypasses affected PHX corridor. ETA Apr 19.
+          new_eta: "2026-04-19T00:00:00Z"
+          extra_cost: 620
+          recommended: true
+        - id: opt-2
+          type: SPLIT_SHIP
+          title: Partial pickup + priority balance
+          description: Release 70% from PHX as soon as hub reopens (Apr 20), expedite remaining 30% via UPS 2-Day.
+          new_eta: "2026-04-22T00:00:00Z"
+          extra_cost: 280
+          recommended: false
+        - id: opt-3
+          type: RESCHEDULE
+          title: Full re-slot to Apr 24 window
+          description: Customer confirmed flexibility on 2 of 4 SKUs; negotiate revised PO with 6-day push, no premium.
+          new_eta: "2026-04-24T00:00:00Z"
+          extra_cost: 0
+          recommended: false
   exc-017:
     diagnosis: Inbound PO PO-PHR-001 landed with a pricing block because line 1's PO price ($101.00) deviates +1.0% from the SAP base ($100.00) at Plant 4100. Variance is within the 2.0% auto-release tolerance; pricing block released automatically and order proceeds to delivery.
     confidence: 96
@@ -131,3 +1230,2804 @@ analyses:
       hard_block_pct: 0.1
       action: ESCALATE
       reason: Variance +5.0% above tolerance (+2.0%); under hard-block (+10.0%). Manager review required.
+  exc-019:
+    diagnosis: Target PO PO-EDM-SKU-001 references material SKU-999-UNKNOWN on line 1 — not present in the SAP material master (MARA). Inbound-order validation hard-rejected the line; buyer notification dispatched automatically.
+    confidence: 99
+    risk: HIGH
+    resolution: BLOCK_AND_NOTIFY
+    root_cause: Received SKU does not match any active record in SAP material master. Order cannot be fulfilled as received — either buyer picked a stale SKU or a catalog entry was purged without buyer-side update.
+    recommendation: Buyer has been notified with the unknown-SKU block. Await corrected PO with the active successor SKU before resuming fulfilment.
+    entity_profile:
+      customer_name: Target Supply Co
+      bp_number: BP-TGT-002
+      customer_tier: Strategic
+      vip_status: true
+      credit_standing: Excellent
+      location: Plant 3200 — Minneapolis DC
+      region: North Central
+    impact_metrics:
+      revenue_at_risk: 5040
+      delta_amount: 5040
+      delta_percentage: 100
+      sla_priority: HIGH
+      sla_deadline: "2026-04-18T12:00:00Z"
+      affected_lines: 1
+    lines:
+      - line_id: L1
+        diagnosis: Expected SKU-001 (active in MARA, material group 201); received SKU-999-UNKNOWN (no MARA record). Qty 80 CS, nominal value $5,040.00.
+        resolution: BLOCK_AND_NOTIFY
+        risk: HIGH
+        waterfall: []
+    edi_mismatch_analysis:
+      sub_type: SKU_MISMATCH
+      classification: HARD_REJECT
+      recommended_action: BLOCK_AND_NOTIFY
+      autonomy_level: L3
+      expected_value: SKU-001
+      received_value: SKU-999-UNKNOWN
+      notification_template: edi_line_mismatch_blocked
+  exc-020:
+    diagnosis: Costco PO PO-EDM-QTY-001 received quantity 144 CS on line 1 instead of the contract-aligned 120 CS (+20%). Variance exceeds pallet-break tolerance; EdiMismatchRecipe flagged for buyer confirmation before release.
+    confidence: 87
+    risk: MEDIUM
+    resolution: REQUEST_BUYER_CONFIRMATION
+    root_cause: Quantity received is 1 pallet layer above the contract forecast. Likely buyer-side PO upsize (seasonal / promo-driven) or an EDI translation error at the 3PL integration.
+    recommendation: Confirm upsize with Costco's buyer. Approve to fulfil at 144 CS, or override to the contract quantity (120 CS) and flag an exception to the buyer.
+    entity_profile:
+      customer_name: Costco Wholesale
+      bp_number: BP-CSC-004
+      customer_tier: Strategic
+      vip_status: true
+      credit_standing: Excellent
+      location: Plant 7100 — Issaquah DC
+      region: Pacific NW
+    impact_metrics:
+      revenue_at_risk: 7200
+      delta_amount: 1200
+      delta_percentage: 20
+      sla_priority: MEDIUM
+      sla_deadline: "2026-04-18T18:00:00Z"
+      affected_lines: 1
+    lines:
+      - line_id: L1
+        diagnosis: Expected qty 120 CS (contract forecast); received 144 CS (+24 CS, +20%). Aligns to 1 pallet-layer over-pull at current pack config.
+        resolution: REQUEST_BUYER_CONFIRMATION
+        risk: MEDIUM
+        waterfall: []
+    edi_mismatch_analysis:
+      sub_type: QTY_MISMATCH
+      classification: REVIEW
+      recommended_action: REQUEST_BUYER_CONFIRMATION
+      autonomy_level: L2
+      expected_value: 120
+      received_value: 144
+      notification_template: edi_line_mismatch_inquiry
+  exc-021:
+    diagnosis: "Inbound EDI 850 line 1 arrived with a price mismatch: received $95.00 against contract base $100.00 (−5.0%). The asoe2 classifier routed the event to CONTRACTUAL_CORRECTION so PriceAdjustmentRecipe owns the resolution. Variance is within the 15% discount ceiling — GREEN shadow verdict, auto-override applied via YK07 customer-match condition."
+    confidence: 94
+    risk: LOW
+    resolution: AUTO_OVERRIDE
+    root_cause: PO references a Q2 customer-match price concession (ZCUST/404) outside the base pricing condition. Variance within the contractual discount ceiling; auto-override permitted.
+    recommendation: No human action required. SAP adjusted via YK07 customer-match condition; delivery proceeds at $95.00.
+    entity_profile:
+      customer_name: Walmart Inc
+      bp_number: BP-WMT-001
+      customer_tier: Strategic
+      vip_status: true
+      credit_standing: Excellent
+      location: Plant 4100 — Bentonville DC
+      region: South Central
+    impact_metrics:
+      revenue_at_risk: 9500
+      delta_amount: 500
+      delta_percentage: 5
+      sla_priority: LOW
+      sla_deadline: "2026-04-18T18:00:00Z"
+      affected_lines: 1
+    lines:
+      - line_id: L1
+        diagnosis: PO $95.00 vs contract base $100.00 (−5.0%). Matches active Q2 customer concession ZCUST/404. Within 15% discount ceiling — auto-override via YK07.
+        resolution: AUTO_OVERRIDE
+        risk: LOW
+        waterfall:
+          - type: BASE
+            label: Base Price (PR00)
+            record: PR00/10
+            value: 100
+            running: 100
+            detail: SAP list price, material group 205, effective 01/01/2026
+          - type: CONTRACT
+            label: Contract Price (ZA01)
+            record: ZA01/620
+            value: 0
+            running: 100
+            detail: "Walmart strategic-tier contract #4600019910 — base unchanged"
+          - type: TPR
+            label: Customer Concession
+            record: ZCUST/404
+            value: -5
+            running: 95
+            detail: Q2 customer-match concession. Valid 04/01–06/30/2026.
+          - type: RESULT
+            label: Override Applied (YK07)
+            record: YK07/55
+            value: 0
+            running: 95
+            detail: Auto-override via customer-match condition. Delta within 15% ceiling.
+    price_analysis:
+      erp_unit_price: 100
+      po_unit_price: 95
+      variance_amount: 5
+      variance_pct: 5
+      total_at_risk: 9500
+      total_quantity: 100
+      uom: CS
+      doc_type: Sales Order
+      doc_number: SO-PM-ROUTING-001
+      sku: SKU-PRICE-MM
+      material_desc: Routed from EDI 850 sub_type PRICE_MISMATCH
+      order_date: "2026-04-17T10:00:00Z"
+      rule_id: SO-PRICE-002
+      root_cause_category: CUSTOMER_CONCESSION
+      contract_ref: "4600019910"
+      promotion_ref: ZCUST/404 (Q2 2026 concession)
+  exc-026:
+    diagnosis: Non-EDI PO from Southeast Beverage Distributors. Extracted four lines at composite confidence 0.88. All non-disable-able floor checks passed; ambiguous ship-to ('Atlanta DC' resolves to two warehouses) blocks one-click approve. Recipe recommends REQUEST_CLARIFICATION.
+    confidence: 88
+    risk: LOW
+    resolution: REQUEST_CLARIFICATION
+    root_cause: Buyer's PDF cover letter listed ship-to as 'Atlanta DC' which matches two physical warehouses (Atlanta-North, Atlanta-South). Confidence on that single field dropped to 0.62, pulling composite below the 0.95 auto-approve threshold.
+    recommendation: Send the templated clarification email asking the buyer to confirm Atlanta-North vs Atlanta-South. Auto-approve once a single match is selected.
+    entity_profile:
+      customer_name: Southeast Beverage Distributors
+      bp_number: BP-SBD-0042
+      customer_tier: Mid-Market
+      vip_status: false
+      credit_standing: Good
+      location: Plant 2200 — Atlanta DC
+      region: Southeast
+    impact_metrics:
+      revenue_at_risk: 18400
+      delta_amount: 0
+      delta_percentage: 0
+      sla_priority: MEDIUM
+      sla_deadline: "2026-04-30T18:00:00Z"
+      affected_lines: 4
+    lines:
+      - line_id: L1
+        diagnosis: SKU-1101 — extracted at 0.97, customer SKU mapping confirmed.
+        resolution: AUTO_APPROVE
+        risk: LOW
+        waterfall: []
+      - line_id: L2
+        diagnosis: SKU-1102 — extracted at 0.96, customer SKU mapping confirmed.
+        resolution: AUTO_APPROVE
+        risk: LOW
+        waterfall: []
+      - line_id: L3
+        diagnosis: SKU-1108 — extracted at 0.91, fuzzy SKU match against customer master.
+        resolution: AUTO_APPROVE
+        risk: LOW
+        waterfall: []
+      - line_id: L4
+        diagnosis: Ship-to 'Atlanta DC' — confidence 0.62; matches two warehouses.
+        resolution: REQUEST_CLARIFICATION
+        risk: MEDIUM
+        waterfall: []
+    email_order_entry_analysis:
+      composite_confidence: 0.88
+      classification: STANDARD_REVIEW
+      recommended_action: REQUEST_CLARIFICATION
+      autonomy_level: L2
+      validation_failures:
+        - ambiguous_ship_to
+      floor_breaches: []
+      reject_reason_code: null
+      floor_status:
+        sender_authorized: true
+        customer_resolved: true
+        duplicate_po_clear: true
+        credit_clear: true
+      notification_template: email_order_clarification_request
+    order_entry_extraction:
+      source_type: PDF
+      confidence: 0.88
+      header:
+        customer_po: EML-PO-2026-0042
+        order_type: ZOR
+        sales_org: "1000"
+        dist_channel: "10"
+        requested_date: "2026-05-24"
+        ship_window_from: null
+        ship_window_to: null
+      customer_name: Southeast Beverage Distributors
+      customer_bp: "300042"
+      line_items:
+        - line_num: "001"
+          material: BEV-COLA-12PK
+          description: Cola 12-pack case
+          quantity: 600
+          uom: CS
+          unit_price: 8.64
+          mdm_matched: true
+          confidence: 0.96
+          confidence_signal:
+            value: 0.96
+            calibrated: false
+            method: order_entry_line_raw
+        - line_num: "002"
+          material: BEV-LEMON-6PK
+          description: Lemon 6-pack case
+          quantity: 240
+          uom: CS
+          unit_price: 5.5
+          mdm_matched: true
+          confidence: 0.61
+          confidence_signal:
+            value: 0.61
+            calibrated: false
+            method: order_entry_line_raw
+      validation_flags:
+        - field: ship_to
+          severity: WARNING
+          message: "Ship-to 'Atlanta DC' is ambiguous — confirm DC #6094."
+        - field: line 002
+          severity: INFO
+          message: Matched to material master.
+    edi_850_audit:
+      standard: ANSI X12 5010
+      transaction_set: "850"
+      envelope:
+        sender_id: "300042"
+        receiver_id: VENDOR-7788
+        interchange_control_number: "000012345"
+        group_control_number: "12345"
+        transaction_set_control_number: "0001"
+        usage_indicator: P
+        x12_version: "005010"
+      header:
+        purpose_code: "00"
+        po_type: SA
+        po_number: EML-PO-2026-0042
+        po_date: "2026-04-30"
+        currency: USD
+        requested_delivery_date: "2026-05-24"
+      parties:
+        - entity_code: BY
+          role: Buying Party (Purchaser)
+          name: Southeast Beverage Distributors
+          id_qualifier: "92"
+          id_value: "300042"
+          address: null
+          city_state_zip: null
+        - entity_code: SE
+          role: Selling Party
+          name: Acme Beverages Co
+          id_qualifier: "92"
+          id_value: VENDOR-7788
+          address: null
+          city_state_zip: null
+      line_items:
+        - line_num: "001"
+          quantity: 600
+          uom: CS
+          unit_price: 8.64
+          product_qualifier: VP
+          product_id: BEV-COLA-12PK
+          description: Cola 12-pack case
+          extended_amount: 5184
+        - line_num: "002"
+          quantity: 240
+          uom: CS
+          unit_price: 5.5
+          product_qualifier: VP
+          product_id: BEV-LEMON-6PK
+          description: Lemon 6-pack case
+          extended_amount: 1320
+      totals:
+        total_line_items: 2
+        total_quantity: 840
+        total_amount: 6504
+      segments:
+        - seg_id: ISA
+          elements: []
+          raw: ISA*00**00**ZZ*300042         *ZZ*VENDOR-7788    *260430*0000*U*00501*000012345*0*P*>~
+          meaning: Interchange Control Header
+          group: envelope
+        - seg_id: GS
+          elements: []
+          raw: GS*PO*300042*VENDOR-7788*20260430*0000*12345*X*005010~
+          meaning: Functional Group Header
+          group: envelope
+        - seg_id: ST
+          elements: []
+          raw: ST*850*0001~
+          meaning: Transaction Set Header
+          group: envelope
+        - seg_id: BEG
+          elements: []
+          raw: BEG*00*SA*EML-PO-2026-0042**20260430~
+          meaning: Beginning Segment for Purchase Order
+          group: header
+        - seg_id: CUR
+          elements: []
+          raw: CUR*BY*USD~
+          meaning: Currency
+          group: header
+        - seg_id: REF
+          elements: []
+          raw: REF*PO*EML-PO-2026-0042~
+          meaning: Reference Identification
+          group: header
+        - seg_id: DTM
+          elements: []
+          raw: DTM*004*20260430~
+          meaning: Date/Time Reference
+          group: dates
+        - seg_id: DTM
+          elements: []
+          raw: DTM*002*20260524~
+          meaning: Date/Time Reference
+          group: dates
+        - seg_id: N1
+          elements: []
+          raw: N1*BY*Southeast Beverage Distributors*92*300042~
+          meaning: Party Identification
+          group: party
+        - seg_id: N1
+          elements: []
+          raw: N1*SE*Acme Beverages Co*92*VENDOR-7788~
+          meaning: Party Identification
+          group: party
+        - seg_id: PO1
+          elements: []
+          raw: PO1*001*600*CS*8.64*PE*VP*BEV-COLA-12PK~
+          meaning: Baseline Item Data
+          group: line
+        - seg_id: PID
+          elements: []
+          raw: PID*F****Cola 12-pack case~
+          meaning: Product/Item Description
+          group: line
+        - seg_id: PO1
+          elements: []
+          raw: PO1*002*240*CS*5.5*PE*VP*BEV-LEMON-6PK~
+          meaning: Baseline Item Data
+          group: line
+        - seg_id: PID
+          elements: []
+          raw: PID*F****Lemon 6-pack case~
+          meaning: Product/Item Description
+          group: line
+        - seg_id: CTT
+          elements: []
+          raw: CTT*2*840~
+          meaning: Transaction Totals
+          group: trailer
+        - seg_id: SE
+          elements: []
+          raw: SE*13*0001~
+          meaning: Transaction Set Trailer
+          group: trailer
+        - seg_id: GE
+          elements: []
+          raw: GE*1*12345~
+          meaning: Functional Group Trailer
+          group: trailer
+        - seg_id: IEA
+          elements: []
+          raw: IEA*1*000012345~
+          meaning: Interchange Control Trailer
+          group: trailer
+      raw_x12: |-
+        ISA*00**00**ZZ*300042         *ZZ*VENDOR-7788    *260430*0000*U*00501*000012345*0*P*>~
+        GS*PO*300042*VENDOR-7788*20260430*0000*12345*X*005010~
+        ST*850*0001~
+        BEG*00*SA*EML-PO-2026-0042**20260430~
+        CUR*BY*USD~
+        REF*PO*EML-PO-2026-0042~
+        DTM*004*20260430~
+        DTM*002*20260524~
+        N1*BY*Southeast Beverage Distributors*92*300042~
+        N1*SE*Acme Beverages Co*92*VENDOR-7788~
+        PO1*001*600*CS*8.64*PE*VP*BEV-COLA-12PK~
+        PID*F****Cola 12-pack case~
+        PO1*002*240*CS*5.5*PE*VP*BEV-LEMON-6PK~
+        PID*F****Lemon 6-pack case~
+        CTT*2*840~
+        SE*13*0001~
+        GE*1*12345~
+        IEA*1*000012345~
+    entities_analysis:
+      extracted:
+        - key: customer_po
+          value: EML-PO-2026-0042
+          kind: po
+          confidence: 0.98
+          source_span: PO# EML-PO-2026-0042
+          evidence_ref: order_entry.customer_po
+        - key: customer
+          value: Southeast Beverage Distributors
+          kind: customer
+          confidence: 0.95
+          source_span: "From: buyer@southeast-distrib.example"
+          evidence_ref: order_entry.customer
+        - key: ship_to
+          value: "Atlanta DC #6094"
+          kind: location
+          confidence: 0.88
+          source_span: ship to Atlanta DC
+          evidence_ref: order_entry.ship_to
+        - key: requested_date
+          value: "2026-05-24"
+          kind: date
+          confidence: 0.9
+          source_span: need by May 24
+          evidence_ref: order_entry.requested_date
+        - key: material
+          value: BEV-COLA-12PK
+          kind: material
+          confidence: 0.94
+          source_span: Cola 12pk x 600
+          evidence_ref: order_entry.material
+    sap_data_analysis:
+      system: S4H_PRD
+      validation_status: Sold-to resolved · ATP OK · credit clear
+      order_value_usd: 27216
+      sap_doc_number: "5100012344"
+    draft_reply:
+      status: DRAFTED
+      reason: null
+      template_name: order_clarification_request
+      recipient: buyer@southeast-distrib.example
+      subject: "Re: PO EML-PO-2026-0042 — please confirm ship-to"
+      body: |-
+        Hello,
+
+        Thanks for your order (PO EML-PO-2026-0042). Before we release it we need to confirm one detail:
+
+        • Ship-to: you wrote "Atlanta DC" — please confirm this is DC #6094.
+
+        Once confirmed we'll process 600 CS of BEV-COLA-12PK and 240 CS of BEV-LEMON-6PK for delivery by 2026-05-24.
+
+        Thank you,
+        Acme Beverages Order Desk
+      edits_applied:
+        - field: subject
+          before: "Re: your order"
+          after: "Re: PO EML-PO-2026-0042 — please confirm ship-to"
+      revisions:
+        - version: 1
+          subject: "Re: your order"
+          body: |-
+            Hello,
+
+            Thanks for your order. Before we release it we need to confirm one detail:
+
+            • Ship-to: you wrote "Atlanta DC" — please confirm this is DC #6094.
+
+            Thank you,
+            Acme Beverages Order Desk
+          edits_applied: []
+          author: ai:ReplyDraftRecipe.py
+          authored_at: "2026-04-30T10:18:00Z"
+          source: AI_GENERATED
+        - version: 2
+          subject: "Re: PO EML-PO-2026-0042 — please confirm ship-to"
+          body: |-
+            Hello,
+
+            Thanks for your order (PO EML-PO-2026-0042). Before we release it we need to confirm one detail:
+
+            • Ship-to: you wrote "Atlanta DC" — please confirm this is DC #6094.
+
+            Once confirmed we'll process 600 CS of BEV-COLA-12PK and 240 CS of BEV-LEMON-6PK for delivery by 2026-05-24.
+
+            Thank you,
+            Acme Beverages Order Desk
+          edits_applied:
+            - field: subject
+              before: "Re: your order"
+              after: "Re: PO EML-PO-2026-0042 — please confirm ship-to"
+          author: analyst-1
+          authored_at: "2026-04-30T10:20:00Z"
+          source: OPERATOR_EDIT
+      drafted_by: analyst-1
+      drafted_at: "2026-04-30T10:20:00Z"
+    knowledge_graph:
+      nodes:
+        - id: order:eml-po-2026-0042
+          label: EML-PO-2026-0042
+          kind: order
+          detail: Sales order
+        - id: customer:300042
+          label: Southeast Beverage Distributors
+          kind: customer
+          detail: BP 300042
+        - id: material:bev-cola-12pk
+          label: BEV-COLA-12PK
+          kind: material
+          detail: 600 CS
+        - id: material:bev-lemon-6pk
+          label: BEV-LEMON-6PK
+          kind: material
+          detail: 240 CS
+        - id: sap_doc:5100012344
+          label: "5100012344"
+          kind: sap_doc
+          detail: SO confirmed, ATP OK
+      edges:
+        - source: customer:300042
+          target: order:eml-po-2026-0042
+          relation: places
+        - source: order:eml-po-2026-0042
+          target: material:bev-cola-12pk
+          relation: contains
+        - source: order:eml-po-2026-0042
+          target: material:bev-lemon-6pk
+          relation: contains
+        - source: order:eml-po-2026-0042
+          target: sap_doc:5100012344
+          relation: validated_by
+      root_id: order:eml-po-2026-0042
+    email_source:
+      from_address: buyer@southeast-distrib.example
+      received_at: "2026-04-30T10:12:00Z"
+      subject: PO 8842 — May allocation, ship to Atlanta DC
+      body_hash: 97b0cdbc09ee7692a6f53bab90d6fe03c5e97f5636860f441206ddd2bfe189e4
+      attachment_manifest:
+        - name: PO_8842.pdf
+          mime_type: application/pdf
+          bytes: 184320
+          sha256: 97a1beabd005767718e7ba0d54647e8b78add24344e5b487da21314b58457aaf
+          attachment_id: att-po-8842-pdf
+        - name: ship_to_addresses.csv
+          mime_type: text/csv
+          bytes: 4096
+          sha256: cde5ebacd0ef2e312d8ec346a8288497d8ccbdeca2b60e345c5213475695a894
+          attachment_id: att-ship-to-addresses-csv
+      body_excerpt: |-
+        Hi team,
+
+        Please process the attached PO 8842 for our May allocation. Ship to the Atlanta DC — full address in the CSV. Confirm by EOD Friday.
+
+        Thanks,
+        Marcus Reed
+      source_email_id: "4"
+      evidence_anchors:
+        - attachment_id: att-po-8842-pdf
+          text: PO# EML-PO-2026-0042
+          match_key:
+            normalized_text: po# eml-po-2026-0042
+            occurrence_index: 0
+          supports_kind: extracted_field
+          supports_ref: order_entry.customer_po
+          label: PO number
+          source_sha256: 97a1beabd005767718e7ba0d54647e8b78add24344e5b487da21314b58457aaf
+          anchor_source: spatial_extracted
+          page: 1
+          bbox:
+            - 0.08
+            - 0.12
+            - 0.52
+            - 0.16
+          confidence: 0.98
+          rendition_hash: rendition-PO_8842-recorded-doctr-v0
+        - attachment_id: att-po-8842-pdf
+          text: "From: buyer@southeast-distrib.example"
+          match_key:
+            normalized_text: "from: buyer@southeast-distrib.example"
+            occurrence_index: 0
+          supports_kind: extracted_field
+          supports_ref: order_entry.customer
+          label: Customer
+          source_sha256: 97a1beabd005767718e7ba0d54647e8b78add24344e5b487da21314b58457aaf
+          anchor_source: text_derived
+        - attachment_id: att-po-8842-pdf
+          text: ship to Atlanta DC
+          match_key:
+            normalized_text: ship to atlanta dc
+            occurrence_index: 0
+          supports_kind: extracted_field
+          supports_ref: order_entry.ship_to
+          label: Ship-to
+          source_sha256: 97a1beabd005767718e7ba0d54647e8b78add24344e5b487da21314b58457aaf
+          anchor_source: spatial_extracted
+          page: 1
+          bbox:
+            - 0.08
+            - 0.2
+            - 0.46
+            - 0.24
+          confidence: 0.91
+          rendition_hash: rendition-PO_8842-recorded-doctr-v0
+        - attachment_id: att-po-8842-pdf
+          text: need by May 24
+          match_key:
+            normalized_text: need by may 24
+            occurrence_index: 0
+          supports_kind: extracted_field
+          supports_ref: order_entry.requested_date
+          label: Requested date
+          source_sha256: 97a1beabd005767718e7ba0d54647e8b78add24344e5b487da21314b58457aaf
+          anchor_source: spatial_extracted
+          page: 1
+          bbox:
+            - 0.08
+            - 0.28
+            - 0.4
+            - 0.32
+          confidence: 0.88
+          rendition_hash: rendition-PO_8842-recorded-doctr-v0
+        - attachment_id: att-po-8842-pdf
+          text: Cola 12pk x 600
+          match_key:
+            normalized_text: cola 12pk x 600
+            occurrence_index: 0
+          supports_kind: extracted_field
+          supports_ref: order_entry.material
+          label: Material
+          source_sha256: 97a1beabd005767718e7ba0d54647e8b78add24344e5b487da21314b58457aaf
+          anchor_source: spatial_extracted
+          page: 1
+          bbox:
+            - 0.08
+            - 0.36
+            - 0.5
+            - 0.4
+          confidence: 0.85
+          rendition_hash: rendition-PO_8842-recorded-doctr-v0
+  exc-027:
+    diagnosis: "Q1 reset PO from Walmart held on pricing check: line 1's PO price ($21.10) deviates +5.5% from the SAP base ($20.00) at Plant 4100. Above the 2.0% auto-release tolerance, below the 10.0% hard-block ceiling — PriceHoldReleaseRecipe escalated to category manager. Q1 promotional reset window opened 2026-05-01; buyer may have applied an unconfirmed promo upcharge ahead of the planogram swap."
+    confidence: 90
+    risk: MEDIUM
+    resolution: ESCALATE
+    root_cause: PO price exceeds auto-release tolerance. Walmart's Q1 reset typically lands with a +3–5% margin uplift confirmed via JBP letter; that letter has not yet arrived in the contract repository.
+    recommendation: Category manager confirms the Q1 JBP uplift letter is in flight, then approves the price-hold release. Reject + buyer notification if the uplift is unauthorised.
+    entity_profile:
+      customer_name: Walmart Inc
+      bp_number: BP-WMT-001
+      customer_tier: Strategic
+      vip_status: true
+      credit_standing: Excellent
+      location: Plant 4100 — Bentonville DC
+      region: South Central
+    impact_metrics:
+      revenue_at_risk: 33760
+      delta_amount: 1760
+      delta_percentage: 5.5
+      sla_priority: HIGH
+      sla_deadline: "2026-05-05T18:00:00Z"
+      affected_lines: 1
+    lines:
+      - line_id: L1
+        diagnosis: PO $21.10 vs SAP base $20.00 (+5.5%). Above ±2.0% release tolerance, under +10.0% hard-block. Q1 reset window — pending JBP confirmation.
+        resolution: ESCALATE
+        risk: MEDIUM
+        waterfall:
+          - type: BASE
+            label: Base Price (PR00)
+            record: PR00/10
+            value: 20
+            running: 20
+            detail: SAP list price, material group 207, effective 04/01/2026
+          - type: CONTRACT
+            label: Contract Price (ZA01)
+            record: ZA01/620
+            value: 0
+            running: 20
+            detail: "Walmart strategic contract #4600055901 — base aligned, no automatic Q1 uplift clause"
+          - type: RESULT
+            label: PO Price (incoming)
+            record: EDI 850/L1
+            value: 21.1
+            running: 21.1
+            detail: Variance +$1.10 (+5.5%). Above tolerance; block held for review.
+          - type: ERROR
+            label: Pricing Block Check
+            record: VBKD-FAKSK
+            value: null
+            running: null
+            detail: "Release tolerance: ±2.0%. Hard-block: ±10.0%."
+            error: Escalate — variance above auto-release threshold; below hard-block.
+    price_hold_analysis:
+      hold_status: HELD
+      po_price: 21.1
+      sap_base_price: 20
+      variance_pct: 0.055
+      tolerance_pct: 0.02
+      hard_block_pct: 0.1
+      action: ESCALATE
+      reason: Variance +5.5% above tolerance (+2.0%); under hard-block (+10.0%). Category manager review required pending Q1 JBP uplift confirmation.
+  exc-028:
+    diagnosis: "Walmart ordered 1,600 CS of the Q1-reset SKU but Bentonville DC had only 1,280 CS on hand (320 CS / 20% gap). Agent split the shipment: 1,280 CS ex-Bentonville released for outbound; 320 CS ex-Memphis NDC on the 2-day transfer lane. Planogram window preserved; freight uplift $102.40 within the GREEN tolerance band."
+    confidence: 94
+    risk: LOW
+    resolution: SPLIT_SHIPMENT
+    root_cause: Bentonville pre-shipped Q4 closeout volume against the new planogram, depleting safety stock below the Q1 reset wave demand. Mid-month production run not yet scheduled.
+    recommendation: "No action required — auto-resolved. Split shipment executed: 1,280 CS from Bentonville, 320 CS from Memphis NDC."
+    entity_profile:
+      customer_name: Walmart Inc
+      bp_number: BP-WMT-001
+      customer_tier: Strategic
+      vip_status: true
+      credit_standing: Excellent
+      location: Plant 4100 — Bentonville DC
+      region: South Central
+    impact_metrics:
+      revenue_at_risk: 33760
+      delta_amount: 6752
+      delta_percentage: 20
+      fulfillment_gap_pct: 20
+      sla_priority: CRITICAL
+      sla_deadline: "2026-05-06T12:00:00Z"
+      affected_lines: 1
+    lines:
+      - line_id: L1
+        diagnosis: "Q1 reset SKU: 1,600 CS ordered, 1,280 CS available at primary DC (Bentonville). 20% gap."
+        resolution: SPLIT_SHIPMENT
+        risk: HIGH
+        waterfall: []
+    backorder_analysis:
+      ordered_qty: 1600
+      available_qty: 1280
+      gap_qty: 320
+      gap_pct: 20
+      unit_price: 21.1
+      uom: CS
+      at_risk: 6752
+      atp_date: "2026-05-12T00:00:00Z"
+      primary_dc:
+        plant: "4100"
+        name: Bentonville Regional DC
+        region: South Central
+        qty: 1280
+      alternate_warehouses:
+        - plant: "3450"
+          name: Memphis National DC
+          region: Mid-South
+          qty: 400
+          eta_days: 2
+          freight_delta_per_unit: 0.32
+          freight_delta_total: 102.4
+        - plant: "5200"
+          name: Dallas Distribution Hub
+          region: South Central
+          qty: 220
+          eta_days: 3
+          freight_delta_per_unit: 0.48
+          freight_delta_total: 153.6
+      substitutes: []
+      production:
+        qty: 800
+        date: "2026-05-12T00:00:00Z"
+      inbound_po: null
+      resolution_options:
+        - id: opt-1
+          type: SPLIT_SHIPMENT
+          title: Split Shipment (Bentonville + Memphis)
+          description: 1,280 CS ex-Bentonville, 320 CS ex-Memphis on the 2-day lane. Maintains planogram window.
+          composite_score: 0.91
+          scores:
+            service: 0.93
+            revenue: 0.92
+            logistics: 0.88
+            preference: 0.92
+          sap_steps:
+            - VA02 (split delivery)
+            - VL01N (create 2nd delivery)
+            - ME21N (interplant transfer)
+        - id: opt-2
+          type: FUTURE_DELIVERY
+          title: Hold full 1,600 CS for production run
+          description: Defer ship date 6 days for the inbound production order. Misses the May 6 planogram window.
+          composite_score: 0.42
+          scores:
+            service: 0.25
+            revenue: 0.95
+            logistics: 0.85
+            preference: 0.2
+          sap_steps:
+            - VA02 (change delivery date)
+            - ZPROD (reserve production)
+  exc-029:
+    diagnosis: PO PO-WMT-Q1-RESET-001-R2 arrived 18h after the original PO-WMT-Q1-RESET-001 with identical line items, quantities, and ship-to. RED — DuplicatePORecipe auto-blocked the retransmission; a courtesy 855 ack was queued against the original PO and Walmart's EDI ops were notified. No human action required for THIS record; the original PO remains in pricing review on its sibling exc-027.
+    confidence: 97
+    risk: MEDIUM
+    resolution: BLOCK_AND_NOTIFY
+    root_cause: Buyer EDI VAN auto-retried after missing 855 ack within the 12h SLA. The original PO is the canonical record; the R2 retry was caught by the 48h duplicate-detection window.
+    recommendation: Blocked and notified — no operator action on this record. Resolve the price-hold escalation on the sibling exc-027 to release the original PO.
+    entity_profile:
+      customer_name: Walmart Inc
+      bp_number: BP-WMT-001
+      customer_tier: Strategic
+      vip_status: true
+      credit_standing: Excellent
+      location: Plant 4100 — Bentonville DC
+      region: South Central
+    impact_metrics:
+      revenue_at_risk: 33760
+      delta_amount: 0
+      delta_percentage: 0
+      fulfillment_gap_pct: 0
+      sla_priority: HIGH
+      sla_deadline: "2026-05-06T01:30:00Z"
+      affected_lines: 1
+    lines:
+      - line_id: L1
+        diagnosis: Exact duplicate of PO-WMT-Q1-RESET-001/L1. Same SKU, qty, ship-to, ship date.
+        resolution: BLOCK_AND_NOTIFY
+        risk: MEDIUM
+        waterfall: []
+    duplicate_detection:
+      original_order:
+        so_number: SO-WMT-Q1RESET-001
+        po_number: PO-WMT-Q1-RESET-001
+        created_date: "2026-05-04T07:10:00Z"
+        total_value: 33760
+        line_count: 1
+        status: Pending Pricing Review
+      duplicate_order:
+        so_number: SO-WMT-Q1RESET-001-R2
+        po_number: PO-WMT-Q1-RESET-001-R2
+        created_date: "2026-05-05T01:30:00Z"
+        total_value: 33760
+        line_count: 1
+        status: Pending
+      detection_method: Identical customer + SKU + qty + ship-to within the 48-hour window; PO suffix '-R2' matches Walmart's retransmission convention.
+      days_between: 0
+      confidence: 97
+      recommended_action: Auto-blocked SO-WMT-Q1RESET-001-R2; 855 ack sent against the original PO.
+      cancellation_target: SO-WMT-Q1RESET-001-R2
+      autonomy_applied: L3 — Auto-blocked. Exact retransmission of an in-window canonical PO; the case still owes a decision on the price-hold sibling (exc-027).
+    order_comparison:
+      orders:
+        - so_number: SO-WMT-Q1RESET-001
+          po_number: PO-WMT-Q1-RESET-001
+          created_date: "2026-05-04T07:10:00Z"
+          customer: Walmart Inc
+          lines:
+            - sku: SKU-Q1R-2076
+              description: Q1 Reset Display Pack
+              qty: 1600
+              unit_price: 21.1
+          total_value: 33760
+          status: Pending Pricing Review
+        - so_number: SO-WMT-Q1RESET-001-R2
+          po_number: PO-WMT-Q1-RESET-001-R2
+          created_date: "2026-05-05T01:30:00Z"
+          customer: Walmart Inc
+          lines:
+            - sku: SKU-Q1R-2076
+              description: Q1 Reset Display Pack
+              qty: 1600
+              unit_price: 21.1
+          total_value: 33760
+          status: Pending
+      matching_fields:
+        - customer_id
+        - ship_to_address
+        - sku_list
+        - quantities
+        - unit_prices
+      differing_fields:
+        - po_number
+        - received_at
+  exc-030:
+    diagnosis: Costco end-of-quarter PO totals 4,000 CS, exceeding the contract maximum of 3,000 CS by 1,000 CS (33%). Two SKUs blew through their per-line ceilings. SAP V4080 applied. The EOQ closeout is a known seasonal spike — last year saw the same buyer over-pull by 28%.
+    confidence: 92
+    risk: MEDIUM
+    resolution: TRIM
+    root_cause: Costco's EOQ allocation grid does not gate against our contract maxima — buyer-side planning lands the order at the gross demand figure even when our line-level ceilings would cap it.
+    recommendation: "Apply the AI trim plan: round SKU-COST-EOQ-A to its per-line ceiling (1,500 CS) and SKU-COST-EOQ-B to a full club-pack pallet (1,500 CS, even layers). Notify category manager that the EOQ wave overran again."
+    entity_profile:
+      customer_name: Costco Wholesale Corp
+      bp_number: BP-COST-001
+      customer_tier: Strategic
+      vip_status: true
+      credit_standing: Excellent
+      location: Plant 7800 — LA Distribution Hub
+      region: West
+    impact_metrics:
+      revenue_at_risk: 122000
+      delta_amount: 30500
+      delta_percentage: 25
+      sla_priority: HIGH
+      sla_deadline: "2026-05-08T16:00:00Z"
+      affected_lines: 2
+    lines:
+      - line_id: L1
+        diagnosis: 2,000 CS ordered, line max 1,500 CS. Excess 500 CS. Trim to ceiling.
+        resolution: TRIM
+        risk: MEDIUM
+        waterfall: []
+      - line_id: L2
+        diagnosis: 2,000 CS ordered, line max 1,500 CS. Even-layer SKU — trim to 1,500 CS (5 layers × 300 CS).
+        resolution: TRIM
+        risk: MEDIUM
+        waterfall: []
+    overmax_analysis:
+      total_ordered: 4000
+      max_qty: 3000
+      excess_qty: 1000
+      exceedance_pct: 33.3
+      uom: CS
+      at_risk: 30500
+      contract_ref: CTR-4600060101
+      block_status: V4080
+      block_reason: Order quantity exceeds contract maximum — automatic block per SD-OM-001
+      order_lines:
+        - sku: SKU-COST-EOQ-A
+          description: Costco Club-Pack Bundle 36ct
+          qty: 2000
+          max_line_qty: 1500
+          excess: 500
+          is_even_layer_item: false
+        - sku: SKU-COST-EOQ-B
+          description: Costco Club-Pack Bundle 48ct
+          qty: 2000
+          max_line_qty: 1500
+          excess: 500
+          is_even_layer_item: true
+      trim_plan:
+        - sku: SKU-COST-EOQ-A
+          description: Costco Club-Pack Bundle 36ct
+          ordered: 2000
+          trimmed_to: 1500
+          delta: 500
+          action: TRIM
+        - sku: SKU-COST-EOQ-B
+          description: Costco Club-Pack Bundle 48ct
+          ordered: 2000
+          trimmed_to: 1500
+          delta: 500
+          action: TRIM
+      trimmed_total: 3000
+      delta_total: 1000
+  exc-031:
+    diagnosis: Two SKUs on the same Costco EOQ PO arrived with quantities that didn't tile to Costco's club-pack pallet spec (300 CS/pallet, 60 CS/layer). PalletAlignmentRecipe rounded both SKUs down to 1,800 CS / 6 full pallets each. Plan is locked in and waiting on the sibling OVER_MAX decision (exc-030) before SAP write-back fires.
+    confidence: 96
+    risk: LOW
+    resolution: PALLET_ALIGN
+    root_cause: Buyer-side ordering quantum doesn't enforce Costco's own pallet spec. The agent's quanta (1,800 CS) match the OVER_MAX trim ceiling, so when the manager approves exc-030 the pallet plan applies in one VA02 transaction.
+    recommendation: No action required for the pallet alignment — auto-resolved. Apply the OVER_MAX trim decision on exc-030; the pallet plan will flow through with it.
+    entity_profile:
+      customer_name: Costco Wholesale Corp
+      bp_number: BP-COST-001
+      customer_tier: Strategic
+      vip_status: true
+      credit_standing: Excellent
+      location: Plant 7800 — LA Distribution Hub
+      region: West
+    impact_metrics:
+      revenue_at_risk: 122000
+      delta_amount: 520
+      delta_percentage: 0.4
+      sla_priority: MEDIUM
+      sla_deadline: "2026-05-08T16:00:00Z"
+      affected_lines: 2
+    lines:
+      - line_id: L1
+        diagnosis: 2,000 CS ordered, layer qty 60. 33 full layers = 1,980, 20 loose. Broken layer.
+        resolution: ROUND_DOWN
+        risk: LOW
+        waterfall: []
+      - line_id: L2
+        diagnosis: 2,000 CS ordered, layer qty 60. 33 full layers = 1,980, 20 loose. Broken layer.
+        resolution: ROUND_DOWN
+        risk: LOW
+        waterfall: []
+    pallet_analysis:
+      classification: BROKEN_LAYER
+      total_ordered_cases: 4000
+      loose_cases_total: 40
+      order_line_count: 2
+      lines:
+        - sku: SKU-COST-EOQ-A
+          description: Costco Club-Pack Bundle 36ct
+          uom: CS
+          layer_qty: 60
+          pallet_qty: 300
+          ordered_qty: 2000
+          complete_layers: 33
+          loose_qty: 20
+          full_pallets: 6
+          pallet_fill_pct: 66.7
+          violation_type: Broken Layer
+        - sku: SKU-COST-EOQ-B
+          description: Costco Club-Pack Bundle 48ct
+          uom: CS
+          layer_qty: 60
+          pallet_qty: 300
+          ordered_qty: 2000
+          complete_layers: 33
+          loose_qty: 20
+          full_pallets: 6
+          pallet_fill_pct: 66.7
+          violation_type: Broken Layer
+      suggested_plan:
+        - sku: SKU-COST-EOQ-A
+          description: Costco Club-Pack Bundle 36ct
+          current: 2000
+          suggested: 1800
+          delta: -200
+          layers: 30
+          full_pallets: 6
+          reason: Round down to 6 full pallets (60 CS/layer × 5 layers/pallet × 6 pallets). Aligns with EOQ trim plan.
+        - sku: SKU-COST-EOQ-B
+          description: Costco Club-Pack Bundle 48ct
+          current: 2000
+          suggested: 1800
+          delta: -200
+          layers: 30
+          full_pallets: 6
+          reason: Round down to 6 full pallets. Aligns with EOQ trim plan.
+  exc-032:
+    diagnosis: Kroger's WK-15 replenishment PO totals 70 CS across two SKUs, below the 100 CS MOQ for the DSD channel. SAP V4082 applied. One SKU rounds cleanly to MOQ; the other is below 50% and requires a KNMT waiver.
+    confidence: 90
+    risk: MEDIUM
+    resolution: ROUND_UP
+    root_cause: Kroger's WK-15 forecast under-allocated the seasonal kombucha SKUs after a category review. The store-level demand projection cleared MOQ at the chain level but not at our line level.
+    recommendation: Round SKU-KR-1100 from 50 to 72 CS (full layer). Escalate SKU-KR-1110 (20 CS, 42% of MOQ) for a KNMT-MINBM waiver via category manager.
+    entity_profile:
+      customer_name: Kroger Co
+      bp_number: BP-KRG-003
+      customer_tier: Strategic
+      vip_status: true
+      credit_standing: Good
+      location: Plant 5100 — Cincinnati DC
+      region: Midwest
+    impact_metrics:
+      revenue_at_risk: 1960
+      delta_amount: 882
+      delta_percentage: 45
+      sla_priority: MEDIUM
+      sla_deadline: "2026-05-09T12:00:00Z"
+      affected_lines: 2
+    lines:
+      - line_id: L1
+        diagnosis: 50 CS ordered, MOQ 48 CS. Within MOQ but breaks pallet layer — round up to 72 CS (24 CS/layer × 3).
+        resolution: ROUND_UP
+        risk: LOW
+        waterfall: []
+      - line_id: L2
+        diagnosis: 20 CS ordered, MOQ 48 CS. Shortfall 28 CS. Below 50% of MOQ — requires KNMT waiver.
+        resolution: ESCALATE
+        risk: MEDIUM
+        waterfall: []
+    moq_analysis:
+      ordered_qty: 70
+      moq_qty: 100
+      shortfall_qty: 30
+      shortfall_pct: 30
+      sku: SKU-KR-1100
+      description: Kombucha Variety 6pk
+      unit_cost: 28
+      uom: CS
+      at_risk: 1960
+      moq_source: KNMT-MINBM
+      channel: Direct Store Delivery
+      block_message: Order quantity 70 CS is below minimum order quantity 100 CS for DSD channel. Block V4082 applied per SD-MOQ-001.
+      contract_ref: CTR-4600022150
+      block_status: V4082
+      round_up_plan:
+        - sku: SKU-KR-1100
+          description: Kombucha Variety 6pk
+          ordered: 50
+          round_up_to: 72
+          delta: 22
+          action: ROUND_UP
+        - sku: SKU-KR-1110
+          description: Ginger Kombucha 6pk
+          ordered: 20
+          round_up_to: 20
+          delta: 0
+          action: ESCALATE
+  exc-033:
+    diagnosis: Kroger WK-15 PO was 5 days behind plan after a DHL equipment failure at the Indianapolis cross-dock. DeliveryDelayResolutionRecipe re-routed the load via FedEx Express on the Chicago → Cincinnati direct lane. ETA recovered to within 1 day of plan; freight uplift $480 within the GREEN auto-route tolerance band.
+    confidence: 92
+    risk: LOW
+    resolution: ALTERNATE_ROUTING
+    root_cause: Primary carrier (DHL Ground) equipment failure at the Indianapolis cross-dock on 2026-05-05; the WK-15 replenishment lane funnels through that hub.
+    recommendation: No action required — auto-resolved. FedEx Express booking confirmed; tracking updated in the carrier portal.
+    entity_profile:
+      customer_name: Kroger Co
+      bp_number: BP-KRG-003
+      customer_tier: Strategic
+      vip_status: true
+      credit_standing: Good
+      location: Plant 5100 — Cincinnati DC
+      region: Midwest
+    impact_metrics:
+      revenue_at_risk: 1960
+      delta_amount: 480
+      delta_percentage: 24.5
+      sla_priority: HIGH
+      sla_deadline: "2026-05-09T18:00:00Z"
+      affected_lines: 2
+    lines:
+      - line_id: L1
+        diagnosis: WK-15 replenishment shipment held at DHL Indianapolis cross-dock. Equipment failure 2026-05-05; recovery ETA 5-7 days.
+        resolution: RE-ROUTE
+        risk: HIGH
+        waterfall: []
+    delivery_delay_analysis:
+      planned_date: "2026-05-09T00:00:00Z"
+      projected_eta: "2026-05-14T00:00:00Z"
+      days_late: 5
+      rule_id: SD-DELAY-002
+      delay_category: CARRIER_DELAY
+      delay_reason: DHL Ground equipment failure at Indianapolis cross-dock on 2026-05-05. WK-15 replenishment held on the inbound deck; recovery estimate 5-7 days. SKUs are also under MOQ review on the same case — coordinate routing only after the MOQ adjustment is approved so we don't expedite an under-quantity load.
+      affected_lines: 2
+      at_risk: 1960
+      carrier: DHL Ground
+      route: CIN → IND → CIN
+      sla_deadline: "2026-05-09T18:00:00Z"
+      alternate_options:
+        - id: opt-1
+          type: EXPEDITE
+          title: Re-route via FedEx Express (CHI → CIN direct)
+          description: Bypass the affected IND cross-dock. ETA 2026-05-10. Freight +$480.
+          new_eta: "2026-05-10T00:00:00Z"
+          extra_cost: 480
+          recommended: true
+        - id: opt-2
+          type: RESCHEDULE
+          title: Hold for DHL recovery, push delivery 5 days
+          description: Wait for IND cross-dock to clear backlog. No freight uplift; misses SLA by 5 days.
+          new_eta: "2026-05-14T00:00:00Z"
+          extra_cost: 0
+          recommended: false
+        - id: opt-3
+          type: SPLIT_SHIP
+          title: Partial pickup ex-Cincinnati DC, balance via DHL when recovered
+          description: Customer-pickup arrangement for the MOQ-cleared SKU; balance follows once DHL recovers.
+          new_eta: "2026-05-12T00:00:00Z"
+          extra_cost: 120
+          recommended: false
+  exc-040:
+    diagnosis: Buyer requests a quantity reduction on line 001 (600 → 420 CS). Mid-fulfilment change; supply + logistics clear, GOLD-tier approval required.
+    confidence: 86
+    risk: LOW
+    resolution: Approve the reduction and re-confirm the order.
+    recommendation: Approve as requested
+    lines: []
+    change_analysis:
+      evaluation:
+        lifecycle_stages:
+          - Created
+          - Confirmed
+          - Released
+          - Picked
+          - Shipped
+        lifecycle_index: 2
+        change_items:
+          - field: Line 001 quantity
+            from_value: 600 CS
+            to_value: 420 CS
+        checks:
+          - name: Inventory
+            status: PASS
+            detail: ATP covers the requested quantity.
+            metric: ATP 920 vs 600
+            agent: Inventory Agent
+            system_ref: SAP MM/ATP
+          - name: Production
+            status: PASS
+            detail: Production order released; change can be incorporated.
+            metric: Order status REL
+            agent: Production Agent
+            system_ref: SAP PP
+          - name: Transport
+            status: PASS
+            detail: Route and carrier capacity available.
+            metric: route=true, carrier=true
+            agent: Transport Agent
+            system_ref: TMS
+          - name: Warehouse
+            status: PASS
+            detail: Pick/pack is feasible for the change.
+            metric: pick_pack_feasible=true
+            agent: Warehouse Agent
+            system_ref: WMS
+          - name: Order Status
+            status: CONDITIONAL
+            detail: Order is mid-fulfilment; change needs coordination.
+            metric: fulfilment stage 2/5
+            agent: Order Lifecycle Agent
+            system_ref: SAP SD
+          - name: SLA
+            status: PASS
+            detail: Change stays within the contractual delivery window.
+            metric: 4 days to deadline
+            agent: SLA Agent
+            system_ref: Contract DB
+          - name: Financial
+            status: PASS
+            detail: Revenue impact is below the four-eyes threshold.
+            metric: $5,184.00 revenue impact
+            agent: Finance Agent
+            system_ref: SAP FI/CO
+          - name: Dependencies
+            status: PASS
+            detail: No linked orders or deliveries affected.
+            metric: 0 linked orders
+            agent: Dependency Agent
+            system_ref: SAP SD
+          - name: Network
+            status: PASS
+            detail: DC routing supports the change.
+            metric: dc_routing_ok=true
+            agent: Network Optimization
+            system_ref: Network Opt
+          - name: Priority
+            status: CONDITIONAL
+            detail: Customer tier requires manual approval of the change.
+            metric: tier GOLD
+            agent: Priority Agent
+            system_ref: CRM
+        pass_count: 8
+        conditional_count: 2
+        warning_count: 0
+      scenarios:
+        - name: Approve as requested
+          description: Reduce the line to 420 CS and re-confirm.
+          recommended: true
+          impact: All constraints clear or conditional.
+          financial_delta_usd: 0
+        - name: Partial keep + backorder
+          description: Keep 480 CS now, backorder the rest if demand returns.
+          recommended: false
+          impact: Protects margin on the original commitment.
+          financial_delta_usd: 1555.2
+      decision:
+        recommended_action: Approve as requested
+        confidence: 0.86
+        rationale: Change is feasible with conditions; review the conditional checks.
+        revenue_impact_usd: 27216
+        requires_cosign: false
+        sap_actions:
+          - "VA02: update sales order"
+    knowledge_graph:
+      nodes:
+        - id: order:eml-po-2026-0042
+          label: EML-PO-2026-0042
+          kind: order
+          detail: Sales order
+        - id: customer:300042
+          label: Southeast Beverage Distributors
+          kind: customer
+          detail: BP 300042
+        - id: material:bev-cola-12pk
+          label: BEV-COLA-12PK
+          kind: material
+          detail: 600 CS
+        - id: material:bev-lemon-6pk
+          label: BEV-LEMON-6PK
+          kind: material
+          detail: 240 CS
+        - id: sap_doc:5100012344
+          label: "5100012344"
+          kind: sap_doc
+          detail: SO confirmed, ATP OK
+      edges:
+        - source: customer:300042
+          target: order:eml-po-2026-0042
+          relation: places
+        - source: order:eml-po-2026-0042
+          target: material:bev-cola-12pk
+          relation: contains
+        - source: order:eml-po-2026-0042
+          target: material:bev-lemon-6pk
+          relation: contains
+        - source: order:eml-po-2026-0042
+          target: sap_doc:5100012344
+          relation: validated_by
+      root_id: order:eml-po-2026-0042
+    entities_analysis:
+      extracted:
+        - key: customer_po
+          value: EML-PO-2026-0042
+          kind: po
+          confidence: 0.98
+          source_span: PO# EML-PO-2026-0042
+          evidence_ref: order_entry.customer_po
+        - key: customer
+          value: Southeast Beverage Distributors
+          kind: customer
+          confidence: 0.95
+          source_span: "From: buyer@southeast-distrib.example"
+          evidence_ref: order_entry.customer
+        - key: ship_to
+          value: "Atlanta DC #6094"
+          kind: location
+          confidence: 0.88
+          source_span: ship to Atlanta DC
+          evidence_ref: order_entry.ship_to
+        - key: requested_date
+          value: "2026-05-24"
+          kind: date
+          confidence: 0.9
+          source_span: need by May 24
+          evidence_ref: order_entry.requested_date
+        - key: material
+          value: BEV-COLA-12PK
+          kind: material
+          confidence: 0.94
+          source_span: Cola 12pk x 600
+          evidence_ref: order_entry.material
+    sap_data_analysis:
+      system: S4H_PRD
+      validation_status: Sold-to resolved · ATP OK · credit clear
+      order_value_usd: 27216
+      sap_doc_number: "5100012344"
+    edi_850_audit:
+      standard: ANSI X12 5010
+      transaction_set: "850"
+      envelope:
+        sender_id: "300042"
+        receiver_id: VENDOR-7788
+        interchange_control_number: "000012345"
+        group_control_number: "12345"
+        transaction_set_control_number: "0001"
+        usage_indicator: P
+        x12_version: "005010"
+      header:
+        purpose_code: "00"
+        po_type: SA
+        po_number: EML-PO-2026-0042
+        po_date: "2026-04-30"
+        currency: USD
+        requested_delivery_date: "2026-05-24"
+      parties:
+        - entity_code: BY
+          role: Buying Party (Purchaser)
+          name: Southeast Beverage Distributors
+          id_qualifier: "92"
+          id_value: "300042"
+          address: null
+          city_state_zip: null
+        - entity_code: SE
+          role: Selling Party
+          name: Acme Beverages Co
+          id_qualifier: "92"
+          id_value: VENDOR-7788
+          address: null
+          city_state_zip: null
+      line_items:
+        - line_num: "001"
+          quantity: 600
+          uom: CS
+          unit_price: 8.64
+          product_qualifier: VP
+          product_id: BEV-COLA-12PK
+          description: Cola 12-pack case
+          extended_amount: 5184
+        - line_num: "002"
+          quantity: 240
+          uom: CS
+          unit_price: 5.5
+          product_qualifier: VP
+          product_id: BEV-LEMON-6PK
+          description: Lemon 6-pack case
+          extended_amount: 1320
+      totals:
+        total_line_items: 2
+        total_quantity: 840
+        total_amount: 6504
+      segments:
+        - seg_id: ISA
+          elements: []
+          raw: ISA*00**00**ZZ*300042         *ZZ*VENDOR-7788    *260430*0000*U*00501*000012345*0*P*>~
+          meaning: Interchange Control Header
+          group: envelope
+        - seg_id: GS
+          elements: []
+          raw: GS*PO*300042*VENDOR-7788*20260430*0000*12345*X*005010~
+          meaning: Functional Group Header
+          group: envelope
+        - seg_id: ST
+          elements: []
+          raw: ST*850*0001~
+          meaning: Transaction Set Header
+          group: envelope
+        - seg_id: BEG
+          elements: []
+          raw: BEG*00*SA*EML-PO-2026-0042**20260430~
+          meaning: Beginning Segment for Purchase Order
+          group: header
+        - seg_id: CUR
+          elements: []
+          raw: CUR*BY*USD~
+          meaning: Currency
+          group: header
+        - seg_id: REF
+          elements: []
+          raw: REF*PO*EML-PO-2026-0042~
+          meaning: Reference Identification
+          group: header
+        - seg_id: DTM
+          elements: []
+          raw: DTM*004*20260430~
+          meaning: Date/Time Reference
+          group: dates
+        - seg_id: DTM
+          elements: []
+          raw: DTM*002*20260524~
+          meaning: Date/Time Reference
+          group: dates
+        - seg_id: N1
+          elements: []
+          raw: N1*BY*Southeast Beverage Distributors*92*300042~
+          meaning: Party Identification
+          group: party
+        - seg_id: N1
+          elements: []
+          raw: N1*SE*Acme Beverages Co*92*VENDOR-7788~
+          meaning: Party Identification
+          group: party
+        - seg_id: PO1
+          elements: []
+          raw: PO1*001*600*CS*8.64*PE*VP*BEV-COLA-12PK~
+          meaning: Baseline Item Data
+          group: line
+        - seg_id: PID
+          elements: []
+          raw: PID*F****Cola 12-pack case~
+          meaning: Product/Item Description
+          group: line
+        - seg_id: PO1
+          elements: []
+          raw: PO1*002*240*CS*5.5*PE*VP*BEV-LEMON-6PK~
+          meaning: Baseline Item Data
+          group: line
+        - seg_id: PID
+          elements: []
+          raw: PID*F****Lemon 6-pack case~
+          meaning: Product/Item Description
+          group: line
+        - seg_id: CTT
+          elements: []
+          raw: CTT*2*840~
+          meaning: Transaction Totals
+          group: trailer
+        - seg_id: SE
+          elements: []
+          raw: SE*13*0001~
+          meaning: Transaction Set Trailer
+          group: trailer
+        - seg_id: GE
+          elements: []
+          raw: GE*1*12345~
+          meaning: Functional Group Trailer
+          group: trailer
+        - seg_id: IEA
+          elements: []
+          raw: IEA*1*000012345~
+          meaning: Interchange Control Trailer
+          group: trailer
+      raw_x12: |-
+        ISA*00**00**ZZ*300042         *ZZ*VENDOR-7788    *260430*0000*U*00501*000012345*0*P*>~
+        GS*PO*300042*VENDOR-7788*20260430*0000*12345*X*005010~
+        ST*850*0001~
+        BEG*00*SA*EML-PO-2026-0042**20260430~
+        CUR*BY*USD~
+        REF*PO*EML-PO-2026-0042~
+        DTM*004*20260430~
+        DTM*002*20260524~
+        N1*BY*Southeast Beverage Distributors*92*300042~
+        N1*SE*Acme Beverages Co*92*VENDOR-7788~
+        PO1*001*600*CS*8.64*PE*VP*BEV-COLA-12PK~
+        PID*F****Cola 12-pack case~
+        PO1*002*240*CS*5.5*PE*VP*BEV-LEMON-6PK~
+        PID*F****Lemon 6-pack case~
+        CTT*2*840~
+        SE*13*0001~
+        GE*1*12345~
+        IEA*1*000012345~
+    email_source:
+      from_address: buyer@southeast-distrib.example
+      received_at: "2026-05-18T09:02:00Z"
+      subject: Change request — reduce line 001 on PO 8842 to 420 CS
+      body_hash: cd6b0acd0a5b4d12e52544704ea66779797c8ca5b2a1fd1201152db10eed2a9a
+      attachment_manifest:
+        - name: PO_8842.pdf
+          mime_type: application/pdf
+          bytes: 184320
+          sha256: 97a1beabd005767718e7ba0d54647e8b78add24344e5b487da21314b58457aaf
+          attachment_id: att-po-8842-pdf
+      body_excerpt: |-
+        Hi,
+
+        Please reduce line 001 on the attached PO 8842 from 600 to 420 CS. Everything else stays the same.
+
+        Thanks,
+        Marcus
+      source_email_id: null
+      evidence_anchors:
+        - attachment_id: att-po-8842-pdf
+          text: PO# EML-PO-2026-0042
+          match_key:
+            normalized_text: po# eml-po-2026-0042
+            occurrence_index: 0
+          supports_kind: extracted_field
+          supports_ref: order_entry.customer_po
+          label: PO number
+          source_sha256: 97a1beabd005767718e7ba0d54647e8b78add24344e5b487da21314b58457aaf
+          anchor_source: spatial_extracted
+          page: 1
+          bbox:
+            - 0.08
+            - 0.12
+            - 0.52
+            - 0.16
+          confidence: 0.98
+          rendition_hash: rendition-PO_8842-recorded-doctr-v0
+        - attachment_id: att-po-8842-pdf
+          text: "From: buyer@southeast-distrib.example"
+          match_key:
+            normalized_text: "from: buyer@southeast-distrib.example"
+            occurrence_index: 0
+          supports_kind: extracted_field
+          supports_ref: order_entry.customer
+          label: Customer
+          source_sha256: 97a1beabd005767718e7ba0d54647e8b78add24344e5b487da21314b58457aaf
+          anchor_source: text_derived
+        - attachment_id: att-po-8842-pdf
+          text: ship to Atlanta DC
+          match_key:
+            normalized_text: ship to atlanta dc
+            occurrence_index: 0
+          supports_kind: extracted_field
+          supports_ref: order_entry.ship_to
+          label: Ship-to
+          source_sha256: 97a1beabd005767718e7ba0d54647e8b78add24344e5b487da21314b58457aaf
+          anchor_source: spatial_extracted
+          page: 1
+          bbox:
+            - 0.08
+            - 0.2
+            - 0.46
+            - 0.24
+          confidence: 0.91
+          rendition_hash: rendition-PO_8842-recorded-doctr-v0
+        - attachment_id: att-po-8842-pdf
+          text: need by May 24
+          match_key:
+            normalized_text: need by may 24
+            occurrence_index: 0
+          supports_kind: extracted_field
+          supports_ref: order_entry.requested_date
+          label: Requested date
+          source_sha256: 97a1beabd005767718e7ba0d54647e8b78add24344e5b487da21314b58457aaf
+          anchor_source: spatial_extracted
+          page: 1
+          bbox:
+            - 0.08
+            - 0.28
+            - 0.4
+            - 0.32
+          confidence: 0.88
+          rendition_hash: rendition-PO_8842-recorded-doctr-v0
+        - attachment_id: att-po-8842-pdf
+          text: Cola 12pk x 600
+          match_key:
+            normalized_text: cola 12pk x 600
+            occurrence_index: 0
+          supports_kind: extracted_field
+          supports_ref: order_entry.material
+          label: Material
+          source_sha256: 97a1beabd005767718e7ba0d54647e8b78add24344e5b487da21314b58457aaf
+          anchor_source: spatial_extracted
+          page: 1
+          bbox:
+            - 0.08
+            - 0.36
+            - 0.5
+            - 0.4
+          confidence: 0.85
+          rendition_hash: rendition-PO_8842-recorded-doctr-v0
+  exc-041:
+    diagnosis: Buyer requests an expedite (delivery 2026-05-24 → 2026-05-20). SLA window tight and carrier capacity constrained.
+    confidence: 74
+    risk: MEDIUM
+    resolution: Expedite via upgraded carrier service to hold the window.
+    recommendation: Expedite shipping
+    lines: []
+    change_analysis:
+      evaluation:
+        lifecycle_stages:
+          - Created
+          - Confirmed
+          - Released
+          - Picked
+          - Shipped
+        lifecycle_index: 2
+        change_items:
+          - field: Requested delivery
+            from_value: "2026-05-24"
+            to_value: "2026-05-20"
+        checks:
+          - name: Inventory
+            status: PASS
+            detail: ATP covers the requested quantity.
+            metric: ATP 920 vs 600
+            agent: Inventory Agent
+            system_ref: SAP MM/ATP
+          - name: Production
+            status: PASS
+            detail: Production order released; change can be incorporated.
+            metric: Order status REL
+            agent: Production Agent
+            system_ref: SAP PP
+          - name: Transport
+            status: CONDITIONAL
+            detail: Partial transport availability; re-plan may be needed.
+            metric: route=true, carrier=false
+            agent: Transport Agent
+            system_ref: TMS
+          - name: Warehouse
+            status: PASS
+            detail: Pick/pack is feasible for the change.
+            metric: pick_pack_feasible=true
+            agent: Warehouse Agent
+            system_ref: WMS
+          - name: Order Status
+            status: CONDITIONAL
+            detail: Order is mid-fulfilment; change needs coordination.
+            metric: fulfilment stage 2/5
+            agent: Order Lifecycle Agent
+            system_ref: SAP SD
+          - name: SLA
+            status: CONDITIONAL
+            detail: Change is within window but the deadline is tight.
+            metric: 1 day to deadline
+            agent: SLA Agent
+            system_ref: Contract DB
+          - name: Financial
+            status: PASS
+            detail: Revenue impact is below the four-eyes threshold.
+            metric: $5,184.00 revenue impact
+            agent: Finance Agent
+            system_ref: SAP FI/CO
+          - name: Dependencies
+            status: PASS
+            detail: No linked orders or deliveries affected.
+            metric: 0 linked orders
+            agent: Dependency Agent
+            system_ref: SAP SD
+          - name: Network
+            status: PASS
+            detail: DC routing supports the change.
+            metric: dc_routing_ok=true
+            agent: Network Optimization
+            system_ref: Network Opt
+          - name: Priority
+            status: CONDITIONAL
+            detail: Customer tier requires manual approval of the change.
+            metric: tier GOLD
+            agent: Priority Agent
+            system_ref: CRM
+        pass_count: 6
+        conditional_count: 4
+        warning_count: 0
+      scenarios:
+        - name: Approve as requested
+          description: Pull the delivery in four days as requested.
+          recommended: false
+          impact: One or more constraints flag a warning.
+          financial_delta_usd: 0
+        - name: Expedite shipping
+          description: Upgrade the carrier service to hold the SLA window.
+          recommended: true
+          impact: Holds the delivery window at added freight cost.
+          financial_delta_usd: -1360.8
+      decision:
+        recommended_action: Expedite shipping
+        confidence: 0.74
+        rationale: Change is feasible with conditions; review the conditional checks.
+        revenue_impact_usd: 27216
+        requires_cosign: false
+        sap_actions:
+          - "VA02: update sales order"
+          - "VT02N: re-plan shipment"
+    knowledge_graph:
+      nodes:
+        - id: order:eml-po-2026-0042
+          label: EML-PO-2026-0042
+          kind: order
+          detail: Sales order
+        - id: customer:300042
+          label: Southeast Beverage Distributors
+          kind: customer
+          detail: BP 300042
+        - id: material:bev-cola-12pk
+          label: BEV-COLA-12PK
+          kind: material
+          detail: 600 CS
+        - id: material:bev-lemon-6pk
+          label: BEV-LEMON-6PK
+          kind: material
+          detail: 240 CS
+        - id: sap_doc:5100012344
+          label: "5100012344"
+          kind: sap_doc
+          detail: SO confirmed, ATP OK
+      edges:
+        - source: customer:300042
+          target: order:eml-po-2026-0042
+          relation: places
+        - source: order:eml-po-2026-0042
+          target: material:bev-cola-12pk
+          relation: contains
+        - source: order:eml-po-2026-0042
+          target: material:bev-lemon-6pk
+          relation: contains
+        - source: order:eml-po-2026-0042
+          target: sap_doc:5100012344
+          relation: validated_by
+      root_id: order:eml-po-2026-0042
+    entities_analysis:
+      extracted:
+        - key: customer_po
+          value: EML-PO-2026-0042
+          kind: po
+          confidence: 0.98
+          source_span: PO# EML-PO-2026-0042
+          evidence_ref: order_entry.customer_po
+        - key: customer
+          value: Southeast Beverage Distributors
+          kind: customer
+          confidence: 0.95
+          source_span: "From: buyer@southeast-distrib.example"
+          evidence_ref: order_entry.customer
+        - key: ship_to
+          value: "Atlanta DC #6094"
+          kind: location
+          confidence: 0.88
+          source_span: ship to Atlanta DC
+          evidence_ref: order_entry.ship_to
+        - key: requested_date
+          value: "2026-05-24"
+          kind: date
+          confidence: 0.9
+          source_span: need by May 24
+          evidence_ref: order_entry.requested_date
+        - key: material
+          value: BEV-COLA-12PK
+          kind: material
+          confidence: 0.94
+          source_span: Cola 12pk x 600
+          evidence_ref: order_entry.material
+    sap_data_analysis:
+      system: S4H_PRD
+      validation_status: Sold-to resolved · ATP OK · credit clear
+      order_value_usd: 27216
+      sap_doc_number: "5100012344"
+    draft_reply:
+      status: DRAFTED
+      reason: null
+      template_name: expedite_acknowledgement
+      recipient: buyer@southeast-distrib.example
+      subject: "Re: expedite request — PO EML-CHG-2026-0052"
+      body: |-
+        Hello,
+
+        We can pull the delivery in to May 20 via our upgraded carrier service. Freight uplift is approximately $185 for this load — please confirm and we'll re-confirm the SO.
+
+        Acme Beverages Order Desk
+      edits_applied: []
+      drafted_by: analyst-2
+      drafted_at: "2026-05-18T11:25:00Z"
+    email_source:
+      from_address: buyer@southeast-distrib.example
+      received_at: "2026-05-18T11:20:00Z"
+      subject: Can we pull the delivery in to May 20?
+      body_hash: c6a928e94156ab87d957371f99fc4866bf3222eb20fee2b9be9bcd65c0ef6931
+      attachment_manifest: []
+      body_excerpt: |-
+        Hello,
+
+        Is it possible to expedite our last order to arrive by May 20 instead of May 24? Let me know the freight impact.
+
+        Thanks
+      source_email_id: null
+      evidence_anchors: []
+  exc-042:
+    diagnosis: Buyer requests a full cancellation on an order already late in fulfilment (stage 4/5, picked). High-risk; revenue impact above the four-eyes threshold.
+    confidence: 45
+    risk: HIGH
+    resolution: Reject the cancellation and escalate to a supply planner.
+    recommendation: Reject / escalate to planner
+    lines: []
+    change_analysis:
+      evaluation:
+        lifecycle_stages:
+          - Created
+          - Confirmed
+          - Released
+          - Picked
+          - Shipped
+        lifecycle_index: 2
+        change_items:
+          - field: Order status
+            from_value: Open
+            to_value: Cancelled
+        checks:
+          - name: Inventory
+            status: PASS
+            detail: ATP covers the requested quantity.
+            metric: ATP 920 vs 600
+            agent: Inventory Agent
+            system_ref: SAP MM/ATP
+          - name: Production
+            status: PASS
+            detail: Production order released; change can be incorporated.
+            metric: Order status REL
+            agent: Production Agent
+            system_ref: SAP PP
+          - name: Transport
+            status: PASS
+            detail: Route and carrier capacity available.
+            metric: route=true, carrier=true
+            agent: Transport Agent
+            system_ref: TMS
+          - name: Warehouse
+            status: WARNING
+            detail: Pick/pack is not feasible at the current stage.
+            metric: pick_pack_feasible=false
+            agent: Warehouse Agent
+            system_ref: WMS
+          - name: Order Status
+            status: WARNING
+            detail: Order is late in fulfilment; change is high-risk.
+            metric: fulfilment stage 4/5
+            agent: Order Lifecycle Agent
+            system_ref: SAP SD
+          - name: SLA
+            status: PASS
+            detail: Change stays within the contractual delivery window.
+            metric: 4 days to deadline
+            agent: SLA Agent
+            system_ref: Contract DB
+          - name: Financial
+            status: CONDITIONAL
+            detail: Revenue impact meets the four-eyes threshold; cosign required.
+            metric: $48,200.00 revenue impact
+            agent: Finance Agent
+            system_ref: SAP FI/CO
+          - name: Dependencies
+            status: PASS
+            detail: No linked orders or deliveries affected.
+            metric: 0 linked orders
+            agent: Dependency Agent
+            system_ref: SAP SD
+          - name: Network
+            status: PASS
+            detail: DC routing supports the change.
+            metric: dc_routing_ok=true
+            agent: Network Optimization
+            system_ref: Network Opt
+          - name: Priority
+            status: CONDITIONAL
+            detail: Customer tier requires manual approval of the change.
+            metric: tier GOLD
+            agent: Priority Agent
+            system_ref: CRM
+        pass_count: 6
+        conditional_count: 2
+        warning_count: 2
+      scenarios:
+        - name: Approve as requested
+          description: Cancel the order in full.
+          recommended: false
+          impact: One or more constraints raised a warning.
+          financial_delta_usd: 0
+        - name: Partial fulfilment
+          description: Ship the already-picked portion, cancel the remainder.
+          recommended: false
+          impact: Protects the delivery date for the available portion.
+          financial_delta_usd: -12050
+        - name: Reject / escalate to planner
+          description: Decline the cancellation and route to a supply planner.
+          recommended: true
+          impact: Avoids committing to an infeasible change.
+          financial_delta_usd: null
+      decision:
+        recommended_action: Reject / escalate to planner
+        confidence: 0.45
+        rationale: One or more constraints raised a warning; see the flagged checks.
+        revenue_impact_usd: 48200
+        requires_cosign: true
+        sap_actions:
+          - "VA02: update sales order"
+    knowledge_graph:
+      nodes:
+        - id: order:eml-po-2026-0042
+          label: EML-PO-2026-0042
+          kind: order
+          detail: Sales order
+        - id: customer:300042
+          label: Southeast Beverage Distributors
+          kind: customer
+          detail: BP 300042
+        - id: material:bev-cola-12pk
+          label: BEV-COLA-12PK
+          kind: material
+          detail: 600 CS
+        - id: material:bev-lemon-6pk
+          label: BEV-LEMON-6PK
+          kind: material
+          detail: 240 CS
+        - id: sap_doc:5100012344
+          label: "5100012344"
+          kind: sap_doc
+          detail: SO confirmed, ATP OK
+      edges:
+        - source: customer:300042
+          target: order:eml-po-2026-0042
+          relation: places
+        - source: order:eml-po-2026-0042
+          target: material:bev-cola-12pk
+          relation: contains
+        - source: order:eml-po-2026-0042
+          target: material:bev-lemon-6pk
+          relation: contains
+        - source: order:eml-po-2026-0042
+          target: sap_doc:5100012344
+          relation: validated_by
+      root_id: order:eml-po-2026-0042
+    entities_analysis:
+      extracted:
+        - key: customer_po
+          value: EML-PO-2026-0042
+          kind: po
+          confidence: 0.98
+          source_span: PO# EML-PO-2026-0042
+          evidence_ref: order_entry.customer_po
+        - key: customer
+          value: Southeast Beverage Distributors
+          kind: customer
+          confidence: 0.95
+          source_span: "From: buyer@southeast-distrib.example"
+          evidence_ref: order_entry.customer
+        - key: ship_to
+          value: "Atlanta DC #6094"
+          kind: location
+          confidence: 0.88
+          source_span: ship to Atlanta DC
+          evidence_ref: order_entry.ship_to
+        - key: requested_date
+          value: "2026-05-24"
+          kind: date
+          confidence: 0.9
+          source_span: need by May 24
+          evidence_ref: order_entry.requested_date
+        - key: material
+          value: BEV-COLA-12PK
+          kind: material
+          confidence: 0.94
+          source_span: Cola 12pk x 600
+          evidence_ref: order_entry.material
+    sap_data_analysis:
+      system: S4H_PRD
+      validation_status: Sold-to resolved · ATP OK · credit clear
+      order_value_usd: 48200
+      sap_doc_number: "5100012344"
+    draft_reply:
+      status: DRAFTED
+      reason: Order already past stage 4/5 (picked) — cancellation high-risk.
+      template_name: cancellation_hold_for_review
+      recipient: orders@walmart.example
+      subject: "Re: cancel order EML-CHG-2026-0053 — held for planner review"
+      body: |-
+        Hello,
+
+        We've received your cancellation request. The order is already picked (stage 4/5), so we've routed it to a supply planner for a feasibility review. We'll come back to you within 4 business hours.
+
+        Acme Beverages Order Desk
+      edits_applied: []
+      drafted_by: analyst-2
+      drafted_at: "2026-05-19T08:20:00Z"
+    email_source:
+      from_address: orders@walmart.example
+      received_at: "2026-05-19T08:15:00Z"
+      subject: Cancel order EML-CHG-2026-0053
+      body_hash: c6acd42467857b0b2282f8eb3374d3599cbad85315679216b3f09f8de065699b
+      attachment_manifest:
+        - name: cancellation_request.pdf
+          mime_type: application/pdf
+          bytes: 92160
+          sha256: c6acd4ea2090b4f14234e73a81c0a6dee42a9abefb4c3ee1348bcaa0d8ee2494
+          attachment_id: att-cancellation-request-pdf
+      body_excerpt: |-
+        Please cancel the referenced order in full. The signed cancellation request is attached.
+
+        Walmart Replenishment
+      source_email_id: null
+      evidence_anchors:
+        - attachment_id: att-cancellation-request-pdf
+          text: PO# EML-PO-2026-0042
+          match_key:
+            normalized_text: po# eml-po-2026-0042
+            occurrence_index: 0
+          supports_kind: extracted_field
+          supports_ref: order_entry.customer_po
+          label: PO number
+          source_sha256: c6acd4ea2090b4f14234e73a81c0a6dee42a9abefb4c3ee1348bcaa0d8ee2494
+          anchor_source: text_derived
+        - attachment_id: att-cancellation-request-pdf
+          text: "From: buyer@southeast-distrib.example"
+          match_key:
+            normalized_text: "from: buyer@southeast-distrib.example"
+            occurrence_index: 0
+          supports_kind: extracted_field
+          supports_ref: order_entry.customer
+          label: Customer
+          source_sha256: c6acd4ea2090b4f14234e73a81c0a6dee42a9abefb4c3ee1348bcaa0d8ee2494
+          anchor_source: text_derived
+        - attachment_id: att-cancellation-request-pdf
+          text: ship to Atlanta DC
+          match_key:
+            normalized_text: ship to atlanta dc
+            occurrence_index: 0
+          supports_kind: extracted_field
+          supports_ref: order_entry.ship_to
+          label: Ship-to
+          source_sha256: c6acd4ea2090b4f14234e73a81c0a6dee42a9abefb4c3ee1348bcaa0d8ee2494
+          anchor_source: text_derived
+        - attachment_id: att-cancellation-request-pdf
+          text: need by May 24
+          match_key:
+            normalized_text: need by may 24
+            occurrence_index: 0
+          supports_kind: extracted_field
+          supports_ref: order_entry.requested_date
+          label: Requested date
+          source_sha256: c6acd4ea2090b4f14234e73a81c0a6dee42a9abefb4c3ee1348bcaa0d8ee2494
+          anchor_source: text_derived
+        - attachment_id: att-cancellation-request-pdf
+          text: Cola 12pk x 600
+          match_key:
+            normalized_text: cola 12pk x 600
+            occurrence_index: 0
+          supports_kind: extracted_field
+          supports_ref: order_entry.material
+          label: Material
+          source_sha256: c6acd4ea2090b4f14234e73a81c0a6dee42a9abefb4c3ee1348bcaa0d8ee2494
+          anchor_source: text_derived
+  exc-043:
+    diagnosis: Buyer requests a SKU substitution (BEV-LEMON-6PK → BEV-LEMON-12PK). ATP partially covers the substitute.
+    confidence: 78
+    risk: MEDIUM
+    resolution: Partial-fulfil the available 12-pack and backorder the balance.
+    recommendation: Partial fulfilment
+    lines: []
+    change_analysis:
+      evaluation:
+        lifecycle_stages:
+          - Created
+          - Confirmed
+          - Released
+          - Picked
+          - Shipped
+        lifecycle_index: 2
+        change_items:
+          - field: Line 002 material
+            from_value: BEV-LEMON-6PK
+            to_value: BEV-LEMON-12PK
+        checks:
+          - name: Inventory
+            status: CONDITIONAL
+            detail: ATP partially covers the change; partial ship feasible.
+            metric: ATP 180 vs 240
+            agent: Inventory Agent
+            system_ref: SAP MM/ATP
+          - name: Production
+            status: PASS
+            detail: Production order released; change can be incorporated.
+            metric: Order status REL
+            agent: Production Agent
+            system_ref: SAP PP
+          - name: Transport
+            status: PASS
+            detail: Route and carrier capacity available.
+            metric: route=true, carrier=true
+            agent: Transport Agent
+            system_ref: TMS
+          - name: Warehouse
+            status: PASS
+            detail: Pick/pack is feasible for the change.
+            metric: pick_pack_feasible=true
+            agent: Warehouse Agent
+            system_ref: WMS
+          - name: Order Status
+            status: CONDITIONAL
+            detail: Order is mid-fulfilment; change needs coordination.
+            metric: fulfilment stage 2/5
+            agent: Order Lifecycle Agent
+            system_ref: SAP SD
+          - name: SLA
+            status: PASS
+            detail: Change stays within the contractual delivery window.
+            metric: 4 days to deadline
+            agent: SLA Agent
+            system_ref: Contract DB
+          - name: Financial
+            status: PASS
+            detail: Revenue impact is below the four-eyes threshold.
+            metric: $5,184.00 revenue impact
+            agent: Finance Agent
+            system_ref: SAP FI/CO
+          - name: Dependencies
+            status: PASS
+            detail: No linked orders or deliveries affected.
+            metric: 0 linked orders
+            agent: Dependency Agent
+            system_ref: SAP SD
+          - name: Network
+            status: PASS
+            detail: DC routing supports the change.
+            metric: dc_routing_ok=true
+            agent: Network Optimization
+            system_ref: Network Opt
+          - name: Priority
+            status: CONDITIONAL
+            detail: Customer tier requires manual approval of the change.
+            metric: tier GOLD
+            agent: Priority Agent
+            system_ref: CRM
+        pass_count: 7
+        conditional_count: 3
+        warning_count: 0
+      scenarios:
+        - name: Approve as requested
+          description: Substitute to the 12-pack SKU.
+          recommended: false
+          impact: One or more constraints flag a warning.
+          financial_delta_usd: 0
+        - name: Partial fulfilment
+          description: Ship available 12-pack now, backorder the balance.
+          recommended: true
+          impact: Protects the delivery date for the available portion.
+          financial_delta_usd: -2120
+      decision:
+        recommended_action: Partial fulfilment
+        confidence: 0.78
+        rationale: Change is feasible with conditions; review the conditional checks.
+        revenue_impact_usd: 8480
+        requires_cosign: false
+        sap_actions:
+          - "VA02: update sales order"
+    knowledge_graph:
+      nodes:
+        - id: order:eml-po-2026-0042
+          label: EML-PO-2026-0042
+          kind: order
+          detail: Sales order
+        - id: customer:300042
+          label: Southeast Beverage Distributors
+          kind: customer
+          detail: BP 300042
+        - id: material:bev-cola-12pk
+          label: BEV-COLA-12PK
+          kind: material
+          detail: 600 CS
+        - id: material:bev-lemon-6pk
+          label: BEV-LEMON-6PK
+          kind: material
+          detail: 240 CS
+        - id: sap_doc:5100012344
+          label: "5100012344"
+          kind: sap_doc
+          detail: SO confirmed, ATP OK
+      edges:
+        - source: customer:300042
+          target: order:eml-po-2026-0042
+          relation: places
+        - source: order:eml-po-2026-0042
+          target: material:bev-cola-12pk
+          relation: contains
+        - source: order:eml-po-2026-0042
+          target: material:bev-lemon-6pk
+          relation: contains
+        - source: order:eml-po-2026-0042
+          target: sap_doc:5100012344
+          relation: validated_by
+      root_id: order:eml-po-2026-0042
+    entities_analysis:
+      extracted:
+        - key: customer_po
+          value: EML-PO-2026-0042
+          kind: po
+          confidence: 0.98
+          source_span: PO# EML-PO-2026-0042
+          evidence_ref: order_entry.customer_po
+        - key: customer
+          value: Southeast Beverage Distributors
+          kind: customer
+          confidence: 0.95
+          source_span: "From: buyer@southeast-distrib.example"
+          evidence_ref: order_entry.customer
+        - key: ship_to
+          value: "Atlanta DC #6094"
+          kind: location
+          confidence: 0.88
+          source_span: ship to Atlanta DC
+          evidence_ref: order_entry.ship_to
+        - key: requested_date
+          value: "2026-05-24"
+          kind: date
+          confidence: 0.9
+          source_span: need by May 24
+          evidence_ref: order_entry.requested_date
+        - key: material
+          value: BEV-COLA-12PK
+          kind: material
+          confidence: 0.94
+          source_span: Cola 12pk x 600
+          evidence_ref: order_entry.material
+    sap_data_analysis:
+      system: S4H_PRD
+      validation_status: Sold-to resolved · ATP OK · credit clear
+      order_value_usd: 27216
+      sap_doc_number: "5100012344"
+    draft_reply:
+      status: DRAFTED
+      reason: null
+      template_name: substitution_partial_fulfilment
+      recipient: buyer@kroger.example
+      subject: "Re: substitute lemon 6pk → 12pk on PO EML-CHG-2026-0054"
+      body: |-
+        Hello,
+
+        We can substitute BEV-LEMON-12PK for BEV-LEMON-6PK on line 002, but ATP only covers part of the requested quantity. We'll ship the available 12-pack and back-order the balance unless you'd prefer to leave line 002 unchanged.
+
+        Acme Beverages Order Desk
+      edits_applied: []
+      drafted_by: analyst-2
+      drafted_at: "2026-05-19T13:45:00Z"
+    email_source:
+      from_address: buyer@kroger.example
+      received_at: "2026-05-19T13:40:00Z"
+      subject: Substitute lemon 6pk to 12pk on our open order
+      body_hash: caacc2848643ec1c43ff5416382484878e6d6fc9f93c5ae328f6e260ffdc50fd
+      attachment_manifest: []
+      body_excerpt: |-
+        Hi,
+
+        Please swap line 002 from BEV-LEMON-6PK to BEV-LEMON-12PK if you can cover it.
+
+        Thanks
+      source_email_id: null
+      evidence_anchors: []
+  exc-044:
+    diagnosis: Buyer A/P inquiry on the status of order SO-5100012344 and invoice INV-2026-8841. Both settled; an informational reply is all that's needed.
+    confidence: 96
+    risk: LOW
+    resolution: Send the order-status response confirming delivery + cleared invoice.
+    recommendation: Send status response
+    lines: []
+    entities_analysis:
+      extracted:
+        - key: order_ref
+          value: SO-5100012344
+          kind: order_id
+          confidence: 0.96
+          source_span: "re: order SO-5100012344"
+        - key: invoice_ref
+          value: INV-2026-8841
+          kind: invoice
+          confidence: 0.91
+          source_span: invoice INV-2026-8841
+        - key: customer
+          value: Southeast Beverage Distributors
+          kind: customer
+          confidence: 0.97
+          source_span: "From: ap@southeast-distrib.example"
+    sap_data_analysis:
+      system: S4H_PRD
+      validation_status: Order SO-5100012344 — delivered 2026-05-09; invoice cleared
+      order_value_usd: 27216
+      sap_doc_number: "5100012344"
+    draft_reply:
+      status: DRAFTED
+      reason: null
+      template_name: order_status_response
+      recipient: ap@southeast-distrib.example
+      subject: "Re: Status of order SO-5100012344"
+      body: |-
+        Hello,
+
+        Thanks for checking in. Order SO-5100012344 was delivered on 2026-05-09 and invoice INV-2026-8841 has cleared in full. No action is needed on your side.
+
+        Let us know if you'd like the POD or a copy of the invoice.
+
+        Acme Beverages Order Desk
+      edits_applied: []
+      drafted_by: analyst-2
+      drafted_at: "2026-05-20T14:05:00Z"
+    knowledge_graph:
+      nodes:
+        - id: order:so-5100012344
+          label: SO-5100012344
+          kind: order
+          detail: Sales order
+        - id: customer:300042
+          label: Southeast Beverage Distributors
+          kind: customer
+          detail: BP 300042
+        - id: material:bev-cola-12pk
+          label: BEV-COLA-12PK
+          kind: material
+          detail: delivered 2026-05-18
+        - id: sap_doc:5100012344
+          label: "5100012344"
+          kind: sap_doc
+          detail: SO confirmed, ATP OK
+      edges:
+        - source: customer:300042
+          target: order:so-5100012344
+          relation: places
+        - source: order:so-5100012344
+          target: material:bev-cola-12pk
+          relation: contains
+        - source: order:so-5100012344
+          target: sap_doc:5100012344
+          relation: validated_by
+      root_id: order:so-5100012344
+    email_source:
+      from_address: ap@southeast-distrib.example
+      received_at: "2026-05-20T14:00:00Z"
+      subject: Status of order SO-5100012344?
+      body_hash: c9adccac272b5d3c796232436587935b5c9909572a44ca7c640185226f0e2c6e
+      attachment_manifest: []
+      body_excerpt: |-
+        Hello,
+
+        Can you confirm the delivery + invoice status for order SO-5100012344 / invoice INV-2026-8841?
+
+        Thanks, A/P
+      source_email_id: null
+      evidence_anchors: []
+  exc-045:
+    diagnosis: "Buyer complaint: short shipment on SO-5100012501 (received 380 of 480 CS). Replacement shipment + goodwill credit under review; escalated to Customer Care."
+    confidence: 90
+    risk: HIGH
+    resolution: Acknowledge, open the replacement shipment, and route the credit for approval.
+    recommendation: Acknowledge + open replacement
+    lines: []
+    entities_analysis:
+      extracted:
+        - key: order_ref
+          value: SO-5100012501
+          kind: order_id
+          confidence: 0.95
+          source_span: order SO-5100012501
+        - key: issue
+          value: short shipment
+          kind: issue
+          confidence: 0.9
+          source_span: received 380 of 480 cases
+        - key: material
+          value: BEV-COLA-12PK
+          kind: material
+          confidence: 0.93
+          source_span: Cola 12pk
+    sap_data_analysis:
+      system: S4H_PRD
+      validation_status: Delivery 8100044122 — 380/480 CS confirmed; 100 CS short
+      order_value_usd: 4147.2
+      sap_doc_number: "5100012501"
+    draft_reply:
+      status: DRAFTED
+      reason: null
+      template_name: complaint_acknowledgement
+      recipient: buyer@walmart.example
+      subject: "Re: Short shipment on SO-5100012501"
+      body: |-
+        Hello,
+
+        Thank you for flagging this — we're sorry the BEV-COLA-12PK delivery arrived short (380 of 480 CS). We've opened a follow-up shipment for the missing 100 CS and a goodwill credit is under review.
+
+        We'll confirm the replacement ship date within one business day.
+
+        Acme Beverages Customer Care
+      edits_applied:
+        - field: body
+          before: (template)
+          after: goodwill credit is under review
+      drafted_by: analyst-3
+      drafted_at: "2026-05-21T09:30:00Z"
+    email_source:
+      from_address: buyer@walmart.example
+      received_at: "2026-05-21T09:25:00Z"
+      subject: Short shipment on SO-5100012501
+      body_hash: cd417eb4dcb55c2c2f6c5525365894be429f7ef9bb0d38bc5996359dd0a40684
+      attachment_manifest:
+        - name: delivery_note_8100044122.pdf
+          mime_type: application/pdf
+          bytes: 73728
+          sha256: d957371f8fa5c06a6b708eaf72c51c6eeccca4143a55fff0051334075aa1f371
+          attachment_id: att-delivery-note-8100044122-pdf
+      body_excerpt: We received 380 of 480 cases of BEV-COLA-12PK. The delivery note is attached. Please advise on the missing 100 CS.
+      source_email_id: null
+      evidence_anchors:
+        - attachment_id: att-delivery-note-8100044122-pdf
+          text: order SO-5100012501
+          match_key:
+            normalized_text: order so-5100012501
+            occurrence_index: 0
+          supports_kind: extracted_field
+          supports_ref: order_entry.order_ref
+          label: Order number
+          source_sha256: d957371f8fa5c06a6b708eaf72c51c6eeccca4143a55fff0051334075aa1f371
+          anchor_source: text_derived
+        - attachment_id: att-delivery-note-8100044122-pdf
+          text: received 380 of 480 cases
+          match_key:
+            normalized_text: received 380 of 480 cases
+            occurrence_index: 0
+          supports_kind: extracted_field
+          supports_ref: order_entry.issue
+          label: Reported issue
+          source_sha256: d957371f8fa5c06a6b708eaf72c51c6eeccca4143a55fff0051334075aa1f371
+          anchor_source: text_derived
+        - attachment_id: att-delivery-note-8100044122-pdf
+          text: Cola 12pk
+          match_key:
+            normalized_text: cola 12pk
+            occurrence_index: 0
+          supports_kind: extracted_field
+          supports_ref: order_entry.material
+          label: Material
+          source_sha256: d957371f8fa5c06a6b708eaf72c51c6eeccca4143a55fff0051334075aa1f371
+          anchor_source: text_derived
+    knowledge_graph:
+      nodes:
+        - id: order:so-5100012501
+          label: SO-5100012501
+          kind: order
+          detail: Sales order
+        - id: customer:300001
+          label: Walmart
+          kind: customer
+          detail: BP 300001
+        - id: material:bev-cola-12pk
+          label: BEV-COLA-12PK
+          kind: material
+          detail: 380/480 CS
+        - id: sap_doc:5100012501
+          label: "5100012501"
+          kind: sap_doc
+          detail: SO confirmed, ATP OK
+      edges:
+        - source: customer:300001
+          target: order:so-5100012501
+          relation: places
+        - source: order:so-5100012501
+          target: material:bev-cola-12pk
+          relation: contains
+        - source: order:so-5100012501
+          target: sap_doc:5100012501
+          relation: validated_by
+      root_id: order:so-5100012501
+  exc-046:
+    diagnosis: EDI 850 order from Kroger, 0.97 extraction confidence, all floor checks green — auto-validated, confirmed in SAP, and resolved without human review.
+    confidence: 97
+    risk: LOW
+    resolution: Auto-confirmed sales order SO-5100012799; no action required.
+    recommendation: Auto-resolved
+    lines: []
+    order_entry_extraction:
+      source_type: EDI_850
+      confidence: 0.97
+      header:
+        customer_po: EDI-PO-2026-7781
+        order_type: ZOR
+        sales_org: "1000"
+        dist_channel: "10"
+        requested_date: "2026-05-26"
+        ship_window_from: null
+        ship_window_to: null
+      customer_name: Kroger Co
+      customer_bp: "300077"
+      line_items:
+        - line_num: "001"
+          material: BEV-COLA-12PK
+          description: Cola 12-pack case
+          quantity: 480
+          uom: CS
+          unit_price: 8.64
+          mdm_matched: true
+      validation_flags:
+        - field: line 001
+          severity: INFO
+          message: Matched to material master; all fields validated.
+    edi_850_audit:
+      standard: ANSI X12 5010
+      transaction_set: "850"
+      envelope:
+        sender_id: "300077"
+        receiver_id: VENDOR-7788
+        interchange_control_number: "000012345"
+        group_control_number: "12345"
+        transaction_set_control_number: "0001"
+        usage_indicator: P
+        x12_version: "005010"
+      header:
+        purpose_code: "00"
+        po_type: SA
+        po_number: EDI-PO-2026-7781
+        po_date: "2026-05-22"
+        currency: USD
+        requested_delivery_date: "2026-05-26"
+      parties:
+        - entity_code: BY
+          role: Buying Party (Purchaser)
+          name: Kroger Co
+          id_qualifier: "92"
+          id_value: "300077"
+          address: null
+          city_state_zip: null
+        - entity_code: SE
+          role: Selling Party
+          name: Acme Beverages Co
+          id_qualifier: "92"
+          id_value: VENDOR-7788
+          address: null
+          city_state_zip: null
+      line_items:
+        - line_num: "001"
+          quantity: 480
+          uom: CS
+          unit_price: 8.64
+          product_qualifier: VP
+          product_id: BEV-COLA-12PK
+          description: Cola 12-pack case
+          extended_amount: 4147.2
+      totals:
+        total_line_items: 1
+        total_quantity: 480
+        total_amount: 4147.2
+      segments:
+        - seg_id: ISA
+          elements: []
+          raw: ISA*00**00**ZZ*300077         *ZZ*VENDOR-7788    *260522*0000*U*00501*000012345*0*P*>~
+          meaning: Interchange Control Header
+          group: envelope
+        - seg_id: GS
+          elements: []
+          raw: GS*PO*300077*VENDOR-7788*20260522*0000*12345*X*005010~
+          meaning: Functional Group Header
+          group: envelope
+        - seg_id: ST
+          elements: []
+          raw: ST*850*0001~
+          meaning: Transaction Set Header
+          group: envelope
+        - seg_id: BEG
+          elements: []
+          raw: BEG*00*SA*EDI-PO-2026-7781**20260522~
+          meaning: Beginning Segment for Purchase Order
+          group: header
+        - seg_id: CUR
+          elements: []
+          raw: CUR*BY*USD~
+          meaning: Currency
+          group: header
+        - seg_id: REF
+          elements: []
+          raw: REF*PO*EDI-PO-2026-7781~
+          meaning: Reference Identification
+          group: header
+        - seg_id: DTM
+          elements: []
+          raw: DTM*004*20260522~
+          meaning: Date/Time Reference
+          group: dates
+        - seg_id: DTM
+          elements: []
+          raw: DTM*002*20260526~
+          meaning: Date/Time Reference
+          group: dates
+        - seg_id: N1
+          elements: []
+          raw: N1*BY*Kroger Co*92*300077~
+          meaning: Party Identification
+          group: party
+        - seg_id: N1
+          elements: []
+          raw: N1*SE*Acme Beverages Co*92*VENDOR-7788~
+          meaning: Party Identification
+          group: party
+        - seg_id: PO1
+          elements: []
+          raw: PO1*001*480*CS*8.64*PE*VP*BEV-COLA-12PK~
+          meaning: Baseline Item Data
+          group: line
+        - seg_id: PID
+          elements: []
+          raw: PID*F****Cola 12-pack case~
+          meaning: Product/Item Description
+          group: line
+        - seg_id: CTT
+          elements: []
+          raw: CTT*1*480~
+          meaning: Transaction Totals
+          group: trailer
+        - seg_id: SE
+          elements: []
+          raw: SE*11*0001~
+          meaning: Transaction Set Trailer
+          group: trailer
+        - seg_id: GE
+          elements: []
+          raw: GE*1*12345~
+          meaning: Functional Group Trailer
+          group: trailer
+        - seg_id: IEA
+          elements: []
+          raw: IEA*1*000012345~
+          meaning: Interchange Control Trailer
+          group: trailer
+      raw_x12: |-
+        ISA*00**00**ZZ*300077         *ZZ*VENDOR-7788    *260522*0000*U*00501*000012345*0*P*>~
+        GS*PO*300077*VENDOR-7788*20260522*0000*12345*X*005010~
+        ST*850*0001~
+        BEG*00*SA*EDI-PO-2026-7781**20260522~
+        CUR*BY*USD~
+        REF*PO*EDI-PO-2026-7781~
+        DTM*004*20260522~
+        DTM*002*20260526~
+        N1*BY*Kroger Co*92*300077~
+        N1*SE*Acme Beverages Co*92*VENDOR-7788~
+        PO1*001*480*CS*8.64*PE*VP*BEV-COLA-12PK~
+        PID*F****Cola 12-pack case~
+        CTT*1*480~
+        SE*11*0001~
+        GE*1*12345~
+        IEA*1*000012345~
+    entities_analysis:
+      extracted:
+        - key: customer_po
+          value: EDI-PO-2026-7781
+          kind: po
+          confidence: 0.99
+          source_span: BEG*00*SA*EDI-PO-2026-7781
+        - key: customer
+          value: Kroger Co
+          kind: customer
+          confidence: 0.99
+          source_span: N1*BY*Kroger Co
+        - key: material
+          value: BEV-COLA-12PK
+          kind: material
+          confidence: 0.98
+          source_span: PO1*001*480*CS
+    sap_data_analysis:
+      system: S4H_PRD
+      validation_status: SO created · ATP OK · credit clear · auto-confirmed
+      order_value_usd: 4147.2
+      sap_doc_number: "5100012799"
+    knowledge_graph:
+      nodes:
+        - id: order:edi-po-2026-7781
+          label: EDI-PO-2026-7781
+          kind: order
+          detail: Sales order
+        - id: customer:300077
+          label: Kroger Co
+          kind: customer
+          detail: BP 300077
+        - id: material:bev-cola-12pk
+          label: BEV-COLA-12PK
+          kind: material
+          detail: 480 CS
+        - id: sap_doc:5100012799
+          label: "5100012799"
+          kind: sap_doc
+          detail: SO confirmed, ATP OK
+      edges:
+        - source: customer:300077
+          target: order:edi-po-2026-7781
+          relation: places
+        - source: order:edi-po-2026-7781
+          target: material:bev-cola-12pk
+          relation: contains
+        - source: order:edi-po-2026-7781
+          target: sap_doc:5100012799
+          relation: validated_by
+      root_id: order:edi-po-2026-7781
+    email_source:
+      from_address: edi@kroger.example
+      received_at: "2026-05-22T07:10:00Z"
+      subject: EDI 850 transmission — PO EDI-PO-2026-7781
+      body_hash: e74fdd9eedeb46112898cd9e90f055958b7ec677913d33bf3dcca92dca07a8ae
+      attachment_manifest:
+        - name: EDI_850_7781.txt
+          mime_type: text/plain
+          bytes: 2048
+          sha256: e74eecac3d573e8bf252b95717a8c2a9f66dcd24c282133d1461d8389f3dfd8e
+          attachment_id: att-edi-850-7781-txt
+      body_excerpt: Automated EDI 850 transmission. The X12 payload is attached.
+      source_email_id: null
+      evidence_anchors:
+        - attachment_id: att-edi-850-7781-txt
+          text: BEG*00*SA*EDI-PO-2026-7781
+          match_key:
+            normalized_text: beg*00*sa*edi-po-2026-7781
+            occurrence_index: 0
+          supports_kind: extracted_field
+          supports_ref: order_entry.customer_po
+          label: PO number
+          source_sha256: e74eecac3d573e8bf252b95717a8c2a9f66dcd24c282133d1461d8389f3dfd8e
+          anchor_source: text_derived
+        - attachment_id: att-edi-850-7781-txt
+          text: N1*BY*Kroger Co
+          match_key:
+            normalized_text: n1*by*kroger co
+            occurrence_index: 0
+          supports_kind: extracted_field
+          supports_ref: order_entry.customer
+          label: Customer
+          source_sha256: e74eecac3d573e8bf252b95717a8c2a9f66dcd24c282133d1461d8389f3dfd8e
+          anchor_source: text_derived
+        - attachment_id: att-edi-850-7781-txt
+          text: PO1*001*480*CS
+          match_key:
+            normalized_text: po1*001*480*cs
+            occurrence_index: 0
+          supports_kind: extracted_field
+          supports_ref: order_entry.material
+          label: Material
+          source_sha256: e74eecac3d573e8bf252b95717a8c2a9f66dcd24c282133d1461d8389f3dfd8e
+          anchor_source: text_derived
+  exc-047:
+    diagnosis: Uncategorised inbound email (trade-show booth invitation) — not an order-desk matter. Classified OTHER; routed to Marketing.
+    confidence: 82
+    risk: LOW
+    resolution: Route to the Marketing team; no order action.
+    recommendation: Route to team
+    lines: []
+    entities_analysis:
+      extracted:
+        - key: sender
+          value: partnerships@beverage-expo.example
+          kind: contact
+          confidence: 0.97
+          source_span: "From: partnerships@beverage-expo.example"
+        - key: topic
+          value: Trade-show booth invitation
+          kind: topic
+          confidence: 0.82
+          source_span: "Subject: Booth at Beverage Expo 2026"
+    email_source:
+      from_address: partnerships@beverage-expo.example
+      received_at: "2026-05-22T15:00:00Z"
+      subject: Booth at Beverage Expo 2026
+      body_hash: b5cb14380b4d4b423e922245388dff12caac0e8265a7a5ac9529b9b1fbcf9977
+      attachment_manifest: []
+      body_excerpt: |-
+        Hi,
+
+        We'd love to invite Acme Beverages to exhibit at Beverage Expo 2026. Could we set up a quick call?
+
+        Partnerships team
+      source_email_id: null
+      evidence_anchors: []
+    draft_reply:
+      status: DRAFTED
+      reason: null
+      template_name: route_to_team
+      recipient: partnerships@beverage-expo.example
+      subject: "Re: Booth at Beverage Expo 2026"
+      body: |-
+        Hello,
+
+        Thanks for reaching out — this isn't an order-desk matter, so I've forwarded your note to our Marketing team, who handle event partnerships. They'll follow up directly.
+
+        Acme Beverages Order Desk
+      edits_applied: []
+      drafted_by: analyst-2
+      drafted_at: "2026-05-22T15:02:00Z"
