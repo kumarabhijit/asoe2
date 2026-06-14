@@ -48,6 +48,13 @@ param namePrefix string = 'asoepreprod'
 ])
 param asoeEnv string = 'sandbox'
 
+@description('ASOE_SANDBOX_BOOTSTRAP value. "1" makes the API materialise catalog scenarios into real cases on first startup (sandbox only; idempotent — seeds once against the Postgres-backed store). "0" disables. Only honoured when asoeEnv=sandbox.')
+@allowed([
+  '0'
+  '1'
+])
+param sandboxBootstrap string = '1'
+
 @description('Single CORS allow-origin (legacy). Kept so existing parameter files keep working; prefer corsAllowedOriginsCsv for multi-origin (pre-prod UI on Azure + Vercel prod + custom domain).')
 param corsAllowedOrigin string = 'https://asoe-ui.vercel.app'
 
@@ -777,6 +784,10 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (deployContainerApp) 
           }
           env: [
             { name: 'ASOE_ENV',           value: asoeEnv }
+            // Materialise catalog scenarios into real cases on first boot so
+            // the Azure sandbox queue matches the asoe-ui mock (parity).
+            // Gated to sandbox inside api/sandbox_bootstrap.py; idempotent.
+            { name: 'ASOE_SANDBOX_BOOTSTRAP', value: sandboxBootstrap }
             { name: 'ASOE_LLM_PROVIDER',  value: llmProvider }
             // Precedents embedding provider (sign-off 2026-06-10).
             // Empty = semantic OFF (correlate fallback) — parity with

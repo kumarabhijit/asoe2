@@ -68,6 +68,11 @@ COPY llm/          llm/
 COPY prompts/      prompts/
 COPY api/          api/
 COPY db/           db/
+# Scenario catalog — the single declarative source the sandbox case
+# bootstrap (api/sandbox_bootstrap.py) materialises into real cases when
+# ASOE_ENV=sandbox + ASOE_SANDBOX_BOOTSTRAP=1. Harmless in other envs (the
+# bootstrap is gated off), and small.
+COPY fixtures/scenarios/ fixtures/scenarios/
 
 # ── Runtime config ──────────────────────────────────────────────────────────
 ENV PYTHONPATH=/app

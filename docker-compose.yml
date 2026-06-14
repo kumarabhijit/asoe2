@@ -104,6 +104,9 @@ services:
     environment:
       <<: *core-env
       ASOE_ENV: "${ASOE_ENV:-sandbox}"
+      # Materialise catalog scenarios into real cases on startup so the
+      # local full-stack queue matches the asoe-ui mock (deployment parity).
+      ASOE_SANDBOX_BOOTSTRAP: "${ASOE_SANDBOX_BOOTSTRAP:-1}"
     ports:
       - "8000:8000"
     volumes:

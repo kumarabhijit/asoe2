@@ -1048,27 +1048,52 @@ scenarios:
 - id: exc-001
   intent: CONTRACTUAL_CORRECTION
   event_type: EDI_850_PRICE_MISMATCH
-  order_id: SO-WMT-1001
+  order_id: PO-001-R-11
   retailer_id: R-11
   sku: BEV-LAGER-24PK
-  po_price: 23.6
-  sap_price: 26.6
-  line_count: 3
+  po_price: 90.0
+  sap_price: 100.0
+  line_count: 1
   dc_id: DC-SOUTH-01
   metadata:
-    contract_ref: CTR-R11-2025
-    expired_promo_id: PROMO-2025-Q4-EXPIRED
-    note: 'Expired Q4 TPR: PO at promo price, SAP reverted to base.'
+    contract_ref: CTR-001
+    note: 10% contract discount within tolerance.
   lifecycle: RESOLVED
   shadow_verdict: GREEN
-  revenue_at_risk: 1218.24
+  revenue_at_risk: 14200.0
   origin: appendix
-  diagnosis: Line items reference promo pricing from an expired Q4 trade promotion; pricing reverted to
-    base.
+  diagnosis: PO price $90.00 vs SAP base $100.00 (10% contract discount); within 15% auto-apply tolerance.
+- id: exc-002
+  intent: DUPLICATE_PO
+  event_type: EDI_850_DUPLICATE_PO
+  order_id: PO-002-R-12
+  retailer_id: R-12
+  sku: BEV-LEMON-6PK
+  po_price: 20.0
+  sap_price: 20.0
+  line_count: 1
+  dc_id: DC-MIDWEST-01
+  metadata:
+    signal_scores:
+      po_number: 1.0
+      customer_id: 1.0
+      line_items: 1.0
+      amount: 1.0
+      timestamp: 0.0
+      ship_to: 0.0
+      channel: 0.0
+      delivery_date: 0.0
+    matched_po_id: PO-DUP-ORIG
+    note: Composite 0.75 — review band.
+  lifecycle: PENDING_REVIEW
+  shadow_verdict: GREEN
+  revenue_at_risk: 18400.0
+  origin: appendix
+  diagnosis: 'Duplicate-PO signals composite 0.75 (PO#, customer, line-items, amount match; timing/ship-to differ); within review band — operator confirmation required.'
 - id: exc-003
   intent: CREDIT_BLOCK
   event_type: EDI_850_PRICE_MISMATCH
-  order_id: SO-TGT-2200
+  order_id: PO-003-R-13
   retailer_id: R-13
   sku: BEV-SPARK-24PK
   po_price: 11.2
@@ -1080,56 +1105,117 @@ scenarios:
     credit_limit: 125000.0
     current_exposure: 142500.0
     note: Exposure $17,500 (14%) over approved limit.
-  lifecycle: BLOCKED
-  shadow_verdict: RED
+  lifecycle: PENDING_REVIEW
+  shadow_verdict: YELLOW
   revenue_at_risk: 13782.0
   origin: appendix
-  diagnosis: Credit exposure ($142,500) exceeds approved limit ($125,000) by $17,500 (14%).
-- id: exc-027
-  intent: PRICE_HOLD_RELEASE
-  event_type: EDI_850_PRICE_HOLD
-  order_id: PO-WMT-Q1-RESET-001
+  diagnosis: Credit exposure ($142,500) exceeds approved limit ($125,000) by $17,500 (14%); credit decisions always route to human review.
+- id: exc-004
+  intent: MASS_PRICING_ERROR
+  event_type: EDI_850_PRICE_MISMATCH
+  order_id: PO-004-R-14
+  retailer_id: R-14
+  sku: BEV-IPA-12PK
+  po_price: 99.0
+  sap_price: 100.0
+  line_count: 15
+  dc_id: DC-WEST-01
+  metadata:
+    note: 15 lines >10-line mass threshold.
+  lifecycle: BLOCKED
+  shadow_verdict: RED
+  revenue_at_risk: 150000.0
+  origin: appendix
+  diagnosis: 15-line price recalculation exceeds the 10-line mass-update threshold; systemic pricing change auto-blocked for human escalation.
+- id: exc-005
+  intent: CONTRACTUAL_CORRECTION
+  event_type: EDI_850_PRICE_MISMATCH
+  order_id: PO-005-R-11
   retailer_id: R-11
-  sku: BEV-Q1RESET
-  po_price: 21.1
-  sap_price: 20.0
+  sku: BEV-LAGER-24PK
+  po_price: 88.0
+  sap_price: 100.0
   line_count: 1
   dc_id: DC-SOUTH-01
   metadata:
-    price_hold_status: HELD
-    note: +5.5% vs SAP base, above 2.0% auto-release tolerance.
-  lifecycle: PENDING_REVIEW
-  shadow_verdict: YELLOW
-  revenue_at_risk: 33760.0
+    contract_ref: CTR-005
+    note: 12% contract discount.
+  lifecycle: RESOLVED
+  shadow_verdict: GREEN
+  revenue_at_risk: 9800.0
   origin: appendix
-  diagnosis: 'Q1 reset PO held on pricing check: PO $21.10 vs SAP base $20.00 (+5.5%).'
-- id: exc-028
-  intent: BACK_ORDER
-  event_type: BACK_ORDER_OOS
-  order_id: PO-WMT-Q1-RESET-001
-  retailer_id: R-11
-  sku: BEV-Q1RESET
+  diagnosis: PO price $88.00 vs SAP base $100.00 (12% contract discount); within 15% auto-apply tolerance.
+- id: exc-006
+  intent: DUPLICATE_PO
+  event_type: EDI_850_DUPLICATE_PO
+  order_id: PO-006-R-12
+  retailer_id: R-12
+  sku: BEV-LEMON-6PK
   po_price: 20.0
   sap_price: 20.0
   line_count: 1
-  dc_id: DC-SOUTH-01
+  dc_id: DC-MIDWEST-01
   metadata:
-    ordered_qty: 1600
-    available_qty: 1280
-    unit_price: 20.0
-    uom: CS
-    note: 20% gap, split shipment.
+    signal_scores:
+      po_number: 1.0
+      customer_id: 1.0
+      line_items: 1.0
+      amount: 1.0
+      timestamp: 1.0
+      ship_to: 1.0
+      channel: 1.0
+      delivery_date: 1.0
+    matched_po_id: PO-DUP-ORIG
+    note: Composite 1.0 — auto-block.
+  lifecycle: BLOCKED
+  shadow_verdict: GREEN
+  revenue_at_risk: 21300.0
+  origin: appendix
+  diagnosis: Duplicate-PO signals composite 1.0 (all signals match the original); auto-blocked to prevent double-shipment.
+- id: exc-007
+  intent: CREDIT_BLOCK
+  event_type: EDI_850_PRICE_MISMATCH
+  order_id: PO-007-R-13
+  retailer_id: R-13
+  sku: BEV-SPARK-24PK
+  po_price: 20.0
+  sap_price: 20.0
+  line_count: 1
+  dc_id: DC-MIDWEST-01
+  metadata:
+    requester_role: ORDER_MANAGER
+    credit_limit: 50000.0
+    current_exposure: 30000.0
+    note: Within limit; release still requires review.
+  lifecycle: PENDING_REVIEW
+  shadow_verdict: YELLOW
+  revenue_at_risk: 12000.0
+  origin: appendix
+  diagnosis: Credit exposure ($30,000) within approved limit ($50,000); release proposed but credit decisions always route to human review.
+- id: exc-008
+  intent: CONTRACTUAL_CORRECTION
+  event_type: EDI_850_PRICE_MISMATCH
+  order_id: PO-008-R-14
+  retailer_id: R-14
+  sku: BEV-IPA-12PK
+  po_price: 92.0
+  sap_price: 100.0
+  line_count: 1
+  dc_id: DC-WEST-01
+  metadata:
+    contract_ref: CTR-008
+    note: 8% contract discount.
   lifecycle: RESOLVED
   shadow_verdict: GREEN
-  revenue_at_risk: 33760.0
+  revenue_at_risk: 6400.0
   origin: appendix
-  diagnosis: Ordered 1,600 CS, 1,280 CS on hand (320 CS / 20% gap); split shipment.
-- id: exc-029
+  diagnosis: PO price $92.00 vs SAP base $100.00 (8% contract discount); within 15% auto-apply tolerance.
+- id: exc-009
   intent: DUPLICATE_PO
   event_type: EDI_850_DUPLICATE_PO
-  order_id: PO-WMT-Q1-RESET-001-R2
+  order_id: PO-009-R-11
   retailer_id: R-11
-  sku: BEV-Q1RESET
+  sku: BEV-LAGER-24PK
   po_price: 20.0
   sap_price: 20.0
   line_count: 1
@@ -1140,20 +1226,412 @@ scenarios:
       customer_id: 1.0
       line_items: 1.0
       amount: 1.0
-      timestamp: 0.6
+      timestamp: 0.0
+      ship_to: 0.0
+      channel: 0.0
+      delivery_date: 0.0
+    matched_po_id: PO-DUP-ORIG
+    note: Composite 0.75 — review band.
+  lifecycle: PENDING_REVIEW
+  shadow_verdict: GREEN
+  revenue_at_risk: 16100.0
+  origin: appendix
+  diagnosis: Duplicate-PO signals composite 0.75; core fields match but timing/ship-to differ — operator confirmation required before re-entry.
+- id: exc-010
+  intent: BACK_ORDER
+  event_type: BACK_ORDER_OOS
+  order_id: PO-010-R-12
+  retailer_id: R-12
+  sku: BEV-LEMON-6PK
+  po_price: 20.0
+  sap_price: 20.0
+  line_count: 1
+  dc_id: DC-MIDWEST-01
+  metadata:
+    ordered_qty: 100
+    available_qty: 70
+    unit_price: 20.0
+    uom: CS
+    note: 30% gap, minor.
+  lifecycle: PENDING_REVIEW
+  shadow_verdict: YELLOW
+  revenue_at_risk: 2000.0
+  origin: appendix
+  diagnosis: Ordered 100 CS, 70 CS on hand (30 CS / 30% gap); minor back-order — split-shipment plan needs review.
+- id: exc-011
+  intent: BACK_ORDER
+  event_type: BACK_ORDER_OOS
+  order_id: PO-011-R-13
+  retailer_id: R-13
+  sku: BEV-SPARK-24PK
+  po_price: 20.0
+  sap_price: 20.0
+  line_count: 1
+  dc_id: DC-MIDWEST-01
+  metadata:
+    ordered_qty: 200
+    available_qty: 150
+    unit_price: 20.0
+    uom: CS
+    note: 25% gap, minor.
+  lifecycle: PENDING_REVIEW
+  shadow_verdict: YELLOW
+  revenue_at_risk: 4000.0
+  origin: appendix
+  diagnosis: Ordered 200 CS, 150 CS on hand (50 CS / 25% gap); minor back-order — split-shipment plan needs review.
+- id: exc-012
+  intent: OVER_MAX
+  event_type: OVER_MAX_QTY
+  order_id: PO-012-R-14
+  retailer_id: R-14
+  sku: BEV-IPA-12PK
+  po_price: 31.43
+  sap_price: 31.43
+  line_count: 2
+  dc_id: DC-WEST-01
+  metadata:
+    total_ordered: 1200
+    max_qty: 1000
+    uom: CS
+    order_lines:
+    - sku: BEV-IPA-12PK
+      description: Craft IPA 12-pack case
+      qty: 1200
+      max_line_qty: 800
+      is_even_layer_item: true
+    note: 20% over contract max.
+  lifecycle: PENDING_REVIEW
+  shadow_verdict: YELLOW
+  revenue_at_risk: 37700.0
+  origin: appendix
+  diagnosis: Order totals 1,200 CS vs 1,000 CS contract max (+20%); within auto-trim band — trim plan needs review.
+- id: exc-013
+  intent: MIN_ORDER_QTY
+  event_type: MIN_ORDER_QTY
+  order_id: PO-013-R-11
+  retailer_id: R-11
+  sku: BEV-LAGER-24PK
+  po_price: 7.2
+  sap_price: 7.2
+  line_count: 1
+  dc_id: DC-SOUTH-01
+  metadata:
+    ordered_qty: 90
+    moq_qty: 100
+    unit_cost: 7.2
+    uom: CS
+    note: 10% shortfall below MOQ.
+  lifecycle: PENDING_REVIEW
+  shadow_verdict: YELLOW
+  revenue_at_risk: 648.0
+  origin: appendix
+  diagnosis: Ordered 90 CS vs 100 CS DSD minimum (10 CS / 10% shortfall); round-up plan needs review.
+- id: exc-014
+  intent: PALLET_CONFIG
+  event_type: PALLET_CONFIG_VIOLATION
+  order_id: PO-014-R-12
+  retailer_id: R-12
+  sku: BEV-LEMON-6PK
+  po_price: 31.43
+  sap_price: 31.43
+  line_count: 1
+  dc_id: DC-MIDWEST-01
+  metadata:
+    pallet_lines:
+    - sku: BEV-IPA-12PK
+      description: Craft IPA 12-pack case
+      layer_qty: 60
+      pallet_qty: 300
+      ordered_qty: 2200
+      uom: CS
+    note: Doesn't tile to 300 CS/pallet, 60 CS/layer.
+  lifecycle: PENDING_REVIEW
+  shadow_verdict: YELLOW
+  revenue_at_risk: 22000.0
+  origin: appendix
+  diagnosis: Quantities don't tile to the club-pack pallet spec (300 CS/pallet, 60 CS/layer); alignment plan needs review.
+- id: exc-015
+  intent: CONTRACTUAL_CORRECTION
+  event_type: EDI_850_PRICE_MISMATCH
+  order_id: PO-015-R-11
+  retailer_id: R-11
+  sku: BEV-LAGER-24PK
+  po_price: 50.0
+  sap_price: 100.0
+  line_count: 1
+  dc_id: DC-SOUTH-01
+  metadata:
+    contract_ref: CTR-015
+    note: 50% discount exceeds 15% ceiling; recipe FAILED, escalated.
+  lifecycle: FAILED
+  shadow_verdict: GREEN
+  revenue_at_risk: 42000.0
+  origin: appendix
+  diagnosis: PO price $50.00 vs SAP base $100.00 (50% discount) exceeds the 15% auto-apply ceiling; PriceAdjustmentRecipe returned FAILED and the order escalated to a human.
+- id: exc-016
+  intent: DELIVERY_DELAY
+  event_type: DELIVERY_DELAY
+  order_id: PO-016-R-13
+  retailer_id: R-13
+  sku: BEV-SPARK-24PK
+  po_price: 20.0
+  sap_price: 20.0
+  line_count: 1
+  dc_id: DC-MIDWEST-01
+  metadata:
+    planned_date: '2026-06-20T00:00:00Z'
+    projected_eta: '2026-06-24T00:00:00Z'
+    delay_category: CARRIER_DELAY
+    note: 4 days late, minor.
+  lifecycle: PENDING_REVIEW
+  shadow_verdict: YELLOW
+  revenue_at_risk: 8200.0
+  origin: appendix
+  diagnosis: Projected ETA 2026-06-24 vs planned 2026-06-20 (4 days late); minor delay — mitigation needs review.
+- id: exc-017
+  intent: PRICE_HOLD_RELEASE
+  event_type: EDI_850_PRICE_HOLD
+  order_id: PO-017-R-11
+  retailer_id: R-11
+  sku: BEV-LAGER-24PK
+  po_price: 102.0
+  sap_price: 100.0
+  line_count: 1
+  dc_id: DC-SOUTH-01
+  metadata:
+    price_hold_status: HELD
+    note: +2% within auto-release tolerance.
+  lifecycle: RESOLVED
+  shadow_verdict: GREEN
+  revenue_at_risk: 5100.0
+  origin: appendix
+  diagnosis: 'Price hold: PO $102.00 vs SAP base $100.00 (+2%); within 2% auto-release tolerance — released.'
+- id: exc-018
+  intent: PRICE_HOLD_RELEASE
+  event_type: EDI_850_PRICE_HOLD
+  order_id: PO-018-R-12
+  retailer_id: R-12
+  sku: BEV-LEMON-6PK
+  po_price: 105.0
+  sap_price: 100.0
+  line_count: 1
+  dc_id: DC-MIDWEST-01
+  metadata:
+    price_hold_status: HELD
+    note: +5% above auto-release tolerance.
+  lifecycle: PENDING_REVIEW
+  shadow_verdict: YELLOW
+  revenue_at_risk: 12750.0
+  origin: appendix
+  diagnosis: 'Price hold: PO $105.00 vs SAP base $100.00 (+5%); above 2% auto-release tolerance — release needs review.'
+- id: exc-019
+  intent: EDI_MISMATCH
+  event_type: EDI_850_LINE_MISMATCH
+  order_id: PO-019-R-13
+  retailer_id: R-13
+  sku: BEV-SPARK-24PK
+  po_price: 100.0
+  sap_price: 100.0
+  line_count: 1
+  dc_id: DC-MIDWEST-01
+  metadata:
+    mismatch_sub_type: SKU_MISMATCH
+    expected_value: BEV-SPARK-24PK
+    received_value: BEV-SPARK-12PK
+    note: SKU mismatch, hard reject.
+  lifecycle: BLOCKED
+  shadow_verdict: RED
+  revenue_at_risk: 9400.0
+  origin: appendix
+  diagnosis: EDI 850 line SKU mismatch (expected BEV-SPARK-24PK, received BEV-SPARK-12PK); hard-rejected pending correction.
+- id: exc-020
+  intent: EDI_MISMATCH
+  event_type: EDI_850_LINE_MISMATCH
+  order_id: PO-020-R-14
+  retailer_id: R-14
+  sku: BEV-IPA-12PK
+  po_price: 100.0
+  sap_price: 100.0
+  line_count: 1
+  dc_id: DC-WEST-01
+  metadata:
+    mismatch_sub_type: QTY_MISMATCH
+    expected_value: 100
+    received_value: 95
+    note: Qty mismatch, review.
+  lifecycle: PENDING_REVIEW
+  shadow_verdict: YELLOW
+  revenue_at_risk: 7600.0
+  origin: appendix
+  diagnosis: EDI 850 line quantity mismatch (expected 100, received 95); needs operator review before posting.
+- id: exc-021
+  intent: CONTRACTUAL_CORRECTION
+  event_type: EDI_850_LINE_MISMATCH
+  order_id: PO-021-R-11
+  retailer_id: R-11
+  sku: BEV-LAGER-24PK
+  po_price: 95.0
+  sap_price: 100.0
+  line_count: 1
+  dc_id: DC-SOUTH-01
+  metadata:
+    mismatch_sub_type: PRICE_MISMATCH
+    contract_ref: CTR-021
+    note: 5% line price correction.
+  lifecycle: RESOLVED
+  shadow_verdict: GREEN
+  revenue_at_risk: 5200.0
+  origin: appendix
+  diagnosis: 'Line-level price mismatch: PO $95.00 vs SAP base $100.00 (5%); classified as a contractual correction and auto-applied.'
+- id: exc-022
+  intent: MASS_PRICING_ERROR
+  event_type: EDI_850_PRICE_MISMATCH
+  order_id: PO-022-R-11
+  retailer_id: R-11
+  sku: BEV-LAGER-24PK
+  po_price: 99.0
+  sap_price: 100.0
+  line_count: 20
+  dc_id: DC-SOUTH-01
+  metadata:
+    note: 20 lines >10-line mass threshold.
+  lifecycle: BLOCKED
+  shadow_verdict: RED
+  revenue_at_risk: 220000.0
+  origin: appendix
+  diagnosis: 20-line price recalculation exceeds the 10-line mass-update threshold; systemic pricing change auto-blocked for human escalation.
+- id: exc-023
+  intent: MASS_PRICING_ERROR
+  event_type: EDI_850_PRICE_MISMATCH
+  order_id: PO-023-R-12
+  retailer_id: R-12
+  sku: BEV-LEMON-6PK
+  po_price: 99.0
+  sap_price: 100.0
+  line_count: 18
+  dc_id: DC-MIDWEST-01
+  metadata:
+    note: 18 lines >10-line mass threshold.
+  lifecycle: BLOCKED
+  shadow_verdict: RED
+  revenue_at_risk: 198000.0
+  origin: appendix
+  diagnosis: 18-line price recalculation exceeds the 10-line mass-update threshold; systemic pricing change auto-blocked for human escalation.
+- id: exc-024
+  intent: DUPLICATE_PO
+  event_type: EDI_850_DUPLICATE_PO
+  order_id: PO-024-R-13
+  retailer_id: R-13
+  sku: BEV-SPARK-24PK
+  po_price: 20.0
+  sap_price: 20.0
+  line_count: 1
+  dc_id: DC-MIDWEST-01
+  metadata:
+    signal_scores:
+      po_number: 1.0
+      customer_id: 1.0
+      line_items: 1.0
+      amount: 1.0
+      timestamp: 1.0
       ship_to: 1.0
       channel: 1.0
       delivery_date: 1.0
-    note: Retransmission 18h after original; RED auto-block.
+    matched_po_id: PO-DUP-ORIG
+    note: Composite 1.0 — auto-block.
+  lifecycle: BLOCKED
+  shadow_verdict: GREEN
+  revenue_at_risk: 19850.0
+  origin: appendix
+  diagnosis: Duplicate-PO signals composite 1.0; identical retransmission auto-blocked to prevent double-shipment.
+- id: exc-025
+  intent: PRICE_HOLD_RELEASE
+  event_type: EDI_850_PRICE_HOLD
+  order_id: PO-025-R-14
+  retailer_id: R-14
+  sku: BEV-IPA-12PK
+  po_price: 23.0
+  sap_price: 20.0
+  line_count: 1
+  dc_id: DC-WEST-01
+  metadata:
+    price_hold_status: HELD
+    note: +15% exceeds hard-block ceiling.
   lifecycle: BLOCKED
   shadow_verdict: RED
+  revenue_at_risk: 28000.0
+  origin: appendix
+  diagnosis: 'Price hold: PO $23.00 vs SAP base $20.00 (+15%); exceeds the 10% hard-block ceiling — auto-blocked.'
+- id: exc-027
+  intent: PRICE_HOLD_RELEASE
+  event_type: EDI_850_PRICE_HOLD
+  order_id: PO-027-R-11
+  retailer_id: R-11
+  sku: BEV-LAGER-24PK
+  po_price: 21.1
+  sap_price: 20.0
+  line_count: 1
+  dc_id: DC-SOUTH-01
+  metadata:
+    price_hold_status: HELD
+    note: +5.5% above auto-release tolerance.
+  lifecycle: PENDING_REVIEW
+  shadow_verdict: YELLOW
   revenue_at_risk: 33760.0
   origin: appendix
-  diagnosis: R2 arrived 18h after the original with identical lines/qty/ship-to; RED auto-block.
+  diagnosis: 'Q1 reset PO held on pricing check: PO $21.10 vs SAP base $20.00 (+5.5%); release needs review.'
+- id: exc-028
+  intent: BACK_ORDER
+  event_type: BACK_ORDER_OOS
+  order_id: PO-028-R-11
+  retailer_id: R-11
+  sku: BEV-LAGER-24PK
+  po_price: 20.0
+  sap_price: 20.0
+  line_count: 1
+  dc_id: DC-SOUTH-01
+  metadata:
+    ordered_qty: 1600
+    available_qty: 1280
+    unit_price: 20.0
+    uom: CS
+    note: 20% gap, split shipment.
+  lifecycle: PENDING_REVIEW
+  shadow_verdict: YELLOW
+  revenue_at_risk: 33760.0
+  origin: appendix
+  diagnosis: Ordered 1,600 CS, 1,280 CS on hand (320 CS / 20% gap); split-shipment plan needs review.
+- id: exc-029
+  intent: DUPLICATE_PO
+  event_type: EDI_850_DUPLICATE_PO
+  order_id: PO-029-R-11
+  retailer_id: R-11
+  sku: BEV-LAGER-24PK
+  po_price: 20.0
+  sap_price: 20.0
+  line_count: 1
+  dc_id: DC-SOUTH-01
+  metadata:
+    signal_scores:
+      po_number: 1.0
+      customer_id: 1.0
+      line_items: 1.0
+      amount: 1.0
+      timestamp: 1.0
+      ship_to: 1.0
+      channel: 1.0
+      delivery_date: 1.0
+    matched_po_id: PO-DUP-ORIG
+    note: Retransmission 18h after original; auto-block.
+  lifecycle: BLOCKED
+  shadow_verdict: GREEN
+  revenue_at_risk: 33760.0
+  origin: appendix
+  diagnosis: R2 arrived 18h after the original with identical lines/qty/ship-to (composite 1.0); auto-blocked.
 - id: exc-030
   intent: OVER_MAX
   event_type: OVER_MAX_QTY
-  order_id: PO-COST-EOQ-2026Q1
+  order_id: PO-030-R-14
   retailer_id: R-14
   sku: BEV-IPA-12PK
   po_price: 31.43
@@ -1163,6 +1641,7 @@ scenarios:
   metadata:
     total_ordered: 4000
     max_qty: 3000
+    uom: CS
     order_lines:
     - sku: BEV-IPA-12PK
       description: Craft IPA 12-pack case
@@ -1174,21 +1653,21 @@ scenarios:
       qty: 1800
       max_line_qty: 1500
       is_even_layer_item: true
-    note: 33% over contract max; SAP V4080.
+    note: 33% over contract max.
   lifecycle: PENDING_REVIEW
   shadow_verdict: YELLOW
   revenue_at_risk: 122000.0
   origin: appendix
-  diagnosis: EOQ PO totals 4,000 CS vs 3,000 CS contract max (+33%); two SKUs over per-line ceiling.
+  diagnosis: EOQ PO totals 4,000 CS vs 3,000 CS contract max (+33%); within auto-trim band — trim plan needs review.
 - id: exc-031
   intent: PALLET_CONFIG
   event_type: PALLET_CONFIG_VIOLATION
-  order_id: PO-COST-EOQ-2026Q1
+  order_id: PO-031-R-14
   retailer_id: R-14
   sku: BEV-IPA-12PK
   po_price: 31.43
   sap_price: 31.43
-  line_count: 2
+  line_count: 1
   dc_id: DC-WEST-01
   metadata:
     pallet_lines:
@@ -1198,60 +1677,53 @@ scenarios:
       pallet_qty: 300
       ordered_qty: 2200
       uom: CS
-    - sku: BEV-LAGER-24PK
-      description: Premium Lager 24-pack case
-      layer_qty: 60
-      pallet_qty: 300
-      ordered_qty: 1800
-      uom: CS
-    note: Quantities don't tile to club-pack pallet spec (300 CS/pallet, 60 CS/layer).
-  lifecycle: RESOLVED
-  shadow_verdict: GREEN
+    note: Broken-layer remainder.
+  lifecycle: PENDING_REVIEW
+  shadow_verdict: YELLOW
   revenue_at_risk: 122000.0
   origin: appendix
-  diagnosis: Two SKUs didn't tile to Costco club-pack pallet spec; auto-aligned.
+  diagnosis: Order quantity leaves a broken-layer remainder against the club-pack pallet spec; alignment plan needs review.
 - id: exc-032
   intent: MIN_ORDER_QTY
   event_type: MIN_ORDER_QTY
-  order_id: PO-KR-WK15-2026
+  order_id: PO-032-R-12
   retailer_id: R-12
   sku: BEV-LEMON-6PK
   po_price: 7.2
   sap_price: 7.2
-  line_count: 2
+  line_count: 1
   dc_id: DC-MIDWEST-01
   metadata:
-    ordered_qty: 70
+    ordered_qty: 80
     moq_qty: 100
     unit_cost: 7.2
     uom: CS
-    note: Below 100 CS DSD MOQ; SAP V4082.
+    note: 20% shortfall below MOQ.
   lifecycle: PENDING_REVIEW
   shadow_verdict: YELLOW
-  revenue_at_risk: 1960.0
+  revenue_at_risk: 1440.0
   origin: appendix
-  diagnosis: WK-15 PO totals 70 CS across two SKUs, below 100 CS DSD MOQ.
+  diagnosis: Ordered 80 CS vs 100 CS DSD minimum (20 CS / 20% shortfall); round-up plan needs review.
 - id: exc-033
   intent: DELIVERY_DELAY
   event_type: DELIVERY_DELAY
-  order_id: PO-KR-WK15-2026
+  order_id: PO-033-R-12
   retailer_id: R-12
-  sku: BEV-SPARK-24PK
+  sku: BEV-LEMON-6PK
   po_price: 11.2
   sap_price: 11.2
   line_count: 1
   dc_id: DC-MIDWEST-01
   metadata:
     planned_date: '2026-05-11T00:00:00Z'
-    projected_eta: '2026-05-16T00:00:00Z'
-    days_late: 5
+    projected_eta: '2026-05-13T00:00:00Z'
     delay_category: CARRIER_DELAY
-    note: Cross-dock equipment failure; re-routed.
-  lifecycle: RESOLVED
-  shadow_verdict: GREEN
+    note: 2 days late, minor.
+  lifecycle: PENDING_REVIEW
+  shadow_verdict: YELLOW
   revenue_at_risk: 1960.0
   origin: appendix
-  diagnosis: WK-15 PO 5 days behind after a cross-dock equipment failure; re-routed.
+  diagnosis: Projected ETA 2026-05-13 vs planned 2026-05-11 (2 days late); minor delay — mitigation needs review.
 email_scenarios:
 - id: exc-026
   intent: MANUAL_ORDER_INTAKE
