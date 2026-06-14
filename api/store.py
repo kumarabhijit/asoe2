@@ -183,6 +183,7 @@ class ChildCase:
             intent_code=self.intent_code,
             divergence_reason=self.divergence_reason,
             sap_block_field=self.sap_block_field,
+            sap_block_code=self.sap_block_code,
             scope=self.scope,
             resolution_data=self.resolution_data,
             resolved_by=self.resolved_by,

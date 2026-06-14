@@ -20,6 +20,7 @@ def _make() -> ChildCase:
         intent_code="INT_PRICE_MISMATCH",
         divergence_reason=None,
         sap_block_field="LIFSK",
+        sap_block_code="Z1",
         scope="ITEM",
     )
 
@@ -30,6 +31,7 @@ def test_child_case_accepts_new_fields():
     assert rec.intent_code == "INT_PRICE_MISMATCH"
     assert rec.divergence_reason is None
     assert rec.sap_block_field == "LIFSK"
+    assert rec.sap_block_code == "Z1"
     assert rec.scope == "ITEM"
 
 
@@ -41,6 +43,7 @@ def test_new_fields_default_to_none():
     assert rec.intent_code is None
     assert rec.divergence_reason is None
     assert rec.sap_block_field is None
+    assert rec.sap_block_code is None
     assert rec.scope is None
 
 
@@ -58,6 +61,11 @@ def test_detail_surfaces_all_new_fields():
     assert detail.intent_code == "INT_PRICE_MISMATCH"
     assert detail.divergence_reason is None
     assert detail.sap_block_field == "LIFSK"
+    # Regression (A2): sap_block_code is carried on the store record but
+    # was previously not projected onto ExceptionDetailResponse, so the
+    # UI's declared field could never be populated. Fails on the parent
+    # commit (no field on the response model).
+    assert detail.sap_block_code == "Z1"
     assert detail.scope == "ITEM"
 
 

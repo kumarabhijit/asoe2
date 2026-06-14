@@ -343,6 +343,12 @@ class ExceptionDetailResponse(BaseModel):
     intent_code: Optional[str] = None
     divergence_reason: Optional[str] = None
     sap_block_field: Optional[str] = None
+    # Phase 2 §8.5 — raw SAP block reason code (`LIFSK=Z1`, `ABGRU=42`, …)
+    # carried on the store record but previously not projected onto the
+    # detail response, so the UI's declared `sap_block_code` field could
+    # never be populated. None on customer-origin records and pre-ADR-041
+    # legacy rows.
+    sap_block_code: Optional[str] = None
     scope: Optional[str] = None
     resolution_data: Dict[str, Any] = Field(default_factory=dict)
     resolved_by: Optional[str] = None
@@ -609,8 +615,14 @@ class ReanalysisHistoryEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     attempt: int
-    attempted_at: str
-    attempted_by: str
+    # Field names mirror the wire payload built in
+    # api/routes/exceptions.py::reanalyze (`triggered_at` / `triggered_by`)
+    # and the UI's ReanalysisEntry. Previously `attempted_at` /
+    # `attempted_by`, which silently contradicted the emitted dict — the
+    # untyped `reanalysis_history: List[Dict[str, Any]]` escape hatch hid
+    # the drift. Keep these in lockstep with the prior_entry construction.
+    triggered_at: str
+    triggered_by: str
     reason: Optional[str] = None
     prior_trace_id: str
     prior_shadow_verdict: Optional[str] = None
