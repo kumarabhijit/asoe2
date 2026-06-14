@@ -21,6 +21,7 @@ needs to know about it (CORS, auth handshake). "Production" is intentionally
 | Dimension | Local (docker-compose / bare) | Vercel preview (UI) | Azure pre-prod (Container Apps) |
 |---|---|---|---|
 | `ASOE_ENV` | `sandbox` | n/a (UI only) | `preprod` |
+| Case bootstrap (`ASOE_SANDBOX_BOOTSTRAP`) | on — catalog scenarios → real cases on boot | n/a (UI mock generated from same catalog) | on when `ASOE_ENV=sandbox` (idempotent; seeds once) |
 | Datastore | SQLite (in-memory unless `DATABASE_URL` set) | n/a | PostgreSQL Flexible Server (`DATABASE_URL` injected) |
 | Redis | in-process counter unless `REDIS_URL` set | n/a | Managed Redis (TLS, port 10000) |
 | Gateways | sandbox stubs | n/a | preprod stubs; live connectors swap in per `*_DRIVER` + canary |
@@ -44,6 +45,7 @@ All vars are documented in [`.env.example`](../.env.example).
 | Variable | Local | Azure pre-prod | Notes |
 |---|---|---|---|
 | `ASOE_ENV` | R (`sandbox`) | R (`preprod`) | unknown value → fail-loud at boot |
+| `ASOE_SANDBOX_BOOTSTRAP` | O (`1`) | O (`1`, sandbox only) | seeds cases from `catalog.yaml` on boot; idempotent; ignored unless `ASOE_ENV=sandbox` |
 | `DATABASE_URL` | O | R | unset → in-memory SQLite (dev only) |
 | `REDIS_URL` | O | R | unset → in-process counter (dev only) |
 | `ASOE_JWT_SECRET` | O (dev fallback) | R | never use the dev fallback off-sandbox |
