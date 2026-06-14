@@ -1,0 +1,133 @@
+# ASOE scenario analysis fixture — sibling to catalog.yaml.
+#
+# Owned by asoe2. Keyed by exc-id, DISTINCT from the SAP-seed `scenarios:`
+# in catalog.yaml (those are detection inputs; these are the per-record
+# OrderAnalysis evidence payload the operator consumes).
+#
+# Each entry validates against api/schemas.py::AnalysisResponse and its
+# *AnalysisData sub-models (tests/test_scenario_analyses.py). asoe-ui
+# vendors a committed snapshot of this file and projects it into
+# src/lib/mock-data/__generated__/scenario_analyses.ts.
+#
+# Authored losslessly from the prior hand-authored UI mock via
+# asoe-ui/scripts/author-scenario-analyses.ts — do not hand-transcribe.
+#
+version: 1
+analyses:
+  exc-017:
+    diagnosis: Inbound PO PO-PHR-001 landed with a pricing block because line 1's PO price ($101.00) deviates +1.0% from the SAP base ($100.00) at Plant 4100. Variance is within the 2.0% auto-release tolerance; pricing block released automatically and order proceeds to delivery.
+    confidence: 96
+    risk: LOW
+    resolution: AUTO_RELEASE
+    root_cause: EDI transmission rounding within contractual tolerance. Pricing block cleared per release policy (2% tolerance, 10% hard-block).
+    recommendation: No human action required. Block released; outbound delivery scheduled.
+    entity_profile:
+      customer_name: Walmart Inc
+      bp_number: BP-WMT-001
+      customer_tier: Strategic
+      vip_status: true
+      credit_standing: Excellent
+      location: Plant 4100 — Bentonville DC
+      region: South Central
+    impact_metrics:
+      revenue_at_risk: 1010
+      delta_amount: 10
+      delta_percentage: 1
+      sla_priority: LOW
+      sla_deadline: "2026-04-18T12:00:00Z"
+      affected_lines: 1
+    lines:
+      - line_id: L1
+        diagnosis: PO $101.00 vs SAP base $100.00 (+1.0%). Within ±2.0% release tolerance — rounding-class variance.
+        resolution: AUTO_RELEASE
+        risk: LOW
+        waterfall:
+          - type: BASE
+            label: Base Price (PR00)
+            record: PR00/10
+            value: 100
+            running: 100
+            detail: SAP list price, material group 101, effective 01/01/2026
+          - type: CONTRACT
+            label: Contract Price (ZA01)
+            record: ZA01/620
+            value: 0
+            running: 100
+            detail: "Walmart strategic-tier contract #4600019910 — no additional discount at this qty"
+          - type: RESULT
+            label: PO Price (incoming)
+            record: EDI 850/L1
+            value: 101
+            running: 101
+            detail: Variance +$1.00 (+1.0%) vs ERP. Within tolerance; pricing block released.
+    price_hold_analysis:
+      hold_status: RELEASED
+      po_price: 101
+      sap_base_price: 100
+      variance_pct: 0.01
+      tolerance_pct: 0.02
+      hard_block_pct: 0.1
+      action: AUTO_RELEASE
+      reason: Variance +1.0% within tolerance (+2.0%); block released per PriceHoldReleaseRecipe.
+  exc-018:
+    diagnosis: "Inbound PO PO-PHR-002 from Kroger is held on pricing-block check: line 1's PO price ($105.00) deviates +5.0% from the SAP base ($100.00). Above the 2.0% auto-release tolerance, below the 10.0% hard-block ceiling — PriceHoldReleaseRecipe escalated to a manager for review."
+    confidence: 90
+    risk: MEDIUM
+    resolution: ESCALATE
+    root_cause: PO price exceeds auto-release tolerance. Possible customer-side upload error, contract amendment not yet applied, or unauthorized price concession.
+    recommendation: Manager reviews the variance against Kroger's current contract. Approve to release block or override to reject with buyer notification.
+    entity_profile:
+      customer_name: Kroger Co
+      bp_number: BP-KRG-003
+      customer_tier: Strategic
+      vip_status: true
+      credit_standing: Good
+      location: Plant 5100 — Cincinnati DC
+      region: Midwest
+    impact_metrics:
+      revenue_at_risk: 5250
+      delta_amount: 250
+      delta_percentage: 5
+      sla_priority: MEDIUM
+      sla_deadline: "2026-04-18T18:00:00Z"
+      affected_lines: 1
+    lines:
+      - line_id: L1
+        diagnosis: "PO $105.00 vs SAP base $100.00 (+5.0%). Above ±2.0% release tolerance. Current Kroger contract #4600022150 does not carry a price-up clause at this SKU."
+        resolution: ESCALATE
+        risk: MEDIUM
+        waterfall:
+          - type: BASE
+            label: Base Price (PR00)
+            record: PR00/10
+            value: 100
+            running: 100
+            detail: SAP list price, material group 102, effective 01/01/2026
+          - type: CONTRACT
+            label: Contract Price (ZA01)
+            record: ZA01/620
+            value: 0
+            running: 100
+            detail: "Kroger strategic-tier contract #4600022150 — base aligned, no +5% clause"
+          - type: RESULT
+            label: PO Price (incoming)
+            record: EDI 850/L1
+            value: 105
+            running: 105
+            detail: Variance +$5.00 (+5.0%). Above tolerance; block held for review.
+          - type: ERROR
+            label: Pricing Block Check
+            record: VBKD-FAKSK
+            value: null
+            running: null
+            detail: "Release tolerance: ±2.0%. Hard-block: ±10.0%."
+            error: Escalate to manager — variance above auto-release threshold.
+    price_hold_analysis:
+      hold_status: HELD
+      po_price: 105
+      sap_base_price: 100
+      variance_pct: 0.05
+      tolerance_pct: 0.02
+      hard_block_pct: 0.1
+      action: ESCALATE
+      reason: Variance +5.0% above tolerance (+2.0%); under hard-block (+10.0%). Manager review required.
