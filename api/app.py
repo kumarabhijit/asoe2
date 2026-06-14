@@ -160,6 +160,18 @@ async def _lifespan(app: FastAPI):
     runtime + tests are unaffected."""
     from orchestration.outbox_scheduler import start_if_configured
 
+    # Opt-in sandbox case bootstrap (ASOE_ENV=sandbox + ASOE_SANDBOX_BOOTSTRAP=1).
+    # Runs catalog scenarios through the real graph so a freshly-started
+    # sandbox backend exposes the same populated queue the asoe-ui mock layer
+    # is generated from. Idempotent + failure-isolated — never blocks startup.
+    try:
+        from api.sandbox_bootstrap import bootstrap_sandbox_cases, is_enabled
+
+        if is_enabled():
+            bootstrap_sandbox_cases()
+    except Exception:  # pragma: no cover - bootstrap must never block startup
+        logging.getLogger("asoe").exception("sandbox case bootstrap failed")
+
     task = None
     try:
         task = start_if_configured()
