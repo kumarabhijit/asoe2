@@ -3034,7 +3034,7 @@ analyses:
       source_email_id: null
       evidence_anchors: []
   exc-042:
-    diagnosis: Buyer requests a full cancellation on an order already late in fulfilment (stage 4/5, picked). High-risk; revenue impact above the four-eyes threshold.
+    diagnosis: Buyer requests a full cancellation on an order already late in fulfilment (stage 4/5, picked). High-risk and above the four-eyes threshold; held for human review (intake never auto-executes, ADR-042).
     confidence: 45
     risk: HIGH
     resolution: Reject the cancellation and escalate to a supply planner.
@@ -3591,7 +3591,7 @@ analyses:
       source_email_id: null
       evidence_anchors: []
   exc-045:
-    diagnosis: "Buyer complaint: short shipment on SO-5100012501 (received 380 of 480 CS). Replacement shipment + goodwill credit under review; escalated to Customer Care."
+    diagnosis: "Buyer complaint: short shipment on SO-5100012501 (received 380 of 480 CS). Replacement shipment + goodwill credit recommended; held for review and routing to Customer Care."
     confidence: 90
     risk: HIGH
     resolution: Acknowledge, open the replacement shipment, and route the credit for approval.
@@ -3713,11 +3713,11 @@ analyses:
           relation: validated_by
       root_id: order:so-5100012501
   exc-046:
-    diagnosis: EDI 850 order from Kroger, 0.97 extraction confidence, all floor checks green — auto-validated, confirmed in SAP, and resolved without human review.
+    diagnosis: EDI 850 order from Kroger extracted at 0.97 confidence with all floor checks green — a clean, one-click-approvable order. Customer intake never auto-posts (ADR-042), so it is queued for the operator to confirm before SAP sales-order creation.
     confidence: 97
     risk: LOW
-    resolution: Auto-confirmed sales order SO-5100012799; no action required.
-    recommendation: Auto-resolved
+    resolution: One-click approve to confirm and post sales order SO-5100012799.
+    recommendation: Approve and post
     lines: []
     order_entry_extraction:
       source_type: EDI_850
