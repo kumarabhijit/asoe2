@@ -487,44 +487,6 @@ def _delivery_delay_template(record, _case) -> Optional[RenderedTemplate]:
     return RenderedTemplate(one_liner=one_liner)
 
 
-def _change_analysis_template(record, _case) -> Optional[RenderedTemplate]:
-    """Recipe SME spec:
-       `{change_items[0].field}: {from_value} → {to_value} (rec:
-        {decision.recommended_action}, ${revenue_impact_usd})`
-
-    Dispatches to `compose_change_analysis` so we project from
-    `enrichment_context["change_analysis"]` via the typed
-    ChangeAnalysis Pydantic shape. Renders the first change item
-    (recipe pre-sorts by revenue-impact desc). Renders without
-    the revenue-impact suffix when the field is absent (it's
-    Optional on ChangeDecision).
-    """
-    from api.profile_composer import compose_change_analysis
-
-    try:
-        data = compose_change_analysis(record)
-    except Exception:
-        return None
-    if data is None:
-        return None
-    items = data.evaluation.change_items
-    if not items:
-        return None
-    head = items[0]
-    field = head.field
-    from_v = head.from_value if head.from_value is not None else "—"
-    to_v = head.to_value if head.to_value is not None else "—"
-    action = data.decision.recommended_action
-    revenue = data.decision.revenue_impact_usd
-    suffix = (
-        f", ${revenue:,.2f}" if isinstance(revenue, (int, float)) else ""
-    )
-    one_liner = (
-        f"{field}: {from_v} → {to_v} (rec: {action}{suffix})"
-    )
-    return RenderedTemplate(one_liner=one_liner)
-
-
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -536,29 +498,19 @@ INTENT_TEMPLATES: Dict[str, TemplateFn] = {
     # Working implementations:
     "DUPLICATE_PO":            _duplicate_po_template,
     "MANUAL_ORDER_INTAKE":     _manual_order_intake_template,
-    # Explicit grandfather-clause no-ops (distinct from "missing"
-    # so the registry-coverage check can tell them apart). Keyed by the
-    # runtime Intent enum value, not the SME panel's working label
-    # (PRICE_HOLD_RELEASE not PRICE_HOLD; PALLET_CONFIG not PALLET), so the
-    # lookup actually matches the record's intent.
-    "PRICE_HOLD_RELEASE":      _grandfathered_no_template,
-    "EDI_MISMATCH":            _grandfathered_no_template,
-    "PALLET_CONFIG":           _grandfathered_no_template,
-    "EMAIL_COMPLAINT":         _grandfathered_no_template,
-    # Recipe-team TODOs:
-    "PRICE_DISCREPANCY":       _price_discrepancy_template,
     "BACK_ORDER":              _back_order_template,
     "CREDIT_BLOCK":            _credit_block_template,
     "CONTRACTUAL_CORRECTION":  _contractual_correction_template,
     "MASS_PRICING_ERROR":      _mass_pricing_error_template,
     "OVER_MAX":                _over_max_template,
-    # Keyed by the runtime Intent enum value (contracts/models.py::Intent),
-    # not the Recipe-SME panel's working label "MOQ_UPLIFT" — the record's
-    # intent is "MIN_ORDER_QTY", so the panel label never matched and the
-    # template (which exists) was unreachable. Wire it to the enum.
     "MIN_ORDER_QTY":           _moq_uplift_template,
     "DELIVERY_DELAY":          _delivery_delay_template,
-    "CHANGE_ANALYSIS":         _change_analysis_template,
+    # No honest one-liner from today's recipe output → the per-record
+    # `reason_headline_fallback` (compute_case_summary / compose_presentation)
+    # fills the cell from `resolution_data["reason"]` instead of a template.
+    "PRICE_HOLD_RELEASE":      _grandfathered_no_template,
+    "EDI_MISMATCH":            _grandfathered_no_template,
+    "PALLET_CONFIG":           _grandfathered_no_template,
 }
 
 
