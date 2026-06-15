@@ -1,0 +1,535 @@
+# ASOE scenario line-item fixture — sibling to catalog.yaml / analyses.yaml.
+#
+# Owned by asoe2. Keyed by exc-id. The line-level evidence table the
+# operator sees in the EvidenceGrid (the `/exceptions/{id}/line-items`
+# surface) — DISTINCT from analyses.yaml `lines` (per-line pricing
+# waterfall analysis, joined by line_id) and from catalog.yaml
+# `scenarios:` (detection inputs).
+#
+# Each entry validates against api/schemas.py::LineItem
+# (tests/test_scenario_line_items.py). asoe-ui vendors a committed
+# snapshot and projects it into
+# src/lib/mock-data/__generated__/scenario_line_items.ts.
+#
+# Generated from the prior hand-authored UI mock (MOCK_LINE_ITEMS) — do
+# not hand-transcribe; edit here and re-run the asoe-ui sync.
+#
+version: 1
+line_items:
+  exc-001:
+    - line_id: L1
+      sku: SKU-0042
+      description: "12-pk Cola"
+      uom: CS
+      quantity: 240
+      erp_price: 14.88
+      po_price: 13.2
+      root_cause: PROMO_EXPIRED
+    - line_id: L2
+      sku: SKU-0043
+      description: "12-pk Diet Cola"
+      uom: CS
+      quantity: 120
+      erp_price: 14.88
+      po_price: 13.2
+      root_cause: PROMO_EXPIRED
+    - line_id: L3
+      sku: SKU-0051
+      description: "12-pk Zero Sugar"
+      uom: CS
+      quantity: 96
+      erp_price: 14.88
+      po_price: 14.9
+      root_cause: EDI_MISMATCH
+  exc-002:
+    - line_id: L1
+      sku: SKU-1180
+      description: "24-pk Water"
+      uom: CS
+      quantity: 500
+      erp_price: 9.6
+      po_price: 9.62
+      root_cause: EDI_MISMATCH
+    - line_id: L2
+      sku: SKU-1181
+      description: "12-pk Sparkling"
+      uom: CS
+      quantity: 200
+      erp_price: 11.4
+      po_price: 10
+      root_cause: CONTRACT_GAP
+  exc-003:
+    - line_id: L1
+      sku: SKU-3310
+      description: Snack Bar 48ct
+      uom: CS
+      quantity: 300
+      erp_price: 28.44
+      po_price: 25
+      root_cause: CONTRACT_GAP
+    - line_id: L2
+      sku: SKU-3312
+      description: Protein Bar 36ct
+      uom: CS
+      quantity: 150
+      erp_price: 24
+      po_price: 21.5
+      root_cause: PROMO_EXPIRED
+    - line_id: L3
+      sku: SKU-3315
+      description: Granola Bar 60ct
+      uom: CS
+      quantity: 80
+      erp_price: 32
+      po_price: 32
+      root_cause: EDI_MISMATCH
+    - line_id: L4
+      sku: SKU-3320
+      description: Kids Bar 24ct
+      uom: CS
+      quantity: 200
+      erp_price: 18
+      po_price: 15
+      root_cause: MASTER_DATA
+  exc-004:
+    - line_id: L1
+      sku: SKU-5521
+      description: Family Pack x6
+      uom: CS
+      quantity: 180
+      erp_price: 42
+      po_price: 36
+      root_cause: UOM_ERROR
+    - line_id: L2
+      sku: SKU-5525
+      description: Mega Pack x12
+      uom: CS
+      quantity: 90
+      erp_price: 82
+      po_price: 72
+      root_cause: UOM_ERROR
+  exc-005:
+    - line_id: L1
+      sku: SKU-0099
+      description: Juice 1L x12
+      uom: CS
+      quantity: 360
+      erp_price: 19.2
+      po_price: 17.28
+      root_cause: ERP_NOT_LOADED
+  exc-006:
+    - line_id: L1
+      sku: SKU-7701
+      description: Energy Drink 4pk
+      uom: CS
+      quantity: 480
+      erp_price: 8.96
+      po_price: 8.5
+      root_cause: MASTER_DATA
+    - line_id: L2
+      sku: SKU-7705
+      description: Energy Drink 8pk
+      uom: CS
+      quantity: 240
+      erp_price: 17.5
+      po_price: 16
+      root_cause: MASTER_DATA
+  exc-007:
+    - line_id: L1
+      sku: SKU-2210
+      description: Sports Drink 12pk
+      uom: CS
+      quantity: 400
+      erp_price: 12.6
+      po_price: 11
+      root_cause: CONTRACT_GAP
+  exc-008:
+    - line_id: L1
+      sku: SKU-8801
+      description: Organic Tea 6pk
+      uom: CS
+      quantity: 150
+      erp_price: 22.5
+      po_price: 20
+      root_cause: PROMO_EXPIRED
+    - line_id: L2
+      sku: SKU-8805
+      description: Green Tea 12pk
+      uom: CS
+      quantity: 200
+      erp_price: 18
+      po_price: 18
+  exc-009:
+    - line_id: L1
+      sku: SKU-4410
+      description: Sports Water 24pk
+      uom: CS
+      quantity: 60
+      erp_price: 8.4
+      po_price: 8.4
+  exc-010:
+    - line_id: L1
+      sku: SKU-6100
+      description: Premium Lager 12pk
+      uom: CS
+      quantity: 800
+      erp_price: 18.5
+      po_price: 18.5
+    - line_id: L2
+      sku: SKU-6105
+      description: Light Lager 12pk
+      uom: CS
+      quantity: 400
+      erp_price: 16.2
+      po_price: 16.2
+  exc-011:
+    - line_id: L1
+      sku: SKU-6200
+      description: Craft IPA 6pk
+      uom: CS
+      quantity: 200
+      erp_price: 22
+      po_price: 22
+  exc-012:
+    - line_id: L1
+      sku: SKU-9010
+      description: Sparkling Mineral 12pk
+      uom: CS
+      quantity: 1200
+      erp_price: 11.5
+      po_price: 11.5
+    - line_id: L2
+      sku: SKU-9015
+      description: Still Mineral 12pk
+      uom: CS
+      quantity: 800
+      erp_price: 9.8
+      po_price: 9.8
+    - line_id: L3
+      sku: SKU-9020
+      description: Flavored Water 24pk
+      uom: CS
+      quantity: 600
+      erp_price: 14.2
+      po_price: 14.2
+  exc-013:
+    - line_id: L1
+      sku: SKU-7800
+      description: Organic Kombucha 6pk
+      uom: CS
+      quantity: 40
+      erp_price: 28.5
+      po_price: 28.5
+    - line_id: L2
+      sku: SKU-7810
+      description: Ginger Kombucha 6pk
+      uom: CS
+      quantity: 25
+      erp_price: 26
+      po_price: 26
+  exc-014:
+    - line_id: L1
+      sku: SKU-3500
+      description: Premium Coffee 12oz 24pk
+      uom: CS
+      quantity: 170
+      erp_price: 36
+      po_price: 36
+    - line_id: L2
+      sku: SKU-3510
+      description: Decaf Coffee 12oz 24pk
+      uom: CS
+      quantity: 85
+      erp_price: 34.5
+      po_price: 34.5
+    - line_id: L3
+      sku: SKU-3520
+      description: Cold Brew 10oz 12pk
+      uom: CS
+      quantity: 50
+      erp_price: 42
+      po_price: 42
+  exc-016:
+    - line_id: L1
+      sku: SKU-9100
+      description: Sparkling Water 16oz 12pk
+      uom: CS
+      quantity: 5000
+      erp_price: 11.5
+      po_price: 11.5
+    - line_id: L2
+      sku: SKU-9110
+      description: Sparkling Water 20oz 12pk
+      uom: CS
+      quantity: 3200
+      erp_price: 13.8
+      po_price: 13.8
+    - line_id: L3
+      sku: SKU-9120
+      description: Electrolyte Blend 12oz 24pk
+      uom: CS
+      quantity: 2400
+      erp_price: 18.4
+      po_price: 18.4
+    - line_id: L4
+      sku: SKU-9130
+      description: Flavored Soda 12oz 24pk
+      uom: CS
+      quantity: 1400
+      erp_price: 15.2
+      po_price: 15.2
+  exc-017:
+    - line_id: L1
+      sku: SKU-101
+      description: "12oz Craft Soda Variety 24pk"
+      uom: CS
+      quantity: 10
+      erp_price: 100
+      po_price: 101
+  exc-018:
+    - line_id: L1
+      sku: SKU-102
+      description: "16oz Energy Drink 12pk"
+      uom: CS
+      quantity: 50
+      erp_price: 100
+      po_price: 105
+  exc-019:
+    - line_id: L1
+      sku: SKU-999-UNKNOWN
+      description: SKU not in material master — buyer-cited variant of SKU-001
+      uom: CS
+      quantity: 80
+      erp_price: 63
+      po_price: 63
+  exc-020:
+    - line_id: L1
+      sku: SKU-202
+      description: "32oz Sports Drink 6pk"
+      uom: CS
+      quantity: 144
+      erp_price: 50
+      po_price: 50
+  exc-021:
+    - line_id: L1
+      sku: SKU-PRICE-MM
+      description: "18oz Premium Juice 8pk (Q2 concession)"
+      uom: CS
+      quantity: 100
+      erp_price: 100
+      po_price: 95
+  exc-026:
+    - line_id: L1
+      sku: SKU-1101
+      description: "12oz Cola 24pk"
+      uom: CS
+      quantity: 80
+      erp_price: 22.5
+      po_price: 22.5
+    - line_id: L2
+      sku: SKU-1102
+      description: "12oz Diet Cola 24pk"
+      uom: CS
+      quantity: 80
+      erp_price: 22.5
+      po_price: 22.5
+    - line_id: L3
+      sku: SKU-1108
+      description: "16oz Sparkling Water 12pk"
+      uom: CS
+      quantity: 60
+      erp_price: 18.4
+      po_price: 18.4
+    - line_id: L4
+      sku: SKU-1112
+      description: "20oz Sports Drink 12pk"
+      uom: CS
+      quantity: 100
+      erp_price: 26
+      po_price: 26
+  exc-027:
+    - line_id: L1
+      sku: SKU-Q1R-2076
+      description: Q1 Reset Display Pack
+      uom: CS
+      quantity: 1600
+      erp_price: 20
+      po_price: 21.1
+      root_cause: PRICE_HOLD_ESCALATE
+  exc-028:
+    - line_id: L1
+      sku: SKU-Q1R-2076
+      description: Q1 Reset Display Pack
+      uom: CS
+      quantity: 1600
+      erp_price: 21.1
+      po_price: 21.1
+      root_cause: BACK_ORDER_GAP
+  exc-029:
+    - line_id: L1
+      sku: SKU-Q1R-2076
+      description: Q1 Reset Display Pack (retransmit)
+      uom: CS
+      quantity: 1600
+      erp_price: 21.1
+      po_price: 21.1
+      root_cause: EDI_RETRANSMIT
+  exc-030:
+    - line_id: L1
+      sku: SKU-COST-EOQ-A
+      description: Costco Club-Pack Bundle 36ct
+      uom: CS
+      quantity: 2000
+      erp_price: 30.5
+      po_price: 30.5
+      root_cause: OVER_MAX_LINE
+    - line_id: L2
+      sku: SKU-COST-EOQ-B
+      description: Costco Club-Pack Bundle 48ct
+      uom: CS
+      quantity: 2000
+      erp_price: 30.5
+      po_price: 30.5
+      root_cause: OVER_MAX_LINE
+  exc-031:
+    - line_id: L1
+      sku: SKU-COST-EOQ-A
+      description: Costco Club-Pack Bundle 36ct
+      uom: CS
+      quantity: 2000
+      erp_price: 30.5
+      po_price: 30.5
+      root_cause: PALLET_BROKEN_LAYER
+    - line_id: L2
+      sku: SKU-COST-EOQ-B
+      description: Costco Club-Pack Bundle 48ct
+      uom: CS
+      quantity: 2000
+      erp_price: 30.5
+      po_price: 30.5
+      root_cause: PALLET_BROKEN_LAYER
+  exc-032:
+    - line_id: L1
+      sku: SKU-KR-1100
+      description: Kombucha Variety 6pk
+      uom: CS
+      quantity: 50
+      erp_price: 28
+      po_price: 28
+      root_cause: MOQ_BELOW_LINE
+    - line_id: L2
+      sku: SKU-KR-1110
+      description: Ginger Kombucha 6pk
+      uom: CS
+      quantity: 20
+      erp_price: 28
+      po_price: 28
+      root_cause: MOQ_BELOW_LINE
+  exc-033:
+    - line_id: L1
+      sku: SKU-KR-1100
+      description: Kombucha Variety 6pk
+      uom: CS
+      quantity: 50
+      erp_price: 28
+      po_price: 28
+      root_cause: CARRIER_DELAY
+    - line_id: L2
+      sku: SKU-KR-1110
+      description: Ginger Kombucha 6pk
+      uom: CS
+      quantity: 20
+      erp_price: 28
+      po_price: 28
+      root_cause: CARRIER_DELAY
+  exc-040:
+    - line_id: L1
+      sku: BEV-COLA-12PK
+      description: Cola 12-pack case (reduce 600 → 420)
+      uom: CS
+      quantity: 600
+      erp_price: 8.64
+      po_price: 8.64
+      root_cause: CHANGE_QTY_REDUCTION
+    - line_id: L2
+      sku: BEV-LEMON-6PK
+      description: Lemon 6-pack case
+      uom: CS
+      quantity: 240
+      erp_price: 7.2
+      po_price: 7.2
+  exc-041:
+    - line_id: L1
+      sku: BEV-COLA-12PK
+      description: Cola 12-pack case (expedite 05/24 → 05/20)
+      uom: CS
+      quantity: 600
+      erp_price: 8.64
+      po_price: 8.64
+      root_cause: CHANGE_EXPEDITE
+    - line_id: L2
+      sku: BEV-LEMON-6PK
+      description: Lemon 6-pack case
+      uom: CS
+      quantity: 240
+      erp_price: 7.2
+      po_price: 7.2
+  exc-042:
+    - line_id: L1
+      sku: BEV-COLA-12PK
+      description: Cola 12-pack case (cancellation requested — picked)
+      uom: CS
+      quantity: 4800
+      erp_price: 8.64
+      po_price: 8.64
+      root_cause: CHANGE_CANCELLATION
+    - line_id: L2
+      sku: BEV-SPRT-20OZ
+      description: Sports Drink 20oz 12pk (cancellation requested — picked)
+      uom: CS
+      quantity: 750
+      erp_price: 9.2
+      po_price: 9.2
+      root_cause: CHANGE_CANCELLATION
+  exc-043:
+    - line_id: L1
+      sku: BEV-COLA-12PK
+      description: Cola 12-pack case
+      uom: CS
+      quantity: 600
+      erp_price: 8.64
+      po_price: 8.64
+    - line_id: L2
+      sku: BEV-LEMON-6PK
+      description: "Lemon 6-pack (request: swap to 12-pack)"
+      uom: CS
+      quantity: 240
+      erp_price: 7.2
+      po_price: 7.2
+      root_cause: CHANGE_SKU_SUBSTITUTION
+  exc-044:
+    - line_id: L1
+      sku: BEV-COLA-12PK
+      description: Cola 12-pack case (referenced order SO-5100012344, delivered)
+      uom: CS
+      quantity: 480
+      erp_price: 8.64
+      po_price: 8.64
+      root_cause: INQUIRY_REFERENCED_ORDER
+  exc-045:
+    - line_id: L1
+      sku: BEV-COLA-12PK
+      description: "Cola 12-pack case (short shipment: received 380 of 480)"
+      uom: CS
+      quantity: 480
+      erp_price: 8.64
+      po_price: 8.64
+      root_cause: COMPLAINT_SHORT_SHIPMENT
+  exc-046:
+    - line_id: L1
+      sku: BEV-COLA-12PK
+      description: Cola 12-pack case (EDI 850 — auto-confirmed)
+      uom: CS
+      quantity: 480
+      erp_price: 8.64
+      po_price: 8.64
