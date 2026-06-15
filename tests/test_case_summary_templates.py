@@ -83,9 +83,10 @@ class TestDispatch:
     def test_template_returning_none_is_normalised_to_empty(self):
         """The dispatcher must never propagate None — the wire shape
         is `RenderedTemplate` (with None fields), not Optional."""
-        # PRICE_DISCREPANCY's stub returns None today.
+        # A sparse pricing record (no audit-bearing gateway context) makes
+        # the template return None — the dispatcher must normalise it.
         result = render_template(
-            _StubRecord(intent="PRICE_DISCREPANCY"),
+            _StubRecord(intent="CONTRACTUAL_CORRECTION"),
             _StubCase(),
         )
         assert result == RenderedTemplate()
@@ -223,7 +224,8 @@ class TestManualOrderIntakeTemplate:
 
 
 # ---------------------------------------------------------------------------
-# PRICE_DISCREPANCY — Round 2 implementation
+# Pricing renderer — shared `_price_record` builder (CONTRACTUAL_CORRECTION;
+# the renderer is exercised via TestContractualCorrectionTemplate below)
 # ---------------------------------------------------------------------------
 
 
@@ -256,7 +258,7 @@ def _price_record(**overrides):
         },
     }
     return _StubRecord(
-        intent="PRICE_DISCREPANCY",
+        intent="CONTRACTUAL_CORRECTION",
         resolution_data=overrides.get("resolution_data", {}),
         enrichment_context=enrichment,
     )._with_event(event)
@@ -270,38 +272,6 @@ def _stub_with_event(self, event):
 
 
 _StubRecord._with_event = _stub_with_event  # type: ignore[attr-defined]
-
-
-class TestPriceDiscrepancyTemplate:
-    def test_happy_path_renders_sku_and_one_liner(self):
-        record = _price_record()
-        result = render_template(record, _StubCase())
-        assert result.sku_code == "BEV-COLA-12PK"
-        assert result.sku_title == "Cola 12-pack"
-        # The one-liner should mention prices + variance + at-risk.
-        assert result.one_liner is not None
-        assert "$10.50/EA" in result.one_liner
-        assert "$9.80" in result.one_liner
-        assert "%" in result.one_liner
-
-    def test_missing_gateway_context_returns_empty(self):
-        # adapt_price returns None when audit-bearing fields absent.
-        record = _StubRecord(
-            intent="PRICE_DISCREPANCY",
-            enrichment_context={},  # no sap_doc / contract / promo
-        )
-        record.original_event = {"po_price": 10, "sap_base_price": 9}
-        result = render_template(record, _StubCase())
-        assert result == RenderedTemplate()
-
-    def test_renders_without_material_desc(self):
-        """material_desc is contextual; absence is OK."""
-        record = _price_record()
-        record.original_event["metadata"].pop("material_desc")
-        result = render_template(record, _StubCase())
-        assert result.sku_code == "BEV-COLA-12PK"
-        assert result.sku_title is None  # gracefully absent
-        assert result.one_liner is not None
 
 
 # ---------------------------------------------------------------------------
@@ -373,72 +343,6 @@ class TestBackOrderTemplate:
     def test_missing_inventory_snapshot_returns_empty(self):
         record = _back_order_record()
         record.enrichment_context = {}  # adapter returns None
-        result = render_template(record, _StubCase())
-        assert result == RenderedTemplate()
-
-
-# ---------------------------------------------------------------------------
-# CHANGE_ANALYSIS — Round 2 implementation
-# ---------------------------------------------------------------------------
-
-
-def _change_record(*, with_revenue: bool = True):
-    enrichment = {
-        "change_analysis": {
-            "evaluation": {
-                "lifecycle_stages": ["DRAFT", "REVIEW", "APPROVED"],
-                "lifecycle_index": 1,
-                "change_items": [
-                    {
-                        "field": "quantity",
-                        "from_value": "100",
-                        "to_value": "150",
-                    },
-                ],
-                "checks": [],
-                "pass_count": 0,
-                "conditional_count": 0,
-                "warning_count": 0,
-            },
-            "scenarios": [],
-            "decision": {
-                "recommended_action": "APPROVE_WITH_COSIGN",
-                "confidence": 0.86,
-                "rationale": "Within tolerance.",
-                "revenue_impact_usd": 4200.0 if with_revenue else None,
-                "requires_cosign": True,
-                "sap_actions": [],
-            },
-        },
-    }
-    return _StubRecord(intent="CHANGE_ANALYSIS", enrichment_context=enrichment)
-
-
-class TestChangeAnalysisTemplate:
-    def test_happy_path_renders_field_arrow_action_revenue(self):
-        result = render_template(_change_record(), _StubCase())
-        assert result.one_liner is not None
-        assert "quantity:" in result.one_liner
-        assert "100 → 150" in result.one_liner
-        assert "APPROVE_WITH_COSIGN" in result.one_liner
-        assert "$4,200" in result.one_liner
-
-    def test_no_revenue_impact_omits_suffix(self):
-        result = render_template(_change_record(with_revenue=False), _StubCase())
-        assert result.one_liner is not None
-        # No dollar suffix when revenue_impact_usd is None.
-        assert "$" not in result.one_liner
-
-    def test_missing_change_analysis_returns_empty(self):
-        record = _StubRecord(intent="CHANGE_ANALYSIS", enrichment_context={})
-        result = render_template(record, _StubCase())
-        assert result == RenderedTemplate()
-
-    def test_empty_change_items_returns_empty(self):
-        record = _change_record()
-        record.enrichment_context["change_analysis"]["evaluation"][
-            "change_items"
-        ] = []
         result = render_template(record, _StubCase())
         assert result == RenderedTemplate()
 
@@ -795,7 +699,7 @@ class TestGrandfatheredIntents:
 
     @pytest.mark.parametrize(
         "intent",
-        ["PRICE_HOLD_RELEASE", "EDI_MISMATCH", "PALLET_CONFIG", "EMAIL_COMPLAINT"],
+        ["PRICE_HOLD_RELEASE", "EDI_MISMATCH", "PALLET_CONFIG"],
     )
     def test_grandfathered_intent_renders_empty(self, intent):
         record = _StubRecord(intent=intent, resolution_data={"anything": "here"})
@@ -804,7 +708,7 @@ class TestGrandfatheredIntents:
 
     @pytest.mark.parametrize(
         "intent",
-        ["PRICE_HOLD_RELEASE", "EDI_MISMATCH", "PALLET_CONFIG", "EMAIL_COMPLAINT"],
+        ["PRICE_HOLD_RELEASE", "EDI_MISMATCH", "PALLET_CONFIG"],
     )
     def test_grandfathered_intent_uses_explicit_sentinel(self, intent):
         """Distinct symbol identifies the deliberate no-op vs. a
@@ -861,31 +765,26 @@ class TestTodoStubs:
 
 
 class TestRegistryCoverage:
-    def test_registry_covers_all_panel_intents(self):
-        """The 15 intents the 2026-05-28 Recipe SME panel mapped
-        must all be in the registry — either with a working
-        template, a TODO stub, or the grandfather-clause sentinel.
-        New intents from the backend MUST be added explicitly so
-        the row's per-intent shape is intentional, not accidental."""
-        EXPECTED = {
-            "DUPLICATE_PO",
-            "MANUAL_ORDER_INTAKE",
-            "PRICE_HOLD_RELEASE",
-            "EDI_MISMATCH",
-            "PALLET_CONFIG",
-            "EMAIL_COMPLAINT",
-            "PRICE_DISCREPANCY",
-            "BACK_ORDER",
-            "CREDIT_BLOCK",
-            "CONTRACTUAL_CORRECTION",
-            "MASS_PRICING_ERROR",
-            "OVER_MAX",
-            "MIN_ORDER_QTY",
-            "DELIVERY_DELAY",
-            "CHANGE_ANALYSIS",
-        }
-        missing = EXPECTED - INTENT_TEMPLATES.keys()
-        assert not missing, (
-            f"Registry missing intents from the Recipe SME panel "
-            f"spec: {missing}. Add an entry to INTENT_TEMPLATES."
+    def test_registry_matches_intent_enum_exactly(self):
+        """Drift-proof lock — `INTENT_TEMPLATES` must be keyed by the runtime
+        `Intent` enum values, EXACTLY:
+
+          * a key that is NOT an Intent value is dead (`render_template` looks
+            up by `record.intent`, so it can never match) — the bug that hid
+            MOQ_UPLIFT / PRICE_HOLD / PALLET behind SME-panel labels;
+          * an Intent value MISSING a key renders a blank one-liner — the gap
+            that left MIN_ORDER_QTY without a Situation headline.
+
+        Every intent gets either a working template or the grandfather
+        sentinel (whose blank one-liner is filled per-record by
+        `reason_headline_fallback`). UNKNOWN is the only enum value excluded —
+        it is the unclassified sink, never a dispositioned queue row."""
+        from contracts.models import Intent
+
+        expected = {i.value for i in Intent} - {"UNKNOWN"}
+        actual = set(INTENT_TEMPLATES.keys())
+        assert actual == expected, (
+            "INTENT_TEMPLATES drifted from the Intent enum.\n"
+            f"  missing (intent has no template entry): {expected - actual}\n"
+            f"  dead    (key is not an Intent value):   {actual - expected}"
         )
