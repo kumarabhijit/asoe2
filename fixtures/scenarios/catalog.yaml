@@ -1565,7 +1565,7 @@ scenarios:
 - id: exc-027
   intent: PRICE_HOLD_RELEASE
   event_type: EDI_850_PRICE_HOLD
-  order_id: PO-027-R-11
+  order_id: PO-WMT-Q1-RESET-001
   retailer_id: R-11
   sku: BEV-LAGER-24PK
   po_price: 21.1
@@ -1583,7 +1583,7 @@ scenarios:
 - id: exc-028
   intent: BACK_ORDER
   event_type: BACK_ORDER_OOS
-  order_id: PO-028-R-11
+  order_id: PO-WMT-Q1-RESET-001
   retailer_id: R-11
   sku: BEV-LAGER-24PK
   po_price: 20.0
@@ -1604,7 +1604,7 @@ scenarios:
 - id: exc-029
   intent: DUPLICATE_PO
   event_type: EDI_850_DUPLICATE_PO
-  order_id: PO-029-R-11
+  order_id: PO-WMT-Q1-RESET-001
   retailer_id: R-11
   sku: BEV-LAGER-24PK
   po_price: 20.0
