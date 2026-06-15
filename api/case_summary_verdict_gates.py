@@ -109,8 +109,11 @@ def apply_verdict_color_gates(
 
 
 def _should_floor_to_amber(intent: str, record, case) -> bool:
-    """Rule 4: PRICE_HOLD AUTO_RELEASE near tolerance."""
-    if intent == "PRICE_HOLD" and _price_hold_near_ceiling(record):
+    """Rule 4: PRICE_HOLD_RELEASE AUTO_RELEASE near tolerance."""
+    # Keyed by the runtime Intent enum value ("PRICE_HOLD_RELEASE"), not the
+    # SME panel's "PRICE_HOLD" label — the prior string never matched a real
+    # record, so this SOX floor-to-AMBER gate had silently stopped firing.
+    if intent == "PRICE_HOLD_RELEASE" and _price_hold_near_ceiling(record):
         return True
 
     """Rule 5: DUPLICATE_PO with duplicate_order.total_value > $10k."""
@@ -225,8 +228,11 @@ def _should_ceiling_at_amber(intent: str, record) -> bool:
     if intent == "DELIVERY_DELAY" and _delivery_delay_within_sla(record):
         return True
 
-    """Rule 2: PALLET BROKEN_LAYER / PARTIAL_PALLET classifications."""
-    if intent == "PALLET" and _pallet_routine_class(record):
+    """Rule 2: PALLET_CONFIG BROKEN_LAYER / PARTIAL_PALLET classifications."""
+    # Runtime Intent enum value ("PALLET_CONFIG"), not the SME "PALLET" label
+    # — the prior string never matched, so this ceiling-at-AMBER gate had
+    # silently stopped firing for real pallet records.
+    if intent == "PALLET_CONFIG" and _pallet_routine_class(record):
         return True
 
     """Rule 3: EDI_MISMATCH DATE_FORMAT / UOM_NORMALISATION sub-types."""

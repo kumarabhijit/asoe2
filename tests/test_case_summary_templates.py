@@ -539,7 +539,7 @@ def _moq_record():
         "shortfall_pct": 36.0,
         "at_risk": 352.80,
     }
-    r = _StubRecord(intent="MOQ_UPLIFT", resolution_data=rd)
+    r = _StubRecord(intent="MIN_ORDER_QTY", resolution_data=rd)
     r.original_event = event
     return r
 
@@ -795,7 +795,7 @@ class TestGrandfatheredIntents:
 
     @pytest.mark.parametrize(
         "intent",
-        ["PRICE_HOLD", "EDI_MISMATCH", "PALLET", "EMAIL_COMPLAINT"],
+        ["PRICE_HOLD_RELEASE", "EDI_MISMATCH", "PALLET_CONFIG", "EMAIL_COMPLAINT"],
     )
     def test_grandfathered_intent_renders_empty(self, intent):
         record = _StubRecord(intent=intent, resolution_data={"anything": "here"})
@@ -804,7 +804,7 @@ class TestGrandfatheredIntents:
 
     @pytest.mark.parametrize(
         "intent",
-        ["PRICE_HOLD", "EDI_MISMATCH", "PALLET", "EMAIL_COMPLAINT"],
+        ["PRICE_HOLD_RELEASE", "EDI_MISMATCH", "PALLET_CONFIG", "EMAIL_COMPLAINT"],
     )
     def test_grandfathered_intent_uses_explicit_sentinel(self, intent):
         """Distinct symbol identifies the deliberate no-op vs. a
@@ -870,9 +870,9 @@ class TestRegistryCoverage:
         EXPECTED = {
             "DUPLICATE_PO",
             "MANUAL_ORDER_INTAKE",
-            "PRICE_HOLD",
+            "PRICE_HOLD_RELEASE",
             "EDI_MISMATCH",
-            "PALLET",
+            "PALLET_CONFIG",
             "EMAIL_COMPLAINT",
             "PRICE_DISCREPANCY",
             "BACK_ORDER",
@@ -880,7 +880,7 @@ class TestRegistryCoverage:
             "CONTRACTUAL_CORRECTION",
             "MASS_PRICING_ERROR",
             "OVER_MAX",
-            "MOQ_UPLIFT",
+            "MIN_ORDER_QTY",
             "DELIVERY_DELAY",
             "CHANGE_ANALYSIS",
         }

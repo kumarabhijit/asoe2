@@ -111,7 +111,7 @@ class TestPalletCeiling:
             "pallet_analysis": {"classification": cls},
         })
         gated = apply_verdict_color_gates(
-            "R", intent="PALLET",
+            "R", intent="PALLET_CONFIG",
             primary_record=record, case=_Case(),
         )
         assert gated == "A"
@@ -121,7 +121,7 @@ class TestPalletCeiling:
             "pallet_analysis": {"classification": "MULTI_TIER_VIOLATION"},
         })
         gated = apply_verdict_color_gates(
-            "R", intent="PALLET",
+            "R", intent="PALLET_CONFIG",
             primary_record=record, case=_Case(),
         )
         assert gated == "R"
@@ -171,7 +171,7 @@ class TestPriceHoldFloor:
             },
         })
         gated = apply_verdict_color_gates(
-            "G", intent="PRICE_HOLD",
+            "G", intent="PRICE_HOLD_RELEASE",
             primary_record=record, case=_Case(),
         )
         assert gated == "A"
@@ -186,7 +186,7 @@ class TestPriceHoldFloor:
             },
         })
         gated = apply_verdict_color_gates(
-            "G", intent="PRICE_HOLD",
+            "G", intent="PRICE_HOLD_RELEASE",
             primary_record=record, case=_Case(),
         )
         assert gated == "G"
@@ -200,7 +200,7 @@ class TestPriceHoldFloor:
             },
         })
         gated = apply_verdict_color_gates(
-            "G", intent="PRICE_HOLD",
+            "G", intent="PRICE_HOLD_RELEASE",
             primary_record=record, case=_Case(),
         )
         assert gated == "G"
