@@ -1737,7 +1737,7 @@ email_scenarios:
   sender: po@sebev.example.com
   received_at: '2026-04-30T10:12:00Z'
   lifecycle: PENDING_REVIEW
-  shadow_verdict: YELLOW
+  shadow_verdict: GREEN
   revenue_at_risk: 18400.0
   diagnosis: Non-EDI PO; four lines at composite confidence 0.88; ambiguous ship-to -> clarification.
 - id: exc-046
@@ -1751,10 +1751,10 @@ email_scenarios:
   zemail_msg_id: MSG-2026-0008
   sender: po@kroger.example.com
   received_at: '2026-05-22T07:10:00Z'
-  lifecycle: RESOLVED
+  lifecycle: PENDING_REVIEW
   shadow_verdict: GREEN
   revenue_at_risk: null
-  diagnosis: Structured order, 0.97 extraction confidence, all floor checks green -> auto-posted.
+  diagnosis: Structured order, 0.97 extraction confidence, all floor checks green; intake routes to review (never auto-executes, ADR-042).
 - id: exc-dup-resend
   intent: MANUAL_ORDER_INTAKE
   fixture: test-dup-0001-resend-sebev.eml
@@ -1767,7 +1767,7 @@ email_scenarios:
   sender: po@sebev.example.com
   received_at: '2026-05-01T08:45:00Z'
   lifecycle: PENDING_REVIEW
-  shadow_verdict: YELLOW
+  shadow_verdict: GREEN
   revenue_at_risk: null
   diagnosis: Same-channel duplicate of msg-2026-0001 ~22h later; flag as duplicate, do not re-enter.
 - id: exc-dup-crosschannel
@@ -1782,7 +1782,7 @@ email_scenarios:
   sender: po@kroger.example.com
   received_at: '2026-04-12T09:30:00Z'
   lifecycle: PENDING_REVIEW
-  shadow_verdict: YELLOW
+  shadow_verdict: GREEN
   revenue_at_risk: null
   diagnosis: 'Cross-channel duplicate: PO-88421 already arrived via EDI; match existing order.'
 - id: exc-040
@@ -1797,7 +1797,7 @@ email_scenarios:
   sender: po@sebev.example.com
   received_at: '2026-05-18T09:02:00Z'
   lifecycle: PENDING_REVIEW
-  shadow_verdict: YELLOW
+  shadow_verdict: GREEN
   revenue_at_risk: null
   diagnosis: Quantity reduction on line 001 (600 -> 420 CS); GOLD-tier approval required.
 - id: exc-041
@@ -1812,7 +1812,7 @@ email_scenarios:
   sender: po@sebev.example.com
   received_at: '2026-05-18T11:20:00Z'
   lifecycle: PENDING_REVIEW
-  shadow_verdict: YELLOW
+  shadow_verdict: GREEN
   revenue_at_risk: null
   diagnosis: Expedite (delivery pulled in); SLA tight, carrier capacity constrained.
 - id: exc-042
@@ -1826,10 +1826,10 @@ email_scenarios:
   zemail_msg_id: MSG-2026-0004
   sender: orders@buying.walmart.example.com
   received_at: '2026-05-19T08:15:00Z'
-  lifecycle: ESCALATED
-  shadow_verdict: RED
+  lifecycle: PENDING_REVIEW
+  shadow_verdict: GREEN
   revenue_at_risk: null
-  diagnosis: Full cancellation late in fulfilment (picked); above four-eyes threshold -> escalate.
+  diagnosis: Full cancellation late in fulfilment (picked); routed to manual review (intake never auto-executes, ADR-042).
 - id: exc-043
   intent: MANUAL_ORDER_INTAKE
   fixture: msg-2026-0005-change-sku-sub-kroger.eml
@@ -1842,7 +1842,7 @@ email_scenarios:
   sender: po@kroger.example.com
   received_at: '2026-05-19T13:40:00Z'
   lifecycle: PENDING_REVIEW
-  shadow_verdict: YELLOW
+  shadow_verdict: GREEN
   revenue_at_risk: null
   diagnosis: SKU substitution (BEV-LEMON-6PK -> BEV-LEMON-12PK); ATP partially covers.
 - id: exc-messy
@@ -1857,7 +1857,7 @@ email_scenarios:
   sender: purchasing@sunrisebev.example.com
   received_at: '2026-05-23T16:42:00Z'
   lifecycle: PENDING_REVIEW
-  shadow_verdict: YELLOW
+  shadow_verdict: GREEN
   revenue_at_risk: null
   diagnosis: Messy forwarded chain, no PO, prose quantities; low-confidence -> clarification.
 - id: exc-044
@@ -1880,10 +1880,10 @@ email_scenarios:
   account: Walmart Inc.
   retailer_id: R-11
   ref_po: EML-CMP-2026-0062
-  lifecycle: ESCALATED
-  shadow_verdict: RED
+  lifecycle: PENDING_REVIEW
+  shadow_verdict: GREEN
   revenue_at_risk: null
-  diagnosis: Short-shipment complaint; replacement + goodwill credit; escalated to Customer Care.
+  diagnosis: Short-shipment complaint; replacement + goodwill credit; routed to manual review (intake never auto-executes, ADR-042).
 - id: exc-047
   intent: MANUAL_ORDER_INTAKE
   fixture: null
