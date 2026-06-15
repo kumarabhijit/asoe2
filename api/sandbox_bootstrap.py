@@ -100,6 +100,92 @@ def _scenario_to_order_event(scn: Dict[str, Any]):
     )
 
 
+# ADR-036 — the email supergroup classifier's expected label maps to the
+# governed CUSTOMER supergroup the materialised case should carry. The
+# projector relays it as the ``email_supergroup_hint`` the deterministic
+# backend echoes (constraints/fallback_backend.py); EMAIL_GENERAL has no
+# confident CUSTOMER supergroup, so it routes to triage and the case falls
+# back to the MANUAL_ORDER_INTAKE → SG_NEW_ORDER rule path.
+_EXPECTED_CLASSIFICATION_TO_SUPERGROUP: Dict[str, str] = {
+    "EMAIL_ORDER_ENTRY_REQUEST": "SG_NEW_ORDER",
+    "EMAIL_ORDER_CHANGE_REQUEST": "SG_ORDER_CHANGE",
+    "EMAIL_INQUIRY": "SG_ORDER_STATUS_INQUIRY",
+    "EMAIL_COMPLAINT": "SG_COMPLAINT_SERVICE",
+    "EMAIL_GENERAL": "SG_NEEDS_TRIAGE",
+}
+
+# All customer-inbox emails enter through the single MANUAL_ORDER_INTAKE
+# recipe path (ADR-034 §6.2 / ADR-042). The graph classifies on this
+# canonical event_type; the recipe self-routes *every* intake to review
+# (free-text order intake is adversarially injectable, so it never
+# auto-executes). The email *supergroup* (new order / change / inquiry /
+# complaint / general) is a parallel classification carried as a hint, not
+# a distinct graph event_type.
+_MANUAL_INTAKE_EVENT_TYPE = "MANUAL_ORDER_INTAKE"
+
+
+def _email_scenario_to_order_event(scn: Dict[str, Any]):
+    """Project a catalog ``email_scenarios:`` entry onto an ``OrderEvent``.
+
+    The email-path sibling of ``_scenario_to_order_event``. Unlike the EDI
+    projector — which forwards a price payload — an inbound customer email
+    carries no price, so ``po_price``/``sap_base_price`` are zeroed and the
+    routing comes entirely from the ``MANUAL_ORDER_INTAKE`` event_type plus
+    the metadata the ``email_intake`` gateway / ManualOrderIntakeRecipe
+    consume (composite confidence + the four non-disable-able floor checks).
+
+    The sandbox ``email_intake`` stub returns all four floor checks clear,
+    so every intake deterministically lands in MANUAL_REVIEW_REQUIRED
+    (PENDING_REVIEW) with a GREEN Compliance Shadow verdict — the recipe,
+    not the shadow, is what holds intake back from auto-execution. That is
+    the disposition the catalog declares and the consistency lock asserts.
+
+    ``OrderEvent`` forbids extra fields, so catalog-only keys (``id`` /
+    ``scenario`` / ``expected_classification`` / ``lifecycle`` / ...) are
+    carried on ``metadata`` (provenance for the audit drawer + case
+    materialisation), never as top-level event fields.
+    """
+    from contracts.models import OrderEvent
+
+    expected = scn.get("expected_classification")
+    hint = _EXPECTED_CLASSIFICATION_TO_SUPERGROUP.get(expected or "")
+    # order_id IS the customer PO in V1; fall back to the catalog id for a
+    # scenario with no PO (e.g. the messy no-PO fixture).
+    order_id = scn.get("ref_po") or scn.get("id")
+
+    metadata: Dict[str, Any] = {
+        "composite_confidence": float(scn.get("composite_confidence") or 0.97),
+        "non_disableable_floor": {
+            "sender_authorized": True,
+            "customer_resolved": True,
+            "duplicate_po_clear": True,
+            "credit_clear": True,
+        },
+        "validation_failures": [],
+        # Provenance — read by case materialisation + the audit drawer.
+        "scenario": scn.get("scenario"),
+        "expected_classification": expected,
+        "sender": scn.get("sender"),
+        "received_at": scn.get("received_at"),
+        "source_email_id": scn.get("zemail_msg_id"),
+        "customer_po_number": scn.get("ref_po"),
+    }
+    if hint is not None:
+        metadata["email_supergroup_hint"] = hint
+    if scn.get("fixture") is not None:
+        metadata["fixture"] = scn["fixture"]
+
+    return OrderEvent(
+        order_id=str(order_id),
+        event_type=_MANUAL_INTAKE_EVENT_TYPE,
+        po_price=0.0,
+        sap_base_price=0.0,
+        retailer_id=scn.get("retailer_id"),
+        line_count=1,
+        metadata=metadata,
+    )
+
+
 def _store_has_records(tenant_id: str) -> bool:
     from api.store import exception_store
 
@@ -120,9 +206,15 @@ def bootstrap_sandbox_cases(
     ``force=True``). Never raises — a bootstrap failure must not block the
     API from serving.
 
-    Email scenarios (``email_scenarios:`` — MANUAL_ORDER_INTAKE) use a
-    distinct intake path and carry no price payload, so they are out of
-    scope here; only the EDI ``scenarios:`` are materialised.
+    Both intake paths are materialised from the one catalog:
+
+      * EDI ``scenarios:`` → ``_scenario_to_order_event`` (price payload).
+      * ``email_scenarios:`` → ``_email_scenario_to_order_event`` (the
+        MANUAL_ORDER_INTAKE customer-inbox path; no price payload).
+
+    Each event runs through the same real graph (``_resolve_state``) and is
+    persisted exactly as ``POST /api/v1/exceptions/resolve`` would, so the
+    sandbox queue mirrors the asoe-ui mock generated from the same catalog.
     """
     # Imported lazily so module import has no cost / side effects outside a
     # sandbox bootstrap (mirrors the lazy gateway imports in api/app.py).
@@ -147,24 +239,34 @@ def bootstrap_sandbox_cases(
         logger.exception("sandbox bootstrap: failed to parse catalog at %s", path)
         return 0
 
-    scenarios = catalog.get("scenarios") or []
+    edi_scenarios = catalog.get("scenarios") or []
+    email_scenarios = catalog.get("email_scenarios") or []
     created = 0
-    for scn in scenarios:
+
+    def _materialise(scn: Dict[str, Any], to_event) -> bool:
         scenario_id = scn.get("id", "<unknown>")
         try:
-            event = _scenario_to_order_event(scn)
+            event = to_event(scn)
             state = GraphState(event=event, tenant_id=tenant_id)
             final_state = _resolve_state(state, tenant_id)
             trace_id = final_state.shadow.trace_id if final_state.shadow else None
             _persist_exception(tenant_id, final_state, trace_id)
-            created += 1
+            return True
         except Exception:  # noqa: BLE001 — one bad scenario must not abort the rest
             logger.exception("sandbox bootstrap: scenario %s failed", scenario_id)
+            return False
+
+    for scn in edi_scenarios:
+        created += _materialise(scn, _scenario_to_order_event)
+    for scn in email_scenarios:
+        created += _materialise(scn, _email_scenario_to_order_event)
 
     logger.info(
-        "sandbox bootstrap: created %d exception(s) from %d scenario(s) in %s",
+        "sandbox bootstrap: created %d exception(s) from %d EDI + %d email "
+        "scenario(s) in %s",
         created,
-        len(scenarios),
+        len(edi_scenarios),
+        len(email_scenarios),
         path.name,
     )
     return created

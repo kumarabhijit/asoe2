@@ -18,9 +18,16 @@ from api.sandbox_bootstrap import (
 from api.store import exception_store
 
 
+def _catalog() -> dict:
+    return yaml.safe_load(_CATALOG_PATH.read_text(encoding="utf-8")) or {}
+
+
 def _catalog_scenario_count() -> int:
-    catalog = yaml.safe_load(_CATALOG_PATH.read_text(encoding="utf-8")) or {}
-    return len(catalog.get("scenarios") or [])
+    return len(_catalog().get("scenarios") or [])
+
+
+def _catalog_email_count() -> int:
+    return len(_catalog().get("email_scenarios") or [])
 
 
 def _list_all(tenant_id: str):
@@ -38,16 +45,19 @@ def _list_all(tenant_id: str):
 
 
 class TestBootstrapMaterialisation:
-    def test_creates_a_case_per_edi_scenario(self):
+    def test_creates_a_case_per_scenario(self):
         exception_store.clear()
-        expected = _catalog_scenario_count()
-        assert expected > 0, "catalog carries no EDI scenarios to materialise"
+        edi = _catalog_scenario_count()
+        email = _catalog_email_count()
+        assert edi > 0, "catalog carries no EDI scenarios to materialise"
+        assert email > 0, "catalog carries no email scenarios to materialise"
 
         created = bootstrap_sandbox_cases(force=True)
 
-        # Every catalog EDI scenario must run the graph to a persisted record.
-        assert created == expected
-        assert len(_list_all(DEFAULT_TENANT)) == expected
+        # Every catalog scenario — EDI *and* email — must run the graph to a
+        # persisted record.
+        assert created == edi + email
+        assert len(_list_all(DEFAULT_TENANT)) == edi + email
 
     def test_persisted_records_carry_graph_output(self):
         exception_store.clear()
@@ -58,6 +68,23 @@ class TestBootstrapMaterialisation:
         # and Compliance Shadow verdict, not hand-stamped values.
         assert all(r.intent for r in records)
         assert all(r.shadow_verdict for r in records)
+
+    def test_email_scenarios_materialise_as_manual_order_intake(self):
+        exception_store.clear()
+        bootstrap_sandbox_cases(force=True)
+
+        records = _list_all(DEFAULT_TENANT)
+        intake = [r for r in records if r.intent == "MANUAL_ORDER_INTAKE"]
+        # Every email scenario materialises through the customer-inbox path.
+        assert len(intake) == _catalog_email_count()
+        # ADR-042 — free-text intake never auto-executes, so the graph holds
+        # every record for review with a non-blocking (GREEN) shadow verdict.
+        assert all(r.lifecycle_state == "PENDING_REVIEW" for r in intake)
+        assert all(r.shadow_verdict == "GREEN" for r in intake)
+        # The email_supergroup_hint drives case-level supergroup variety —
+        # the queue is not collapsed onto a single SG_NEW_ORDER bucket.
+        supergroups = {r.supergroup_code for r in intake if r.supergroup_code}
+        assert len(supergroups) >= 3, supergroups
 
     def test_idempotent_when_store_already_populated(self):
         exception_store.clear()

@@ -34,7 +34,10 @@ from typing import Any, Dict, List
 import pytest
 import yaml
 
-from api.sandbox_bootstrap import _scenario_to_order_event
+from api.sandbox_bootstrap import (
+    _email_scenario_to_order_event,
+    _scenario_to_order_event,
+)
 from api.sandbox_gateways import register_sandbox_gateways
 from contracts.models import STATUS_TO_LIFECYCLE, GraphState
 
@@ -56,12 +59,22 @@ def _lifecycle_of(final_status: Any) -> str:
     return _val(mapped) if mapped is not None else f"<unmapped:{_val(final_status)}>"
 
 
+def _catalog() -> Dict[str, Any]:
+    return yaml.safe_load(_CATALOG_PATH.read_text(encoding="utf-8")) or {}
+
+
 def _dispositioned_edi_scenarios() -> List[Dict[str, Any]]:
-    catalog = yaml.safe_load(_CATALOG_PATH.read_text(encoding="utf-8")) or {}
     # Only EDI ``scenarios:`` carrying a UI disposition (``lifecycle``) are
-    # bootstrapped through the graph. ``email_scenarios:`` use a distinct
-    # intake path (out of scope for this lock).
-    return [s for s in (catalog.get("scenarios") or []) if s.get("lifecycle")]
+    # bootstrapped through the graph.
+    return [s for s in (_catalog().get("scenarios") or []) if s.get("lifecycle")]
+
+
+def _dispositioned_email_scenarios() -> List[Dict[str, Any]]:
+    # ``email_scenarios:`` run through the email-intake projector
+    # (``_email_scenario_to_order_event``); every entry declares a
+    # lifecycle. The test-only ``test-*.eml`` fixtures are backend-only but
+    # still real graph cases, so they are covered here too.
+    return [s for s in (_catalog().get("email_scenarios") or []) if s.get("lifecycle")]
 
 
 # Registered once at import — mirrors api/app.py startup so recipes see the
@@ -70,6 +83,7 @@ def _dispositioned_edi_scenarios() -> List[Dict[str, Any]]:
 register_sandbox_gateways()
 
 _SCENARIOS = _dispositioned_edi_scenarios()
+_EMAIL_SCENARIOS = _dispositioned_email_scenarios()
 
 
 def test_catalog_has_dispositioned_scenarios() -> None:
@@ -81,15 +95,17 @@ def test_catalog_has_dispositioned_scenarios() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    "scenario",
-    _SCENARIOS,
-    ids=[str(s.get("id", "<?>")) for s in _SCENARIOS],
-)
-def test_declared_disposition_matches_graph(scenario: Dict[str, Any]) -> None:
+def test_catalog_has_dispositioned_email_scenarios() -> None:
+    """Guards the email half of the lock against a silent empty parametrize."""
+    assert len(_EMAIL_SCENARIOS) >= 9, (
+        f"expected the full customer-inbox catalog (>=9 dispositioned email "
+        f"rows); found {len(_EMAIL_SCENARIOS)} — did email_scenarios regress?"
+    )
+
+
+def _assert_declared_matches_graph(scenario: Dict[str, Any], event) -> None:
     from api.routes.exceptions import _resolve_state
 
-    event = _scenario_to_order_event(scenario)
     final_state = _resolve_state(GraphState(event=event, tenant_id=_TENANT), _TENANT)
 
     graph_intent = _val(final_state.intent) if final_state.intent else None
@@ -112,3 +128,26 @@ def test_declared_disposition_matches_graph(scenario: Dict[str, Any]) -> None:
             f"{scenario['id']}: declared shadow_verdict {declared_verdict!r} but "
             f"graph produced {graph_verdict!r}"
         )
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    _SCENARIOS,
+    ids=[str(s.get("id", "<?>")) for s in _SCENARIOS],
+)
+def test_declared_disposition_matches_graph(scenario: Dict[str, Any]) -> None:
+    _assert_declared_matches_graph(scenario, _scenario_to_order_event(scenario))
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    _EMAIL_SCENARIOS,
+    ids=[str(s.get("id", "<?>")) for s in _EMAIL_SCENARIOS],
+)
+def test_declared_email_disposition_matches_graph(scenario: Dict[str, Any]) -> None:
+    """Every ``email_scenarios:`` row, run through the email-intake projector
+    and the real graph, must produce the declared intent / lifecycle /
+    shadow_verdict. Customer-inbox intake (ADR-042) never auto-executes, so
+    the graph-truthful disposition is uniformly PENDING_REVIEW with a GREEN
+    verdict — the recipe holds it for review, the shadow does not block."""
+    _assert_declared_matches_graph(scenario, _email_scenario_to_order_event(scenario))
