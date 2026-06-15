@@ -94,6 +94,43 @@ def test_per_intent_template_fields_default_to_none(cleanup):
     assert summary.problem_one_liner is None
 
 
+def test_grandfathered_intent_falls_back_to_recipe_reason(cleanup):
+    """A grandfather-clause intent (no template) fills `problem_one_liner`
+    from the recipe-supplied `resolution_data["reason"]` (first sentence)
+    rather than leaving the queue row blank. The reason is recipe output,
+    not event metadata, so the no-synthesise contract is preserved."""
+    case = _open_case(customer_po_number="PO-PH")
+    _attach_child(
+        parent_case_id=case.case_id,
+        intent="PRICE_HOLD_RELEASE",
+        shadow_verdict="YELLOW",
+        resolution_data={
+            "reason": "PO price +5.5% over base, above the 2.0% auto-release "
+            "tolerance. Escalated to the category manager.",
+        },
+    )
+    records = exception_store.list_by_case("tenant-a", case.case_id)
+    summary = compute_case_summary(case, records)
+    assert summary.problem_one_liner == (
+        "PO price +5.5% over base, above the 2.0% auto-release tolerance."
+    )
+
+
+def test_grandfathered_intent_without_reason_stays_none(cleanup):
+    """The fallback is surgical: a record carrying no `reason` still ships a
+    null one-liner (no fabrication) — the no-synthesise contract holds."""
+    case = _open_case(customer_po_number="PO-EDM")
+    _attach_child(
+        parent_case_id=case.case_id,
+        intent="EDI_MISMATCH",
+        shadow_verdict="YELLOW",
+        resolution_data={"sub_type": "QTY_MISMATCH"},
+    )
+    records = exception_store.list_by_case("tenant-a", case.case_id)
+    summary = compute_case_summary(case, records)
+    assert summary.problem_one_liner is None
+
+
 # ---------------------------------------------------------------------------
 # verdict rollup
 # ---------------------------------------------------------------------------

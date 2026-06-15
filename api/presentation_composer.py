@@ -60,9 +60,15 @@ def compose_presentation(record: Any, case: Any = None) -> PresentationContract:
     # drifts from queue vocabulary. Lazy import mirrors compose_case_summary
     # (avoids a module-load cycle). `case` is unused by every template's
     # field projection, so None is safe.
-    from api.case_summary_templates import render_template
+    from api.case_summary_templates import (
+        reason_headline_fallback,
+        render_template,
+    )
 
-    headline = render_template(record, None).one_liner
+    # Per-record fallback for grandfather-clause intents (no template): the
+    # recipe's own `resolution_data["reason"]` rather than a blank Situation
+    # line. Same helper the /cases queue rows use, so the two never drift.
+    headline = render_template(record, None).one_liner or reason_headline_fallback(record)
 
     from api.presentation_tiers import section_tiers
 

@@ -189,10 +189,17 @@ def compute_case_summary(case, records: Iterable) -> CaseSummary:
     # has no template OR the recipe output is too sparse, all
     # three fields stay None — the wire shape ships nulls and the
     # UI's EvidenceBlock collapses the cells.
-    from api.case_summary_templates import render_template
+    from api.case_summary_templates import (
+        reason_headline_fallback,
+        render_template,
+    )
     from api.case_summary_verdict_gates import apply_verdict_color_gates
 
     rendered = render_template(primary, case)
+    # Per-record fallback for the grandfather-clause intents (no template):
+    # the recipe's own `resolution_data["reason"]` rather than a blank cell
+    # (2026-06-15 request; flagged for Recipe-SME review in reason_headline_fallback).
+    one_liner = rendered.one_liner or reason_headline_fallback(primary)
     intent = _intent_of(primary)
     raw_color = _verdict_color_rollup(records)
 
@@ -211,7 +218,7 @@ def compute_case_summary(case, records: Iterable) -> CaseSummary:
         customer_name=_customer_name(case),
         top_line_sku_code=rendered.sku_code,
         top_line_sku_title=rendered.sku_title,
-        problem_one_liner=rendered.one_liner,
+        problem_one_liner=one_liner,
         intent=intent,
         dollar_impact=_dollar_impact_of(primary),
         audit_verdict_color=gated_color,

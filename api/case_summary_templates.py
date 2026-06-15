@@ -60,6 +60,7 @@ For the rest of the intents, the Recipe team owns:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
 
@@ -536,10 +537,13 @@ INTENT_TEMPLATES: Dict[str, TemplateFn] = {
     "DUPLICATE_PO":            _duplicate_po_template,
     "MANUAL_ORDER_INTAKE":     _manual_order_intake_template,
     # Explicit grandfather-clause no-ops (distinct from "missing"
-    # so the registry-coverage check can tell them apart):
-    "PRICE_HOLD":              _grandfathered_no_template,
+    # so the registry-coverage check can tell them apart). Keyed by the
+    # runtime Intent enum value, not the SME panel's working label
+    # (PRICE_HOLD_RELEASE not PRICE_HOLD; PALLET_CONFIG not PALLET), so the
+    # lookup actually matches the record's intent.
+    "PRICE_HOLD_RELEASE":      _grandfathered_no_template,
     "EDI_MISMATCH":            _grandfathered_no_template,
-    "PALLET":                  _grandfathered_no_template,
+    "PALLET_CONFIG":           _grandfathered_no_template,
     "EMAIL_COMPLAINT":         _grandfathered_no_template,
     # Recipe-team TODOs:
     "PRICE_DISCREPANCY":       _price_discrepancy_template,
@@ -580,3 +584,38 @@ def render_template(record, case) -> RenderedTemplate:
         return RenderedTemplate()
     result = template(record, case)
     return result if result is not None else RenderedTemplate()
+
+
+_HEADLINE_MAX = 110
+
+
+def reason_headline_fallback(record) -> Optional[str]:
+    """Per-record one-liner fallback when the intent renders no template.
+
+    The grandfather-clause intents (PRICE_HOLD_RELEASE / EDI_MISMATCH /
+    PALLET_CONFIG) have no template, so the queue row + Situation headline were
+    blank. Fall back to the recipe-supplied ``resolution_data["reason"]`` — the
+    Recipe team owns this content, so this is NOT a UI-side synthesis from event
+    metadata (the constraint ``test_per_intent_template_fields_default_to_none``
+    guards): a record that carries no ``reason`` still returns None.
+
+    First sentence, trimmed to a headline length. None when absent / non-string.
+
+    NOTE (Recipe-SME / Compliance review): this deliberately fills the
+    grandfather-clause null with the recipe's own reason rather than leaving the
+    cell blank, per the 2026-06-15 product request. Revert this helper (and its
+    two call sites) to restore the strict "blank on grandfathered intents"
+    behaviour the 2026-05-28 panel signed off.
+    """
+    if record is None:
+        return None
+    rd = getattr(record, "resolution_data", None)
+    if not isinstance(rd, dict):
+        return None
+    reason = rd.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        return None
+    first = re.split(r"(?<=[.!?])\s", reason.strip())[0].strip()
+    if len(first) <= _HEADLINE_MAX:
+        return first
+    return first[: _HEADLINE_MAX - 1].rstrip() + "…"
