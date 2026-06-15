@@ -271,20 +271,19 @@ class TestTier1CustomerFloor:
 
 
 # ---------------------------------------------------------------------------
-# Rule 7 — Requires-cosign on EMAIL_COMPLAINT / CHANGE_ANALYSIS → FLOOR AMBER
+# Rule 7 — Requires-cosign on MANUAL_ORDER_INTAKE (inbox change/complaint) → AMBER
 # ---------------------------------------------------------------------------
 
 
 class TestCosignFloor:
-    @pytest.mark.parametrize("intent", ["EMAIL_COMPLAINT", "CHANGE_ANALYSIS"])
-    def test_requires_cosign_lifts_green_to_amber(self, intent):
+    def test_requires_cosign_lifts_green_to_amber(self):
         record = _Record(enrichment_context={
             "change_analysis": {
                 "decision": {"requires_cosign": True},
             },
         })
         gated = apply_verdict_color_gates(
-            "G", intent=intent,
+            "G", intent="MANUAL_ORDER_INTAKE",
             primary_record=record, case=_Case(),
         )
         assert gated == "A"
@@ -296,22 +295,23 @@ class TestCosignFloor:
             },
         })
         gated = apply_verdict_color_gates(
-            "G", intent="EMAIL_COMPLAINT",
+            "G", intent="MANUAL_ORDER_INTAKE",
             primary_record=record, case=_Case(),
         )
         assert gated == "G"
 
     def test_other_intents_unaffected_by_cosign_field(self):
-        """Rule 7 applies only to EMAIL_COMPLAINT / CHANGE_ANALYSIS.
-        A DUPLICATE_PO with requires_cosign=true doesn't trip this
-        gate (it has its own dollar-floor rule)."""
+        """Rule 7 applies only to MANUAL_ORDER_INTAKE (the inbox
+        change/complaint shape). A DUPLICATE_PO carrying a
+        change_analysis.requires_cosign field doesn't trip this gate
+        (it has its own dollar-floor rule, not exercised here)."""
         record = _Record(enrichment_context={
             "change_analysis": {
                 "decision": {"requires_cosign": True},
             },
         })
         gated = apply_verdict_color_gates(
-            "G", intent="MANUAL_ORDER_INTAKE",
+            "G", intent="DUPLICATE_PO",
             primary_record=record, case=_Case(),
         )
         assert gated == "G"

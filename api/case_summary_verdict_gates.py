@@ -40,8 +40,9 @@ NEVER GREEN (floor at AMBER):
      credit-block-adjacent, large auto-cancel needs sign-off.
   6. Tier-1 customer (any intent) — VIPs don't get silent
      auto-resolves.
-  7. EMAIL_COMPLAINT / CHANGE_ANALYSIS with
-     decision.requires_cosign=true — recipe already says cosign.
+  7. MANUAL_ORDER_INTAKE (customer-inbox order-change / complaint)
+     with change_analysis.decision.requires_cosign=true — recipe
+     already says cosign.
 """
 
 from __future__ import annotations
@@ -124,8 +125,15 @@ def _should_floor_to_amber(intent: str, record, case) -> bool:
     if _is_high_tier_customer(case):
         return True
 
-    """Rule 7: EMAIL_COMPLAINT / CHANGE_ANALYSIS with requires_cosign=true."""
-    if intent in ("EMAIL_COMPLAINT", "CHANGE_ANALYSIS") and _requires_cosign(record):
+    """Rule 7: a customer-inbox order-change / complaint (MANUAL_ORDER_INTAKE)
+    whose change_analysis decision requires cosign."""
+    # Keyed by the runtime Intent enum value. The customer-inbox order-change
+    # and complaint shapes are both classified MANUAL_ORDER_INTAKE; the prior
+    # "EMAIL_COMPLAINT"/"CHANGE_ANALYSIS" strings are not Intent values, so this
+    # SOX floor-to-AMBER gate never fired. The change_analysis enrichment
+    # (checked by _requires_cosign) is what scopes it to the change/complaint
+    # records — a clean new-order intake carries no change_analysis.
+    if intent == "MANUAL_ORDER_INTAKE" and _requires_cosign(record):
         return True
 
     return False
@@ -188,10 +196,9 @@ def _is_high_tier_customer(case) -> bool:
 
 
 def _requires_cosign(record) -> bool:
-    """CHANGE_ANALYSIS writes `enrichment_context["change_analysis"]
-    .decision.requires_cosign`. EMAIL_COMPLAINT routes through
-    ChangeAnalysisRecipe for the order-change shape, so the same
-    field shows up under the same key. Returns True only on
+    """The customer-inbox order-change / complaint shapes write
+    `enrichment_context["change_analysis"].decision.requires_cosign`
+    (both classified MANUAL_ORDER_INTAKE). Returns True only on
     explicit True; missing field is treated as not-required."""
     enrichment = getattr(record, "enrichment_context", None) or {}
     if not isinstance(enrichment, dict):
