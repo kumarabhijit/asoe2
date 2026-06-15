@@ -158,7 +158,7 @@ def test_intent_picks_highest_dollar_child(cleanup):
     _attach_child(
         parent_case_id=case.case_id,
         order_id="PO-1",
-        intent="MOQ_UPLIFT",
+        intent="MIN_ORDER_QTY",
         resolution_data={"financial_impact_usd": 50.0},
     )
     _attach_child(

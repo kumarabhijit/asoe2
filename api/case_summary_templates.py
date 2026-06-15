@@ -548,7 +548,11 @@ INTENT_TEMPLATES: Dict[str, TemplateFn] = {
     "CONTRACTUAL_CORRECTION":  _contractual_correction_template,
     "MASS_PRICING_ERROR":      _mass_pricing_error_template,
     "OVER_MAX":                _over_max_template,
-    "MOQ_UPLIFT":              _moq_uplift_template,
+    # Keyed by the runtime Intent enum value (contracts/models.py::Intent),
+    # not the Recipe-SME panel's working label "MOQ_UPLIFT" — the record's
+    # intent is "MIN_ORDER_QTY", so the panel label never matched and the
+    # template (which exists) was unreachable. Wire it to the enum.
+    "MIN_ORDER_QTY":           _moq_uplift_template,
     "DELIVERY_DELAY":          _delivery_delay_template,
     "CHANGE_ANALYSIS":         _change_analysis_template,
 }

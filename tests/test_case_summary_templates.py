@@ -539,7 +539,7 @@ def _moq_record():
         "shortfall_pct": 36.0,
         "at_risk": 352.80,
     }
-    r = _StubRecord(intent="MOQ_UPLIFT", resolution_data=rd)
+    r = _StubRecord(intent="MIN_ORDER_QTY", resolution_data=rd)
     r.original_event = event
     return r
 
@@ -880,7 +880,7 @@ class TestRegistryCoverage:
             "CONTRACTUAL_CORRECTION",
             "MASS_PRICING_ERROR",
             "OVER_MAX",
-            "MOQ_UPLIFT",
+            "MIN_ORDER_QTY",
             "DELIVERY_DELAY",
             "CHANGE_ANALYSIS",
         }
