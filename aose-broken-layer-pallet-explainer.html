@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Broken Layer/Pallet Exception — B2B Order Management Explainer</title>
+<style>
+  :root {
+    --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+    --font-mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    --bg-primary: #ffffff;
+    --bg-secondary: #f5f5f7;
+    --bg-tertiary: #fbfbfd;
+    --text-primary: #1d1d1f;
+    --text-secondary: #6e6e73;
+    --text-tertiary: #8e8e93;
+    --border: #e5e5ea;
+    --border-light: #f0f0f0;
+    --success: #34C759;
+    --success-bg: #34C75912;
+    --success-text: #1a7e2e;
+    --warning: #FF9500;
+    --warning-bg: #FF950012;
+    --warning-text: #995a00;
+    --danger: #FF3B30;
+    --danger-bg: #FF3B3012;
+    --danger-text: #cc2f26;
+    --info: #007AFF;
+    --info-bg: #007AFF12;
+    --info-text: #0055b3;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg-primary: #1c1c1e;
+      --bg-secondary: #2c2c2e;
+      --bg-tertiary: #000000;
+      --text-primary: #f5f5f7;
+      --text-secondary: #a1a1a6;
+      --text-tertiary: #8e8e93;
+      --border: #38383a;
+      --border-light: #2c2c2e;
+      --success-bg: #34C75920;
+      --success-text: #30d158;
+      --warning-bg: #FF950020;
+      --warning-text: #ffa733;
+      --danger-bg: #FF3B3020;
+      --danger-text: #ff6961;
+      --info-bg: #007AFF20;
+      --info-text: #64b5f6;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: var(--font-sans);
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .container { max-width: 780px; margin: 0 auto; padding: 40px 24px 80px; }
+  h1 { font-size: 32px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; margin-bottom: 8px; }
+  .subtitle { font-size: 17px; color: var(--text-secondary); margin-bottom: 32px; max-width: 600px; }
+  .section { margin-bottom: 2.5rem; }
+  .section-label { font-size: 12px; font-weight: 600; color: var(--text-tertiary); letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 12px; }
+  .pallet-grid { display: flex; gap: 32px; align-items: flex-end; justify-content: center; flex-wrap: wrap; }
+  .pallet-col { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .pallet-label { font-size: 13px; font-weight: 600; color: var(--text-primary); text-align: center; }
+  .pallet-sub { font-size: 12px; color: var(--text-secondary); text-align: center; margin-top: 2px; transition: color 0.2s; }
+  .pallet-base { width: 160px; height: 10px; background: var(--border); border-radius: 0 0 4px 4px; }
+  .layer { display: grid; width: 160px; border-radius: 2px; overflow: hidden; gap: 1px; padding: 1px; }
+  .case-cell { height: 14px; border-radius: 1px; transition: all 0.3s; }
+  .case-full { background: #5DCAA5; }
+  .case-empty { background: var(--border); opacity: 0.3; }
+  .case-broken { background: #EF9F27; }
+  .controls {
+    display: flex; align-items: center; gap: 16px;
+    padding: 14px 18px; background: var(--bg-secondary);
+    border-radius: var(--radius-lg); margin-bottom: 20px;
+  }
+  .controls label { font-size: 13px; color: var(--text-secondary); white-space: nowrap; }
+  .controls input[type="range"] { flex: 1; accent-color: var(--info); }
+  .metric-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 20px; }
+  @media (max-width: 600px) { .metric-row { grid-template-columns: repeat(2, 1fr); } }
+  .metric { background: var(--bg-secondary); border-radius: var(--radius-md); padding: 14px 16px; }
+  .metric-val { font-size: 22px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+  .metric-label { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+  .metric-warn .metric-val { color: var(--danger-text); }
+  .metric-ok .metric-val { color: var(--success-text); }
+  .sku-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .sku-table th { text-align: left; font-weight: 600; font-size: 11px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.04em; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  .sku-table td { padding: 10px 12px; border-bottom: 1px solid var(--border-light); vertical-align: middle; }
+  .sku-table tr:last-child td { border-bottom: none; }
+  .mono { font-family: var(--font-mono); font-size: 12px; }
+  .badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 4px; white-space: nowrap; }
+  .badge-full { background: var(--success-bg); color: var(--success-text); }
+  .badge-broken { background: var(--warning-bg); color: var(--warning-text); }
+  .badge-critical { background: var(--danger-bg); color: var(--danger-text); }
+  .callout { padding: 12px 16px; border-radius: var(--radius-md); font-size: 12px; line-height: 1.65; margin-top: 12px; }
+  .callout-warning { background: var(--warning-bg); color: var(--warning-text); }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--border-light); border-radius: var(--radius-lg); background: var(--bg-primary); }
+  .example-card { border: 1px solid var(--border-light); border-radius: var(--radius-lg); overflow: hidden; margin-bottom: 12px; background: var(--bg-primary); }
+  .example-header {
+    padding: 12px 16px; background: var(--bg-secondary);
+    display: flex; justify-content: space-between; align-items: center;
+    cursor: pointer; user-select: none;
+  }
+  .example-header:hover { opacity: 0.85; }
+  .example-header span:first-child { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .example-body { padding: 16px; }
+  .example-body.collapsed { display: none; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 600px) { .two-col { grid-template-columns: 1fr; } }
+  .col-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
+  .col-label-erp { color: var(--danger-text); }
+  .col-label-agent { color: var(--success-text); }
+  .flow-step { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 10px; }
+  .flow-num {
+    width: 22px; height: 22px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 600; flex-shrink: 0;
+  }
+  .flow-num-erp { background: var(--danger-bg); color: var(--danger-text); }
+  .flow-num-agent { background: var(--info-bg); color: var(--info-text); }
+  .flow-text { font-size: 13px; color: var(--text-secondary); line-height: 1.6; padding-top: 1px; }
+  .flow-text strong { color: var(--text-primary); font-weight: 600; }
+  .resolution {
+    display: flex; gap: 10px; align-items: flex-start;
+    padding: 12px 16px; border-radius: var(--radius-md);
+    border: 1px solid var(--border-light); background: var(--bg-primary);
+    margin-bottom: 8px;
+  }
+  .res-icon {
+    width: 22px; height: 22px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; flex-shrink: 0; margin-top: 1px;
+  }
+  .res-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .res-desc { font-size: 12px; color: var(--text-secondary); margin-top: 2px; line-height: 1.55; }
+  .arrow-col {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 4px; padding-bottom: 40px;
+  }
+  .arrow-col span:first-child { font-size: 20px; color: var(--text-tertiary); }
+  #arrow-label { font-size: 11px; font-weight: 600; max-width: 80px; text-align: center; transition: color 0.2s; }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <h1>Broken layer / pallet exception</h1>
+  <p class="subtitle">An interactive explainer on how layer and pallet alignment works in B2B CPG order management — and where ERPs fail.</p>
+
+  <!-- INTERACTIVE PALLET VISUALIZER -->
+  <div class="section">
+    <div class="section-label">Interactive pallet visualizer</div>
+    <div class="controls">
+      <label>Order quantity</label>
+      <input type="range" min="1" max="60" value="47" id="qty-slider" step="1" oninput="updatePallet(this.value)">
+      <span id="qty-out" class="mono" style="min-width: 60px; text-align: right; font-weight: 600; color: var(--text-primary);">47 cases</span>
+    </div>
+
+    <div class="pallet-grid">
+      <div class="pallet-col">
+        <div class="pallet-label">Customer order</div>
+        <div class="pallet-sub" id="order-sub">47 of 50 · broken layer</div>
+        <div id="order-pallet"></div>
+        <div class="pallet-base"></div>
+      </div>
+      <div class="arrow-col">
+        <span>→</span>
+        <span id="arrow-label" style="color: var(--warning-text);">3 cases removed manually</span>
+      </div>
+      <div class="pallet-col">
+        <div class="pallet-label">Ideal full pallet</div>
+        <div class="pallet-sub">50 cases · 5 layers × 10</div>
+        <div id="full-pallet"></div>
+        <div class="pallet-base"></div>
+      </div>
+    </div>
+
+    <div class="metric-row" id="metrics"></div>
+  </div>
+
+  <!-- REAL-WORLD EXAMPLE -->
+  <div class="section">
+    <div class="section-label">Real-world example — Target PO-88423</div>
+    <div class="table-wrap">
+      <table class="sku-table">
+        <thead>
+          <tr><th>SKU</th><th>Product</th><th>Ordered</th><th>Ti × Hi</th><th>Full layer</th><th>Status</th><th>Waste</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mono">SKU-3310</td><td>Snack Bar 48ct</td><td class="mono">300 CS</td>
+            <td class="mono">12 × 5</td><td class="mono">60 CS</td>
+            <td><span class="badge badge-full">Full pallet ×5</span></td>
+            <td style="color: var(--success-text);">0 cases</td>
+          </tr>
+          <tr>
+            <td class="mono">SKU-3312</td><td>Protein Bar 36ct</td><td class="mono">150 CS</td>
+            <td class="mono">10 × 5</td><td class="mono">50 CS</td>
+            <td><span class="badge badge-full">Full pallet ×3</span></td>
+            <td style="color: var(--success-text);">0 cases</td>
+          </tr>
+          <tr>
+            <td class="mono">SKU-3315</td><td>Granola Bar 60ct</td><td class="mono">80 CS</td>
+            <td class="mono">8 × 6</td><td class="mono">48 CS</td>
+            <td><span class="badge badge-broken">Broken layer</span></td>
+            <td style="color: var(--warning-text);">16 empty slots</td>
+          </tr>
+          <tr>
+            <td class="mono">SKU-3320</td><td>Kids Bar 24ct</td><td class="mono">200 CS</td>
+            <td class="mono">10 × 4</td><td class="mono">40 CS</td>
+            <td><span class="badge badge-full">Full pallet ×5</span></td>
+            <td style="color: var(--success-text);">0 cases</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout callout-warning">
+      SKU-3315 orders 80 cases but a full layer is 8 cases. 80 ÷ 8 = 10 full layers, which is 1 full pallet (48) + 32 cases. Those 32 cases fill 4 full layers but leave the pallet only 67% full — shipping a half-empty pallet or requiring a manual pick to consolidate.
+    </div>
+  </div>
+
+  <!-- ERP vs AGENT COMPARISON -->
+  <div class="section">
+    <div class="section-label">Where the ERP fails — and what an agent does instead</div>
+
+    <div class="example-card">
+      <div class="example-header" onclick="toggle('ex1')">
+        <span>Scenario: customer orders 47 cases, layer = 10</span>
+        <span class="badge badge-broken">Broken layer</span>
+      </div>
+      <div class="example-body" id="ex1">
+        <div class="two-col">
+          <div>
+            <div class="col-label col-label-erp">ERP behavior</div>
+            <div class="flow-step"><div class="flow-num flow-num-erp">1</div><div class="flow-text">Checks MOQ (min 10 cases). <strong>47 ≥ 10 → passes.</strong></div></div>
+            <div class="flow-step"><div class="flow-num flow-num-erp">2</div><div class="flow-text">No layer/pallet validation exists. <strong>Order accepted as-is.</strong></div></div>
+            <div class="flow-step"><div class="flow-num flow-num-erp">3</div><div class="flow-text">Warehouse receives pick ticket for 47. Worker must <strong>break open layer 5, remove 3 cases, re-wrap.</strong></div></div>
+            <div class="flow-step"><div class="flow-num flow-num-erp">4</div><div class="flow-text">3 loose cases go to overstock. <strong>12–18% labor premium applied retroactively</strong> — or absorbed as cost.</div></div>
+          </div>
+          <div>
+            <div class="col-label col-label-agent">ASOE agent behavior</div>
+            <div class="flow-step"><div class="flow-num flow-num-agent">1</div><div class="flow-text">Reads pallet config: <strong>Ti=10, Hi=5 → layer=10, pallet=50.</strong></div></div>
+            <div class="flow-step"><div class="flow-num flow-num-agent">2</div><div class="flow-text">Detects 47 mod 10 = 7. <strong>Broken layer — 3 cases short of full layer 5.</strong></div></div>
+            <div class="flow-step"><div class="flow-num flow-num-agent">3</div><div class="flow-text">Checks customer exception table: <strong>no broken-layer waiver on file.</strong></div></div>
+            <div class="flow-step"><div class="flow-num flow-num-agent">4</div><div class="flow-text">Generates two alternatives:<br/><strong>Option A:</strong> Round up to 50 (+$44.40)<br/><strong>Option B:</strong> Round down to 40 (−$103.60)</div></div>
+            <div class="flow-step"><div class="flow-num flow-num-agent">5</div><div class="flow-text">Routes to CSR with pre-drafted customer email showing cost delta for each option.</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="example-card">
+      <div class="example-header" onclick="toggle('ex2')">
+        <span>Scenario: cross-line pallet optimization</span>
+        <span class="badge badge-critical">ERP blind spot</span>
+      </div>
+      <div class="example-body" id="ex2">
+        <div class="two-col">
+          <div>
+            <div class="col-label col-label-erp">ERP behavior</div>
+            <div class="flow-step"><div class="flow-num flow-num-erp">1</div><div class="flow-text">Validates <strong>each line independently.</strong> Line 1: 23 cases of SKU-A (layer=10). Line 2: 17 cases of SKU-B (layer=10).</div></div>
+            <div class="flow-step"><div class="flow-num flow-num-erp">2</div><div class="flow-text">Both lines pass MOQ. <strong>Both are broken layers.</strong> Two separate picks, two partial pallets shipped.</div></div>
+            <div class="flow-step"><div class="flow-num flow-num-erp">3</div><div class="flow-text"><strong>Combined: 40 cases on 2 pallets</strong> that could fit on 1. Wasted truck space, double handling cost.</div></div>
+          </div>
+          <div>
+            <div class="col-label col-label-agent">ASOE agent behavior</div>
+            <div class="flow-step"><div class="flow-num flow-num-agent">1</div><div class="flow-text">Evaluates <strong>all lines together.</strong> 23 + 17 = 40 cases. Both SKUs have same case dimensions.</div></div>
+            <div class="flow-step"><div class="flow-num flow-num-agent">2</div><div class="flow-text">Detects <strong>mixed-SKU pallet opportunity.</strong> 40 cases = 4 full layers on 1 pallet.</div></div>
+            <div class="flow-step"><div class="flow-num flow-num-agent">3</div><div class="flow-text">Checks if customer accepts mixed pallets (most do for same product family).</div></div>
+            <div class="flow-step"><div class="flow-num flow-num-agent">4</div><div class="flow-text">Suggests: <strong>ship as 1 mixed pallet.</strong> Saves 1 pallet position, reduces freight cost ~$45. Or: round SKU-A to 20, SKU-B to 20 for clean split.</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RESOLUTION DECISION TREE -->
+  <div class="section">
+    <div class="section-label">Resolution decision tree</div>
+
+    <div class="resolution">
+      <div class="res-icon" style="background: var(--success-bg); color: var(--success-text);">✓</div>
+      <div>
+        <div class="res-title">Full layer / full pallet</div>
+        <div class="res-desc">Order qty mod Ti = 0. No action needed — passes validation automatically.</div>
+      </div>
+    </div>
+    <div class="resolution">
+      <div class="res-icon" style="background: var(--info-bg); color: var(--info-text);">↑</div>
+      <div>
+        <div class="res-title">Auto-round up (within tolerance)</div>
+        <div class="res-desc">Remainder ≥ 70% of layer. Agent rounds up to next full layer and adjusts PO total. Customer notified, no approval needed if within contract tolerance.</div>
+      </div>
+    </div>
+    <div class="resolution">
+      <div class="res-icon" style="background: var(--warning-bg); color: var(--warning-text);">⇅</div>
+      <div>
+        <div class="res-title">Propose alternatives</div>
+        <div class="res-desc">Remainder 30–70% of layer. Agent generates round-up and round-down options with dollar impact, routes to CSR with pre-drafted communication.</div>
+      </div>
+    </div>
+    <div class="resolution">
+      <div class="res-icon" style="background: var(--danger-bg); color: var(--danger-text);">!</div>
+      <div>
+        <div class="res-title">Broken layer surcharge or exception</div>
+        <div class="res-desc">Remainder &lt; 30% of layer. Apply surcharge per contract terms, or check customer exception table for waiver. Escalate if no rule covers it.</div>
+      </div>
+    </div>
+    <div class="resolution">
+      <div class="res-icon" style="background: var(--bg-secondary); color: var(--text-secondary);">◈</div>
+      <div>
+        <div class="res-title">Cross-line optimization</div>
+        <div class="res-desc">Multiple broken lines on same PO. Agent checks if combining SKUs onto mixed pallets improves fill rate. Common for same-family products going to same DC.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const TI = 10, HI = 5, FULL = TI * HI;
+
+function buildPalletHTML(qty, maxQty, isFull) {
+  let html = '';
+  const totalLayers = Math.ceil(maxQty / TI);
+  let remaining = qty;
+  for (let layer = totalLayers; layer >= 1; layer--) {
+    const casesInLayer = Math.min(remaining, TI);
+    remaining = Math.max(0, remaining - TI);
+    let cells = '';
+    for (let c = 0; c < TI; c++) {
+      if (c < casesInLayer) {
+        cells += '<div class="case-cell ' + (isFull || casesInLayer === TI ? 'case-full' : 'case-broken') + '"></div>';
+      } else {
+        cells += '<div class="case-cell case-empty"></div>';
+      }
+    }
+    html += '<div class="layer" style="grid-template-columns: repeat(' + TI + ', 1fr);">' + cells + '</div>';
+  }
+  return html;
+}
+
+function updatePallet(qty) {
+  qty = parseInt(qty);
+  document.getElementById('qty-out').textContent = qty + ' cases';
+  document.getElementById('order-pallet').innerHTML = buildPalletHTML(qty, FULL, false);
+  document.getElementById('full-pallet').innerHTML = buildPalletHTML(FULL, FULL, true);
+
+  const remainder = qty % TI;
+  const fullLayers = Math.floor(qty / TI);
+  const isFull = remainder === 0;
+  const isFullPallet = qty === FULL;
+  const waste = isFull ? 0 : TI - remainder;
+  const laborPct = isFull ? 0 : Math.round(12 + (waste / TI) * 6);
+
+  const sub = document.getElementById('order-sub');
+  const arrowLabel = document.getElementById('arrow-label');
+
+  if (isFullPallet) {
+    sub.textContent = qty + ' of ' + FULL + ' · full pallet';
+    sub.style.color = 'var(--success-text)';
+    arrowLabel.textContent = 'Perfect match';
+    arrowLabel.style.color = 'var(--success-text)';
+  } else if (isFull) {
+    sub.textContent = qty + ' of ' + FULL + ' · ' + fullLayers + ' full layers';
+    sub.style.color = 'var(--success-text)';
+    arrowLabel.textContent = (FULL - qty) + ' cases fewer';
+    arrowLabel.style.color = 'var(--text-secondary)';
+  } else {
+    sub.textContent = qty + ' of ' + FULL + ' · broken layer';
+    sub.style.color = 'var(--warning-text)';
+    arrowLabel.textContent = waste + ' cases removed manually';
+    arrowLabel.style.color = 'var(--warning-text)';
+  }
+
+  const roundUp = Math.ceil(qty / TI) * TI;
+  const roundDown = Math.floor(qty / TI) * TI;
+
+  document.getElementById('metrics').innerHTML =
+    '<div class="metric ' + (isFull ? 'metric-ok' : 'metric-warn') + '">' +
+      '<div class="metric-val">' + remainder + '</div>' +
+      '<div class="metric-label">Remainder (mod ' + TI + ')</div>' +
+    '</div>' +
+    '<div class="metric ' + (isFull ? 'metric-ok' : '') + '">' +
+      '<div class="metric-val">' + fullLayers + '</div>' +
+      '<div class="metric-label">Full layers</div>' +
+    '</div>' +
+    '<div class="metric">' +
+      '<div class="metric-val">' + (isFull ? '—' : '↑' + roundUp + ' / ↓' + roundDown) + '</div>' +
+      '<div class="metric-label">' + (isFull ? 'No rounding needed' : 'Round up / down') + '</div>' +
+    '</div>' +
+    '<div class="metric ' + (laborPct > 0 ? 'metric-warn' : 'metric-ok') + '">' +
+      '<div class="metric-val">' + (laborPct > 0 ? '+' + laborPct + '%' : '0%') + '</div>' +
+      '<div class="metric-label">Pick labor premium</div>' +
+    '</div>';
+}
+
+function toggle(id) {
+  document.getElementById(id).classList.toggle('collapsed');
+}
+
+updatePallet(47);
+</script>
+
+</body>
+</html>
